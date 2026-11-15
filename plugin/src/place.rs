@@ -16,7 +16,7 @@ pub struct Config {
     pub max_bricks: usize,
     pub max_ext: i32,
     /// game asset per kind, in `Kind` order
-    pub assets: [String; 4],
+    pub assets: [String; 5],
     pub models: Models,
 }
 
@@ -40,6 +40,7 @@ impl Config {
                 text("asset-ramp", "PB_DefaultMicroWedge"),
                 text("asset-tetrahedron", "PB_DefaultMicroWedgeTriangleCorner"),
                 text("asset-cut-cube", "PB_DefaultMicroWedgeOuterCorner"),
+                text("asset-hip", "PB_DefaultMicroWedgeCorner"),
             ],
             models: Models {
                 local_mask: [
@@ -47,6 +48,7 @@ impl Config {
                     num("mask-ramp", defaults[1] as i64, 0, 255) as u8,
                     num("mask-tetrahedron", defaults[2] as i64, 0, 255) as u8,
                     num("mask-cut-cube", defaults[3] as i64, 0, 255) as u8,
+                    num("mask-hip", defaults[4] as i64, 0, 255) as u8,
                 ],
             },
         }
@@ -259,8 +261,8 @@ mod tests {
         let models = Models::default();
         let bricks = calibration(&models);
         let solver = Solver::new(&models);
-        // 4 bricks and a marker per filled corner: 8 + 6 + 4 + 7
-        assert_eq!(bricks.len(), 4 + 25);
+        // 5 bricks and a marker per filled corner: 8 + 6 + 4 + 7 + 5
+        assert_eq!(bricks.len(), 5 + 30);
         let mut cells = std::collections::HashSet::new();
         for b in &bricks {
             assert!(shape_info(b.mask).is_some());

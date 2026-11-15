@@ -12,9 +12,11 @@
     "asset-ramp": { "description": "Brick asset for ramps (triangular prisms).", "type": "string", "default": "PB_DefaultMicroWedge" },
     "asset-tetrahedron": { "description": "Brick asset for the right-angled tetrahedron.", "type": "string", "default": "PB_DefaultMicroWedgeTriangleCorner" },
     "asset-cut-cube": { "description": "Brick asset for the cube with that tetrahedron removed.", "type": "string", "default": "PB_DefaultMicroWedgeOuterCorner" },
+    "asset-hip": { "description": "Brick asset for the hip: a quarter of a square pyramid, used on a pyramid's ridges.", "type": "string", "default": "PB_DefaultMicroWedgeCorner" },
     "mask-ramp": { "description": "Which corners of its box the ramp asset fills when unrotated (see docs/calibration.md).", "type": "number", "default": 119 },
     "mask-tetrahedron": { "description": "The same for the tetrahedron asset.", "type": "number", "default": 23 },
-    "mask-cut-cube": { "description": "The same for the cut-cube asset.", "type": "number", "default": 127 }
+    "mask-cut-cube": { "description": "The same for the cut-cube asset.", "type": "number", "default": 127 },
+    "mask-hip": { "description": "The same for the hip asset. Not yet checked in the game: one of 87, 117, 55 or 115 (see docs/calibration.md).", "type": "number", "default": 87 }
   },
   "commands": [
     { "name": "/arc", "description": "Get your link to the editor.", "example": "/arc", "args": [] },

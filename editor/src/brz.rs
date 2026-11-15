@@ -24,6 +24,7 @@ const fn asset(kind: Kind) -> &'static str {
         Kind::Ramp => "PB_DefaultMicroWedge",
         Kind::Tet => "PB_DefaultMicroWedgeTriangleCorner",
         Kind::Cut => "PB_DefaultMicroWedgeOuterCorner",
+        Kind::Hip => "PB_DefaultMicroWedgeCorner",
     }
 }
 
@@ -152,13 +153,13 @@ pub fn read(bytes: &[u8]) -> Result<Vec<(Spec, Paint)>, String> {
     use brdb::{Brz, IntoReader};
     let file = Brz::read_slice(bytes).map_err(|e| format!("it is not a .brz file the editor can read ({e})"))?.into_reader();
     let data = file.global_data().map_err(|e| format!("its list of bricks cannot be read ({e})"))?;
-    let ours = [Kind::Cube, Kind::Ramp, Kind::Tet, Kind::Cut].map(asset);
+    let ours = arcs_core::shapes::KINDS.map(asset);
     let mut foreign: Vec<&str> = data.basic_brick_asset_names.iter().chain(&data.procedural_brick_asset_names).map(String::as_str).filter(|name| !ours.contains(name)).collect();
     if !foreign.is_empty() {
         let more = foreign.len().saturating_sub(6);
         foreign.truncate(6);
         let more = if more > 0 { format!(" and {more} more") } else { String::new() };
-        return Err(format!("it holds bricks this editor does not have: {}{more}. Only the four microbricks can be shown.", foreign.join(", ")));
+        return Err(format!("it holds bricks this editor does not have: {}{more}. Only the five microbricks can be shown.", foreign.join(", ")));
     }
     let bundle = file.bundle_json().map_err(|e| format!("its description cannot be read ({e})"))?;
     let forms = forms_in(&bundle.description)?;
@@ -222,7 +223,7 @@ mod tests {
         let blend = Paint { mode: crate::paint::Mode::Stripes, colours: vec![[1, 2, 3], [250, 0, 9]], axis: 0, width: 3 };
         let forms = vec![(arch, blend), (Spec { form: arcs_core::spec::Form::Sphere, points: vec![arcs_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default())];
         let world = prefab(&bricks, &forms).unwrap();
-        assert_eq!(world.bricks.len(), 29);
+        assert_eq!(world.bricks.len(), 53);
         assert_eq!(world.meta.bundle.level_type, "Prefab");
         let solver = Solver::new(&Models::default());
         for (brick, (cell, colour, _)) in world.bricks.iter().zip(&bricks) {
@@ -255,7 +256,7 @@ mod tests {
         assert!(read(&bare.to_brz_vec().unwrap()).unwrap_err().contains("not copied from this editor"));
         assert!(read(b"not a brz").is_err());
         // a piece no single brick can be is refused, not written wrong
-        let odd = (CellBrick { mask: 0b0001_1111, min: [0; 3], ext: [1; 3] }, None, 0);
+        let odd = (CellBrick { mask: 0b0000_1001, min: [0; 3], ext: [1; 3] }, None, 0);
         assert!(prefab(&[odd], &[]).err().unwrap().contains("no brick fits"));
     }
 }

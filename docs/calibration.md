@@ -11,8 +11,13 @@ at different bricks. The check below is for those cases.
 1. Take out a brick and aim at open ground.
 2. Type `/arc calibrate`.
 
-Four test bricks appear in a row along X, each 2 × 3 × 4 microbricks: cube,
-ramp, tetrahedron, cut cube. Around each are small marker cubes.
+Five test bricks appear in a row along X, each 2 × 3 × 4 microbricks: cube,
+ramp, tetrahedron, cut cube, hip. Around each are small marker cubes.
+
+**The hip is the one that has not been checked.** It is the game's
+`PB_DefaultMicroWedgeCorner`, used on a pyramid's ridges, and how it sits
+unrotated is a guess: `mask-hip` is 87, and the other three ways it could
+sit are 117, 55 and 115. If its markers are wrong, try those in turn.
 
 **It is correct when every filled corner of a test brick has a marker touching
 it, and no marker sits beside an empty corner.** `/arc undo` removes them.

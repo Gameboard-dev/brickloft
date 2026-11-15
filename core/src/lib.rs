@@ -15,6 +15,7 @@
 
 pub mod curves;
 pub mod fit_planar;
+pub mod fit_pyramid;
 pub mod fit_round;
 pub mod fit_stack;
 pub mod fit_volume;

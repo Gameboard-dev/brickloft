@@ -221,7 +221,7 @@ fn mismatch(t: &[Vec<f64>; 3], count: usize, layers: usize, radii: [f64; 3], inn
 }
 
 /// One axis's cuts laid out through the centre: each position with its number.
-fn through(center: f64, t: &[f64]) -> Vec<(i32, usize)> {
+pub(crate) fn through(center: f64, t: &[f64]) -> Vec<(i32, usize)> {
     let mut all: Vec<(i32, usize)> = t
         .iter()
         .enumerate()
@@ -244,6 +244,8 @@ pub(crate) fn rest_of_box(mask: u8) -> u8 {
     let c = info.corner;
     match info.kind {
         Kind::Cube => 0,
+        // what a hip leaves is a valley, which no one brick is
+        Kind::Hip => 0,
         // a corner piece and the cube that lacks it
         Kind::Tet => CUBE & !(1 << c),
         Kind::Cut => 1 << c | 1 << (c ^ 1) | 1 << (c ^ 2) | 1 << (c ^ 4),
@@ -431,11 +433,20 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
         }
     }
 
-    // Boxes into bricks. Whole boxes join their neighbours, along x, then y,
-    // then z, as the volume fitter's cubes do (see `fit_volume::merge`); the
-    // rest are one brick each.
-    let limit = round.max_ext.max(1);
-    let size = |k: usize, from: usize, to: usize| lines[k][to].0 - lines[k][from].0;
+    bricks_of(held, lines.map(|line| line.into_iter().map(|cut| cut.0).collect()), round.max_ext)
+}
+
+/// A grid of boxes, each holding one brick shape or nothing, as bricks.
+///
+/// `held` has a corner mask per box, x fastest, and `lines` the positions of
+/// the cuts between boxes along each axis. Whole boxes join their
+/// neighbours, along x, then y, then z, as the volume fitter's cubes do (see
+/// `fit_volume::merge`); the rest are one brick each. `None` if there is
+/// nothing, or a box is longer than a brick may be.
+pub(crate) fn bricks_of(mut held: Vec<u8>, lines: [Vec<i32>; 3], max_ext: i32) -> Option<Vec<CellBrick>> {
+    let n = [0, 1, 2].map(|k| lines[k].len() - 1);
+    let limit = max_ext.max(1);
+    let size = |k: usize, from: usize, to: usize| lines[k][to] - lines[k][from];
     let index = |x: usize, y: usize, z: usize| x + n[0] * (y + n[1] * z);
     let mut bricks = Vec::new();
     for z in 0..n[2] {
@@ -447,26 +458,15 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
                 }
                 let mut end = [x + 1, y + 1, z + 1];
                 if mask == CUBE {
-                    while end[0] < n[0]
-                        && held[index(end[0], y, z)] == CUBE
-                        && size(0, x, end[0] + 1) <= limit
-                    {
+                    while end[0] < n[0] && held[index(end[0], y, z)] == CUBE && size(0, x, end[0] + 1) <= limit {
                         end[0] += 1;
                     }
                     let run = end[0];
-                    let row = |y: usize, z: usize, held: &[u8]| {
-                        held[index(x, y, z)..index(run, y, z)]
-                            .iter()
-                            .all(|m| *m == CUBE)
-                    };
-                    while end[1] < n[1] && row(end[1], z, &held) && size(1, y, end[1] + 1) <= limit
-                    {
+                    let row = |y: usize, z: usize, held: &[u8]| held[index(x, y, z)..index(run, y, z)].iter().all(|m| *m == CUBE);
+                    while end[1] < n[1] && row(end[1], z, &held) && size(1, y, end[1] + 1) <= limit {
                         end[1] += 1;
                     }
-                    while end[2] < n[2]
-                        && (y..end[1]).all(|yy| row(yy, end[2], &held))
-                        && size(2, z, end[2] + 1) <= limit
-                    {
+                    while end[2] < n[2] && (y..end[1]).all(|yy| row(yy, end[2], &held)) && size(2, z, end[2] + 1) <= limit {
                         end[2] += 1;
                     }
                 }
@@ -479,11 +479,7 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
                 if ext.iter().any(|e| *e > limit) {
                     return None; // one box is longer than a brick may be
                 }
-                bricks.push(CellBrick {
-                    mask,
-                    min: [lines[0][x].0, lines[1][y].0, lines[2][z].0],
-                    ext,
-                });
+                bricks.push(CellBrick { mask, min: [lines[0][x], lines[1][y], lines[2][z]], ext });
             }
         }
     }
@@ -682,7 +678,7 @@ mod tests {
     fn the_rest_of_a_box_fills_it() {
         for mask in crate::shapes::all_masks() {
             let rest = rest_of_box(mask);
-            if mask == CUBE {
+            if mask == CUBE || shape_info(mask).unwrap().kind == Kind::Hip {
                 assert_eq!(rest, 0);
                 continue;
             }

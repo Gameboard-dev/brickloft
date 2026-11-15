@@ -11,8 +11,23 @@ use std::rc::Rc;
 
 /// The forms on offer, in menu order. `Form` itself carries the arch type,
 /// so the menu works on this index and the arch type is kept beside it.
-// A torus is the circle as a round tube, so it has no entry of its own.
-pub const FORMS: [&str; 7] = ["Arch", "Arc through 3 points", "Circle", "Spline", "Bézier", "Sphere", "Revolve"];
+/// The forms in the menu. A torus is the Circle as a round tube, and an arc
+/// through three points is an Arch with three, so neither has an entry.
+pub const FORMS: [&str; 7] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid"];
+
+// Where each is in that list. Named, because the places have changed as
+// forms were merged, and a bare number left behind in a `match` then meant
+// a different form without any complaint from the compiler.
+pub const ARCH: usize = 0;
+pub const CIRCLE: usize = 1;
+pub const SPLINE: usize = 2;
+pub const BEZIER: usize = 3;
+pub const SPHERE: usize = 4;
+pub const REVOLVE: usize = 5;
+pub const PYRAMID: usize = 6;
+
+/// Most points an arch may have: two feet and up to six between.
+pub const ARCH_POINTS: usize = 8;
 pub const ARCHES: [(&str, ArchType); 6] = [
     ("Round", ArchType::Round),
     ("Pointed", ArchType::Pointed),
@@ -80,13 +95,14 @@ impl Item {
 /// Where a form is in the menu.
 fn form_index(form: Form) -> usize {
     match form {
-        Form::Arch(_) => 0,
-        Form::Arc => 1,
-        Form::Spline => 3,
-        Form::Bezier => 4,
-        Form::Sphere => 5,
-        Form::Circle | Form::Torus => 2,
-        Form::Revolve => 6,
+        // an arc through three points is an arch with three
+        Form::Arch(_) | Form::Arc => ARCH,
+        Form::Circle | Form::Torus => CIRCLE,
+        Form::Spline => SPLINE,
+        Form::Bezier => BEZIER,
+        Form::Sphere => SPHERE,
+        Form::Revolve => REVOLVE,
+        Form::Pyramid => PYRAMID,
     }
 }
 
@@ -292,10 +308,11 @@ impl State {
     }
 
     /// Make the form being edited larger or smaller by `cells` of radius,
-    /// if it is one with a single size all round: a circle or a sphere. Returns whether it is. By whole cells, so that a radius that
+    /// if it is one with a single size all round: a circle, a sphere or a
+    /// pyramid. Returns whether it is. By whole cells, so that a radius that
     /// ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, 2 | 5);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -315,39 +332,47 @@ impl State {
         if self.others.is_empty() {
             return Some(by);
         }
-        let cells = |b: &CellBrick| {
-            let (min, ext) = (b.min, b.ext);
-            (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])))
-        };
-        let taken: std::collections::HashSet<[i32; 3]> = self.others.iter().flat_map(|i| i.built.bricks.iter().flat_map(cells)).collect();
+        let taken: std::collections::HashSet<[i32; 3]> = self.others.iter().flat_map(|i| cells_of(&i.built.bricks)).collect();
         // the bricks in hand are where the form was last built; it may have
         // been moved since, within this frame
         let since = match (&self.built_from, self.spec.points.first()) {
             (Some(from), Some(now)) if !from.points.is_empty() => (*now - from.points[0]).round().to_array().map(|v| v as i32),
             _ => [0; 3],
         };
-        let mine: Vec<[i32; 3]> = self.built.bricks.iter().flat_map(cells).collect();
-        let hits = |shift: [i32; 3]| mine.iter().any(|c| taken.contains(&[c[0] + since[0] + shift[0], c[1] + since[1] + shift[1], c[2] + since[2] + shift[2]]));
-        if !hits(by) {
-            return Some(by);
+        let mine: Vec<[i32; 3]> = cells_of(&self.built.bricks).map(|c| [c[0] + since[0], c[1] + since[1], c[2] + since[2]]).collect();
+        way_out(&mine, &taken, by)
+    }
+
+    /// Move the other forms out of the way of the one being edited, where
+    /// reshaping it has grown it into them.
+    ///
+    /// Each form it now touches goes to the nearest place, up or to a side,
+    /// that is clear of it and of every form already settled; the ones it
+    /// does not touch are settled first, so that a form pushed aside goes
+    /// round them and not into them.
+    fn push_others(&mut self) {
+        if self.others.is_empty() {
+            return;
         }
-        // no further than would lift or slide it clear of everything
-        let span = |k: usize| {
-            let all = taken.iter().map(|c| c[k]).chain(mine.iter().map(|c| c[k] + since[k] + by[k]));
-            let (lo, hi) = all.fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
-            hi - lo + 1
-        };
-        let furthest = span(0).max(span(1)).max(span(2));
-        for d in 1..=furthest {
-            // up first: of two ways out equally near, onto is the one meant
-            for way in [[0, 0, 1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]] {
-                let shift = [by[0] + way[0] * d, by[1] + way[1] * d, by[2] + way[2] * d];
-                if !hits(shift) {
-                    return Some(shift);
+        let mut settled: std::collections::HashSet<[i32; 3]> = cells_of(&self.built.bricks).collect();
+        let touched: Vec<bool> = self.others.iter().map(|o| cells_of(&o.built.bricks).any(|c| settled.contains(&c))).collect();
+        for (other, _) in self.others.iter().zip(&touched).filter(|(_, t)| !**t) {
+            settled.extend(cells_of(&other.built.bricks));
+        }
+        for (other, _) in self.others.iter_mut().zip(&touched).filter(|(_, t)| **t) {
+            let mine: Vec<[i32; 3]> = cells_of(&other.built.bricks).collect();
+            if let Some(by) = way_out(&mine, &settled, [0; 3]) {
+                let step = DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64);
+                other.spec.points.iter_mut().for_each(|p| *p += step);
+                other.built.path.iter_mut().for_each(|p| *p += step);
+                for b in &mut other.built.bricks {
+                    b.min = [b.min[0] + by[0], b.min[1] + by[1], b.min[2] + by[2]];
                 }
+                other.bounds = bounds_of(&other.built);
             }
+            settled.extend(cells_of(&other.built.bricks));
+            self.scene += 1;
         }
-        None
     }
 
     /// Every form in the workspace with its colouring, the one being edited first.
@@ -473,10 +498,10 @@ impl State {
                 }
             }
         }
-        if matches!(self.form, 2 | 5) && wanted(Handle::Radius) {
+        if matches!(self.form, CIRCLE | SPHERE | PYRAMID) && wanted(Handle::Radius) {
             all.push(Tune::Radius);
         }
-        if self.form == 0 && wanted(Handle::Rise) {
+        if self.has_rise() && wanted(Handle::Rise) {
             all.push(Tune::Rise);
         }
         all
@@ -563,45 +588,64 @@ impl State {
         // Curves stand on the floor, as they will in the game. Solids start
         // lifted clear of it, so that the camera can get underneath and look
         // up into a dome or a hollow shell.
-        self.floor_gap = if self.form >= 5 { 8.0 } else { 0.0 };
+        self.floor_gap = if matches!(self.form, SPHERE | REVOLVE) { 8.0 } else { 0.0 };
         match self.form {
-            0 => {
+            ARCH => {
                 s.points = vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)];
                 self.lock = Lock::Axis(1); // an arch stays in its upright plane
             }
-            1 => {
-                s.points = vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 6.0), cell(8.0, 0.0, 0.0)];
-                self.lock = Lock::Axis(1);
-            }
-            2 => s.points = vec![cell(0.0, 0.0, 0.0)],
-            3 => s.points = vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)],
-            4 => {
+            CIRCLE => s.points = vec![cell(0.0, 0.0, 0.0)],
+            SPLINE => s.points = vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)],
+            BEZIER => {
                 s.points = vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)];
                 s.weights = vec![1.0, 1.0, 1.0];
             }
-            5 => {
+            SPHERE => {
                 s.points = vec![cell(0.0, 0.0, s.radius.ceil())];
+                s.fill = true;
+            }
+            PYRAMID => {
+                // on the floor; half a cell more than a whole radius, so
+                // that its base ends on the lattice about a cell's centre
+                s.points = vec![cell(0.0, 0.0, 0.0)];
+                s.radius = s.radius.floor() + 0.5;
                 s.fill = true;
             }
             _ => s.points = vec![cell(0.0, 0.0, 10.0), cell(5.0, 0.0, 8.0), cell(8.0, 0.0, 0.0)],
         }
-        if matches!(self.form, 3 | 4 | 6) {
+        if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
             self.lock = Lock::Axis(1);
         }
+    }
+
+    /// Whether the form is an arch on its two feet alone, which has a kind
+    /// and a height; with more points it is a curve through them.
+    pub fn has_rise(&self) -> bool {
+        self.form == ARCH && self.spec.points.len() == 2
     }
 
     /// The spec with the menu's choices folded in.
     pub fn full_spec(&self) -> Spec {
         let mut s = self.spec.clone();
         s.form = match self.form {
-            0 => Form::Arch(ARCHES[self.arch].1),
-            1 => Form::Arc,
-            2 => Form::Circle,
-            3 => Form::Spline,
-            4 => Form::Bezier,
-            5 => Form::Sphere,
+            // An arch is its two feet; with a third point, the arc through
+            // all three; with more, the smooth curve through them all.
+            ARCH => match s.points.len() {
+                0..=2 => Form::Arch(ARCHES[self.arch].1),
+                3 => Form::Arc,
+                _ => Form::Spline,
+            },
+            CIRCLE => Form::Circle,
+            SPLINE => Form::Spline,
+            BEZIER => Form::Bezier,
+            SPHERE => Form::Sphere,
+            PYRAMID => Form::Pyramid,
             _ => Form::Revolve,
         };
+        // a curve through an arch's points is open, whatever a spline left behind
+        if self.form == ARCH && s.points.len() != 3 {
+            s.closed = false;
+        }
         s.cut = match self.cut {
             Cut::Whole => None,
             // from the bottom face of the centre's cell, so the dome sits flat
@@ -624,6 +668,7 @@ impl State {
                 self.bounds = bounds_of(&built);
                 self.built = built;
                 self.problem = None;
+                self.push_others();
             }
             // keep showing the last good build under the message
             Err(e) => self.problem = Some(e),
@@ -641,7 +686,7 @@ impl State {
     /// The direction the radius handle sits in, from the centre.
     fn radius_dir(&self) -> DVec3 {
         match self.form {
-            2 => Circle::axis_aligned(DVec3::ZERO, 1.0, self.spec.plane.min(2)).u,
+            CIRCLE => Circle::axis_aligned(DVec3::ZERO, 1.0, self.spec.plane.min(2)).u,
             _ => DVec3::X,
         }
     }
@@ -650,8 +695,8 @@ impl State {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
         match self.form {
-            0 if p.len() >= 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
-            2 | 5 if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
+            CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
             _ => {}
         }
         all
@@ -726,27 +771,81 @@ impl State {
     }
 
     pub fn can_add_points(&self) -> bool {
-        matches!(self.form, 3 | 4 | 7)
+        matches!(self.form, ARCH | SPLINE | BEZIER | REVOLVE)
     }
 
-    /// Add a point a little beyond the last one.
+    /// Add a point. To an arch, between its feet: the first at its crown,
+    /// each one after half way between the last two, so that the feet stay
+    /// its ends. To the other curves, a little beyond the last.
     pub fn add_point(&mut self) {
+        let grid = |q: DVec3| DVec3::new(q.x.floor() + 0.5, q.y.floor() + 0.5, q.z.floor() + 0.5);
+        if self.form == ARCH {
+            let n = self.spec.points.len();
+            if n >= ARCH_POINTS || n < 2 {
+                return;
+            }
+            let p = &self.spec.points;
+            let between = if n == 2 { (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise() } else { (p[n - 2] + p[n - 1]) / 2.0 };
+            self.spec.points.insert(n - 1, grid(between));
+            return;
+        }
         let p = &mut self.spec.points;
         let n = p.len();
         let step = if n >= 2 { p[n - 1] - p[n - 2] } else { DVec3::new(4.0, 0.0, 0.0) };
         let next = p[n - 1] + step.clamp_length(2.0, 6.0);
-        p.push(DVec3::new(next.x.floor() + 0.5, next.y.floor() + 0.5, next.z.floor() + 0.5));
-        if self.form == 4 {
+        p.push(grid(next));
+        if self.form == BEZIER {
             self.spec.weights.resize(self.spec.points.len(), 1.0);
         }
     }
 
+    /// Take a point away: from an arch the last one between its feet, from
+    /// the other curves the last. Two always stay.
     pub fn remove_point(&mut self) {
-        if self.spec.points.len() > 2 {
-            self.spec.points.pop();
+        let n = self.spec.points.len();
+        if n > 2 {
+            self.spec.points.remove(if self.form == ARCH { n - 2 } else { n - 1 });
             self.spec.weights.truncate(self.spec.points.len());
         }
     }
+}
+
+/// Where a set of cells ends up if moved by `by`: there, if that is clear of
+/// `taken`, or else the nearest place straight up or straight out to one side
+/// that is. `None` if there is none within reach.
+///
+/// Up or sideways and never down, so that a form brought down onto another
+/// comes to rest on top of it.
+fn way_out(mine: &[[i32; 3]], taken: &std::collections::HashSet<[i32; 3]>, by: [i32; 3]) -> Option<[i32; 3]> {
+    let hits = |shift: [i32; 3]| mine.iter().any(|c| taken.contains(&[c[0] + shift[0], c[1] + shift[1], c[2] + shift[2]]));
+    if !hits(by) {
+        return Some(by);
+    }
+    // no further than would lift or slide it clear of everything
+    let span = |k: usize| {
+        let all = taken.iter().map(|c| c[k]).chain(mine.iter().map(|c| c[k] + by[k]));
+        let (lo, hi) = all.fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        hi - lo + 1
+    };
+    let furthest = span(0).max(span(1)).max(span(2));
+    for d in 1..=furthest {
+        // up first: of two ways out equally near, onto is the one meant
+        for way in [[0, 0, 1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]] {
+            let shift = [by[0] + way[0] * d, by[1] + way[1] * d, by[2] + way[2] * d];
+            if !hits(shift) {
+                return Some(shift);
+            }
+        }
+    }
+    None
+}
+
+/// Every cell in the boxes of some bricks.
+fn cells_of(bricks: &[CellBrick]) -> impl Iterator<Item = [i32; 3]> + '_ {
+    bricks.iter().flat_map(|b| {
+        let (min, ext) = (b.min, b.ext);
+        (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])))
+    })
 }
 
 #[cfg(test)]
@@ -773,10 +872,75 @@ mod tests {
     /// walls half a cell off the grid, and best fit had to move it to radius
     /// 13 or 12. A ring is now set on the grid whatever its radius.
     #[test]
+    fn an_arch_takes_more_points_and_gives_them_back() {
+        let mut state = State::new();
+        state.form = ARCH;
+        state.preset();
+        let feet = state.spec.points.clone();
+        assert!(state.has_rise() && matches!(state.full_spec().form, Form::Arch(_)));
+        // a third point goes in at the crown, and the arch is the arc through all three
+        state.add_point();
+        assert_eq!(state.spec.points.len(), 3);
+        assert_eq!((state.spec.points[0], state.spec.points[2]), (feet[0], feet[1]));
+        assert!(state.spec.points[1].z > feet[0].z + 4.0 && state.spec.points[1].x.abs() < 1.0);
+        assert!(!state.has_rise() && state.full_spec().form == Form::Arc);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        // more make it the curve through them all, up to the limit, with the feet still its ends
+        for _ in 0..10 {
+            state.add_point();
+        }
+        assert_eq!(state.spec.points.len(), ARCH_POINTS);
+        assert_eq!((state.spec.points[0], state.spec.points[ARCH_POINTS - 1]), (feet[0], feet[1]));
+        assert_eq!(state.full_spec().form, Form::Spline);
+        assert!(state.handles().iter().all(|(h, _)| *h != Handle::Rise));
+        // and taken away again, down to the two feet
+        for _ in 0..10 {
+            state.remove_point();
+        }
+        assert_eq!(state.spec.points, feet);
+        // a saved arc opens as an arch with three points
+        let mut arc = state.full_spec();
+        arc.form = Form::Arc;
+        arc.points.insert(1, cell(0.0, 0.0, 6.0));
+        state.load_spec(arc);
+        assert_eq!((state.form, state.spec.points.len()), (ARCH, 3));
+    }
+
+    #[test]
+    fn reshaping_a_form_pushes_its_neighbour_away() {
+        let mut state = State::new();
+        state.form = SPHERE;
+        state.preset();
+        state.spec.radius = 4.5;
+        state.refresh(|| 0.0);
+        let mut ball = State::new();
+        ball.form = SPHERE;
+        ball.preset();
+        ball.spec.radius = 4.5;
+        state.add_form(ball.full_spec());
+        state.refresh(|| 0.0);
+        let shared = |state: &State| {
+            let mine: std::collections::HashSet<[i32; 3]> = cells_of(&state.built.bricks).collect();
+            cells_of(&state.others[0].built.bricks).filter(|c| mine.contains(c)).count()
+        };
+        assert_eq!(shared(&state), 0);
+        let (was, bricks) = (state.others[0].spec.points.clone(), state.others[0].built.bricks.len());
+        // grown until it would swallow half of the other
+        state.spec.radius = 12.5;
+        assert!(state.refresh(|| 0.0));
+        assert_eq!(shared(&state), 0, "the two share cells");
+        let other = &state.others[0];
+        assert_ne!(other.spec.points, was, "the other form did not move");
+        // moved whole: the same bricks, and its points with them
+        assert_eq!(other.built.bricks.len(), bricks);
+        assert_eq!(build(&other.spec).unwrap().bricks, other.built.bricks);
+    }
+
+    #[test]
     fn a_ring_is_on_the_grid_without_best_fit() {
         let misfit_at = |radius: f64| {
             let mut state = State::new();
-            state.form = 2;
+            state.form = CIRCLE;
             state.preset();
             state.spec.radius = radius;
             state.spec.thick = 2.0;
@@ -805,14 +969,14 @@ mod tests {
     #[test]
     fn a_saved_form_comes_back_as_it_was() {
         let mut state = State::new();
-        state.form = 5;
+        state.form = SPHERE;
         state.preset();
         state.cut = Cut::Dome;
         state.spec.radius = 11.0;
         let text = arcs_core::report::spec_text(&state.full_spec());
         let mut other = State::new();
         other.load_spec(arcs_core::report::parse_spec(&text).unwrap());
-        assert_eq!((other.form, other.cut == Cut::Dome), (5, true));
+        assert_eq!((other.form, other.cut == Cut::Dome), (SPHERE, true));
         assert_eq!(other.full_spec(), state.full_spec());
 
         let mut arch = State::new();
@@ -834,11 +998,11 @@ mod tests {
 
         // add a sphere: it becomes the form being edited, clear of the arch
         let mut sphere = State::new();
-        sphere.form = 5;
+        sphere.form = SPHERE;
         sphere.preset();
         state.add_form(sphere.full_spec());
         assert!(state.refresh(|| 0.0));
-        assert_eq!((state.form, state.others.len()), (5, 1));
+        assert_eq!((state.form, state.others.len()), (SPHERE, 1));
         assert!(state.bounds.unwrap().0[0] >= arch_right + 4, "the sphere overlaps the arch");
         assert_eq!(state.paint, Paint::default(), "a new form starts with its own colouring");
 
@@ -927,12 +1091,12 @@ mod tests {
 
         // removing the form being edited leaves the other; the last cannot go
         state.remove_active();
-        assert_eq!((state.form, state.others.len()), (5, 0));
+        assert_eq!((state.form, state.others.len()), (SPHERE, 0));
         let before = state.spec.radius;
         assert!(state.resize(-1.0) && state.spec.radius == before - 1.0);
         assert!(state.resize(-1000.0) && state.spec.radius == 0.5);
         state.remove_active();
-        assert_eq!(state.form, 5);
+        assert_eq!(state.form, SPHERE);
     }
 
     #[test]
@@ -969,7 +1133,7 @@ mod tests {
         state.preset();
 
         // a sphere's radius handle
-        state.form = 5;
+        state.form = SPHERE;
         state.preset();
         let (_, at) = state.handles()[1];
         let out = at + DVec3::X * 3.4;

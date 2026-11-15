@@ -28,6 +28,7 @@ fn form_name(form: Form) -> String {
         Form::Sphere => "sphere".into(),
         Form::Torus => "torus".into(),
         Form::Revolve => "revolve".into(),
+        Form::Pyramid => "pyramid".into(),
     }
 }
 
@@ -135,6 +136,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("sphere", _) => Form::Sphere,
                     ("torus", _) => Form::Torus,
                     ("revolve", _) => Form::Revolve,
+                    ("pyramid", _) => Form::Pyramid,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -302,13 +304,15 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
                 // a cell whose centre is further from the surface than its
                 // corners are from its centre is wholly in or out
                 let centre = probe.distance(corner + 0.5);
-                let form = if centre > 0.87 {
-                    0
+                // `edge` marks the samples that lie on the form's surface itself
+                let (form, edge) = if centre > 0.87 {
+                    (0, 0)
                 } else if centre < -0.87 {
-                    u64::MAX
+                    (u64::MAX, 0)
                 } else {
-                    (0..K * K * K).fold(0u64, |bits, s| {
-                        bits | ((probe.distance(corner + sample(s)) < 0.0) as u64) << s
+                    (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
+                        let d = probe.distance(corner + sample(s));
+                        (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
                     })
                 };
                 let holds = (owner[i] > 0).then(|| owner[i] as usize - 1);
@@ -325,6 +329,13 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
                         })
                     }
                 };
+                // A sample exactly on the form's surface is on neither side of
+                // it, so it agrees with whatever the bricks do there. Counted
+                // as outside, as a strict test has it, every sloped brick
+                // lying exactly along a sloped face of the form was charged
+                // for the samples on that face, and a pyramid built exactly
+                // measured 5% wrong.
+                let form = (form & !edge) | (bricks & edge);
                 form_bits[i] = form;
                 brick_bits[i] = bricks;
                 let wrong = (form ^ bricks).count_ones();
@@ -568,12 +579,13 @@ pub fn report(spec: &Spec) -> Result<String, String> {
     writeln!(w, "brick size = {}", built.grain).unwrap();
     writeln!(
         w,
-        "bricks = {} ({} cubes, {} ramps, {} tetrahedra, {} cut cubes)",
+        "bricks = {} ({} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips)",
         built.bricks.len(),
         count(Kind::Cube),
         count(Kind::Ramp),
         count(Kind::Tet),
-        count(Kind::Cut)
+        count(Kind::Cut),
+        count(Kind::Hip)
     )
     .unwrap();
     writeln!(w, "form volume = {:.2}", built.solid).unwrap();
@@ -751,7 +763,7 @@ mod tests {
             };
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap().form, form);
         }
-        assert!(parse_spec("form = pyramid")
+        assert!(parse_spec("form = teapot")
             .unwrap_err()
             .contains("unknown form"));
         assert!(parse_spec("radius = wide").unwrap_err().contains("line 1"));

@@ -7,6 +7,7 @@
 
 use crate::curves::{arch, catmull_rom, circle3, rational_bezier, ArchType, Circle};
 use crate::fit_planar::{self, fit_planar, fit_planar_towards};
+use crate::fit_pyramid::{fit_pyramid, Pyramid};
 use crate::fit_round::{fit_round, Round};
 use crate::fit_volume::{self, fit_volume};
 use crate::sdf::{Field, Fill, Region, Stroke};
@@ -32,6 +33,9 @@ pub enum Form {
     Torus,
     /// 2 or more points: a profile spun about the vertical through the first
     Revolve,
+    /// 1 point, the middle of its base: a pyramid `radius` to each side of
+    /// it (scaled by `stretch` along x and y) and `rise` tall
+    Pyramid,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -228,13 +232,15 @@ impl Spec {
         let limit = match self.form {
             Form::Sphere if self.fill => self.radius * self.stretch.min_element() / 4.0,
             Form::Torus => self.thick / 4.0,
+            // a pyramid is exact at any size: nothing is gained by coarser bricks
+            Form::Pyramid => 1.0,
             Form::Revolve if self.fill => f64::INFINITY,
             Form::Sphere | Form::Revolve => self.thick / 2.0,
             // a curve
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -292,9 +298,7 @@ fn build_at(spec: &Spec, grain: i32) -> Result<Built, String> {
         // form itself. A build too large to measure that way is fitted cell
         // by cell after all, which does have its own figures.
         let (field, min, max) = match &solid {
-            Solid::Round {
-                field, min, max, ..
-            } => (Some(field.clone()), *min, *max),
+            Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
         match crate::report::analyse_probe(&Probe::of(solid), &built) {
@@ -379,6 +383,10 @@ pub enum Solid {
         max: [i32; 2],
         field: Field,
     },
+    /// A pyramid, whose bricks follow from its size with no fitting (see
+    /// `fit_pyramid`); `None` where it cannot be laid out that way. `field`
+    /// is the same solid as a distance function.
+    Pyramid { bricks: Option<Vec<CellBrick>>, field: Field, min: [i32; 3], max: [i32; 3] },
     /// A round tube along a curve lying across `axis`, built as a pipe: an
     /// octagon in section (see `fit_stack`). `top` is the band of its flat
     /// top and `full` the band of its whole width; it fills `layers` cells
@@ -412,6 +420,7 @@ impl Solid {
             Solid::Volume { field, .. }
             | Solid::Stack { field, .. }
             | Solid::Round { field, .. }
+            | Solid::Pyramid { field, .. }
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Flat {
                 region,
@@ -473,6 +482,7 @@ impl Probe {
             Solid::Volume { .. }
             | Solid::Stack { .. }
             | Solid::Round { .. }
+            | Solid::Pyramid { .. }
             | Solid::Pipe { .. } => None,
         }
     }
@@ -566,6 +576,23 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         // A torus is a circle as a round tube, and is built as one. It was a
         // form of its own while it was fitted cell by cell from a formula.
         Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }),
+        Form::Pyramid => {
+            let base = need(1)?[0];
+            let half = [spec.radius * spec.stretch.x.max(0.05), spec.radius * spec.stretch.y.max(0.05)];
+            let pyramid = Pyramid { base, half, height: spec.rise.unwrap_or(spec.radius), max_ext: spec.max_ext };
+            // measured against the pyramid as the lattice has it; off the
+            // half-cell grid it has no such place and is fitted as it stands
+            let (field, lo, hi) = match pyramid.snapped() {
+                Some(at) => {
+                    let floor = DVec3::new(base.x, base.y, at.floor as f64);
+                    (Field::Pyramid { base: floor, half: at.half, top: at.top, height: at.height as f64 }, floor - DVec3::new(at.half[0], at.half[1], 0.0), floor + DVec3::new(at.half[0], at.half[1], at.height as f64))
+                }
+                None => (Field::Pyramid { base, half, top: [0.0; 2], height: pyramid.height.max(1.0) }, base - DVec3::new(half[0], half[1], 0.0), base + DVec3::new(half[0], half[1], pyramid.height.max(1.0))),
+            };
+            let (solid, path) = volume(field.clone(), lo, hi, Vec::new())?;
+            let Solid::Volume { min, max, .. } = solid else { unreachable!() };
+            Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
+        }
         Form::Revolve => {
             let p = need(2)?;
             let axis = p[0].truncate();
@@ -885,6 +912,10 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 unmeasured: false,
             }
         }
+        Solid::Pyramid { bricks, field, min, max } => match bricks.clone().filter(|_| spec.wedges) {
+            Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true },
+            None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
+        },
         Solid::Round {
             round,
             field,
@@ -1785,6 +1816,28 @@ mod tests {
         assert_eq!([size(&filled, 0), size(&filled, 2)], [34, 6]);
         assert!(filled.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == Kind::Tet));
         assert!(filled.error / filled.solid < 0.05, "error {} of {}", filled.error, filled.solid);
+    }
+
+    #[test]
+    fn a_pyramid_is_built_exactly_from_a_handful_of_bricks() {
+        let spec = Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 8.5, rise: Some(8.0), ..Spec::default() };
+        let built = check(&spec);
+        let kind = |k: Kind| built.bricks.iter().filter(|b| shape_info(b.mask).unwrap().kind == k).count();
+        // centred in a cell: a hip on each ridge, a ramp on each side, a column up the middle
+        assert_eq!((built.bricks.len(), kind(Kind::Hip), kind(Kind::Ramp), kind(Kind::Cube)), (9, 4, 4, 1));
+        assert_eq!(built.bricks.iter().map(|b| b.min[2]).min(), Some(0));
+        assert_eq!(built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max(), Some(8));
+        // exact: what little is measured is the sampling of sloped faces
+        assert!(built.error / built.solid < 0.03, "error {} of {}", built.error, built.solid);
+        let survey = crate::surface::survey(&Probe::new(&spec, built.grain).unwrap(), &built).unwrap();
+        assert!(survey.stepped == 0.0 && survey.mean_angle < 2.0, "stepped {}, mean angle {}", survey.stepped, survey.mean_angle);
+        // oblong, and flipped into a funnel
+        let oblong = check(&Spec { stretch: DVec3::new(2.0, 1.0, 1.0), flip: [false, false, true], ..spec.clone() });
+        let size = |k: usize| oblong.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap() - oblong.bricks.iter().map(|b| b.min[k]).min().unwrap();
+        assert_eq!([size(0), size(1), size(2)], [35, 17, 8]);
+        // with cubes alone it is still a pyramid, in steps
+        let steps = check(&Spec { wedges: false, ..spec.clone() });
+        assert!(steps.bricks.iter().all(|b| b.mask == CUBE) && steps.bricks.len() >= 6);
     }
 
     #[test]

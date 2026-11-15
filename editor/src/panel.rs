@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCHES, FORMS};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
 use arcs_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -122,10 +122,11 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         colours(ui, state);
         ui.separator();
 
+        let arch_feet = state.has_rise();
         let s = &mut state.spec;
-        let is_curve = state.form <= 4;
+        let is_curve = state.form <= BEZIER;
         match state.form {
-            0 => {
+            ARCH if arch_feet => {
                 ComboBox::from_label("Arch").selected_text(ARCHES[state.arch].0).show_ui(ui, |ui| {
                     for (i, (name, _)) in ARCHES.iter().enumerate() {
                         ui.selectable_value(&mut state.arch, i, *name);
@@ -137,10 +138,18 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     s.rise = None;
                 }
             }
-            1 | 3 => {
-                ui.checkbox(&mut s.closed, if state.form == 1 { "Whole circle" } else { "Closed loop" });
+            ARCH => {
+                if s.points.len() == 3 {
+                    ui.label("The arc through its three points.");
+                    ui.checkbox(&mut s.closed, "Whole circle");
+                } else {
+                    ui.label(format!("The curve through its {} points.", s.points.len()));
+                }
             }
-            2 => {
+            SPLINE => {
+                ui.checkbox(&mut s.closed, "Closed loop");
+            }
+            CIRCLE => {
                 ComboBox::from_label("Facing").selected_text(["X", "Y", "Z (flat)"][s.plane.min(2)]).show_ui(ui, |ui| {
                     for (i, name) in ["X", "Y", "Z (flat)"].iter().enumerate() {
                         ui.selectable_value(&mut s.plane, i, *name);
@@ -153,14 +162,14 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() }));
                 }
             }
-            4 => {
+            BEZIER => {
                 ui.label("Pull of each point (higher draws the curve closer):");
                 s.weights.resize(s.points.len(), 1.0);
                 for (i, w) in s.weights.iter_mut().enumerate() {
                     ui.add(Slider::new(w, 0.1..=8.0).logarithmic(true).text(format!("point {}", i + 1)));
                 }
             }
-            5 => {
+            SPHERE => {
                 ui.label("Stretch:");
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                     ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
@@ -177,19 +186,33 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             _ => {}
         }
-        if matches!(state.form, 2 | 5) {
-            ui.add(Slider::new(&mut s.radius, 0.5..=60.0).step_by(0.5).text("Radius"));
+        if state.form == PYRAMID {
+            ui.label("Stretch:");
+            for (axis, name) in ["X", "Y"].iter().enumerate() {
+                ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
+            }
+            let mut height = s.rise.unwrap_or(s.radius);
+            ui.add(Slider::new(&mut height, 1.0..=80.0).step_by(1.0).text("Height"));
+            // left alone it is as tall as it is wide to one side
+            if height != s.rise.unwrap_or(s.radius) {
+                s.rise = Some(height);
+            }
+        }
+        if matches!(state.form, CIRCLE | SPHERE | PYRAMID) {
+            ui.add(Slider::new(&mut s.radius, 0.5..=60.0).step_by(0.5).text(if state.form == PYRAMID { "Half its base" } else { "Radius" }));
         }
 
         ui.separator();
         // Fill means different things to a curve and to a solid, so say which
         match state.form {
-            5 => {
+            SPHERE => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a hollow shell)");
             }
-            6 => {
+            REVOLVE => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a shell along the profile)");
             }
+            // a pyramid is solid, and that is all it is
+            PYRAMID => {}
             _ => {
                 ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
                 ui.checkbox(&mut s.tube, "Round tube instead of a flat band");
@@ -203,10 +226,12 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            5 | 6 => "Wall thickness",
+            SPHERE | REVOLVE => "Wall thickness",
             _ => "Thickness",
         };
-        ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
+        if state.form != PYRAMID {
+            ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
+        }
         if is_curve && !s.tube {
             ui.add(Slider::new(&mut s.depth, 1..=64).text("Depth"));
         }
@@ -223,7 +248,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         if state.can_add_points() {
             ui.horizontal(|ui| {
-                if ui.button("Add point").clicked() {
+                let full = state.form == ARCH && state.spec.points.len() >= ARCH_POINTS;
+                if ui.add_enabled(!full, egui::Button::new("Add point")).clicked() {
                     state.add_point();
                 }
                 if ui.button("Remove point").clicked() {
@@ -280,7 +306,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.separator();
         let built = &state.built;
         let count = |kind: Kind| built.bricks.iter().filter(|b| shape_info(b.mask).is_some_and(|s| s.kind == kind)).count();
-        ui.label(format!("{} bricks: {} cubes, {} ramps, {} tetrahedra, {} cut cubes", built.bricks.len(), count(Kind::Cube), count(Kind::Ramp), count(Kind::Tet), count(Kind::Cut)));
+        ui.label(format!("{} bricks: {} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips", built.bricks.len(), count(Kind::Cube), count(Kind::Ramp), count(Kind::Tet), count(Kind::Cut), count(Kind::Hip)));
         if built.grain > 1 {
             ui.label(format!("Brick size {} microbricks", built.grain));
         }

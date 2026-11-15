@@ -178,6 +178,14 @@ fn part(info: ShapeInfo, t: [f64; 3]) -> f64 {
             let (p, q) = [(1, 2), (0, 2), (0, 1)][info.axis as usize];
             side(c[p] + c[q], true)
         }
+        // inside both of its sloped faces, each of which is where one
+        // coordinate across equals the one along its axis
+        Kind::Hip => {
+            let (p, q) = [(1, 2), (0, 2), (0, 1)][info.axis as usize];
+            let along = c[info.axis as usize];
+            let within = |x: f64| -> f64 { if (x - along).abs() < 1e-5 { 0.5 } else if x < along { 1.0 } else { 0.0 } };
+            within(c[p]).min(within(c[q]))
+        }
     }
 }
 
@@ -223,7 +231,50 @@ fn square_faces(b: &CellBrick, info: ShapeInfo) -> Vec<(DVec3, Vec<Sample>)> {
     faces
 }
 
-/// A brick's sloped face, if it has one: its direction and samples.
+/// A brick's sloped faces: each one's direction and samples. A hip has two,
+/// the other shapes one, a cube none.
+fn sloped_faces(b: &CellBrick, info: ShapeInfo) -> Vec<(DVec3, Vec<Sample>)> {
+    if info.kind != Kind::Hip {
+        return sloped_face(b, info).into_iter().collect();
+    }
+    let ext = b.ext.map(|e| e as f64);
+    let axis = info.axis as usize;
+    let (p, q) = [(1, 2), (0, 2), (0, 1)][axis];
+    // from the apex's corner back to the brick's box: a sign for each axis
+    let sign = |k: usize| if info.corner >> k & 1 != 0 { -1.0 } else { 1.0 };
+    let place = |c: [f64; 3]| {
+        let t = from_corner(info, c);
+        DVec3::from_array([0, 1, 2].map(|k| b.min[k] as f64 + t[k] * ext[k]))
+    };
+    [(p, q), (q, p)]
+        .into_iter()
+        .map(|(across, level)| {
+            // The face where `across` equals the distance along the axis: a
+            // right triangle from the apex down to one side of the whole
+            // face. It looks outwards along `across` and back towards the
+            // apex along the axis.
+            let mut normal = DVec3::ZERO;
+            normal[across] = sign(across) / ext[across];
+            normal[axis] = -sign(axis) / ext[axis];
+            let area = 0.5 * ext[across].hypot(ext[axis]) * ext[level];
+            // sampled evenly in how far down and how far along; a row's
+            // length grows with how far down it is, and so does its share
+            let n = (b.ext.iter().max().unwrap() * PER_CELL as i32).clamp(2, 12) as usize;
+            let mut samples = Vec::new();
+            for i in 0..n {
+                for j in 0..n {
+                    let (down, along) = ((i as f64 + 0.5) / n as f64, (j as f64 + 0.5) / n as f64);
+                    let mut c = [0.0; 3];
+                    (c[axis], c[across], c[level]) = (down, down, along * down);
+                    samples.push((place(c), area * 2.0 * down / (n * n) as f64));
+                }
+            }
+            (normal.normalize(), samples)
+        })
+        .collect()
+}
+
+/// The sloped face of a ramp, tetrahedron or cut cube: its direction and samples.
 fn sloped_face(b: &CellBrick, info: ShapeInfo) -> Option<(DVec3, Vec<Sample>)> {
     let ext = b.ext.map(|e| e as f64);
     // back from the shape's own corner to the brick's box, and out to space
@@ -248,7 +299,7 @@ fn sloped_face(b: &CellBrick, info: ShapeInfo) -> Option<(DVec3, Vec<Sample>)> {
         n.normalize()
     };
     match info.kind {
-        Kind::Cube => None,
+        Kind::Cube | Kind::Hip => None,
         Kind::Ramp => {
             let axis = info.axis as usize;
             let (p, q) = [(1, 2), (0, 2), (0, 1)][axis];
@@ -323,11 +374,11 @@ pub fn survey(probe: &Probe, built: &Built) -> Result<Survey, String> {
     for (index, b) in built.bricks.iter().enumerate() {
         let info = shape_info(b.mask).ok_or("a brick has a mask that is not a shape")?;
         let square = square_faces(b, info);
-        let sloped = sloped_face(b, info);
+        let sloped = sloped_faces(b, info);
         for (is_square, (normal, samples)) in square
             .into_iter()
             .map(|f| (true, f))
-            .chain(sloped.map(|f| (false, f)))
+            .chain(sloped.into_iter().map(|f| (false, f)))
         {
             let mut note = FaceNote {
                 brick: index,
@@ -546,7 +597,7 @@ mod tests {
             let info = shape_info(mask).unwrap();
             let total: f64 = square_faces(&b, info)
                 .iter()
-                .chain(sloped_face(&b, info).iter())
+                .chain(sloped_faces(&b, info).iter())
                 .flat_map(|f| f.1.iter().map(|s| s.1))
                 .sum();
             let [x, y, z] = b.ext.map(|e| e as f64);
@@ -562,13 +613,15 @@ mod tests {
                 Kind::Ramp => p * q + a * (p + q) + a * p.hypot(q),
                 Kind::Tet => 0.5 * (x * y + y * z + x * z) + slope,
                 Kind::Cut => 1.5 * (x * y + y * z + x * z) + slope,
+                // its whole face, two upright triangles and two sloped ones
+                Kind::Hip => p * q + 0.5 * a * (p + q) + 0.5 * (p.hypot(a) * q + q.hypot(a) * p),
             };
             assert!(
                 (total - expected).abs() < 1e-6 * expected,
                 "mask {mask:#x}: {total} vs {expected}"
             );
             // and every sample of its sloped face lies on the solid's edge
-            if let Some((normal, samples)) = sloped_face(&b, info) {
+            for (normal, samples) in sloped_faces(&b, info) {
                 let grid = Grid::new(&[b]).unwrap();
                 for (at, _) in samples {
                     assert!(

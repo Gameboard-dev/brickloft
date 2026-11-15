@@ -10,7 +10,7 @@ use crate::shapes::{shape_info, transform_mask, CellBrick, Kind, KINDS, ORIENT};
 /// again if an update or a change of assets puts them in doubt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Models {
-    pub local_mask: [u8; 4],
+    pub local_mask: [u8; 5],
 }
 
 impl Default for Models {
@@ -20,7 +20,11 @@ impl Default for Models {
     /// - the outer corner is the cube missing its +x +y +z corner
     fn default() -> Self {
         Models {
-            local_mask: [0xff, 0x77, 0x17, 0x7f],
+            // The last is the micro wedge corner, a hip. Unlike the others
+            // it has NOT been checked in the game: it is the wedge above with
+            // one more corner taken off, which leaves four ways it could sit,
+            // and this is one of them. `/arc calibrate` shows which is right.
+            local_mask: [0xff, 0x77, 0x17, 0x7f, 0x57],
         }
     }
 }

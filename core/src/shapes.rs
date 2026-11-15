@@ -11,6 +11,7 @@
 //! | ramp | 6, the missing two share an edge | 12 |
 //! | tet  | 4, one corner and its three neighbours | 8 |
 //! | cut  | 7, the cube with a corner tet removed | 8 |
+//! | hip  | 5, one face and one corner of the face opposite | 24 |
 
 use std::sync::OnceLock;
 
@@ -20,9 +21,13 @@ pub enum Kind {
     Ramp,
     Tet,
     Cut,
+    /// One whole face of the box and a single corner of the opposite face:
+    /// a quarter of a square pyramid, the piece at the corner of a hipped
+    /// roof where two slopes meet along a ridge.
+    Hip,
 }
 
-pub const KINDS: [Kind; 4] = [Kind::Cube, Kind::Ramp, Kind::Tet, Kind::Cut];
+pub const KINDS: [Kind; 5] = [Kind::Cube, Kind::Ramp, Kind::Tet, Kind::Cut, Kind::Hip];
 
 impl Kind {
     /// The pose every other pose of this kind is a rotation of.
@@ -32,6 +37,7 @@ impl Kind {
             Kind::Ramp => 0x77, // missing the edge x=1,y=1: solid where x + y <= 1
             Kind::Tet => 0x17,  // corner 0 and its neighbours: x + y + z <= 1
             Kind::Cut => 0x7f,  // missing corner 7: x + y + z <= 2
+            Kind::Hip => 0x1f,  // the face z=0 and corner 4 above corner 0: x <= 1 - z and y <= 1 - z
         }
     }
 
@@ -42,6 +48,7 @@ impl Kind {
             Kind::Ramp => 0.5,
             Kind::Tet => 1.0 / 6.0,
             Kind::Cut => 5.0 / 6.0,
+            Kind::Hip => 1.0 / 3.0,
         }
     }
 }
@@ -113,9 +120,10 @@ pub fn transform_mask(mask: u8, orientation: usize) -> u8 {
 pub struct ShapeInfo {
     pub kind: Kind,
     /// tet: the right-angle corner. cut: the missing corner. ramp: a corner on
-    /// the missing edge.
+    /// the missing edge. hip: the apex, the one corner kept of its face.
     pub corner: u8,
-    /// ramp: the axis its missing edge, and so the prism, runs along
+    /// ramp: the axis its missing edge, and so the prism, runs along.
+    /// hip: the axis from its whole face to its apex.
     pub axis: u8,
 }
 
@@ -130,6 +138,15 @@ fn table() -> &'static [Option<ShapeInfo>; 256] {
                 let (corner, axis) = match kind {
                     Kind::Cube => (0, 0),
                     Kind::Cut => (missing[0], 0),
+                    // the axis along which one side keeps all four corners;
+                    // the apex is the corner kept on the other side
+                    Kind::Hip => {
+                        let axis = (0..3u8).find(|&a| [0u8, 1].iter().any(|&side| (0..8u8).filter(|c| c >> a & 1 == side).all(|c| mask >> c & 1 == 1))).unwrap();
+                        let whole = (0..8u8).filter(|c| c >> axis & 1 == 0).all(|c| mask >> c & 1 == 1) as u8;
+                        // `whole` is 1 if the low side is the whole face, so the apex is on the high side
+                        let apex = (0..8u8).find(|&c| c >> axis & 1 == whole && mask >> c & 1 == 1).unwrap();
+                        (apex, axis)
+                    }
                     Kind::Ramp => (missing[0], (missing[0] ^ missing[1]).trailing_zeros() as u8),
                     // the kept corner whose three neighbours are all kept
                     Kind::Tet => (
@@ -154,7 +171,7 @@ pub fn shape_info(mask: u8) -> Option<ShapeInfo> {
     table()[mask as usize]
 }
 
-/// Every representable mask: 1 cube, 12 ramps, 8 tets and 8 cuts.
+/// Every representable mask: 1 cube, 12 ramps, 8 tets, 8 cuts and 24 hips.
 pub fn all_masks() -> Vec<u8> {
     (0..=255u8).filter(|&m| shape_info(m).is_some()).collect()
 }
@@ -181,6 +198,17 @@ pub fn inside_shape(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
             1 => a + d > 1.0,
             _ => a + b > 1.0,
         },
+        // Measured from the apex: at a distance t along the axis towards the
+        // whole face, the shape is the square from the apex's corner out to
+        // t each way across.
+        Kind::Hip => {
+            let (t, p, q) = match info.axis {
+                0 => (a, b, d),
+                1 => (b, a, d),
+                _ => (d, a, b),
+            };
+            p < t && q < t
+        }
     }
 }
 
@@ -198,6 +226,23 @@ pub fn inside_shape(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
 pub fn inside_sampled(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
     if inside_shape(info, u, v, w) {
         return true;
+    }
+    if info.kind == Kind::Hip {
+        // A hip's two sloped faces line up with the sample grid as a ramp's
+        // one does. Of the samples on either face, those in the half of it
+        // nearer the apex count as inside, which brings 22 of a cell's 64
+        // samples in where a third of them is 21.3; all in would be 30 and
+        // all out 14. Measured from the hip's own apex, so mirror images
+        // get mirror-image samples.
+        let c = info.corner;
+        let f = [if c & 1 != 0 { 1.0 - u } else { u }, if c & 2 != 0 { 1.0 - v } else { v }, if c & 4 != 0 { 1.0 - w } else { w }];
+        let (t, p, q) = match info.axis {
+            0 => (f[0], f[1], f[2]),
+            1 => (f[1], f[0], f[2]),
+            _ => (f[2], f[0], f[1]),
+        };
+        let on = |x: f64| (x - t).abs() < 1e-9;
+        return (on(p) && q < t / 2.0) || (on(q) && p < t / 2.0);
     }
     if info.kind != Kind::Ramp {
         return false;
@@ -330,6 +375,12 @@ mod tests {
         assert_eq!(count(Kind::Ramp), 12);
         assert_eq!(count(Kind::Tet), 8);
         assert_eq!(count(Kind::Cut), 8);
+        assert_eq!(count(Kind::Hip), 24);
+        // a hip's apex and axis are read back from its corners correctly
+        let hip = shape_info(0x1f).unwrap();
+        assert_eq!((hip.corner, hip.axis), (4, 2));
+        let turned = shape_info(0b1010_1011).unwrap();
+        assert_eq!((turned.kind, turned.corner, turned.axis), (Kind::Hip, 0, 0));
     }
 
     #[test]

@@ -82,8 +82,15 @@ pub(crate) fn patterns() -> &'static [(u8, u64)] {
     PATTERNS.get_or_init(|| {
         let at = |i: usize| (i as f64 + 0.5) / K as f64;
         let mut all = vec![(0u8, 0u64), (CUBE, u64::MAX)];
+        // Not the hips: they are for forms laid out whole, with a ridge to
+        // put them on (see `fit_pyramid`). Offered to every cell of a curved
+        // surface they would nearly double the shapes each cell is tried
+        // against, for a piece that belongs on a ridge and nowhere else.
         for mask in all_masks().into_iter().filter(|&m| m != CUBE) {
             let info = shape_info(mask).unwrap();
+            if info.kind == Kind::Hip {
+                continue;
+            }
             let bits = (0..K * K * K).fold(0u64, |bits, s| {
                 bits | (inside_sampled(info, at(s % K), at(s / K % K), at(s / (K * K))) as u64) << s
             });
@@ -665,7 +672,7 @@ pub(crate) fn merge(mut shape: Vec<u8>, n: [usize; 3], max_ext: usize) -> Vec<Ce
                             ext[a] += 1;
                         }
                     }
-                    Kind::Tet | Kind::Cut => {}
+                    Kind::Tet | Kind::Cut | Kind::Hip => {}
                 }
                 for zz in z..z + ext[2] {
                     for yy in y..y + ext[1] {

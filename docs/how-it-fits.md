@@ -8,7 +8,7 @@ snapped to whole units (half cells) before anything is computed
 (`Spec::snapped` in `core/src/spec.rs`). A form placed between units could
 only be approximated by bricks that are all slightly off it.
 
-## The four shapes
+## The shapes
 
 Each shape is the convex hull of some corners of a box, so they all share
 faces exactly. In a unit box:
@@ -19,11 +19,24 @@ faces exactly. In a unit box:
 | Ramp | `y + z ≤ 1` | 6 | 1/2 | 12 |
 | Tetrahedron | `x + y + z ≤ 1` | 4 | 1/6 | 8 |
 | Cut cube | `x + y + z ≥ 1` | 7 | 5/6 | 8 |
+| Hip | `x ≤ 1 − z` and `y ≤ 1 − z` | 5 | 1/3 | 24 |
 
 The tetrahedron and the cut cube are complements: together they fill the box,
 and a plane tilted on all three axes passes through the grid cutting
-alternate layers of cells into one and the other. All four can be stretched
-by whole cells along each axis.
+alternate layers of cells into one and the other. The hip is one whole face
+of the box and a single corner of the opposite face: a quarter of a square
+pyramid, with two sloped faces meeting along a ridge. It is used only where
+a form has such a ridge, which so far is the pyramid; the fitters that work
+cell by cell are not offered it. All five can be stretched by whole cells
+along each axis.
+
+## Pyramids
+
+A pyramid is built exactly, with no fitting (`core/src/fit_pyramid.rs`): a
+ramp for each slope and a hip on each ridge. Centred on a lattice point it is
+four hips and nothing else; centred in a cell it has a top one cell square,
+so nine bricks. One too large for single bricks is cut into as few levels as
+keep every brick within the game's limit.
 
 ## Curves
 

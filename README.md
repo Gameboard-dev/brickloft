@@ -5,8 +5,9 @@ and build it in Brickadia at your ghost brick.
 
 Forms: arches (round, pointed, triangular, elliptical, parabolic, catenary),
 arcs and circles through points, splines, weighted Bézier curves, spheres,
-ellipsoids, domes, segments, hollow shells, tori, and any profile spun about
-an axis. Each is fitted with cubes, ramps, tetrahedra and cut cubes so that
+ellipsoids, domes, segments, hollow shells, tori, pyramids, and any profile
+spun about an axis. Each is fitted with cubes, ramps, tetrahedra and cut cubes
+(and, on a pyramid's ridges, the game's corner wedge) so that
 the volume where bricks and form disagree is as small as it can be made.
 
 It is an [omegga](https://github.com/brickadia-community/omegga) plugin,
@@ -43,7 +44,12 @@ written in Rust, in four parts:
 edited, add a saved form (its Add button, or drag it from the list onto the
 view), and click a form in the view to edit it. Drag a form by its bricks to
 move it. Forms never share a cell: one dragged into another stops beside it
-or comes to rest on top of it. Everything in the workspace is sent together.
+or comes to rest on top of it, and one reshaped until it reaches another
+pushes that one away.
+
+**An arch** starts on its two feet, with a kind and a height. Add point
+gives it a third, and it becomes the arc through all three; more, up to
+eight, and it is the smooth curve through them all. Everything in the workspace is sent together.
 
 **A torus** is the Circle form with "Round tube" ticked; there is no
 separate Torus form. Its Stretch sliders make it an ellipse within its plane
@@ -58,7 +64,7 @@ a disc with a rounded rim.
 | Drag a form by its bricks | move it |
 | Delete | remove the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
-| Ctrl+scroll | resize a circle or sphere, a microbrick of radius a notch |
+| Ctrl+scroll | resize a circle, sphere or pyramid, a microbrick a notch |
 | Ctrl+C (desktop) | write the whole workspace (every form, where it stands, and its colours) to `arcs-build.brz`, a Brickadia prefab, and put that file on the clipboard |
 | Ctrl+V (desktop) | add the forms of a `.brz` copied from the editor back to the workspace |
 
