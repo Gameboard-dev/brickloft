@@ -6,6 +6,7 @@
 //! through the grid (it can stretch wedges; the volume fitter cannot yet).
 
 use crate::curves::{arch, catmull_rom, circle3, rational_bezier, ArchType, Circle};
+use crate::fit_lathe::{fit_lathe, Lathe};
 use crate::fit_planar::{self, fit_planar, fit_planar_towards};
 use crate::fit_pyramid::{fit_pyramid, Pyramid};
 use crate::fit_round::{fit_round, Round};
@@ -298,7 +299,7 @@ fn build_at(spec: &Spec, grain: i32) -> Result<Built, String> {
         // form itself. A build too large to measure that way is fitted cell
         // by cell after all, which does have its own figures.
         let (field, min, max) = match &solid {
-            Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } => (Some(field.clone()), *min, *max),
+            Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
         match crate::report::analyse_probe(&Probe::of(solid), &built) {
@@ -383,6 +384,11 @@ pub enum Solid {
         max: [i32; 2],
         field: Field,
     },
+    /// A profile spun about an upright axis, which has a fitter of its own
+    /// (`fit_lathe`): `profile` is the solid's section in the half-plane of
+    /// (distance from the axis, height), reaching `far` from the axis and
+    /// from `low` to `high`. `field` is the same solid as a distance function.
+    Lathe { profile: Region, axis: DVec2, far: f64, low: f64, high: f64, field: Field, min: [i32; 3], max: [i32; 3] },
     /// A pyramid, whose bricks follow from its size with no fitting (see
     /// `fit_pyramid`); `None` where it cannot be laid out that way. `field`
     /// is the same solid as a distance function.
@@ -421,6 +427,7 @@ impl Solid {
             | Solid::Stack { field, .. }
             | Solid::Round { field, .. }
             | Solid::Pyramid { field, .. }
+            | Solid::Lathe { field, .. }
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Flat {
                 region,
@@ -483,6 +490,7 @@ impl Probe {
             | Solid::Stack { .. }
             | Solid::Round { .. }
             | Solid::Pyramid { .. }
+            | Solid::Lathe { .. }
             | Solid::Pipe { .. } => None,
         }
     }
@@ -619,7 +627,9 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let max = DVec3::new(axis.x + far, axis.y + far, z1 + half);
             // the curve drawn in the editor: the profile, back in space
             let shown = catmull_rom(p, false)?;
-            volume(Field::Revolve { axis, region }, min, max, shown)
+            let (solid, path) = volume(Field::Revolve { axis, region: region.clone() }, min, max, shown)?;
+            let Solid::Volume { field, min, max } = solid else { unreachable!() };
+            Ok((Solid::Lathe { profile: region, axis, far, low: z0 - half, high: z1 + half, field, min, max }, path))
         }
     }
 }
@@ -910,6 +920,28 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 path,
                 grain: 1,
                 unmeasured: false,
+            }
+        }
+        Solid::Lathe { profile, axis, far, low, high, field, min, max } => {
+            let section = |out: f64, up: f64| profile.eval(DVec2::new(out, up));
+            // Laid out both ways `fit_lathe` knows, and the closer kept: which
+            // way suits depends on the form (a straight cone one, a thin
+            // curved wall the other), and measuring both is cheaper than a
+            // rule that would have to guess.
+            let ways = [false, true].map(|short_sides| {
+                let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext };
+                let bricks = fit_lathe(&lathe).filter(|_| spec.wedges)?;
+                let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true };
+                let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
+                if let Ok(measured) = crate::report::analyse_probe(&form, &built) {
+                    (built.solid, built.error, built.unmeasured) = (measured.form_volume, measured.missing + measured.extra, false);
+                }
+                Some(built)
+            });
+            let closer = ways.into_iter().flatten().min_by(|a, b| a.error.total_cmp(&b.error));
+            match closer {
+                Some(built) => Built { path, ..built },
+                None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
             }
         }
         Solid::Pyramid { bricks, field, min, max } => match bricks.clone().filter(|_| spec.wedges) {
@@ -1838,6 +1870,34 @@ mod tests {
         // with cubes alone it is still a pyramid, in steps
         let steps = check(&Spec { wedges: false, ..spec.clone() });
         assert!(steps.bricks.iter().all(|b| b.mask == CUBE) && steps.bricks.len() >= 6);
+    }
+
+    /// From saved report 24: a hollow turned form, fitted cell by cell, was
+    /// a quarter treads and risers.
+    #[test]
+    fn a_turned_form_is_sloped_rings_not_a_staircase() {
+        let stepped = |spec: &Spec| {
+            let built = check(spec);
+            let survey = crate::surface::survey(&Probe::new(spec, built.grain).unwrap(), &built).unwrap();
+            (built, survey.stepped / survey.area)
+        };
+        let bell = Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, fill: false, simplify: 0.25, ..Spec::default() };
+        let (built, steps) = stepped(&bell);
+        assert!(steps < 0.15, "the bell is {steps} steps");
+        for kind in [Kind::Ramp, Kind::Tet, Kind::Cut] {
+            assert!(built.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == kind), "no {kind:?}");
+        }
+        // the same all the way round: mirrored in x and in y, and with the two exchanged
+        let cells: HashSet<[i32; 3]> = built.bricks.iter().flat_map(|b| (0..b.ext[0]).flat_map(move |x| (0..b.ext[1]).flat_map(move |y| (0..b.ext[2]).map(move |z| [b.min[0] + x, b.min[1] + y, b.min[2] + z])))).collect();
+        assert!(cells.iter().all(|c| cells.contains(&[-c[0], c[1], c[2]]) && cells.contains(&[c[0], -c[1], c[2]]) && cells.contains(&[c[1], c[0], c[2]])), "the bell is not the same all round");
+        // solid, and a plain dome's profile
+        let (_, solid) = stepped(&Spec { fill: true, ..bell.clone() });
+        let (_, dome) = stepped(&Spec { points: vec![at(0.0, 0.0, 14.0), at(9.0, 0.0, 11.0), at(14.0, 0.0, 0.0)], fill: true, ..bell.clone() });
+        assert!(solid < 0.1 && dome < 0.06, "solid {solid}, dome {dome}");
+        // cubes alone are still the staircase, and an axis between the two grids is still fitted cell by cell
+        let (_, cubes) = stepped(&Spec { wedges: false, ..bell.clone() });
+        assert!(cubes > 0.4, "cubes {cubes}");
+        check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell });
     }
 
     #[test]

@@ -222,6 +222,28 @@ Under 3 microbricks across there is no room for a chamfer, so a thin tube is
 a square bar, and its discrepancy against the true round tube reads about
 30%. A tube that does not lie flat is still fitted as a volume.
 
+## Turned forms
+
+A profile spun about an upright axis is laid out from its section
+(`core/src/fit_lathe.rs`). The section, in the half-plane of distance from
+the axis and height, is fitted as an outline. Spun, each upright side of it
+is a wall standing on a circle, each level side a flat face, and each sloped
+side a ring whose circle shrinks as it rises: the chamfer of a pipe, cut back
+from the outline of the ring's wide end. Sloped sides are kept to one cell
+across or one cell up, so that the pieces of a wall's two faces keep to
+their own cells. That is done two ways, in the fitting or after it, and the
+closer of the two results is kept: a straight cone suits one and a thin
+curved wall the other.
+
+Each sloped ring's outline is fitted for that ring, so where one ring ends
+and the next begins two outlines of the same circle meet, and can differ by
+a sliver. Where two faces of the form run into each other, at the bottom of
+a groove or the root of a lip, the pieces that will not fit are built as
+whole cells, which rounds the groove off with a little too much. On your
+bell-shaped shell (report 24) this took stepped faces from 25% to 12%, with
+the volume disagreement up from 7% to 11%. An axis on a lattice line one way
+and in the middle of a cell the other is still fitted cell by cell.
+
 ## Reading a surface
 
 Volume cannot tell a slope from a staircase. The report's `[surface]`
@@ -263,10 +285,10 @@ symmetric.
 
 ## Limits
 
-- **Tilted tubes, tilted bands and revolved profiles are still fitted cell
+- **Tilted tubes and tilted bands are still fitted cell
   by cell**, with ramps stretched one way where that helps, so their
-  surfaces can show stray pieces and steps. Only spheres, ellipsoids, flat
-  round tubes and tori have a fitter that lays the surface out whole.
+  surfaces can show stray pieces and steps. Spheres, ellipsoids, pyramids,
+  flat round tubes, tori and turned forms are laid out whole.
 - **A thin pipe's outline has few directions.** No sloped side of a pipe's
   outline may be deeper than its chamfer, so a tube under 6 across, whose
   chamfer is one cell, can only use slopes of 1 in n: round a quarter of a

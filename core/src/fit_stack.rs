@@ -48,9 +48,9 @@ type Point = (i32, i32);
 /// triangle's box.
 #[derive(Clone)]
 pub struct Plan {
-    min: [i32; 2],
-    w: usize,
-    h: usize,
+    pub(crate) min: [i32; 2],
+    pub(crate) w: usize,
+    pub(crate) h: usize,
     /// 0 for nothing, 1 for a whole cell, or a triangle's index plus 2
     cell: Vec<u32>,
     triangles: Vec<Piece>,
@@ -60,13 +60,13 @@ pub struct Plan {
 /// corners of that box it reaches at the wide end, and at the narrow end.
 /// Corners are bits `cx | cy << 1`, as in a [`Piece`].
 #[derive(Clone, Copy, Debug)]
-struct Foot {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    wide: u8,
-    narrow: u8,
+pub(crate) struct Foot {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) w: i32,
+    pub(crate) h: i32,
+    pub(crate) wide: u8,
+    pub(crate) narrow: u8,
 }
 
 impl Plan {
@@ -108,7 +108,7 @@ impl Plan {
         }
     }
 
-    fn at(&self, x: i32, y: i32) -> u32 {
+    pub(crate) fn at(&self, x: i32, y: i32) -> u32 {
         let (cx, cy) = (x - self.min[0], y - self.min[1]);
         if cx < 0 || cy < 0 || cx as usize >= self.w || cy as usize >= self.h {
             return 0;
@@ -149,7 +149,7 @@ impl Plan {
     /// The plan's outlines, each a closed run of sides with the inside on
     /// the left of the direction of travel. A side is two points and, for a
     /// sloped one, the triangle it belongs to.
-    fn outlines(&self) -> Vec<Vec<(Point, Point, Option<usize>)>> {
+    pub(crate) fn outlines(&self) -> Vec<Vec<(Point, Point, Option<usize>)>> {
         let mut sides: Vec<(Point, Point, Option<usize>)> = Vec::new();
         for (i, p) in self.triangles.iter().enumerate() {
             let right = (!p.mask & 15).trailing_zeros() as i32 ^ 3;
@@ -266,7 +266,7 @@ struct Side {
 /// `want` is the solid the wide outline should follow (negative inside), and
 /// `most` the furthest any side may move. Returns the pieces of the chamfer
 /// and the wide outline's inside.
-fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> (Vec<Foot>, Plan) {
+pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> (Vec<Foot>, Plan) {
     let mut feet: Vec<Foot> = Vec::new();
     let eighth = |dx: i32, dy: i32| -> i32 {
         match (dx.signum(), dy.signum()) {
@@ -538,8 +538,14 @@ fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> (Vec<Foot>,
 }
 
 impl Plan {
+    /// The triangles still in the plan. Growing fills some triangles' boxes
+    /// in whole, and those stay in the list with no cells of their own.
+    pub(crate) fn live_triangles(&self) -> impl Iterator<Item = &Piece> {
+        self.triangles.iter().enumerate().filter(|(i, p)| self.at(p.x, p.y) == *i as u32 + 2).map(|(_, p)| p)
+    }
+
     /// Everything this plan is not, within its own room: the air round a solid.
-    fn complement(&self) -> Plan {
+    pub(crate) fn complement(&self) -> Plan {
         let mut air = self.clone();
         for cell in &mut air.cell {
             *cell = match *cell {
