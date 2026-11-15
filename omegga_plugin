@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# omegga runs this file to start the plugin. It only finds and runs the
+# program built by setup.sh; a release build is preferred over a debug one.
+cd "$(dirname "$0")" || exit 1
+for build in release debug; do
+  if [ -x "./target/$build/omegga-arcs" ]; then
+    exec "./target/$build/omegga-arcs"
+  fi
+done
+echo "arcs: the plugin is not built. Run 'cargo build --release -p omegga-arcs' in $(pwd) (Rust is needed: https://rustup.rs)." >&2
+exit 1

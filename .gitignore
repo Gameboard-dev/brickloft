@@ -1,0 +1,19 @@
+# build output
+target/
+dist/
+
+# written by the editor while it runs
+arcs-report*.txt
+arcs-build.brz
+arcs-forms/
+
+# written by Omegga beside a plugin
+disabled.omegga
+data/
+
+# editors and operating systems
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,54 @@
+[package]
+name = "arcs-editor"
+description = "Browser editor for arcs: shape a form, see its bricks, send it to the game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# cdylib is what wasm-bindgen packages for the browser; rlib lets src/main.rs
+# run the same editor as a desktop window while developing
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The desktop window, for development. Named differently from the library:
+# on Windows a program and a library called arcs-editor and arcs_editor both
+# want the debug file arcs_editor.pdb, and cargo warns that one overwrites
+# the other.
+[[bin]]
+name = "arcs"
+path = "src/main.rs"
+
+[dependencies]
+arcs-core = { path = "../core" }
+# Rendering, the orbit camera, picking and the egui panel all come from this
+# one crate. Its default features also pull in image decoding, text shaping
+# and glTF loading, none of which the editor uses, so only the window and the
+# GUI are switched on. A full engine (Bevy) was the alternative: it would give
+# the same four things for several times the compile time and download size.
+three-d = { version = "0.19", default-features = false, features = ["window", "egui-gui"] }
+
+# Only to give the desktop window an icon (see `open_window`). It is the
+# version three-d already builds, so it adds nothing to compile.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+winit = "0.28"
+# Writes Brickadia's own .brz file, for the Copy button (see src/brz.rs). Only
+# its .brz half: the other half is the SQLite world format, which would build
+# all of SQLite to be left unused. The format is a compressed archive of
+# schema-described tables; writing it by hand would mean re-deriving those
+# schemas from the game, with no way here to check the result against it.
+# https://docs.rs/brdb
+brdb = { version = "1.0.5", default-features = false, features = ["brz"] }
+
+# Puts a file on the Windows clipboard, as Explorer's Copy does. The standard
+# library has no clipboard, and the alternative is the raw Win32 calls this
+# crate wraps.
+# https://docs.rs/clipboard-win
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# pinned to the installed wasm-bindgen CLI: the two must match exactly or the
+# CLI refuses the build
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3", features = ["Window", "Location", "Request", "RequestInit", "Response", "Headers", "Navigator", "Clipboard", "Storage"] }
+js-sys = "0.3"

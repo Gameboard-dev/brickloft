@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+# Every member listed here must exist: cargo (and so rust-analyzer) fails to
+# load the whole workspace if one is missing.
+members = ["core", "plugin", "editor"]
+# The editor is a default member so that `cargo test` covers its logic too.
+# Its renderer is compiled once (about 50 s) and cached after that.
+default-members = ["core", "plugin", "editor"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Compile-time settings. Our own crates build unoptimised with thin debug info
+# for fast rebuilds; dependencies are optimised once and then cached, which
+# also keeps the editor usable in a dev build.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# the fitters are hot loops; keep them quick in dev builds and tests too
+[profile.dev.package.arcs-core]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+strip = true

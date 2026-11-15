@@ -1,0 +1,10 @@
+[package]
+name = "arcs-core"
+description = "Curves and solids fitted to Brickadia microbricks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# f64 vectors only
+glam = { version = "0.34", default-features = false, features = ["std", "f64"] }
