@@ -30,7 +30,6 @@ written in Rust, in four parts:
 2. Build the plugin: `cargo build --release -p omegga-arcs` (omegga's installer runs this for you through `setup.sh`).
 3. Build the editor: `sh build-editor.sh`. The top of that file lists the two tools it needs.
 4. Restart omegga, so that UE4SS loads the Lua mod.
-5. In game, run `/arc calibrate` once and check the result against [docs/calibration.md](docs/calibration.md).
 
 ## Use
 

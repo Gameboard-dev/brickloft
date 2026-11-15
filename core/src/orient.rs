@@ -6,14 +6,15 @@ use crate::shapes::{shape_info, transform_mask, CellBrick, Kind, KINDS, ORIENT};
 /// How the game's asset for each kind sits at orientation 16 (Z+, unrotated):
 /// which corners of its box it fills. Indexed by `Kind as usize`.
 ///
-/// These are the facts `/arc calibrate` checks in game.
+/// The defaults have been confirmed in the game; `/arc calibrate` shows them
+/// again if an update or a change of assets puts them in doubt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Models {
     pub local_mask: [u8; 4],
 }
 
 impl Default for Models {
-    /// Starting hypotheses:
+    /// As confirmed in the game:
     /// - the micro wedge is solid on its local -x -y side, prism along local z
     /// - the triangle corner is the tetrahedron at local -x -y -z
     /// - the outer corner is the cube missing its +x +y +z corner

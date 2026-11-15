@@ -31,8 +31,9 @@ the editor's parts, so the whole path up to the call into the game is tested
 without a game. Each of its two tests has been seen to fail with its bug put
 back (a forged token accepted; positions one unit off).
 
-Nothing here has been run against a live server yet. See
-[calibration.md](calibration.md) for what to check first.
+The brick orientation rules have been confirmed in the game. The plugin's
+own path (the link, sending a build, undo) has not been reported run against
+a live server.
 
 ## Dependencies
 

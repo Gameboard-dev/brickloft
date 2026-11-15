@@ -1,10 +1,10 @@
 # Calibration
 
 The plugin has to know how each of the game's brick assets sits when it is
-not rotated: which corners of its box are filled. That has **not been checked
-against the running game**. The defaults come from older third-party code and
-agree with each other, but the game has changed since. Check once per game
-version.
+not rotated: which corners of its box are filled. The defaults have been
+**confirmed in the game** (November 2026), so there is nothing to do here
+unless a game update changes the assets or the `asset-*` settings are pointed
+at different bricks. The check below is for those cases.
 
 ## The check
 
