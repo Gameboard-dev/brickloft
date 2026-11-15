@@ -20,10 +20,8 @@ impl Default for Models {
     /// - the outer corner is the cube missing its +x +y +z corner
     fn default() -> Self {
         Models {
-            // The last is the micro wedge corner, a hip. Unlike the others
-            // it has NOT been checked in the game: it is the wedge above with
-            // one more corner taken off, which leaves four ways it could sit,
-            // and this is one of them. `/arc calibrate` shows which is right.
+            // the last is the micro wedge corner, a hip: the wedge above
+            // with one more corner taken off
             local_mask: [0xff, 0x77, 0x17, 0x7f, 0x57],
         }
     }

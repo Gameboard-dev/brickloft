@@ -16,7 +16,7 @@
     "mask-ramp": { "description": "Which corners of its box the ramp asset fills when unrotated (see docs/calibration.md).", "type": "number", "default": 119 },
     "mask-tetrahedron": { "description": "The same for the tetrahedron asset.", "type": "number", "default": 23 },
     "mask-cut-cube": { "description": "The same for the cut-cube asset.", "type": "number", "default": 127 },
-    "mask-hip": { "description": "The same for the hip asset. Not yet checked in the game: one of 87, 117, 55 or 115 (see docs/calibration.md).", "type": "number", "default": 87 }
+    "mask-hip": { "description": "The same for the hip asset.", "type": "number", "default": 87 }
   },
   "commands": [
     { "name": "/arc", "description": "Get your link to the editor.", "example": "/arc", "args": [] },
