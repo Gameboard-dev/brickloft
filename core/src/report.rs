@@ -72,6 +72,7 @@ pub fn spec_text(spec: &Spec) -> String {
     );
     line("wedges", spec.wedges.to_string());
     line("flip", spec.flip.map(|f| f.to_string()).join(","));
+    line("symmetric", spec.symmetric.to_string());
     line("simplify", number(spec.simplify));
     line("grain", spec.grain.to_string());
     line("budget", spec.budget.to_string());
@@ -186,6 +187,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
             }
             "wedges" => spec.wedges = flag(value)?,
+            "symmetric" => spec.symmetric = flag(value)?,
             "flip" => {
                 let flags: Vec<bool> = value.split(',').map(|f| flag(f.trim())).collect::<Result<_, _>>()?;
                 spec.flip = <[bool; 3]>::try_from(flags).map_err(|_| bad("expected three of true or false"))?;
@@ -792,6 +794,7 @@ mod tests {
                 plane: 0,
                 wedges: false,
                 flip: [true, false, true],
+                symmetric: true,
                 simplify: 0.25,
                 grain: 0,
                 budget: 2500,

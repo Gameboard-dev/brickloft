@@ -239,6 +239,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if is_curve && s.tube && s.thick < 3.0 {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
         }
+        ui.checkbox(&mut s.symmetric, "Fix symmetry").on_hover_text("Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.");
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {

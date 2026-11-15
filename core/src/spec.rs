@@ -73,6 +73,9 @@ pub struct Spec {
     /// Mirror the finished form along x, y or z, about the middle of its
     /// points: a dome becomes a bowl, an arc bends the other way.
     pub flip: [bool; 3],
+    /// Where the form is its own mirror image, make its bricks so too (see
+    /// [`symmetrise`]).
+    pub symmetric: bool,
     /// What a brick costs in cells of disagreement; see the fitters'
     /// `brick_cost`. 0 fits as closely as possible, whatever the count.
     pub simplify: f64,
@@ -104,6 +107,7 @@ impl Default for Spec {
             cut: None,
             wedges: true,
             flip: [false; 3],
+            symmetric: false,
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -284,6 +288,65 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
 /// be stretched by whole cells, so a scaled-up fit is as valid as a fine one;
 /// it has about `grain` squared fewer bricks on a surface and is `grain`
 /// times rougher.
+/// Make bricks the same on both sides of each plane the form itself is
+/// symmetric about. Returns whether anything was changed.
+///
+/// The fitters are built to treat a form and its mirror image alike, and
+/// tests hold them to it, but every case found so far where they did not was
+/// found by eye, in a form a player had made. This is the guarantee for
+/// those: along each axis, if the form is its own mirror image about the
+/// middle of its bricks, the bricks on the low side are kept and the high
+/// side is replaced with their mirror images.
+///
+/// An axis is left alone if the form is not symmetric along it (an arch is
+/// not, top to bottom), or if a brick that lies across the middle is not its
+/// own mirror image, since replacing one side would then leave that brick
+/// overlapping or a hole beside it.
+pub fn symmetrise(bricks: &mut Vec<CellBrick>, distance: &dyn Fn(DVec3) -> f64) -> bool {
+    let mut changed = false;
+    for k in 0..3 {
+        if bricks.is_empty() {
+            break;
+        }
+        let lo = bricks.iter().map(|b| b.min[k]).min().unwrap();
+        let hi = bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap();
+        // twice the mirror plane, to stay in whole numbers
+        let twice = lo + hi;
+        let mirror = |b: &CellBrick| {
+            let mut m = *b;
+            m.min[k] = twice - b.min[k] - b.ext[k];
+            m.mask = (0..8u8).fold(0u8, |mask, c| mask | (b.mask >> c & 1) << (c ^ (1 << k)));
+            m
+        };
+        // Is the form itself symmetric here? Asked at the middle of every
+        // brick near its surface, and at the mirror image of each.
+        let alike = bricks.iter().all(|b| {
+            let mut p = DVec3::new(b.min[0] as f64 + b.ext[0] as f64 / 2.0, b.min[1] as f64 + b.ext[1] as f64 / 2.0, b.min[2] as f64 + b.ext[2] as f64 / 2.0);
+            let here = distance(p);
+            p[k] = twice as f64 - p[k];
+            let there = distance(p);
+            // far from the surface the distance is not exact, only its sign
+            if here.abs() > 3.0 || there.abs() > 3.0 { (here < 0.0) == (there < 0.0) } else { (here - there).abs() < 1e-6 }
+        });
+        let across: Vec<&CellBrick> = bricks.iter().filter(|b| 2 * b.min[k] < twice && 2 * (b.min[k] + b.ext[k]) > twice).collect();
+        if !alike || across.iter().any(|b| mirror(b) != **b) {
+            continue;
+        }
+        let low: Vec<CellBrick> = bricks.iter().filter(|b| 2 * (b.min[k] + b.ext[k]) <= twice).copied().collect();
+        let mut high: Vec<CellBrick> = bricks.iter().filter(|b| 2 * b.min[k] >= twice).copied().collect();
+        let mut wanted: Vec<CellBrick> = low.iter().map(mirror).collect();
+        let order = |b: &CellBrick| (b.min, b.ext, b.mask);
+        high.sort_by_key(order);
+        wanted.sort_by_key(order);
+        if high != wanted {
+            bricks.retain(|b| 2 * b.min[k] < twice);
+            bricks.extend(wanted);
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Where a spec's form is mirrored: for each axis it is flipped along, twice
 /// the coordinate of the mirror plane, which is the middle of its points.
 ///
@@ -305,6 +368,10 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
     let coarse = coarse(spec, grain);
     let (solid, path) = solid(&coarse)?;
     let mut built = fit(&coarse, &solid, path, g);
+    if coarse.symmetric && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
+        // the fitter's own figures are for the bricks as it left them
+        built.unmeasured = true;
+    }
     if built.unmeasured && measured && !built.bricks.is_empty() {
         // Bricks laid out as a whole, not cell by cell against the form, come
         // with no figure for how well they fit it. Measure them against the
@@ -1851,6 +1918,45 @@ mod tests {
         // with cubes alone it is still a pyramid, in steps
         let steps = check(&Spec { wedges: false, ..spec.clone() });
         assert!(steps.bricks.iter().all(|b| b.mask == CUBE) && steps.bricks.len() >= 6);
+    }
+
+    #[test]
+    fn fix_symmetry_makes_the_high_side_the_mirror_of_the_low() {
+        // a ball of radius 6 about the origin, in eight like corners
+        let ball = |p: DVec3| p.length() - 6.0;
+        let whole: Vec<CellBrick> = (0..8)
+            .map(|c| CellBrick { mask: CUBE, min: [0, 1, 2].map(|k| if c >> k & 1 == 1 { 0 } else { -4 }), ext: [4; 3] })
+            .collect();
+        // already symmetric: nothing to do
+        let mut bricks = whole.clone();
+        assert!(!symmetrise(&mut bricks, &ball));
+        assert_eq!(bricks, whole);
+        // one high corner turned into a ramp, another lost: both put right, from the low side
+        let mut bricks = whole.clone();
+        bricks[7].mask = 0x77;
+        bricks.remove(3);
+        assert!(symmetrise(&mut bricks, &ball));
+        let mut found = bricks.clone();
+        found.sort_by_key(|b| b.min);
+        let mut expected = whole.clone();
+        expected.sort_by_key(|b| b.min);
+        assert_eq!(found, expected);
+        // a form that is not symmetric along an axis is left alone along it
+        let lopsided = |p: DVec3| (p - DVec3::new(0.0, 0.0, 1.5)).length() - 6.0;
+        let mut bricks = whole.clone();
+        for b in bricks.iter_mut().filter(|b| b.min[2] == 0) {
+            b.ext[2] = 2; // the top half as thick, all four corners alike
+        }
+        let short = bricks.clone();
+        assert!(!symmetrise(&mut bricks, &lopsided));
+        assert_eq!(bricks, short);
+        // and through a whole build it changes nothing where the fit is already symmetric
+        let arch = Spec { form: Form::Arch(ArchType::Round), points: vec![at(-8.0, 0.0, 0.0), at(8.0, 0.0, 0.0)], thick: 3.0, ..Spec::default() };
+        let mut plain = build(&arch).unwrap().bricks;
+        let mut fixed = check(&Spec { symmetric: true, ..arch.clone() }).bricks;
+        plain.sort_by_key(|b| (b.min, b.ext, b.mask));
+        fixed.sort_by_key(|b| (b.min, b.ext, b.mask));
+        assert_eq!(plain, fixed);
     }
 
     #[test]
