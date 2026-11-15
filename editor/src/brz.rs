@@ -95,6 +95,15 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
     let mut world = World::new();
     world.meta.bundle.description = describe(forms);
     for (cell, colour, _, place) in bricks {
+        world.bricks.push(brick_for(&solver, cell, *colour, *place)?);
+    }
+    world.make_prefab();
+    Ok(world)
+}
+
+/// One of the editor's bricks as the file has it.
+fn brick_for(solver: &Solver, cell: &arcs_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3]) -> Result<Brick, String> {
+    {
         let placed = solver.place(cell).ok_or_else(|| format!("no brick fits the piece at {:?}", cell.min))?;
         // a brick's size in the file is its half-extent in game units, which
         // for a microbrick is its size in cells
@@ -106,7 +115,7 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
         // the game numbers orientations as direction * 4 + rotation
         let direction = [Direction::XPositive, Direction::XNegative, Direction::YPositive, Direction::YNegative, Direction::ZPositive, Direction::ZNegative][placed.orientation as usize / 4];
         let rotation = [Rotation::Deg0, Rotation::Deg90, Rotation::Deg180, Rotation::Deg270][placed.orientation as usize % 4];
-        world.bricks.push(Brick {
+        Ok(Brick {
             asset: BrickType::Procedural { asset: BString::str(asset(placed.kind)), size: BrickSize { x, y, z } },
             // a brick's centre in units: its cells', and where its form stands
             position: (placed.pos[0] + place[0], placed.pos[1] + place[1], placed.pos[2] + place[2]).into(),
@@ -114,10 +123,40 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
             rotation,
             color: Color::new(r, g, b),
             ..Default::default()
-        });
+        })
     }
+}
+
+/// A trial file for brick grids at an angle: a flat ring on the world's own
+/// grid, and an arch on a second grid of its own, frozen in place and
+/// tilted 30 degrees about x and then 20 about z.
+///
+/// The game keeps bricks on grids, and a grid other than the world's can
+/// stand at any angle. Whether a prefab holding such a grid can be pasted
+/// from the clipboard as one of bricks alone can is what this file is for
+/// finding out, before the editor is built to turn forms freely.
+pub fn tilted_trial() -> Result<Vec<u8>, String> {
+    use arcs_core::spec::{build, Form, Spec};
+    use arcs_core::DVec3;
+    let solver = Solver::new(&Models::default());
+    let mut world = World::new();
+    world.register_all_components();
+    let ring = build(&Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 14.0, thick: 3.0, ..Spec::default() })?;
+    for cell in &ring.bricks {
+        world.bricks.push(brick_for(&solver, cell, Some([90, 150, 220]), [0; 3])?);
+    }
+    let arch = build(&Spec { points: vec![DVec3::new(-7.5, 0.5, 0.5), DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, depth: 3, ..Spec::default() })?;
+    let on_grid: Vec<Brick> = arch.bricks.iter().map(|cell| brick_for(&solver, cell, Some([230, 150, 60]), [0; 3])).collect::<Result<_, _>>()?;
+    // a quarter of a turn is two halves: the turn about x, then the turn about z
+    let (half_x, half_z) = (15f32.to_radians(), 10f32.to_radians());
+    let (about_x, about_z) = ([half_x.sin(), 0.0, 0.0, half_x.cos()], [0.0, 0.0, half_z.sin(), half_z.cos()]);
+    // the product of two quaternions (x, y, z, w): https://en.wikipedia.org/wiki/Quaternion#Hamilton_product
+    let both = |a: [f32; 4], b: [f32; 4]| [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+    let [x, y, z, w] = both(about_z, about_x);
+    let grid = brdb::Entity { frozen: true, location: (0.0, 0.0, 60.0).into(), rotation: brdb::Quat4f { x, y, z, w }, ..Default::default() };
+    world.add_brick_grid(grid, on_grid);
     world.make_prefab();
-    Ok(world)
+    world.to_brz_vec().map_err(|e| e.to_string())
 }
 
 /// Write the workspace to `arcs-build.brz` beside where the editor was
@@ -221,6 +260,17 @@ mod tests {
     use arcs_core::spec::Spec;
     use arcs_core::shapes::{all_masks, CellBrick};
     use brdb::{BrFsReader, Brz, IntoReader};
+
+    #[test]
+    fn the_tilted_trial_is_a_file_with_two_grids_of_bricks() {
+        let bytes = tilted_trial().unwrap();
+        let archive = Brz::read_slice(&bytes).unwrap().into_reader();
+        // the ring on the world's grid, and the arch on one of its own
+        let grids = archive.brick_chunk_index(1).map(|c| c.len()).unwrap_or(0);
+        assert!(archive.brick_chunk_index(1).is_ok(), "the world's grid is missing");
+        assert!(grids > 0);
+        assert!(archive.entity_chunk_index().unwrap().len() >= 1, "no second grid");
+    }
 
     #[test]
     fn every_shape_is_written_and_read_back() {
