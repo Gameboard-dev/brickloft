@@ -99,7 +99,7 @@ pub fn run_form(form: usize) {
 
     // Brickadia's up is Z, so the camera's is too
     let mut camera = Camera::new_perspective(window.viewport(), vec3(22.0, -42.0, 26.0), vec3(0.0, 0.0, 6.0), vec3(0.0, 0.0, 1.0), degrees(45.0), 0.5, 4000.0);
-    let mut controls = camera::Controls::new();
+    let mut controls = camera::Controls::new(&camera);
     let mut gui = GUI::new(&context);
     // A sun that casts shadows, a weak light from the other side so that
     // faces turned away from the sun still differ from one another, and a
@@ -188,6 +188,12 @@ pub fn run_form(form: usize) {
         // handles take the mouse before the camera does
         for event in frame.events.iter_mut() {
             match event {
+                // a middle click turns the camera to face what the cursor is on
+                Event::MousePress { button: MouseButton::Middle, position, handled, .. } if !*handled => {
+                    let towards = camera.view_direction_at_pixel(*position);
+                    controls.face(&mut camera, towards);
+                    *handled = true;
+                }
                 Event::MousePress { button: MouseButton::Left, position, modifiers, handled, .. } if !*handled => {
                     if let Ok(Some(hit)) = pick(&context, &camera, *position, &handle_mesh, Cull::Back) {
                         dragging = shown_handles.get(hit.instance_id as usize).map(|h| h.0);

@@ -1,6 +1,13 @@
 //! Moving the view: the camera is flown. Right-drag turns it where it
-//! stands, W A S D move it the way it looks and sideways, Space or E raise
-//! it, Q lowers it, and the scroll wheel sets how fast it goes.
+//! stands, a middle click turns it to face whatever the cursor is on,
+//! W A S D move it the way it looks and sideways, Space or E raise it,
+//! Q lowers it, and the scroll wheel sets how fast it goes.
+//!
+//! It can be tilted right over backwards. Its direction is kept as a
+//! heading about the upright and a tilt from level, and its own "up" is
+//! worked out from those two instead of being fixed at the world's: with a
+//! fixed up, a view cannot pass straight up or down, where it would have no
+//! way to tell left from right.
 //!
 //! It once turned about a point in front of it and was brought nearer and
 //! further with the wheel, which made its speed depend on how far off that
@@ -23,6 +30,11 @@ pub struct Controls {
     held: [bool; 7],
     /// microbricks a second
     speed: f32,
+    /// which way it looks: round the upright from +x, and up from level.
+    /// The tilt is not kept within a quarter turn: past it, the camera is
+    /// on its back.
+    heading: f32,
+    tilt: f32,
 }
 
 /// The speed to start with, and the slowest and fastest the wheel can set.
@@ -35,13 +47,36 @@ const FASTEST: f32 = 2000.0;
 const PER_UNIT: f32 = 0.0025;
 /// Radians turned for each point the mouse moves.
 const TURN: f32 = 0.005;
-/// How near straight up or down the view may be tilted, in radians: at
-/// either it would have no way to tell left from right.
-const STEEPEST: f32 = 1.5;
+
+/// The direction looked in at a heading and a tilt, and which way is up
+/// for a camera looking that way: a quarter turn of tilt further on.
+fn facing(heading: f32, tilt: f32) -> (Vec3, Vec3) {
+    let at = |tilt: f32| vec3(heading.cos() * tilt.cos(), heading.sin() * tilt.cos(), tilt.sin());
+    (at(tilt), at(tilt + std::f32::consts::FRAC_PI_2))
+}
 
 impl Controls {
-    pub fn new() -> Controls {
-        Controls { held: [false; 7], speed: SPEED }
+    /// For a camera that is the right way up.
+    pub fn new(camera: &Camera) -> Controls {
+        let view = camera.view_direction();
+        Controls { held: [false; 7], speed: SPEED, heading: view.y.atan2(view.x), tilt: view.z.clamp(-1.0, 1.0).asin() }
+    }
+
+    /// Turn the camera, where it stands, to look along `towards`: the way
+    /// the cursor points. It comes out the right way up.
+    pub fn face(&mut self, camera: &mut Camera, towards: Vec3) {
+        if towards.magnitude() < 1e-6 {
+            return;
+        }
+        let towards = towards.normalize();
+        (self.heading, self.tilt) = (towards.y.atan2(towards.x), towards.z.clamp(-1.0, 1.0).asin());
+        self.aim(camera);
+    }
+
+    fn aim(&self, camera: &mut Camera) {
+        let (view, up) = facing(self.heading, self.tilt);
+        let at = camera.position();
+        camera.set_view(at, at + view, up);
     }
 
     /// Apply this frame's events. Events already used by the panel or by a
@@ -57,13 +92,14 @@ impl Controls {
                     // Turned as a heading about the upright and a tilt from
                     // level, and never rolled: turning about the camera's
                     // own axes, as its `yaw` and `pitch` do, tips the
-                    // horizon over a little with every turn.
-                    let view = camera.view_direction();
-                    let heading = view.y.atan2(view.x) - TURN * delta.0;
-                    let tilt = (view.z.clamp(-1.0, 1.0).asin() - TURN * delta.1).clamp(-STEEPEST, STEEPEST);
-                    let view = vec3(heading.cos() * tilt.cos(), heading.sin() * tilt.cos(), tilt.sin());
-                    let at = camera.position();
-                    camera.set_view(at, at + view, vec3(0.0, 0.0, 1.0));
+                    // horizon over a little with every turn. On its back,
+                    // the camera sees the heading turn the other way, so the
+                    // mouse's sideways travel is taken the other way too and
+                    // the view still follows the hand.
+                    let upright = if self.tilt.cos() < 0.0 { -1.0 } else { 1.0 };
+                    self.heading -= TURN * delta.0 * upright;
+                    self.tilt -= TURN * delta.1;
+                    self.aim(camera);
                     *handled = true;
                 }
                 Event::MouseWheel { delta, handled, .. } if !*handled => {
@@ -158,5 +194,17 @@ mod tests {
         assert_eq!(faster(SLOWEST, -100.0), SLOWEST);
         assert!((0..200).fold(SPEED, |s, _| faster(s, 100.0)) == FASTEST && (0..200).fold(SPEED, |s, _| faster(s, -100.0)) == SLOWEST);
         assert!(faster(SPEED, 1.0e6) < SPEED * 3.0);
+
+        // Looking any way at all, up is square to the view and of length
+        // one, with no way of looking where it is not: straight up, on its
+        // back, and all the way round to where it began.
+        for step in 0..=48 {
+            let tilt = step as f32 * std::f32::consts::TAU / 48.0;
+            let (view, up) = facing(0.7, tilt);
+            assert!(view.dot(up).abs() < 1e-5 && (up.magnitude() - 1.0).abs() < 1e-5 && (view.magnitude() - 1.0).abs() < 1e-5);
+        }
+        // level, up is the world's; a half turn over, it is the world's down
+        assert!((facing(0.7, 0.0).1 - vec3(0.0, 0.0, 1.0)).magnitude() < 1e-5);
+        assert!((facing(0.7, std::f32::consts::PI).1 - vec3(0.0, 0.0, -1.0)).magnitude() < 1e-5);
     }
 }

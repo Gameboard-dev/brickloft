@@ -89,7 +89,8 @@ it back to how it starts. Under **Saved forms** you can keep forms in folders
 (`arches`, `domes`, or your own) and open them again; on the desktop they are
 text files under `arcs-forms/`, in the browser they are kept by the browser.
 
-In the view the camera is flown: right-drag looks around, W A S D move it
+In the view the camera is flown: right-drag looks around, as far as right
+over backwards, a middle click turns it to face what the cursor is on, W A S D move it
 the way it looks and sideways, Space or E raise it, Q lowers it, and the
 scroll wheel makes it faster or slower. The form being edited has a red, a green and a blue
 arrow through its middle; dragging one moves the form along x, y or z alone.
