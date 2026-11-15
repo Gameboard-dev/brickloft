@@ -196,6 +196,12 @@ band. Where that band ran diagonally it could only be fitted as a
 staircase, its chamfer pieces collided and were dropped, and the wall was
 left with holes: a ring of radius 19 was 29% steps and is now 1%.
 
+A torus is not a form of its own: it is a circle as a round tube. Stretched
+within its plane the circle is an ellipse; stretched across it, the tube is
+that many times as deep as it is wide, and its chamfers that many times as
+tall. Filled, every band takes in what the circle encloses, which gives a
+disc with a rounded rim.
+
 "Protruded" instead builds flat bands of different widths side by side,
 which is smooth along the curve and stepped across it.
 

@@ -11,7 +11,8 @@ use std::rc::Rc;
 
 /// The forms on offer, in menu order. `Form` itself carries the arch type,
 /// so the menu works on this index and the arch type is kept beside it.
-pub const FORMS: [&str; 8] = ["Arch", "Arc through 3 points", "Circle", "Spline", "Bézier", "Sphere", "Torus", "Revolve"];
+// A torus is the circle as a round tube, so it has no entry of its own.
+pub const FORMS: [&str; 7] = ["Arch", "Arc through 3 points", "Circle", "Spline", "Bézier", "Sphere", "Revolve"];
 pub const ARCHES: [(&str, ArchType); 6] = [
     ("Round", ArchType::Round),
     ("Pointed", ArchType::Pointed),
@@ -81,12 +82,11 @@ fn form_index(form: Form) -> usize {
     match form {
         Form::Arch(_) => 0,
         Form::Arc => 1,
-        Form::Circle => 2,
         Form::Spline => 3,
         Form::Bezier => 4,
         Form::Sphere => 5,
-        Form::Torus => 6,
-        Form::Revolve => 7,
+        Form::Circle | Form::Torus => 2,
+        Form::Revolve => 6,
     }
 }
 
@@ -292,15 +292,62 @@ impl State {
     }
 
     /// Make the form being edited larger or smaller by `cells` of radius,
-    /// if it is one with a single size all round: a circle, a sphere or a
-    /// torus. Returns whether it is. By whole cells, so that a radius that
+    /// if it is one with a single size all round: a circle or a sphere. Returns whether it is. By whole cells, so that a radius that
     /// ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, 2 | 5 | 6);
+        let round = matches!(self.form, 2 | 5);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
         round
+    }
+
+    /// Where the form being edited ends up if moved by `by` cells: there, if
+    /// that is clear of the other forms, or else the nearest place straight
+    /// up or straight out to one side that is. `None` if there is none.
+    ///
+    /// Two forms may not share a cell: the game refuses a brick whose box
+    /// overlaps another's, so forms pushed into each other would be sent
+    /// with pieces missing. Clear is judged by the cells of each brick's
+    /// box, as the game judges it. The way out is up or sideways and never
+    /// down, so that a form dragged onto another comes to rest on top of it.
+    fn clear_of_others(&self, by: [i32; 3]) -> Option<[i32; 3]> {
+        if self.others.is_empty() {
+            return Some(by);
+        }
+        let cells = |b: &CellBrick| {
+            let (min, ext) = (b.min, b.ext);
+            (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])))
+        };
+        let taken: std::collections::HashSet<[i32; 3]> = self.others.iter().flat_map(|i| i.built.bricks.iter().flat_map(cells)).collect();
+        // the bricks in hand are where the form was last built; it may have
+        // been moved since, within this frame
+        let since = match (&self.built_from, self.spec.points.first()) {
+            (Some(from), Some(now)) if !from.points.is_empty() => (*now - from.points[0]).round().to_array().map(|v| v as i32),
+            _ => [0; 3],
+        };
+        let mine: Vec<[i32; 3]> = self.built.bricks.iter().flat_map(cells).collect();
+        let hits = |shift: [i32; 3]| mine.iter().any(|c| taken.contains(&[c[0] + since[0] + shift[0], c[1] + since[1] + shift[1], c[2] + since[2] + shift[2]]));
+        if !hits(by) {
+            return Some(by);
+        }
+        // no further than would lift or slide it clear of everything
+        let span = |k: usize| {
+            let all = taken.iter().map(|c| c[k]).chain(mine.iter().map(|c| c[k] + since[k] + by[k]));
+            let (lo, hi) = all.fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+            hi - lo + 1
+        };
+        let furthest = span(0).max(span(1)).max(span(2));
+        for d in 1..=furthest {
+            // up first: of two ways out equally near, onto is the one meant
+            for way in [[0, 0, 1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]] {
+                let shift = [by[0] + way[0] * d, by[1] + way[1] * d, by[2] + way[2] * d];
+                if !hits(shift) {
+                    return Some(shift);
+                }
+            }
+        }
+        None
     }
 
     /// Every form in the workspace with its colouring, the one being edited first.
@@ -396,7 +443,11 @@ impl State {
     }
 
     /// Take on a saved form: its spec, and the menu choices that go with it.
-    pub fn load_spec(&mut self, spec: Spec) {
+    pub fn load_spec(&mut self, mut spec: Spec) {
+        // a torus saved by an earlier version: the same thing under its new name
+        if spec.form == Form::Torus {
+            (spec.form, spec.tube, spec.fill) = (Form::Circle, true, false);
+        }
         self.form = form_index(spec.form);
         if let Form::Arch(kind) = spec.form {
             self.arch = ARCHES.iter().position(|a| a.1 == kind).unwrap_or(0);
@@ -422,7 +473,7 @@ impl State {
                 }
             }
         }
-        if matches!(self.form, 2 | 5 | 6) && wanted(Handle::Radius) {
+        if matches!(self.form, 2 | 5) && wanted(Handle::Radius) {
             all.push(Tune::Radius);
         }
         if self.form == 0 && wanted(Handle::Rise) {
@@ -532,10 +583,9 @@ impl State {
                 s.points = vec![cell(0.0, 0.0, s.radius.ceil())];
                 s.fill = true;
             }
-            6 => s.points = vec![cell(0.0, 0.0, 1.0)],
             _ => s.points = vec![cell(0.0, 0.0, 10.0), cell(5.0, 0.0, 8.0), cell(8.0, 0.0, 0.0)],
         }
-        if matches!(self.form, 3 | 4 | 7) {
+        if matches!(self.form, 3 | 4 | 6) {
             self.lock = Lock::Axis(1);
         }
     }
@@ -550,7 +600,6 @@ impl State {
             3 => Form::Spline,
             4 => Form::Bezier,
             5 => Form::Sphere,
-            6 => Form::Torus,
             _ => Form::Revolve,
         };
         s.cut = match self.cut {
@@ -602,7 +651,7 @@ impl State {
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
         match self.form {
             0 if p.len() >= 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
-            2 | 5 | 6 if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            2 | 5 if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
             _ => {}
         }
         all
@@ -652,6 +701,12 @@ impl State {
                 let mut by = DVec3::new((hit.x - at.x).round(), (hit.y - at.y).round(), (hit.z - at.z).round());
                 if let Lock::Axis(a) = self.lock {
                     by[a] = 0.0;
+                }
+                // not into another form: onto it or beside it
+                let Some(clear) = self.clear_of_others(by.to_array().map(|v| v as i32)) else { return };
+                by = DVec3::new(clear[0] as f64, clear[1] as f64, clear[2] as f64);
+                if by == DVec3::ZERO {
+                    return;
                 }
                 for p in &mut self.spec.points {
                     *p = (*p + by).clamp(DVec3::splat(-HANDLE_LIMIT), DVec3::splat(HANDLE_LIMIT));
@@ -841,6 +896,33 @@ mod tests {
         assert!(!state.redo());
         assert!(state.undo() && state.undo());
         assert_eq!((state.spec.thick, state.spec.points.clone()), (arch.thick, moved));
+        state.refresh(|| 0.0);
+
+        // dragged into the other form, it stops against it or comes to rest on it
+        state.refresh(|| 0.0);
+        let other = state.others[0].bounds.unwrap();
+        let mine = state.bounds.unwrap();
+        let cells = |bricks: &[CellBrick]| -> std::collections::HashSet<[i32; 3]> { bricks.iter().flat_map(|b| (0..b.ext[2]).flat_map(move |z| (0..b.ext[1]).flat_map(move |y| (0..b.ext[0]).map(move |x| [b.min[0] + x, b.min[1] + y, b.min[2] + z])))).collect() };
+        let theirs = cells(&state.others[0].built.bricks);
+        // straight at the middle of it
+        // (the drag is in the plane facing the eye, so not along y)
+        let aim = [(other.0[0] + other.1[0]) / 2 - (mine.0[0] + mine.1[0]) / 2, 0, other.0[2] - mine.0[2]];
+        let before = state.spec.points.clone();
+        state.lock = Lock::Free;
+        let at = state.spec.points[0];
+        state.grab = Some(at);
+        let target = at + DVec3::new(aim[0] as f64, aim[1] as f64, aim[2] as f64);
+        let eye = target + DVec3::new(0.0, -200.0, 0.0);
+        state.drag(Handle::Move, eye, DVec3::Y, DVec3::Y);
+        assert_ne!(state.spec.points, before, "it did not move at all");
+        state.refresh(|| 0.0);
+        let moved = cells(&state.built.bricks);
+        assert!(moved.is_disjoint(&theirs), "the two forms share {} cells", moved.intersection(&theirs).count());
+        // not where it was aimed, which is inside the other, but up or aside from there
+        let went = (state.spec.points[0] - at).to_array().map(|v| v as i32);
+        let off: Vec<i32> = (0..3).map(|k| went[k] - aim[k]).filter(|d| *d != 0).collect();
+        assert!(off.len() == 1 && (went[2] - aim[2]) >= 0, "aimed {aim:?}, went {went:?}");
+        state.spec.points = before;
         state.refresh(|| 0.0);
 
         // removing the form being edited leaves the other; the last cannot go

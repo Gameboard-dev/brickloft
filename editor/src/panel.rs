@@ -90,7 +90,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ui.ctx(), |ui| {
             ui.set_max_width(420.0);
             ui.label(alert);
-            if ui.button("OK").clicked() {
+            // Enter or Escape does as well as the button
+            let keyed = ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape));
+            if ui.button("OK").clicked() || keyed {
                 state.alert = None;
             }
         });
@@ -138,12 +140,18 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             1 | 3 => {
                 ui.checkbox(&mut s.closed, if state.form == 1 { "Whole circle" } else { "Closed loop" });
             }
-            2 | 6 => {
+            2 => {
                 ComboBox::from_label("Facing").selected_text(["X", "Y", "Z (flat)"][s.plane.min(2)]).show_ui(ui, |ui| {
                     for (i, name) in ["X", "Y", "Z (flat)"].iter().enumerate() {
                         ui.selectable_value(&mut s.plane, i, *name);
                     }
                 });
+                // within its plane, into an ellipse; across it, the depth of a round tube
+                ui.label("Stretch:");
+                for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
+                    let across = axis == s.plane.min(2);
+                    ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() }));
+                }
             }
             4 => {
                 ui.label("Pull of each point (higher draws the curve closer):");
@@ -169,7 +177,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             _ => {}
         }
-        if matches!(state.form, 2 | 5 | 6) {
+        if matches!(state.form, 2 | 5) {
             ui.add(Slider::new(&mut s.radius, 0.5..=60.0).step_by(0.5).text("Radius"));
         }
 
@@ -179,16 +187,15 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             5 => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a hollow shell)");
             }
-            7 => {
+            6 => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a shell along the profile)");
             }
-            6 => {}
             _ => {
                 ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
                 ui.checkbox(&mut s.tube, "Round tube instead of a flat band");
             }
         }
-        if state.form == 6 || (is_curve && s.tube) {
+        if is_curve && s.tube {
             // how a round section is built: see `arcs_core::fit_stack`
             ui.horizontal(|ui| {
                 ui.radio_value(&mut s.protrude, false, "Rounded").on_hover_text("A pipe: the edges chamfered round with sloped pieces.");
@@ -196,8 +203,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            5 | 7 => "Wall thickness",
-            6 => "Ring thickness",
+            5 | 6 => "Wall thickness",
             _ => "Thickness",
         };
         ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));

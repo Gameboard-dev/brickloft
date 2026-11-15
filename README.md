@@ -42,7 +42,13 @@ written in Rust, in four parts:
 **Workspace** holds several forms at once. Add a copy of the one being
 edited, add a saved form (its Add button, or drag it from the list onto the
 view), and click a form in the view to edit it. Drag a form by its bricks to
-move it. Everything in the workspace is sent together.
+move it. Forms never share a cell: one dragged into another stops beside it
+or comes to rest on top of it. Everything in the workspace is sent together.
+
+**A torus** is the Circle form with "Round tube" ticked; there is no
+separate Torus form. Its Stretch sliders make it an ellipse within its plane
+and a deeper or shallower tube across it, and "Fill" closes the hole, giving
+a disc with a rounded rim.
 
 **Keys and mouse in the view:**
 
@@ -52,8 +58,8 @@ move it. Everything in the workspace is sent together.
 | Drag a form by its bricks | move it |
 | Delete | remove the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
-| Ctrl+scroll | resize a circle, sphere or torus, a microbrick of radius a notch |
-| Ctrl+C (desktop) | write the workspace to `arcs-build.brz`, a Brickadia prefab, and put that file on the clipboard |
+| Ctrl+scroll | resize a circle or sphere, a microbrick of radius a notch |
+| Ctrl+C (desktop) | write the whole workspace (every form, where it stands, and its colours) to `arcs-build.brz`, a Brickadia prefab, and put that file on the clipboard |
 | Ctrl+V (desktop) | add the forms of a `.brz` copied from the editor back to the workspace |
 
 A `.brz` holding any brick other than the four microbricks is refused with

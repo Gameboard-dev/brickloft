@@ -388,6 +388,8 @@ pub enum Solid {
         top: Region,
         full: Region,
         chamfer: i32,
+        /// how many layers each chamfer takes
+        rise: i32,
         axis: usize,
         first: i32,
         layers: i32,
@@ -502,8 +504,14 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             curve(spec, path, spec.closed, Some(c.normal))
         }
         Form::Circle => {
-            let c = Circle::axis_aligned(need(1)?[0], spec.radius, spec.plane.min(2));
-            curve(spec, c.path(0.0, 2.0 * PI), true, Some(c.normal))
+            let centre = need(1)?[0];
+            let c = Circle::axis_aligned(centre, spec.radius, spec.plane.min(2));
+            // stretched within its own plane, a circle is an ellipse; its
+            // stretch across the plane is the depth of a round tube (see `stacked`)
+            let mut within = spec.stretch.max(DVec3::splat(0.05));
+            within[spec.plane.min(2)] = 1.0;
+            let path = c.path(0.0, 2.0 * PI).into_iter().map(|p| centre + (p - centre) * within).collect();
+            curve(spec, path, true, Some(c.normal))
         }
         Form::Arch(kind) => {
             let p = need(2)?;
@@ -555,25 +563,9 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
                 path,
             ))
         }
-        Form::Torus => {
-            let center = need(1)?[0];
-            let (axis, minor) = (spec.plane.min(2), spec.thick / 2.0);
-            if spec.wedges {
-                // a torus is a round tube along a circle, and is built as one
-                let ring = Circle::axis_aligned(center, spec.radius, axis);
-                return stacked(spec, ring.path(0.0, 2.0 * PI), true, axis)
-                    .map(|(solid, _)| (solid, Vec::new()));
-            }
-            let field = Field::Torus {
-                center,
-                axis,
-                major: spec.radius,
-                minor,
-            };
-            let mut reach = DVec3::splat(spec.radius + minor);
-            reach[axis] = minor;
-            volume(field, center - reach, center + reach, Vec::new())
-        }
+        // A torus is a circle as a round tube, and is built as one. It was a
+        // form of its own while it was fitted cell by cell from a formula.
+        Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }),
         Form::Revolve => {
             let p = need(2)?;
             let axis = p[0].truncate();
@@ -766,14 +758,25 @@ fn stacked(
         .iter()
         .map(|p| DVec3::new(p[ua] + shift, p[va] + shift, 0.0))
         .collect();
-    let w0 = path[0][axis].floor() as i32 - (count - 1) / 2;
-    let centre = w0 as f64 + count as f64 / 2.0;
+    // A circle may be stretched across its plane, which makes its tube that
+    // many times as deep as it is wide: an oval in section.
+    let deep = if matches!(spec.form, Form::Circle | Form::Torus) { spec.stretch[axis].max(0.05) } else { 1.0 };
+    let depth = ((count as f64 * deep).round() as i32).max(1);
+    let w0 = path[0][axis].floor() as i32 - (depth - 1) / 2;
+    let centre = w0 as f64 + depth as f64 / 2.0;
+    // a closed curve may be filled: each band then takes in all it encloses
+    let outline: Vec<DVec2> = flat.iter().take(flat.len() - 1).map(|p| p.truncate()).collect();
+    let filled = spec.fill && closed && outline.len() >= 3;
+    let band = |half_width: f64| {
+        let stroke = Stroke::new(&flat, half_width, closed, Some(extend));
+        if filled { Region::Both(stroke, Fill::new(outline.clone())) } else { Region::Stroke(stroke) }
+    };
 
     // each layer's half-width, from the circle, in whole cells less than the
     // radius so that every layer shares the tube's centre line
-    let widths: Vec<f64> = (0..count)
+    let widths: Vec<f64> = (0..depth)
         .map(|i| {
-            let off = w0 as f64 + i as f64 + 0.5 - centre;
+            let off = (w0 as f64 + i as f64 + 0.5 - centre) / deep;
             let reach = (radius * radius - off * off).max(0.0).sqrt();
             (radius - (radius - reach).round()).max(0.5)
         })
@@ -786,11 +789,7 @@ fn stacked(
             .iter()
             .take_while(|w| **w == widths[at])
             .count();
-        layers.push((
-            Region::Stroke(Stroke::new(&flat, widths[at], closed, Some(extend))),
-            w0 + at as i32,
-            run as i32,
-        ));
+        layers.push((band(widths[at]), w0 + at as i32, run as i32));
         at += run;
     }
 
@@ -801,11 +800,7 @@ fn stacked(
         [lo.x.floor() as i32, lo.y.floor() as i32],
         [hi.x.ceil() as i32, hi.y.ceil() as i32],
     );
-    check_size(&[
-        (max[0] - min[0]) as i64,
-        (max[1] - min[1]) as i64,
-        count as i64,
-    ])?;
+    check_size(&[(max[0] - min[0]) as i64, (max[1] - min[1]) as i64, depth as i64])?;
 
     // the round tube itself, along the same shifted centre line
     let centre_line: Vec<DVec3> = flat
@@ -816,7 +811,15 @@ fn stacked(
             q
         })
         .collect();
-    let field = Field::Tube(Stroke::new(&centre_line, radius, closed, Some(extend)));
+    let mut field = Field::Tube(Stroke::new(&centre_line, radius, closed, Some(extend)));
+    if deep != 1.0 {
+        field = Field::Squash { inner: Box::new(field), axis, centre, factor: deep };
+    }
+    if filled {
+        // filled, it is a plate with a rounded rim
+        let plate = Field::Plate { fill: Fill::new(outline.clone()), axis, lo: w0 as f64, hi: (w0 + depth) as f64 };
+        field = Field::Either(Box::new(field), Box::new(plate));
+    }
     // As a pipe: a regular octagon, the roundest section bricks allow. Its
     // sloping sides are as long as its flat ones when each chamfer is
     // 1 - 1/sqrt(2) of the whole width. The flat top must be a band with an
@@ -825,24 +828,12 @@ fn stacked(
     // https://en.wikipedia.org/wiki/Octagon#Regular_octagon
     let half = count as f64 / 2.0;
     let chamfer = chamfer_of(count);
-    if pipe && chamfer > 0 {
-        let band =
-            |half_width: f64| Region::Stroke(Stroke::new(&flat, half_width, closed, Some(extend)));
+    // how many layers the chamfer takes: as many as it is wide, times the
+    // stretch, and always leaving a wall between the two chamfers
+    let rise = ((chamfer as f64 * deep).round() as i32).min((depth - 1) / 2);
+    if pipe && chamfer > 0 && rise > 0 {
         let (top, full) = (band(half - chamfer as f64), band(half));
-        return Ok((
-            Solid::Pipe {
-                top,
-                full,
-                chamfer,
-                axis,
-                first: w0,
-                layers: count,
-                min,
-                max,
-                field,
-            },
-            path,
-        ));
+        return Ok((Solid::Pipe { top, full, chamfer, rise, axis, first: w0, layers: depth, min, max, field }, path));
     }
     Ok((
         Solid::Stack {
@@ -939,11 +930,11 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 unmeasured: false,
             }
         }
-        Solid::Pipe { top, full, chamfer, axis, first, layers, min, max, .. } => {
+        Solid::Pipe { top, full, chamfer, rise, axis, first, layers, min, max, .. } => {
             let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: true };
             let narrower = |x: f64, y: f64| top.eval(DVec2::new(x, y));
             let fit = fit_planar_towards(&|x, y| full.eval(DVec2::new(x, y)), *min, *max, &opts, Some((&narrower, *chamfer)));
-            let pipe = crate::fit_stack::Pipe { wall: &fit.pieces, top: &narrower, chamfer: *chamfer, axis: *axis, first: *first, layers: *layers, max_ext: spec.max_ext };
+            let pipe = crate::fit_stack::Pipe { wall: &fit.pieces, top: &narrower, chamfer: *chamfer, rise: *rise, axis: *axis, first: *first, layers: *layers, max_ext: spec.max_ext };
             // measured against the round tube by the caller
             Built { bricks: crate::fit_stack::pipe(&pipe), solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true }
         }
@@ -1764,6 +1755,36 @@ mod tests {
             // nearly upright where it leaves the x axis, nearly level at the y axis
             assert!(slopes[0] < 30.0 && slopes[slopes.len() - 1] > 60.0, "radius {radius} thick {thick}: {slopes:?}");
         }
+    }
+
+    #[test]
+    fn a_circle_stretches_fills_and_stands_in_for_the_torus() {
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 14.0, thick: 6.0, tube: true, simplify: 0.25, ..Spec::default() };
+        let size = |built: &Built, k: usize| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap() - built.bricks.iter().map(|b| b.min[k]).min().unwrap();
+        let plain = check(&ring);
+        assert_eq!([size(&plain, 0), size(&plain, 1), size(&plain, 2)], [34, 34, 6]);
+        // a torus is the same thing under its old name
+        assert_eq!(build(&Spec { form: Form::Torus, tube: false, ..ring.clone() }).unwrap().bricks, plain.bricks);
+        // stretched within its plane it is an ellipse, and across it a deeper or shallower tube
+        let wide = check(&Spec { stretch: DVec3::new(1.5, 1.0, 1.0), ..ring.clone() });
+        assert_eq!([size(&wide, 0), size(&wide, 1), size(&wide, 2)], [48, 34, 6]);
+        let deep = check(&Spec { stretch: DVec3::new(1.0, 1.0, 2.0), ..ring.clone() });
+        assert_eq!([size(&deep, 0), size(&deep, 1), size(&deep, 2)], [34, 34, 12]);
+        let shallow = check(&Spec { stretch: DVec3::new(1.0, 1.0, 0.5), ..ring.clone() });
+        assert_eq!(size(&shallow, 2), 3);
+        for built in [&deep, &shallow] {
+            assert!(built.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == Kind::Tet), "no chamfer left");
+        }
+        // facing x, its plane is y and z, and x is its depth
+        let turned = check(&Spec { plane: 0, stretch: DVec3::new(2.0, 1.0, 1.5), ..ring.clone() });
+        assert_eq!([size(&turned, 0), size(&turned, 1), size(&turned, 2)], [12, 34, 48]);
+        // filled, the hole is gone and the rim is still rounded
+        let filled = check(&Spec { fill: true, ..ring.clone() });
+        let covers = |built: &Built, c: [i32; 3]| built.bricks.iter().any(|b| (0..3).all(|i| c[i] >= b.min[i] && c[i] < b.min[i] + b.ext[i]));
+        assert!(covers(&filled, [0, 0, 0]) && !covers(&plain, [0, 0, 0]));
+        assert_eq!([size(&filled, 0), size(&filled, 2)], [34, 6]);
+        assert!(filled.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == Kind::Tet));
+        assert!(filled.error / filled.solid < 0.05, "error {} of {}", filled.error, filled.solid);
     }
 
     #[test]

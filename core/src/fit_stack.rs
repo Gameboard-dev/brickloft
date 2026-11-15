@@ -563,8 +563,9 @@ pub struct Pipe<'a> {
     pub wall: &'a [Piece],
     /// the flat top's band as a solid in the plane (negative inside)
     pub top: &'a dyn Fn(f64, f64) -> f64,
-    /// the chamfer: how far in it goes, which is also how many layers up
+    /// the chamfer: how far in it goes, and how many layers up
     pub chamfer: i32,
+    pub rise: i32,
     /// the axis the tube lies across, its first layer along it and how many
     pub axis: usize,
     pub first: i32,
@@ -574,11 +575,12 @@ pub struct Pipe<'a> {
 
 /// The bricks of a [`Pipe`].
 pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
-    let k = pipe.chamfer.min(pipe.layers / 2);
+    let reach = pipe.chamfer;
+    let k = pipe.rise.min(pipe.layers / 2);
     let wall = Plan::new(pipe.wall, 2);
     // the air round the wall, grown inwards over the chamfer to the air round the top
     let air = wall.complement();
-    let (feet, air_top) = grow(&air, &|x, y| -(pipe.top)(x, y), k);
+    let (feet, air_top) = grow(&air, &|x, y| -(pipe.top)(x, y), reach);
     let (ua, va) = crate::spec::plane_axes(pipe.axis);
     let (w, h, layers) = (wall.w, wall.h, pipe.layers as usize);
     let limit = pipe.max_ext.max(1);

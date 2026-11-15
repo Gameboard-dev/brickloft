@@ -265,6 +265,8 @@ impl Fill {
 pub enum Region {
     Stroke(Stroke),
     Fill(Fill),
+    /// a closed band together with everything it encloses
+    Both(Stroke, Fill),
 }
 
 impl Region {
@@ -272,6 +274,7 @@ impl Region {
         match self {
             Region::Stroke(s) => s.eval(p.extend(0.0)),
             Region::Fill(f) => f.eval(p),
+            Region::Both(s, f) => s.eval(p.extend(0.0)).min(f.eval(p)),
         }
     }
 }
@@ -309,6 +312,15 @@ pub enum Field {
         major: f64,
         minor: f64,
     },
+    /// `inner` made `factor` times as deep along `axis`, about `centre`: a
+    /// round tube stretched to an oval one. The value is scaled down for a
+    /// flattened solid so that it never claims the surface is further off
+    /// than it is, which the fitters' skipping of far cells relies on.
+    Squash { inner: Box<Field>, axis: usize, centre: f64, factor: f64 },
+    /// a flat outline's inside, as a plate filling `lo..hi` along `axis`
+    Plate { fill: Fill, axis: usize, lo: f64, hi: f64 },
+    /// both of two solids together
+    Either(Box<Field>, Box<Field>),
 }
 
 impl Field {
@@ -354,6 +366,16 @@ impl Field {
                 let out = (q.length_squared() - along * along).max(0.0).sqrt();
                 (out - major).hypot(along) - minor
             }
+            Field::Squash { inner, axis, centre, factor } => {
+                let mut q = p;
+                q[*axis] = centre + (p[*axis] - centre) / factor;
+                inner.eval(q) * factor.min(1.0)
+            }
+            Field::Plate { fill, axis, lo, hi } => {
+                let (ua, va) = [(1, 2), (0, 2), (0, 1)][*axis];
+                fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
+            }
+            Field::Either(a, b) => a.eval(p).min(b.eval(p)),
         }
     }
 }
