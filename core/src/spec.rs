@@ -104,6 +104,14 @@ pub struct Spec {
     /// upright (a pyramid, a profile spun about the vertical) can lie on
     /// their sides.
     pub turned: u8,
+    /// The angle the form's own brick grid stands at, as a quaternion
+    /// (x, y, z, w); `[0, 0, 0, 1]` for none. The game keeps bricks on
+    /// grids, and a grid other than the world's can stand at any angle. A
+    /// form turned by anything but quarter turns is on such a grid of its
+    /// own: fitted here exactly as if it were not turned at all, which is
+    /// why nothing in this library reads this, and turned as a whole by
+    /// whatever places it (the editor's view, the file it copies).
+    pub grid: [f64; 4],
     /// Places where a curve is pulled out of its shape: a point on it, and
     /// how far that point is moved. The curve to either side follows, less
     /// and less, out to `pull_reach` along it (see [`pulled`]). Curves only:
@@ -134,6 +142,7 @@ impl Default for Spec {
             symmetric: false,
             mirror: [false; 3],
             turned: UPRIGHT,
+            grid: [0.0, 0.0, 0.0, 1.0],
             pulls: Vec::new(),
             pull_reach: 8.0,
             simplify: 0.0,

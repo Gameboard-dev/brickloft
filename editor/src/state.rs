@@ -159,6 +159,8 @@ pub enum Handle {
     /// a point added to a curve with Shift + click, which pulls the curve
     /// out of shape where it was added
     Pull(usize),
+    /// one of the three rings, which turn the form's own grid about x, y or z
+    Spin(usize),
     /// a control point
     Point(usize),
     /// pulls a circle, sphere or torus wider or narrower
@@ -245,6 +247,9 @@ pub struct State {
     pub lift: bool,
     /// how much of a dragged dot's movement the dots near it share, 0 to 1
     pub follow: f64,
+    /// a ring being dragged: the angle round it where it was taken hold of,
+    /// and the grid's angle then
+    spin_from: Option<(f64, [f64; 4])>,
     /// the workspace as it was before each change, oldest first, and after
     /// each change undone, for Ctrl+Z and Ctrl+Y
     undone: Vec<Snapshot>,
@@ -271,6 +276,44 @@ fn along_line(from: DVec3, a: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
     let t = (b * dir.dot(w) - a.dot(w)) / across;
     // as for a drag in a plane: never flung to the horizon
     (t.abs() <= 4.0 * w.length().max(15.0)).then_some(t)
+}
+
+/// A grid that is not turned: see `arcs_core::spec::Spec::grid`.
+pub const LEVEL: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
+
+/// The turn that is `first` and then `then`, as quaternions (x, y, z, w).
+/// <https://en.wikipedia.org/wiki/Quaternion#Hamilton_product>
+fn turns(first: [f64; 4], then: [f64; 4]) -> [f64; 4] {
+    let (a, b) = (then, first);
+    let q = [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+    let length = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+    q.map(|v| v / length)
+}
+
+/// A turn by `angle` radians about x, y or z.
+fn about(axis: usize, angle: f64) -> [f64; 4] {
+    let mut q = [0.0, 0.0, 0.0, (angle / 2.0).cos()];
+    q[axis] = (angle / 2.0).sin();
+    q
+}
+
+/// A direction turned by a quaternion; with `back`, turned the other way.
+pub fn turned_way(q: [f64; 4], v: DVec3, back: bool) -> DVec3 {
+    let u = DVec3::new(q[0], q[1], q[2]) * if back { -1.0 } else { 1.0 };
+    // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#Using_quaternions_as_rotations
+    v + 2.0 * u.cross(u.cross(v) + v * q[3])
+}
+
+/// Whether a form is on a grid of its own, at an angle.
+pub fn on_own_grid(spec: &Spec) -> bool {
+    spec.grid != LEVEL
+}
+
+/// The point a form's own grid turns about: the middle of its bricks where
+/// it stands, to the nearest unit, so that its bricks are whole units from it.
+pub fn pivot(bounds: Option<Bounds>, place: [i32; 3]) -> DVec3 {
+    let (lo, hi) = bounds.unwrap_or(([0; 3], [0; 3]));
+    DVec3::from_array([0, 1, 2].map(|k| ((lo[k] + hi[k] + place[k]) as f64).round() / 2.0))
 }
 
 /// How far from a dragged dot others go with it, in reaches of an added point.
@@ -328,6 +371,7 @@ impl State {
             busy: false,
             lift: false,
             follow: 0.5,
+            spin_from: None,
             undone: Vec::new(),
             redone: Vec::new(),
             noted: Vec::new(),
@@ -423,7 +467,13 @@ impl State {
     /// judges it. The way out is up or sideways and never down, so that a
     /// form dragged onto another comes to rest on top of it.
     fn clear_of_others(&self, by: [i32; 3]) -> Option<[i32; 3]> {
-        let taken: Vec<Standing> = self.others.iter().map(|o| Standing::new(&o.built.bricks, o.place)).collect();
+        // A form on a grid of its own is in nobody's way and nobody is in
+        // its: the game lets grids pass through each other, since bricks
+        // only ever collide with bricks of their own grid.
+        if on_own_grid(&self.spec) {
+            return Some(by);
+        }
+        let taken: Vec<Standing> = self.others.iter().filter(|o| !on_own_grid(&o.spec)).map(|o| Standing::new(&o.built.bricks, o.place)).collect();
         let mine: Vec<[i32; 3]> = cells_of(&self.built.bricks).collect();
         way_out(&mine, self.place, &taken, by)
     }
@@ -436,12 +486,12 @@ impl State {
     /// does not touch are settled first, so that a form pushed aside goes
     /// round them and not into them.
     fn push_others(&mut self) {
-        if self.others.is_empty() {
+        if self.others.is_empty() || on_own_grid(&self.spec) {
             return;
         }
         let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
-        let touched: Vec<bool> = self.others.iter().map(|o| settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
-        for (other, _) in self.others.iter().zip(&touched).filter(|(_, t)| !**t) {
+        let touched: Vec<bool> = self.others.iter().map(|o| !on_own_grid(&o.spec) && settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
+        for (other, _) in self.others.iter().zip(&touched).filter(|(o, t)| !**t && !on_own_grid(&o.spec)) {
             settled.push(Standing::new(&other.built.bricks, other.place));
         }
         for (other, _) in self.others.iter_mut().zip(&touched).filter(|(_, t)| **t) {
@@ -739,7 +789,7 @@ impl State {
         let s = &mut self.spec;
         (s.radius, s.thick, s.depth, s.stretch, s.plane) = (fresh.radius, fresh.thick, fresh.depth, fresh.stretch, fresh.plane);
         (s.protrude, s.flip, s.symmetric, s.pull_reach) = (fresh.protrude, fresh.flip, fresh.symmetric, fresh.pull_reach);
-        (s.mirror, s.turned) = (fresh.mirror, fresh.turned);
+        (s.mirror, s.turned, s.grid) = (fresh.mirror, fresh.turned, fresh.grid);
         self.arch = 0;
         self.segment = (2.0, 6.0);
         self.preset();
@@ -828,7 +878,8 @@ impl State {
 
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
-        let spec = self.full_spec();
+        // (the angle of its grid changes nothing about how a form is fitted)
+        let spec = Spec { grid: LEVEL, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
         // (see `arcs_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
@@ -875,18 +926,52 @@ impl State {
         }
     }
 
-    /// The rings the form is turned by: their middle and how wide they are,
-    /// which is clear of the form.
+    /// The rings the form's grid is turned by: their middle and how wide
+    /// they are, which is as long as the arrows that move it.
     pub fn rings(&self) -> Option<(DVec3, f64)> {
-        let ((lo, hi), (middle, _)) = (self.bounds?, self.gizmo()?);
-        let across = (0..3).map(|k| ((hi[k] - lo[k]) as f64).powi(2)).sum::<f64>().sqrt();
-        Some((middle, across / 2.0 + 2.0))
+        self.gizmo().map(|(middle, reach)| (middle, reach[0]))
     }
 
-    /// The dots as they are seen: where the form's dots are once it is turned.
+    /// Each form's own grid, the one being edited first: the point it
+    /// turns about and its angle.
+    pub fn grids(&self) -> Vec<(DVec3, [f64; 4])> {
+        std::iter::once((pivot(self.bounds, self.place), self.spec.grid)).chain(self.others.iter().map(|o| (pivot(o.bounds, o.place), o.spec.grid))).collect()
+    }
+
+    /// The angle of the cursor's ray round ring `axis`: where the ray meets
+    /// the ring's plane, as an angle about the ring's middle. `None` if the
+    /// ring is seen edge on.
+    fn round_ring(&self, axis: usize, origin: DVec3, dir: DVec3) -> Option<f64> {
+        let middle = pivot(self.bounds, self.place);
+        let normal = [DVec3::X, DVec3::Y, DVec3::Z][axis];
+        let facing = dir.dot(normal);
+        if facing.abs() < 0.05 {
+            return None;
+        }
+        let out = origin + dir * ((middle - origin).dot(normal) / facing) - middle;
+        let (a, b) = [(1, 2), (2, 0), (0, 1)][axis];
+        Some(out[b].atan2(out[a]))
+    }
+
+    /// Take hold of ring `axis` where the cursor's ray passes it. Returns
+    /// whether it could be.
+    pub fn hold_ring(&mut self, axis: usize, origin: DVec3, dir: DVec3) -> bool {
+        self.spin_from = self.round_ring(axis, origin, dir).map(|angle| (angle, self.spec.grid));
+        self.spin_from.is_some()
+    }
+
+    /// Put the form back on the world's grid, level.
+    pub fn level(&mut self) {
+        self.spec.grid = LEVEL;
+        self.scene += 1;
+    }
+
+    /// The dots as they are seen: where the form's dots are once it has
+    /// been turned by quarter turns, and its grid by whatever angle.
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
         let (turn, standing) = (arcs_core::spec::Turn::of(&self.spec.snapped()), self.standing());
-        self.dots().into_iter().map(|(h, at)| (h, turn.point(at - standing) + standing)).collect()
+        let (about, grid) = (pivot(self.bounds, self.place), self.spec.grid);
+        self.dots().into_iter().map(|(h, at)| (h, about + turned_way(grid, turn.point(at - standing) + standing - about, false))).collect()
     }
 
     /// The dots of the form as it is fitted, before it is turned: where
@@ -960,6 +1045,29 @@ impl State {
             Handle::Point(i) => state.spec.points.get(i).copied(),
             Handle::Pull(i) => state.spec.pulls.get(i).map(|(at, by)| *at + *by),
             _ => None,
+        };
+        if let Handle::Spin(axis) = handle {
+            // Round its ring, by whole degrees: the grid as it was when the
+            // ring was taken hold of, turned by as far as the cursor has
+            // gone round since. About the world's axis, as the ring is drawn.
+            let (Some((from, was)), Some(now)) = (self.spin_from, self.round_ring(axis, origin, dir)) else { return };
+            let by = (now - from).to_degrees().round().to_radians();
+            self.spec.grid = turns(was, about(axis, by));
+            // a hair off level after a full turn back is level
+            if self.spec.grid[3].abs() > 1.0 - 1e-9 {
+                self.spec.grid = LEVEL;
+            }
+            self.scene += 1;
+            return;
+        }
+        // The dots of a form on a grid of its own are where the grid's
+        // angle puts them, and are dragged from there: the cursor's ray is
+        // turned back into the grid first.
+        let (origin, dir, view) = if !on_own_grid(&self.spec) || matches!(handle, Handle::Move | Handle::Slide(_)) {
+            (origin, dir, view)
+        } else {
+            let (about, grid) = (pivot(self.bounds, self.place), self.spec.grid);
+            (about + turned_way(grid, origin - about, true), turned_way(grid, dir, true), turned_way(grid, view, true))
         };
         let before = place(self);
         // A form that has been turned is dragged as it was before the turn:
@@ -1086,7 +1194,7 @@ impl State {
                 }
                 self.move_by(by, at);
             }
-            Handle::Slide(_) => unreachable!("answered above"),
+            Handle::Slide(_) | Handle::Spin(_) => unreachable!("answered above"),
             Handle::Pull(i) => {
                 let Some(&(from, _)) = self.spec.pulls.get(i) else { return };
                 let mut by = DVec3::new(snap(hit.x - from.x), snap(hit.y - from.y), snap(hit.z - from.z));
@@ -1132,6 +1240,9 @@ impl State {
         if !self.can_pull() || self.spec.pulls.len() >= PULLS {
             return None;
         }
+        // (where it was clicked, as it is in the form's own grid)
+        let about = pivot(self.bounds, self.place);
+        let at = about + turned_way(self.spec.grid, at - about, true);
         let at = at - self.standing();
         // On a curve, or a profile spun about an axis, the point takes hold
         // of the curve as last built where it comes nearest the click. A
@@ -1533,9 +1644,7 @@ mod tests {
         let further = crown + DVec3::Y * 3.0 * (crown.y - foot.y).signum();
         state.drag(Handle::Rise, further + DVec3::Z * 80.0, -DVec3::Z, -DVec3::Z);
         assert!((state.arch_rise() - (rise_before + 3.0)).abs() <= 0.5, "rise {} from {rise_before}", state.arch_rise());
-        // its rings stand clear of it, and four turns bring it back
-        let (middle, wide) = state.rings().unwrap();
-        assert!(wide > (hi[1] - lo[1]) as f64 / 2.0 && middle == state.gizmo().unwrap().0);
+        // four turns bring it back
         for _ in 0..3 {
             state.turn(0, false);
         }
@@ -1543,6 +1652,47 @@ mod tests {
         state.turn(2, false);
         state.turn(2, true);
         assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+    }
+
+    #[test]
+    fn a_ring_turns_the_forms_grid_by_any_angle() {
+        let mut state = State::new(); // an arch across x, standing along z
+        state.refresh(|| 0.0);
+        let bricks = state.built.bricks.clone();
+        let (middle, wide) = state.rings().unwrap();
+        assert_eq!(wide, state.gizmo().unwrap().1[0], "the rings are as large as the arrows");
+        let foot = state.handles()[0].1;
+        // the ring about y, seen along y: taken hold of out along x, and carried 37 degrees round
+        let eye = middle - DVec3::Y * 60.0;
+        let towards = |angle: f64| (middle + DVec3::new(angle.sin(), 0.0, angle.cos()) * 4.0 - eye).normalize();
+        assert!(state.hold_ring(1, eye, towards(0.0)));
+        let scene = state.scene;
+        state.drag(Handle::Spin(1), eye, towards(37f64.to_radians()), DVec3::Y);
+        assert!(on_own_grid(&state.spec) && state.scene > scene);
+        // by 37 degrees about y, to the degree
+        let turned = turned_way(state.spec.grid, DVec3::Z, false);
+        assert!((turned - DVec3::new(37f64.to_radians().sin(), 0.0, 37f64.to_radians().cos())).length() < 1e-9, "{turned:?}");
+        // it is the same bricks, not fitted again, and its dots have gone round with it
+        assert!(!state.refresh(|| 0.0));
+        assert_eq!(state.built.bricks, bricks);
+        let now = state.handles()[0].1;
+        assert!((now - (middle + turned_way(state.spec.grid, foot - middle, false))).length() < 1e-9);
+        assert!((now - foot).length() > 1.0);
+        // a dot is dragged where it is seen: the crown, pulled two cells further along the arch's own up
+        let rise = state.arch_rise();
+        let crown = state.handles().iter().find(|h| h.0 == Handle::Rise).unwrap().1;
+        let side = turned_way(state.spec.grid, DVec3::Y, false);
+        state.drag(Handle::Rise, crown + turned * 2.0 - side * 80.0, side, side);
+        assert!((state.arch_rise() - (rise + 2.0)).abs() <= 0.5, "rise {} from {rise}", state.arch_rise());
+        // on a grid of its own it is in no other form's way
+        state.spec.rise = Some(rise);
+        state.refresh(|| 0.0);
+        assert_eq!(state.clear_of_others([4, 0, -2]), Some([4, 0, -2]));
+        // levelled, it is back on the world's grid
+        state.level();
+        assert!(!on_own_grid(&state.spec));
+        // seen edge on, a ring cannot be taken hold of
+        assert!(!state.hold_ring(1, middle - DVec3::X * 60.0, DVec3::X));
     }
 
     #[test]

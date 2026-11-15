@@ -82,6 +82,8 @@ pub struct Asked {
     pub best: bool,
     /// turn the form a quarter turn about this axis
     pub turn: Option<usize>,
+    /// put the form back on the world's grid
+    pub level: bool,
 }
 
 /// Draw the panel.
@@ -280,6 +282,11 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
             }
+            // said where it applies, since the difference is large and not obvious
+            let across = s.plane.min(2);
+            if state.form == CIRCLE && s.pulls.iter().any(|(_, by)| by[across] != 0.0) {
+                ui.label("A point pulled out of the circle's plane is rough where it was pulled: bricks cannot make a smooth round tube or band at a slant. Pulled within the plane it stays smooth. To tilt the whole circle, drag one of its rings.");
+            }
         }
         ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")).on_hover_text("How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.");
         ui.label("Sizes are in microbricks. Half steps are single game units.");
@@ -287,13 +294,21 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
         }
         ui.horizontal(|ui| {
-            ui.label("Turn").on_hover_text("Turn the form a quarter turn about an axis. Clicking the red, green or blue ring around the form does the same; Shift + click turns it the other way. The form is the same bricks whichever way it faces.");
+            ui.label("Quarter turn").on_hover_text("Turn the form a quarter turn about an axis, within the brick grid. The form is the same bricks whichever way it faces. For any other angle, drag one of the red, green or blue rings round: that turns the form's whole grid.");
             for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                 if ui.button(*name).clicked() {
                     asked.turn = Some(axis);
                 }
             }
         });
+        if crate::state::on_own_grid(s) {
+            ui.horizontal(|ui| {
+                ui.label("On a grid of its own, at an angle.").on_hover_text("Bricks sit on a grid, and a grid other than the world's can stand at any angle. This form has been turned by its rings, so it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other form's way. Sent through the plugin it is placed level.");
+                if ui.button("Level it").clicked() {
+                    asked.level = true;
+                }
+            });
+        }
         ui.horizontal(|ui| {
             ui.label("Mirror").on_hover_text("Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.");
             for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {

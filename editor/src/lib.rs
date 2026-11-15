@@ -134,14 +134,19 @@ pub fn run_form(form: usize) {
     // drawn over the bricks whatever is in front: a sphere's centre dot would
     // otherwise be buried inside it, out of sight and out of reach
     handle_mesh.material.render_states.depth_test = DepthTest::Always;
-    // The three rings that turn the form being edited, a quarter turn a
-    // click: red about x, green about y, blue about z. One mesh, lying
-    // about z, turned to face each axis.
-    let (ring_corners, ring_triangles) = mesh::ring_mesh(0.012);
+    // The three rings that turn the grid of the form being edited, by any
+    // angle: red about x, green about y, blue about z. One mesh, lying
+    // about z, turned to face each axis. Drawn over the bricks, as the
+    // arrows are, since they are no larger and start inside the form.
+    let (ring_corners, ring_triangles) = mesh::ring_mesh(0.035);
     let ring = CpuMesh { positions: Positions::F32(ring_corners.iter().map(|c| vec3(c[0], c[1], c[2])).collect()), indices: Indices::U32(ring_triangles), ..Default::default() };
     let mut rings: Vec<Gm<Mesh, ColorMaterial>> = [Srgba::new_opaque(230, 60, 60), Srgba::new_opaque(70, 200, 80), Srgba::new_opaque(70, 120, 240)]
         .into_iter()
-        .map(|albedo| Gm::new(Mesh::new(&context, &ring), ColorMaterial::new_opaque(&context, &CpuMaterial { albedo, ..Default::default() })))
+        .map(|albedo| {
+            let mut ring = Gm::new(Mesh::new(&context, &ring), ColorMaterial::new_opaque(&context, &CpuMaterial { albedo, ..Default::default() }));
+            ring.material.render_states.depth_test = DepthTest::Always;
+            ring
+        })
         .collect();
     // The three arrows that move the form being edited: red along x, green
     // along y, blue along z. Drawn over the bricks, like the dots, since
@@ -219,12 +224,13 @@ pub fn run_form(form: usize) {
                             }
                         }
                     }
-                    // then the rings: a click on one turns the form a quarter
-                    // turn about its axis, or with Shift the other way
+                    // then the rings: dragging one round turns the form's grid about its axis
                     if dragging.is_none() && !*handled && state.rings().is_some() {
                         if let Ok(Some(hit)) = pick(&context, &camera, *position, rings.iter().map(|r| &r.geometry), Cull::None) {
-                            if (hit.geometry_id as usize) < 3 {
-                                state.turn(hit.geometry_id as usize, modifiers.shift);
+                            let axis = hit.geometry_id as usize;
+                            let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
+                            if axis < 3 && state.hold_ring(axis, d(origin), d(dir)) {
+                                dragging = Some(Handle::Spin(axis));
                                 *handled = true;
                             }
                         }
@@ -265,7 +271,7 @@ pub fn run_form(form: usize) {
                 }
                 Event::MouseRelease { button: MouseButton::Left, .. } => {
                     // a form only moved is the same form: there is no better fit to look for
-                    if let (Some(handle), true) = (dragging.take().filter(|h| !matches!(h, Handle::Move | Handle::Slide(_))), state.auto_best) {
+                    if let (Some(handle), true) = (dragging.take().filter(|h| !matches!(h, Handle::Move | Handle::Slide(_) | Handle::Spin(_))), state.auto_best) {
                         state.snap_best(Some(handle));
                     }
                 }
@@ -342,6 +348,9 @@ pub fn run_form(form: usize) {
         if let Some(axis) = asked.turn {
             state.turn(axis, false);
         }
+        if asked.level {
+            state.level();
+        }
         // A search under way is given half of a frame at 60 a second, so
         // that the view still turns and the progress bar still moves while
         // it runs. A form that takes longer than that to build once holds
@@ -361,6 +370,12 @@ pub fn run_form(form: usize) {
         if rebuilt || first || shown_scene != state.scene {
             shown_scene = state.scene;
             let bricks = state.painted();
+            // each form's own grid: the point it turns about and its angle, as a turn of the view's
+            let grids: Vec<Option<Mat4>> = state
+                .grids()
+                .into_iter()
+                .map(|(about, q)| (q != state::LEVEL).then(|| Mat4::from_translation(v(about)) * Mat4::from(Quat::new(q[3] as f32, q[0] as f32, q[1] as f32, q[2] as f32)) * Mat4::from_translation(-v(about))))
+                .collect();
             for ((object, &mask), owner) in brick_meshes.iter_mut().zip(&masks).zip(owners.iter_mut()) {
                 let mut instances = Instances::default();
                 let mut colours = Vec::new();
@@ -370,7 +385,12 @@ pub fn run_form(form: usize) {
                     // brick's extent, then move it to the brick's corner
                     // (its form may stand an odd unit, half a cell, off the cells)
                     let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
-                    instances.transformations.push(Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32));
+                    let on_lattice = Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32);
+                    // then turned with its form's grid, if that is at an angle
+                    instances.transformations.push(match grids.get(*form).copied().flatten() {
+                        Some(turn) => turn * on_lattice,
+                        None => on_lattice,
+                    });
                     // a brick left to the player's colour in the game is
                     // shown in a neutral one; the forms not being edited
                     // are shown a little darker, to tell them apart
@@ -396,7 +416,7 @@ pub fn run_form(form: usize) {
             for (handle, at) in &handles {
                 instances.transformations.push(Mat4::from_translation(v(*at)) * Mat4::from_scale(0.7));
                 colours.push(match handle {
-                    Handle::Move | Handle::Slide(_) => Srgba::new_opaque(250, 250, 250),
+                    Handle::Move | Handle::Slide(_) | Handle::Spin(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
                     Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),

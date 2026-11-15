@@ -94,8 +94,32 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
     let solver = Solver::new(&Models::default());
     let mut world = World::new();
     world.meta.bundle.description = describe(forms);
-    for (cell, colour, _, place) in bricks {
-        world.bricks.push(brick_for(&solver, cell, *colour, *place)?);
+    // A form whose grid is at an angle goes on a grid of its own, frozen
+    // where it stands: its bricks placed from the point the grid turns
+    // about, which is where the grid is put. (That the game takes such a
+    // prefab from the clipboard was tried with `tilted_trial`.)
+    let mut own: std::collections::BTreeMap<usize, Vec<&Painted>> = std::collections::BTreeMap::new();
+    for brick in bricks {
+        let (cell, colour, form, place) = brick;
+        if forms.get(*form).is_some_and(|f| crate::state::on_own_grid(&f.0)) {
+            own.entry(*form).or_default().push(brick);
+        } else {
+            world.bricks.push(brick_for(&solver, cell, *colour, *place)?);
+        }
+    }
+    if !own.is_empty() {
+        world.register_all_components();
+    }
+    for (form, bricks) in own {
+        // the middle of its bricks, in whole units: see `state::pivot`
+        let lo = [0, 1, 2].map(|k| bricks.iter().map(|b| b.0.min[k]).min().unwrap());
+        let hi = [0, 1, 2].map(|k| bricks.iter().map(|b| b.0.min[k] + b.0.ext[k]).max().unwrap());
+        let place = bricks[0].3;
+        let about = [0, 1, 2].map(|k| lo[k] + hi[k] + place[k]);
+        let on_grid: Vec<Brick> = bricks.iter().map(|(cell, colour, _, place)| brick_for(&solver, cell, *colour, [0, 1, 2].map(|k| place[k] - about[k]))).collect::<Result<_, _>>()?;
+        let [x, y, z, w] = forms[form].0.grid.map(|v| v as f32);
+        let grid = brdb::Entity { frozen: true, location: (about[0] as f32, about[1] as f32, about[2] as f32).into(), rotation: brdb::Quat4f { x, y, z, w }, ..Default::default() };
+        world.add_brick_grid(grid, on_grid);
     }
     world.make_prefab();
     Ok(world)
@@ -270,6 +294,34 @@ mod tests {
         assert!(archive.brick_chunk_index(1).is_ok(), "the world's grid is missing");
         assert!(grids > 0);
         assert!(archive.entity_chunk_index().unwrap().len() >= 1, "no second grid");
+    }
+
+    #[test]
+    fn a_form_at_an_angle_is_copied_on_a_grid_of_its_own() {
+        use arcs_core::spec::build;
+        use arcs_core::DVec3;
+        let arch = Spec { points: vec![DVec3::new(-7.5, 0.5, 0.5), DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, ..Spec::default() };
+        let tilted = Spec { grid: [0.0, 0.6, 0.0, 0.8], ..arch.clone() };
+        let cells = build(&arch).unwrap().bricks;
+        // the same arch twice: level, and standing eight units along y at an angle
+        let bricks: Vec<Painted> = cells.iter().map(|c| (*c, None, 0, [0; 3])).chain(cells.iter().map(|c| (*c, None, 1, [0, 8, 0]))).collect();
+        let forms = vec![(arch, Paint::default(), [0; 3]), (tilted, Paint::default(), [0, 8, 0])];
+        let world = prefab(&bricks, &forms).unwrap();
+        assert_eq!(world.bricks.len(), cells.len(), "the level arch is on the world's grid");
+        assert_eq!(world.grids.len(), 1, "the tilted arch is on one grid of its own");
+        let (grid, on_it) = &world.grids[0];
+        assert_eq!(on_it.len(), cells.len());
+        assert!(grid.frozen && (grid.rotation.y - 0.6).abs() < 1e-6 && (grid.rotation.w - 0.8).abs() < 1e-6);
+        // where it stands, and its bricks about that point
+        let across = |k: usize| (cells.iter().map(|c| c.min[k]).min().unwrap() + cells.iter().map(|c| c.min[k] + c.ext[k]).max().unwrap()) as f32;
+        assert_eq!([grid.location.x, grid.location.y, grid.location.z], [across(0), across(1) + 8.0, across(2)], "the grid is not at the middle of the form where it stands");
+        // (the file's library keeps a grid's bricks half a chunk, 1024 units, from where they are)
+        let middle = on_it.iter().map(|b| b.position.x + 1024).sum::<i32>() as f32 / on_it.len() as f32;
+        assert!(middle.abs() < 2.0, "its bricks are not about the point the grid turns on: {middle}");
+        // and it comes back from the file as the form it was, angle and all
+        let back = read(&world.to_brz_vec().unwrap()).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[1].0.grid, [0.0, 0.6, 0.0, 0.8]);
     }
 
     #[test]

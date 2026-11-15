@@ -53,6 +53,18 @@ further off it is. The form's own points and sizes are untouched.
   changes is fitted cell by cell, which is rougher. A round tube pulled out
   of its plane is treated the same way: the pipe is kept away from the pull.
 
+## Turning
+
+A form can be turned two ways. By quarter turns it stays on the brick grid:
+it is fitted as it stands and its bricks are turned afterwards, so it is the
+same bricks facing another way. By any other angle it cannot stay on the
+grid, so its whole grid is turned instead: the game keeps bricks on grids,
+and a grid other than the world's can stand at any angle. The form is
+fitted exactly as if it were level and is copied to the clipboard on a
+frozen grid of its own. Grids pass through each other, so such a form is
+not kept clear of the others. Sent through the plugin, which places on the
+world's grid, it is placed level.
+
 ## Mirror
 
 Mirror, along x, y or z, makes the form its own mirror image: its low side
