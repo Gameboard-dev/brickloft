@@ -51,6 +51,11 @@ pushes that one away.
 gives it a third, and it becomes the arc through all three; more, up to
 eight, and it is the smooth curve through them all. Everything in the workspace is sent together.
 
+**Fix symmetry** makes a form's bricks mirror images of each other wherever
+the form itself is one: side to side for an arch, in every direction for a
+sphere. It keeps the low side along each such axis and rebuilds the high
+side from it.
+
 **A torus** is the Circle form with "Round tube" ticked; there is no
 separate Torus form. Its Stretch sliders make it an ellipse within its plane
 and a deeper or shallower tube across it, and "Fill" closes the hole, giving
