@@ -321,6 +321,8 @@ pub enum Field {
     Plate { fill: Fill, axis: usize, lo: f64, hi: f64 },
     /// both of two solids together
     Either(Box<Field>, Box<Field>),
+    /// the first solid with the second taken out of it
+    Without(Box<Field>, Box<Field>),
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
@@ -379,6 +381,7 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
+            Field::Without(a, b) => a.eval(p).max(-b.eval(p)),
             Field::Pyramid { base, half, top, height } => {
                 let up = p.z - base.z;
                 // the distance out of each of its four slopes, and of its base and top

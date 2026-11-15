@@ -33,8 +33,14 @@ pyramid, with two sloped faces meeting along a ridge. It is used only where
 a form has such a ridge, which so far is the pyramid; the fitters that work
 cell by cell are not offered it. The inner corner is what a hip leaves of
 its box: a valley, where two slopes meet in an inside corner. It and the
-three half corners can be placed, drawn, measured and saved, but no fitter
-lays them out yet. All five can be stretched by whole cells
+inner corner is used on the inside ridges of a hollow pyramid, and where two
+ramps meet in an inside corner of a sloped ring. The three half corners can
+be placed, drawn, measured and saved, but no fitter lays them out yet.
+
+A pyramid that is not filled is a tent, open underneath: the same pyramid
+less a smaller one inside it. Its wall is measured straight up, and comes
+out a little thicker or thinner than asked where that lets its slopes land
+exactly on the grid. All five can be stretched by whole cells
 along each axis.
 
 ## Pyramids

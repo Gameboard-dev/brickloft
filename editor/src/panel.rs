@@ -235,8 +235,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             REVOLVE => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a shell along the profile)");
             }
-            // a pyramid is solid, and that is all it is
-            PYRAMID => {}
+            PYRAMID => {
+                ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)");
+            }
             _ => {
                 ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
                 ui.checkbox(&mut s.tube, "Round tube instead of a flat band");
@@ -250,10 +251,11 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            SPHERE | REVOLVE => "Wall thickness",
+            SPHERE | REVOLVE | PYRAMID => "Wall thickness",
             _ => "Thickness",
         };
-        if state.form != PYRAMID {
+        // (a pyramid's wall is measured straight up, and only a hollow one has any)
+        if state.form != PYRAMID || !s.fill {
             ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
         }
         if is_curve && !s.tube {

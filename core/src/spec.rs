@@ -678,7 +678,8 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         Form::Pyramid => {
             let base = need(1)?[0];
             let half = [spec.radius * spec.stretch.x.max(0.05), spec.radius * spec.stretch.y.max(0.05)];
-            let pyramid = Pyramid { base, half, height: spec.rise.unwrap_or(spec.radius), max_ext: spec.max_ext };
+            // not filled, it is hollow: a tent with walls `thick` through, measured straight up
+            let pyramid = Pyramid { base, half, height: spec.rise.unwrap_or(spec.radius), max_ext: spec.max_ext, shell: (!spec.fill).then_some(spec.thick) };
             // measured against the pyramid as the lattice has it; off the
             // half-cell grid it has no such place and is fitted as it stands
             let (field, lo, hi) = match pyramid.snapped() {
@@ -687,6 +688,15 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
                     (Field::Pyramid { base: floor, half: at.half, top: at.top, height: at.height as f64 }, floor - DVec3::new(at.half[0], at.half[1], 0.0), floor + DVec3::new(at.half[0], at.half[1], at.height as f64))
                 }
                 None => (Field::Pyramid { base, half, top: [0.0; 2], height: pyramid.height.max(1.0) }, base - DVec3::new(half[0], half[1], 0.0), base + DVec3::new(half[0], half[1], pyramid.height.max(1.0))),
+            };
+            // less the pyramid of air inside it, where it is hollow and big enough to be
+            let field = match pyramid.hollow() {
+                Some(air) => {
+                    // standing on the same floor, so the hollow is open underneath
+                    let floor = DVec3::new(base.x, base.y, air.floor as f64);
+                    Field::Without(Box::new(field), Box::new(Field::Pyramid { base: floor, half: air.half, top: air.top, height: air.height as f64 }))
+                }
+                None => field,
             };
             let (solid, path) = volume(field.clone(), lo, hi, Vec::new())?;
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
@@ -1954,7 +1964,7 @@ mod tests {
 
     #[test]
     fn a_pyramid_is_built_exactly_from_a_handful_of_bricks() {
-        let spec = Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 8.5, rise: Some(8.0), ..Spec::default() };
+        let spec = Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 8.5, rise: Some(8.0), fill: true, ..Spec::default() };
         let built = check(&spec);
         let kind = |k: Kind| built.bricks.iter().filter(|b| shape_info(b.mask).unwrap().kind == k).count();
         // centred in a cell: a hip on each ridge, a ramp on each side, a column up the middle
@@ -1972,6 +1982,14 @@ mod tests {
         // with cubes alone it is still a pyramid, in steps
         let steps = check(&Spec { wedges: false, ..spec.clone() });
         assert!(steps.bricks.iter().all(|b| b.mask == CUBE) && steps.bricks.len() >= 6);
+        // Not filled, it is a tent: the same outside, a valley up each
+        // inside ridge, and still exactly the form it is measured against.
+        let tent = check(&Spec { radius: 12.5, rise: Some(12.0), thick: 4.0, fill: false, ..spec.clone() });
+        let of = |k: Kind| tent.bricks.iter().filter(|b| shape_info(b.mask).unwrap().kind == k).count();
+        assert!(of(Kind::Hip) >= 4 && of(Kind::Inner) >= 4, "{} hips, {} inner corners", of(Kind::Hip), of(Kind::Inner));
+        assert!(tent.error < 0.01 * tent.solid, "a tent {} wrong of {}", tent.error, tent.solid);
+        let whole = check(&Spec { radius: 12.5, rise: Some(12.0), fill: true, ..spec.clone() });
+        assert!(tent.solid < 0.8 * whole.solid, "the tent is not hollow: {} of {}", tent.solid, whole.solid);
     }
 
     /// From saved report 24: a hollow turned form, fitted cell by cell, was
