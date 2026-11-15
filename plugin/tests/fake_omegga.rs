@@ -93,7 +93,7 @@ fn a_build_goes_from_the_editor_to_the_game() {
 
     // a 2 x 1 x 1 cube at the anchor and a unit tetrahedron two cells along
     // the cube in the player's own colour, the tetrahedron in the palette's one
-    let body = json!({ "token": token, "bricks": [255, 0, 0, 0, 2, 1, 1, 0x17, 2, 0, 0, 1, 1, 1], "palette": [12, 34, 56], "paint": [0, 1] }).to_string();
+    let body = json!({ "token": token, "bricks": [255, 0, 0, 0, 2, 1, 1, 0x17, 5, 0, -1, 1, 1, 1], "palette": [12, 34, 56], "paint": [0, 1] }).to_string();
     let port = plugin.port;
     let post = std::thread::spawn(move || {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -138,7 +138,7 @@ fn a_build_goes_from_the_editor_to_the_game() {
         request["bricks"],
         json!([
             1, 2, 1, 1, 1, 0, 0, 16, 0, // cells 0..2 are units -1..3: centre 1
-            3, 1, 1, 1, 4, 0, 0, 16, 1, // cell 2 is units 3..5: centre 4
+            3, 1, 1, 1, 5, 0, -1, 16, 1, // low corner 5, 0, -1 in units: cell 2, 0, -1 and a unit on along x and z
         ])
     );
 

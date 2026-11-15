@@ -81,6 +81,8 @@ fn bounds_of(built: &Built) -> Option<Bounds> {
 pub struct Item {
     pub spec: Spec,
     pub paint: Paint,
+    /// where it stands, in units
+    pub place: [i32; 3],
     pub built: Built,
     pub bounds: Option<Bounds>,
 }
@@ -109,7 +111,16 @@ fn form_index(form: Form) -> usize {
 /// A brick of the workspace: the brick, its colour (`None` for the player's
 /// own in the game), and which form it belongs to (0 is the one being
 /// edited, then the others in order).
-pub type Painted = (CellBrick, Option<[u8; 3]>, usize);
+pub type Painted = (CellBrick, Option<[u8; 3]>, usize, [i32; 3]);
+
+/// A form with how it is coloured and where it stands in the workspace.
+///
+/// Where it stands is in game units, two to a cell, and is no part of the
+/// form: a form is fitted on its own cells, and moving it moves those cells
+/// with it. Moving its points instead, as was done at first, refitted it at
+/// every step, could only go a whole cell at a time, and changed its bricks
+/// whenever a point crossed from a cell's middle to its edge.
+pub type Placed = (Spec, Paint, [i32; 3]);
 
 /// Something in the view that can be dragged.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -129,6 +140,8 @@ pub struct State {
     pub form: usize,
     pub arch: usize,
     pub lock: Lock,
+    /// where the form being edited stands in the workspace, in units
+    pub place: [i32; 3],
     /// the point of the form being edited that a drag has hold of, while it
     /// is being moved
     pub grab: Option<DVec3>,
@@ -196,7 +209,7 @@ pub struct State {
 /// Everything in the workspace that an edit can change: each form and how it
 /// is coloured, the one being edited first. Bricks are not kept; they are
 /// built again from the form, which keeps a long history small.
-type Snapshot = Vec<(Spec, Paint)>;
+type Snapshot = Vec<Placed>;
 
 /// How many changes can be undone. Each is a few hundred bytes.
 const HISTORY: usize = 200;
@@ -213,6 +226,7 @@ impl State {
             form: 0,
             arch: 0,
             lock: Lock::Free,
+            place: [0; 3],
             grab: None,
             cut: Cut::Whole,
             segment: (2.0, 6.0),
@@ -265,13 +279,14 @@ impl State {
 
     /// The form being edited, as an item to set aside.
     fn as_item(&self) -> Item {
-        Item { spec: self.full_spec(), paint: self.paint.clone(), built: self.built.clone(), bounds: self.bounds }
+        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds }
     }
 
     /// Make `item` the form being edited, with the bricks it already has.
     fn take_item(&mut self, item: Item) {
         self.load_spec(item.spec);
         self.paint = item.paint;
+        self.place = item.place;
         self.built = item.built;
         self.bounds = item.bounds;
         self.problem = None;
@@ -291,21 +306,24 @@ impl State {
 
     /// Add a form to the workspace and edit it. It is set down clear of the
     /// forms already there, to their +x side, so that nothing is hidden.
-    pub fn add_form(&mut self, mut spec: Spec) {
-        let taken = self.others.iter().filter_map(|i| i.bounds).chain(self.bounds).map(|(_, hi)| hi[0]).max();
-        if let (Some(right), Ok(built)) = (taken, build(&spec)) {
-            if let Some((lo, _)) = bounds_of(&built) {
-                // four microbricks of air between them
-                let shift = (right + 4 - lo[0]) as f64;
-                for p in &mut spec.points {
-                    p.x += shift;
-                }
-            }
-        }
+    pub fn add_form(&mut self, spec: Spec) {
+        self.add_form_at(spec, None);
+    }
+
+    /// [`State::add_form`], standing at `place` if one is given.
+    fn add_form_at(&mut self, spec: Spec, place: Option<[i32; 3]>) {
+        // the far side of everything there, in units
+        let taken = self.others.iter().filter_map(|i| i.bounds.map(|b| 2 * b.1[0] + i.place[0])).chain(self.bounds.map(|b| 2 * b.1[0] + self.place[0])).max();
+        let beside = match (taken, build(&spec).ok().as_ref().and_then(bounds_of)) {
+            // four microbricks of air between them
+            (Some(right), Some((lo, _))) => [right + 8 - 2 * lo[0], 0, 0],
+            _ => [0; 3],
+        };
         let mine = self.as_item();
         self.others.push(mine);
         self.load_spec(spec);
         self.paint = Paint::default();
+        self.place = place.unwrap_or(beside);
         self.built_from = None;
         self.scene += 1;
     }
@@ -322,28 +340,19 @@ impl State {
         round
     }
 
-    /// Where the form being edited ends up if moved by `by` cells: there, if
+    /// Where the form being edited ends up if moved by `by` units: there, if
     /// that is clear of the other forms, or else the nearest place straight
     /// up or straight out to one side that is. `None` if there is none.
     ///
-    /// Two forms may not share a cell: the game refuses a brick whose box
+    /// Two forms may not overlap: the game refuses a brick whose box
     /// overlaps another's, so forms pushed into each other would be sent
-    /// with pieces missing. Clear is judged by the cells of each brick's
-    /// box, as the game judges it. The way out is up or sideways and never
-    /// down, so that a form dragged onto another comes to rest on top of it.
+    /// with pieces missing. Clear is judged by each brick's box, as the game
+    /// judges it. The way out is up or sideways and never down, so that a
+    /// form dragged onto another comes to rest on top of it.
     fn clear_of_others(&self, by: [i32; 3]) -> Option<[i32; 3]> {
-        if self.others.is_empty() {
-            return Some(by);
-        }
-        let taken: std::collections::HashSet<[i32; 3]> = self.others.iter().flat_map(|i| cells_of(&i.built.bricks)).collect();
-        // the bricks in hand are where the form was last built; it may have
-        // been moved since, within this frame
-        let since = match (&self.built_from, self.spec.points.first()) {
-            (Some(from), Some(now)) if !from.points.is_empty() => (*now - from.points[0]).round().to_array().map(|v| v as i32),
-            _ => [0; 3],
-        };
-        let mine: Vec<[i32; 3]> = cells_of(&self.built.bricks).map(|c| [c[0] + since[0], c[1] + since[1], c[2] + since[2]]).collect();
-        way_out(&mine, &taken, by)
+        let taken: Vec<Standing> = self.others.iter().map(|o| Standing::new(&o.built.bricks, o.place)).collect();
+        let mine: Vec<[i32; 3]> = cells_of(&self.built.bricks).collect();
+        way_out(&mine, self.place, &taken, by)
     }
 
     /// Move the other forms out of the way of the one being edited, where
@@ -357,44 +366,51 @@ impl State {
         if self.others.is_empty() {
             return;
         }
-        let mut settled: std::collections::HashSet<[i32; 3]> = cells_of(&self.built.bricks).collect();
-        let touched: Vec<bool> = self.others.iter().map(|o| cells_of(&o.built.bricks).any(|c| settled.contains(&c))).collect();
+        let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
+        let touched: Vec<bool> = self.others.iter().map(|o| settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
         for (other, _) in self.others.iter().zip(&touched).filter(|(_, t)| !**t) {
-            settled.extend(cells_of(&other.built.bricks));
+            settled.push(Standing::new(&other.built.bricks, other.place));
         }
         for (other, _) in self.others.iter_mut().zip(&touched).filter(|(_, t)| **t) {
             let mine: Vec<[i32; 3]> = cells_of(&other.built.bricks).collect();
-            if let Some(by) = way_out(&mine, &settled, [0; 3]) {
-                let step = DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64);
-                other.spec.points.iter_mut().for_each(|p| *p += step);
-                other.built.path.iter_mut().for_each(|p| *p += step);
-                for b in &mut other.built.bricks {
-                    b.min = [b.min[0] + by[0], b.min[1] + by[1], b.min[2] + by[2]];
-                }
-                other.bounds = bounds_of(&other.built);
+            if let Some(by) = way_out(&mine, other.place, &settled, [0; 3]) {
+                other.place = [other.place[0] + by[0], other.place[1] + by[1], other.place[2] + by[2]];
             }
-            settled.extend(cells_of(&other.built.bricks));
+            settled.push(Standing::new(&other.built.bricks, other.place));
             self.scene += 1;
         }
     }
 
+    /// Where the form being edited stands, in cells: what to add to a point
+    /// of the form to find it in the workspace.
+    pub fn standing(&self) -> DVec3 {
+        DVec3::new(self.place[0] as f64, self.place[1] as f64, self.place[2] as f64) / 2.0
+    }
+
     /// Every form in the workspace with its colouring, the one being edited first.
-    pub fn forms(&self) -> Vec<(Spec, Paint)> {
+    pub fn forms(&self) -> Vec<Placed> {
         self.snapshot()
     }
 
-    /// Add copies of forms to the workspace, each set down clear of what is there.
-    pub fn paste(&mut self, forms: Vec<(Spec, Paint)>) {
-        for (spec, paint) in forms {
-            self.add_form(spec);
+    /// Add copies of forms to the workspace, standing as they stood with
+    /// each other when they were copied, and as a group clear of what is
+    /// already there.
+    pub fn paste(&mut self, forms: Vec<Placed>) {
+        let Some(first) = forms.first().map(|f| f.2) else { return };
+        let mut origin = None;
+        for (spec, paint, place) in forms {
+            // the first is set down beside what is there; the rest keep
+            // their distance from it
+            let at = origin.map(|o: [i32; 3]| [0, 1, 2].map(|k| o[k] + place[k] - first[k]));
+            self.add_form_at(spec, at);
             self.paint = paint;
-            // built now, so that the next one is set down clear of this one too
+            origin.get_or_insert(self.place);
             self.refresh(|| 0.0);
         }
     }
 
     fn snapshot(&self) -> Snapshot {
-        std::iter::once((self.full_spec(), self.paint.clone())).chain(self.others.iter().map(|i| (i.spec.clone(), i.paint.clone()))).collect()
+        std::iter::once((self.full_spec(), self.paint.clone(), self.place)).chain(self.others.iter().map(|i| (i.spec.clone(), i.paint.clone(), i.place))).collect()
     }
 
     /// Note the workspace if it has changed since it was last noted, as a
@@ -421,15 +437,16 @@ impl State {
     /// Put the workspace back as a snapshot has it.
     fn restore(&mut self, snapshot: Snapshot) {
         let mut forms = snapshot.clone().into_iter();
-        let Some((spec, paint)) = forms.next() else { return };
+        let Some((spec, paint, place)) = forms.next() else { return };
         self.others = forms
-            .map(|(spec, paint)| {
+            .map(|(spec, paint, place)| {
                 let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, built }
+                Item { bounds: bounds_of(&built), spec, paint, place, built }
             })
             .collect();
         self.load_spec(spec);
         self.paint = paint;
+        self.place = place;
         self.built_from = None;
         self.scene += 1;
         self.noted = snapshot;
@@ -462,10 +479,10 @@ impl State {
     /// Every brick in the workspace, with its colour and its form.
     pub fn painted(&self) -> Vec<Painted> {
         let mut all = Vec::new();
-        let forms = std::iter::once((&self.built, &self.paint, self.bounds)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds)));
-        for (form, (built, paint, bounds)) in forms.enumerate() {
+        let forms = std::iter::once((&self.built, &self.paint, self.bounds, self.place)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place)));
+        for (form, (built, paint, bounds, place)) in forms.enumerate() {
             let Some((lo, hi)) = bounds else { continue };
-            all.extend(built.bricks.iter().map(|b| (*b, paint.colour(b, lo, hi), form)));
+            all.extend(built.bricks.iter().map(|b| (*b, paint.colour(b, lo, hi), form, place)));
         }
         all
     }
@@ -701,11 +718,14 @@ impl State {
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
+        let standing = self.standing();
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
             CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
             _ => {}
         }
+        // where they are in the workspace, which is where they are drawn and dragged
+        all.iter_mut().for_each(|h| h.1 += standing);
         all
     }
 
@@ -739,6 +759,10 @@ impl State {
         let limit = HANDLE_LIMIT;
         let hit = hit.clamp(DVec3::splat(-limit), DVec3::splat(limit));
         let step = |v: f64| if self.fine_snap { snap(v) } else { v.floor() + 0.5 };
+        // the form's own points are where they would be if it stood at the origin
+        let standing = self.standing();
+        let (hit, at) = if handle == Handle::Move { (hit, at) } else { (hit - standing, at - standing) };
+        let _ = at;
         match handle {
             Handle::Point(i) => {
                 let mut to = DVec3::new(step(hit.x), step(hit.y), step(hit.z));
@@ -748,23 +772,22 @@ impl State {
                 self.spec.points[i] = to;
             }
             Handle::Move => {
-                // the whole form, by whole microbricks so that it stays on
-                // the grid it was fitted to
-                let mut by = DVec3::new((hit.x - at.x).round(), (hit.y - at.y).round(), (hit.z - at.z).round());
+                // The whole form, a unit at a time: half a cell. Only where
+                // it stands changes, so it is the same bricks wherever it is.
+                let mut by = [0, 1, 2].map(|k| ((hit[k] - at[k]) * 2.0).round() as i32);
                 if let Lock::Axis(a) = self.lock {
-                    by[a] = 0.0;
+                    by[a] = 0;
                 }
                 // not into another form: onto it or beside it
-                let Some(clear) = self.clear_of_others(by.to_array().map(|v| v as i32)) else { return };
-                by = DVec3::new(clear[0] as f64, clear[1] as f64, clear[2] as f64);
-                if by == DVec3::ZERO {
+                let Some(by) = self.clear_of_others(by) else { return };
+                if by == [0; 3] {
                     return;
                 }
-                for p in &mut self.spec.points {
-                    *p = (*p + by).clamp(DVec3::splat(-HANDLE_LIMIT), DVec3::splat(HANDLE_LIMIT));
-                }
+                let limit = (HANDLE_LIMIT * 2.0) as i32;
+                self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
+                self.scene += 1;
                 // what is held moves with the form
-                self.grab = Some(at + by);
+                self.grab = Some(at + DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64) / 2.0);
             }
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
@@ -817,22 +840,58 @@ impl State {
     }
 }
 
-/// Where a set of cells ends up if moved by `by`: there, if that is clear of
-/// `taken`, or else the nearest place straight up or straight out to one side
-/// that is. `None` if there is none within reach.
+/// A form's bricks where they stand: the cells of their boxes, and the
+/// form's place in units.
+struct Standing {
+    cells: std::collections::HashSet<[i32; 3]>,
+    place: [i32; 3],
+}
+
+impl Standing {
+    fn new(bricks: &[CellBrick], place: [i32; 3]) -> Standing {
+        Standing { cells: cells_of(bricks).collect(), place }
+    }
+
+    /// Whether any of `cells`, of a form standing at `place`, overlaps this one.
+    ///
+    /// The two forms' cells need not line up: one may stand an odd unit off
+    /// the other along any axis. A cell of the one then lies across two of
+    /// the other's along that axis, so up to eight are looked at for each.
+    /// Laying every cell out as eight unit cubes would line everything up
+    /// and take eight times the memory to say the same thing.
+    fn meets(&self, mut cells: impl Iterator<Item = [i32; 3]>, place: [i32; 3]) -> bool {
+        // in this form's units; a cell is two units along each axis
+        let off = [0, 1, 2].map(|k| place[k] - self.place[k]);
+        cells.any(|c| {
+            let low = [0, 1, 2].map(|k| 2 * c[k] + off[k]);
+            let first = low.map(|u| u.div_euclid(2));
+            let more = low.map(|u| u.rem_euclid(2));
+            (0..=more[2]).any(|z| (0..=more[1]).any(|y| (0..=more[0]).any(|x| self.cells.contains(&[first[0] + x, first[1] + y, first[2] + z]))))
+        })
+    }
+}
+
+/// Where a form's cells end up if moved by `by` units from `place`: there,
+/// if that is clear of the forms in `taken`, or else the nearest place
+/// straight up or straight out to one side that is. `None` if there is none
+/// within reach.
 ///
 /// Up or sideways and never down, so that a form brought down onto another
 /// comes to rest on top of it.
-fn way_out(mine: &[[i32; 3]], taken: &std::collections::HashSet<[i32; 3]>, by: [i32; 3]) -> Option<[i32; 3]> {
-    let hits = |shift: [i32; 3]| mine.iter().any(|c| taken.contains(&[c[0] + shift[0], c[1] + shift[1], c[2] + shift[2]]));
+fn way_out(mine: &[[i32; 3]], place: [i32; 3], taken: &[Standing], by: [i32; 3]) -> Option<[i32; 3]> {
+    let hits = |shift: [i32; 3]| {
+        let at = [0, 1, 2].map(|k| place[k] + shift[k]);
+        taken.iter().any(|t| t.meets(mine.iter().copied(), at))
+    };
     if !hits(by) {
         return Some(by);
     }
-    // no further than would lift or slide it clear of everything
+    // no further, in units, than would lift or slide it clear of everything
     let span = |k: usize| {
-        let all = taken.iter().map(|c| c[k]).chain(mine.iter().map(|c| c[k] + by[k]));
+        let theirs = taken.iter().flat_map(|t| t.cells.iter().map(move |c| 2 * c[k] + t.place[k]));
+        let all = theirs.chain(mine.iter().map(|c| 2 * c[k] + place[k] + by[k]));
         let (lo, hi) = all.fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
-        hi - lo + 1
+        hi - lo + 4
     };
     let furthest = span(0).max(span(1)).max(span(2));
     for d in 1..=furthest {
@@ -948,21 +1007,17 @@ mod tests {
         ball.spec.radius = 4.5;
         state.add_form(ball.full_spec());
         state.refresh(|| 0.0);
-        let shared = |state: &State| {
-            let mine: std::collections::HashSet<[i32; 3]> = cells_of(&state.built.bricks).collect();
-            cells_of(&state.others[0].built.bricks).filter(|c| mine.contains(c)).count()
-        };
-        assert_eq!(shared(&state), 0);
-        let (was, bricks) = (state.others[0].spec.points.clone(), state.others[0].built.bricks.len());
+        let overlap = |state: &State| Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place);
+        assert!(!overlap(&state));
+        let (was, bricks) = (state.others[0].place, state.others[0].built.bricks.clone());
         // grown until it would swallow half of the other
         state.spec.radius = 12.5;
         assert!(state.refresh(|| 0.0));
-        assert_eq!(shared(&state), 0, "the two share cells");
+        assert!(!overlap(&state), "the two overlap");
         let other = &state.others[0];
-        assert_ne!(other.spec.points, was, "the other form did not move");
-        // moved whole: the same bricks, and its points with them
-        assert_eq!(other.built.bricks.len(), bricks);
-        assert_eq!(build(&other.spec).unwrap().bricks, other.built.bricks);
+        assert_ne!(other.place, was, "the other form did not move");
+        // moved whole: only where it stands has changed
+        assert_eq!(other.built.bricks, bricks);
     }
 
     #[test]
@@ -1032,7 +1087,8 @@ mod tests {
         state.add_form(sphere.full_spec());
         assert!(state.refresh(|| 0.0));
         assert_eq!((state.form, state.others.len()), (SPHERE, 1));
-        assert!(state.bounds.unwrap().0[0] >= arch_right + 4, "the sphere overlaps the arch");
+        // (where it stands is in units, two to a cell)
+        assert!(2 * state.bounds.unwrap().0[0] + state.place[0] >= 2 * (arch_right + 4), "the sphere overlaps the arch");
         assert_eq!(state.paint, Paint::default(), "a new form starts with its own colouring");
 
         // every brick is there, each with its own form's colour
@@ -1049,23 +1105,30 @@ mod tests {
         assert!(!state.refresh(|| 0.0), "its bricks came with it");
         assert_eq!(state.others[0].spec, sphere_spec);
 
-        // moving a form moves all of it, by whole microbricks
+        // moving a form moves all of it, a unit (half a microbrick) at a time,
+        // and changes nothing about it but where it stands
         assert!(state.handles().iter().all(|(h, _)| *h != Handle::Move), "a form has no dot to move it by");
+        let bricks = state.built.bricks.clone();
         let at = state.spec.points[0] + DVec3::new(2.0, 0.0, 5.0);
         state.grab = Some(at);
         let eye = DVec3::new(0.0, -80.0, at.z);
         state.lock = Lock::Axis(1);
         state.drag(Handle::Move, eye, (at + DVec3::new(3.4, 0.0, 2.2) - eye).normalize(), DVec3::Y);
-        assert_eq!(state.spec.points[0] - arch.points[0], DVec3::new(3.0, 0.0, 2.0));
-        assert_eq!(state.spec.points[1] - arch.points[1], DVec3::new(3.0, 0.0, 2.0));
+        assert_eq!(state.place, [7, 0, 4], "3.4 and 2.2 cells, to the nearest unit");
+        assert_eq!(state.spec.points, arch.points);
+        assert!(!state.refresh(|| 0.0), "a move is no reason to fit the form again");
+        assert_eq!(state.built.bricks, bricks);
+        // its dots, and its bricks as drawn and sent, are where it now stands
+        assert_eq!(state.handles()[0].1, arch.points[0] + DVec3::new(3.5, 0.0, 2.0));
+        assert!(state.painted().iter().filter(|b| b.2 == 0).all(|b| b.3 == [7, 0, 4]));
         // and a second, smaller pull carries on from where the first left it
-        assert_eq!(state.grab, Some(at + DVec3::new(3.0, 0.0, 2.0)));
+        assert_eq!(state.grab, Some(at + DVec3::new(3.5, 0.0, 2.0)));
 
         // only a form with one size all round is resized by the wheel
         assert!(!state.resize(1.0), "an arch has no single size");
         // each of those changes can be taken back and made again
         state.record();
-        let moved = state.spec.points.clone();
+        let moved = state.place;
         state.spec.thick = 5.0;
         state.record();
         state.paint.colours = vec![[1, 2, 3]];
@@ -1073,7 +1136,7 @@ mod tests {
         assert!(state.undo());
         assert_eq!((state.spec.thick, state.paint.colours.clone()), (5.0, vec![[10, 20, 30]]));
         assert!(state.undo());
-        assert_eq!((state.spec.thick, state.spec.points.clone(), state.others.len()), (arch.thick, moved.clone(), 1));
+        assert_eq!((state.spec.thick, state.place, state.others.len()), (arch.thick, moved, 1));
         assert!(state.redo() && state.redo() && !state.redo());
         assert_eq!((state.spec.thick, state.paint.colours.clone()), (5.0, vec![[1, 2, 3]]));
         // choosing the other form to edit is not a step, and a new change forgets what was undone
@@ -1088,35 +1151,40 @@ mod tests {
         state.record();
         assert!(!state.redo());
         assert!(state.undo() && state.undo());
-        assert_eq!((state.spec.thick, state.spec.points.clone()), (arch.thick, moved));
+        assert_eq!((state.spec.thick, state.place), (arch.thick, moved));
+        // a move is a step of its own
+        state.place[0] += 3;
+        state.record();
+        assert!(state.undo());
+        assert_eq!(state.place, moved);
         state.refresh(|| 0.0);
 
         // dragged into the other form, it stops against it or comes to rest on it
         state.refresh(|| 0.0);
-        let other = state.others[0].bounds.unwrap();
-        let mine = state.bounds.unwrap();
-        let cells = |bricks: &[CellBrick]| -> std::collections::HashSet<[i32; 3]> { bricks.iter().flat_map(|b| (0..b.ext[2]).flat_map(move |z| (0..b.ext[1]).flat_map(move |y| (0..b.ext[0]).map(move |x| [b.min[0] + x, b.min[1] + y, b.min[2] + z])))).collect() };
-        let theirs = cells(&state.others[0].built.bricks);
-        // straight at the middle of it
-        // (the drag is in the plane facing the eye, so not along y)
-        let aim = [(other.0[0] + other.1[0]) / 2 - (mine.0[0] + mine.1[0]) / 2, 0, other.0[2] - mine.0[2]];
-        let before = state.spec.points.clone();
+        let overlap = |state: &State| Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place);
+        assert!(!overlap(&state));
+        // where each begins and ends in units, and so how far apart their middles are
+        let low = |b: Bounds, place: [i32; 3], k: usize| 2 * b.0[k] + place[k];
+        let middle = |b: Bounds, place: [i32; 3], k: usize| b.0[k] + b.1[k] + place[k];
+        let (other, theirs, mine, before) = (state.others[0].bounds.unwrap(), state.others[0].place, state.bounds.unwrap(), state.place);
+        // straight at the middle of it (the drag is in the plane facing the eye, so not along y)
+        let aim = [middle(other, theirs, 0) - middle(mine, before, 0), 0, low(other, theirs, 2) - low(mine, before, 2)];
         state.lock = Lock::Free;
-        let at = state.spec.points[0];
+        let at = state.handles()[0].1;
         state.grab = Some(at);
-        let target = at + DVec3::new(aim[0] as f64, aim[1] as f64, aim[2] as f64);
-        let eye = target + DVec3::new(0.0, -200.0, 0.0);
-        state.drag(Handle::Move, eye, DVec3::Y, DVec3::Y);
-        assert_ne!(state.spec.points, before, "it did not move at all");
-        state.refresh(|| 0.0);
-        let moved = cells(&state.built.bricks);
-        assert!(moved.is_disjoint(&theirs), "the two forms share {} cells", moved.intersection(&theirs).count());
+        let target = at + DVec3::new(aim[0] as f64, aim[1] as f64, aim[2] as f64) / 2.0;
+        state.drag(Handle::Move, target + DVec3::new(0.0, -200.0, 0.0), DVec3::Y, DVec3::Y);
+        assert_ne!(state.place, before, "it did not move at all");
+        assert!(!overlap(&state), "the two forms overlap");
         // not where it was aimed, which is inside the other, but up or aside from there
-        let went = (state.spec.points[0] - at).to_array().map(|v| v as i32);
+        let went = [0, 1, 2].map(|k| state.place[k] - before[k]);
         let off: Vec<i32> = (0..3).map(|k| went[k] - aim[k]).filter(|d| *d != 0).collect();
         assert!(off.len() == 1 && (went[2] - aim[2]) >= 0, "aimed {aim:?}, went {went:?}");
-        state.spec.points = before;
-        state.refresh(|| 0.0);
+        // resting on it or against it: one unit back the way it came would overlap
+        let back = (0..3).find(|&k| went[k] != aim[k]).unwrap();
+        state.place[back] -= (went[back] - aim[back]).signum();
+        assert!(overlap(&state), "it stopped short of the other form");
+        state.place = before;
 
         // removing the form being edited leaves the other; the last cannot go
         state.remove_active();

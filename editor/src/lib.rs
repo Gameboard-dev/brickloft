@@ -168,7 +168,9 @@ pub fn run_form(form: usize) {
             // is where the last frame left it, so while the view is turning
             // the rulers trail it by one frame.
             if let (true, Some((lo, hi))) = (state.show_ruler, state.bounds) {
-                ruler::draw(ui, &camera, frame.device_pixel_ratio, lo, hi);
+                // where the form stands, to the cell below
+                let stands = state.place.map(|u| u.div_euclid(2));
+                ruler::draw(ui, &camera, frame.device_pixel_ratio, [0, 1, 2].map(|k| lo[k] + stands[k]), [0, 1, 2].map(|k| hi[k] + stands[k]));
             }
         });
 
@@ -284,7 +286,7 @@ pub fn run_form(form: usize) {
         if rebuilt || first || shown_gap != state.floor_gap || shown_scene != state.scene {
             shown_gap = state.floor_gap;
             // the floor sits under the lowest brick of any form, less the gap asked for
-            let lowest = state.others.iter().filter_map(|i| i.bounds).chain(state.bounds).map(|(lo, _)| lo[2]).min().unwrap_or(0) as f32;
+            let lowest = state.others.iter().filter_map(|i| i.bounds.map(|b| 2 * b.0[2] + i.place[2])).chain(state.bounds.map(|b| 2 * b.0[2] + state.place[2])).min().unwrap_or(0) as f32 / 2.0;
             ground.set_transformation(Mat4::from_translation(vec3(0.0, 0.0, lowest - state.floor_gap as f32 - 0.02)) * Mat4::from_scale(600.0));
         }
         if rebuilt || first || shown_scene != state.scene {
@@ -294,10 +296,11 @@ pub fn run_form(form: usize) {
                 let mut instances = Instances::default();
                 let mut colours = Vec::new();
                 owner.clear();
-                for (b, colour, form) in bricks.iter().filter(|b| b.0.mask == mask) {
+                for (b, colour, form, place) in bricks.iter().filter(|b| b.0.mask == mask) {
                     // the mesh is a unit box at the origin: scale it to the
                     // brick's extent, then move it to the brick's corner
-                    let at = vec3(b.min[0] as f32, b.min[1] as f32, b.min[2] as f32);
+                    // (its form may stand an odd unit, half a cell, off the cells)
+                    let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
                     instances.transformations.push(Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32));
                     // a brick left to the player's colour in the game is
                     // shown in a neutral one; the forms not being edited

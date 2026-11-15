@@ -9,9 +9,8 @@
 //! own reader and writer of the format.
 
 use crate::paint::{Paint, MODES};
-use crate::state::Painted;
+use crate::state::{Painted, Placed};
 use arcs_core::report::{parse_spec, spec_text};
-use arcs_core::spec::Spec;
 use arcs_core::orient::{Models, Solver};
 use arcs_core::shapes::Kind;
 use brdb::{BString, Brick, BrickSize, BrickType, Color, Direction, Rotation, World};
@@ -45,21 +44,30 @@ const MAX_FILE: u64 = 64 << 20;
 /// were fitted to. With the forms written beside them, a file copied from
 /// the editor pastes back as forms that can still be reshaped, not as a
 /// fixed lump; the game ignores the description.
-fn describe(forms: &[(Spec, Paint)]) -> String {
+fn describe(forms: &[Placed]) -> String {
     let mut text = String::new();
-    for (spec, paint) in forms {
+    for (spec, paint, place) in forms {
         let mode = MODES.iter().position(|m| m.0 == paint.mode).unwrap_or(0);
         let colours: Vec<String> = paint.colours.iter().map(|c| format!("{},{},{}", c[0], c[1], c[2])).collect();
-        text += &format!("{FORM}\npaint {mode} {} {} {}\n{}", paint.axis, paint.width, colours.join(" "), spec_text(spec));
+        text += &format!("{FORM}\nplace {} {} {}\npaint {mode} {} {} {}\n{}", place[0], place[1], place[2], paint.axis, paint.width, colours.join(" "), spec_text(spec));
     }
     text
 }
 
 /// The reverse of [`describe`]. The text is from a file, which may be anyone's.
-fn forms_in(description: &str) -> Result<Vec<(Spec, Paint)>, String> {
+fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
     let mut forms = Vec::new();
     for part in description.split(FORM).skip(1) {
-        let (first, spec) = part.trim_start().split_once('\n').ok_or("a form in it is cut short")?;
+        // where it stands, in units; a file from before forms had a place has none
+        let part = part.trim_start();
+        let (place, part) = match part.strip_prefix("place ").and_then(|rest| rest.split_once('\n')) {
+            Some((line, rest)) => {
+                let units: Vec<i32> = line.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                (<[i32; 3]>::try_from(units).map_err(|_| "where a form stands cannot be read")?.map(|u| u.clamp(-800, 800)), rest)
+            }
+            None => ([0; 3], part),
+        };
+        let (first, spec) = part.split_once('\n').ok_or("a form in it is cut short")?;
         let mut words = first.strip_prefix("paint ").ok_or("a form in it has no colours")?.split_whitespace();
         let mut number = || words.next().and_then(|w| w.parse::<usize>().ok());
         let (Some(mode), Some(axis), Some(width)) = (number(), number(), number()) else { return Err("a form's colours cannot be read".into()) };
@@ -71,18 +79,18 @@ fn forms_in(description: &str) -> Result<Vec<(Spec, Paint)>, String> {
             .collect();
         let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
         let paint = Paint { mode: MODES.get(mode).ok_or("a form's colouring is not one this editor has")?.0, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
-        forms.push((parse_spec(spec)?, paint));
+        forms.push((parse_spec(spec)?, paint, place));
     }
     Ok(forms)
 }
 
 /// The bricks as a prefab, with the forms they were built from in its
 /// description. `Err` names the first brick that cannot be placed.
-pub fn prefab(bricks: &[Painted], forms: &[(Spec, Paint)]) -> Result<World, String> {
+pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
     let solver = Solver::new(&Models::default());
     let mut world = World::new();
     world.meta.bundle.description = describe(forms);
-    for (cell, colour, _) in bricks {
+    for (cell, colour, _, place) in bricks {
         let placed = solver.place(cell).ok_or_else(|| format!("no brick fits the piece at {:?}", cell.min))?;
         // a brick's size in the file is its half-extent in game units, which
         // for a microbrick is its size in cells
@@ -96,7 +104,8 @@ pub fn prefab(bricks: &[Painted], forms: &[(Spec, Paint)]) -> Result<World, Stri
         let rotation = [Rotation::Deg0, Rotation::Deg90, Rotation::Deg180, Rotation::Deg270][placed.orientation as usize % 4];
         world.bricks.push(Brick {
             asset: BrickType::Procedural { asset: BString::str(asset(placed.kind)), size: BrickSize { x, y, z } },
-            position: (placed.pos[0], placed.pos[1], placed.pos[2]).into(),
+            // a brick's centre in units: its cells', and where its form stands
+            position: (placed.pos[0] + place[0], placed.pos[1] + place[1], placed.pos[2] + place[2]).into(),
             direction,
             rotation,
             color: Color::new(r, g, b),
@@ -110,7 +119,7 @@ pub fn prefab(bricks: &[Painted], forms: &[(Spec, Paint)]) -> Result<World, Stri
 /// Write the workspace to `arcs-build.brz` beside where the editor was
 /// started, and put that file on the clipboard. Returns what to tell the
 /// player.
-pub fn copy(bricks: &[Painted], forms: &[(Spec, Paint)]) -> String {
+pub fn copy(bricks: &[Painted], forms: &[Placed]) -> String {
     if bricks.is_empty() {
         return "There are no bricks to copy.".into();
     }
@@ -149,7 +158,7 @@ fn place_on_clipboard(path: &std::path::Path) -> Result<(), String> {
 /// refused, naming them: the editor has no such bricks to show. One that
 /// holds only microbricks but was not copied from this editor is refused
 /// too, since it carries no forms.
-pub fn read(bytes: &[u8]) -> Result<Vec<(Spec, Paint)>, String> {
+pub fn read(bytes: &[u8]) -> Result<Vec<Placed>, String> {
     use brdb::{Brz, IntoReader};
     let file = Brz::read_slice(bytes).map_err(|e| format!("it is not a .brz file the editor can read ({e})"))?.into_reader();
     let data = file.global_data().map_err(|e| format!("its list of bricks cannot be read ({e})"))?;
@@ -171,7 +180,7 @@ pub fn read(bytes: &[u8]) -> Result<Vec<(Spec, Paint)>, String> {
 
 /// The forms in the .brz file on the clipboard. `Ok(None)` if what is on the
 /// clipboard is not a .brz file at all, which is nothing to complain about.
-pub fn paste() -> Result<Option<Vec<(Spec, Paint)>>, String> {
+pub fn paste() -> Result<Option<Vec<Placed>>, String> {
     let Some(path) = file_on_clipboard() else { return Ok(None) };
     let name = path.display();
     let size = std::fs::metadata(&path).map_err(|e| format!("{name} cannot be read: {e}"))?.len();
@@ -205,6 +214,7 @@ fn place_on_clipboard(_: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arcs_core::spec::Spec;
     use arcs_core::shapes::{all_masks, CellBrick};
     use brdb::{BrFsReader, Brz, IntoReader};
 
@@ -216,20 +226,21 @@ mod tests {
             .enumerate()
             .map(|(i, mask)| {
                 let i = i as i32;
-                (CellBrick { mask, min: [i * 7, -3, i % 4], ext: [1 + i % 3, 2, 1 + i % 2] }, (i % 2 == 0).then_some([200, 10, i as u8]), 0)
+                (CellBrick { mask, min: [i * 7, -3, i % 4], ext: [1 + i % 3, 2, 1 + i % 2] }, (i % 2 == 0).then_some([200, 10, i as u8]), 0, [i % 3, 0, -(i % 2)])
             })
             .collect();
         let arch = Spec { points: vec![arcs_core::DVec3::new(-7.5, 0.5, 0.5), arcs_core::DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, flip: [false, true, false], ..Spec::default() };
         let blend = Paint { mode: crate::paint::Mode::Stripes, colours: vec![[1, 2, 3], [250, 0, 9]], axis: 0, width: 3 };
-        let forms = vec![(arch, blend), (Spec { form: arcs_core::spec::Form::Sphere, points: vec![arcs_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default())];
+        let forms = vec![(arch, blend, [3, 0, -1]), (Spec { form: arcs_core::spec::Form::Sphere, points: vec![arcs_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default(), [0; 3])];
         let world = prefab(&bricks, &forms).unwrap();
         assert_eq!(world.bricks.len(), 53);
         assert_eq!(world.meta.bundle.level_type, "Prefab");
         let solver = Solver::new(&Models::default());
-        for (brick, (cell, colour, _)) in world.bricks.iter().zip(&bricks) {
+        for (brick, (cell, colour, _, place)) in world.bricks.iter().zip(&bricks) {
             let placed = solver.place(cell).unwrap();
             assert_eq!(brdb::orientation_to_byte(brick.direction, brick.rotation), placed.orientation, "{cell:?}");
-            assert_eq!((brick.position.x, brick.position.y, brick.position.z), (placed.pos[0], placed.pos[1], placed.pos[2]));
+            // its cells' middle in units, and where its form stands
+            assert_eq!((brick.position.x, brick.position.y, brick.position.z), (placed.pos[0] + place[0], placed.pos[1] + place[1], placed.pos[2] + place[2]));
             let [r, g, b] = colour.unwrap_or(UNPAINTED);
             assert_eq!((brick.color.r, brick.color.g, brick.color.b), (r, g, b));
             let BrickType::Procedural { asset: name, size } = &brick.asset else { panic!("{cell:?} is not a sized brick") };
@@ -256,7 +267,7 @@ mod tests {
         assert!(read(&bare.to_brz_vec().unwrap()).unwrap_err().contains("not copied from this editor"));
         assert!(read(b"not a brz").is_err());
         // a piece no single brick can be is refused, not written wrong
-        let odd = (CellBrick { mask: 0b0000_1001, min: [0; 3], ext: [1; 3] }, None, 0);
+        let odd = (CellBrick { mask: 0b0000_1001, min: [0; 3], ext: [1; 3] }, None, 0, [0; 3]);
         assert!(prefab(&[odd], &[]).err().unwrap().contains("no brick fits"));
     }
 }

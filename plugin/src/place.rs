@@ -130,17 +130,18 @@ impl Colours {
     }
 }
 
-/// Place `bricks` (cell space, relative to the anchor) for `player`.
-pub fn place(rpc: &Rpc, config: &Config, player: &str, origin: [i64; 3], bricks: &[CellBrick], colours: &Colours) -> Result<Outcome, String> {
+/// Place `bricks` for `player`: each in cells relative to the anchor, with
+/// the odd unit along each axis that cells cannot hold (see `orient::from_wire`).
+pub fn place(rpc: &Rpc, config: &Config, player: &str, origin: [i64; 3], bricks: &[(CellBrick, [i32; 3])], colours: &Colours) -> Result<Outcome, String> {
     let solver = Solver::new(&config.models);
     let mut flat = Vec::with_capacity(bricks.len() * FIELDS);
-    for (i, b) in bricks.iter().enumerate() {
+    for (i, (b, odd)) in bricks.iter().enumerate() {
         let p = solver.place(b).ok_or_else(|| {
             format!("no orientation of the configured assets makes shape {:#04x}; check the mask-* settings against /arc calibrate", b.mask)
         })?;
         // 1-based asset index, as Lua counts
         let colour = colours.paint.get(i).copied().unwrap_or(0) as i64;
-        flat.extend([p.kind as i64 + 1, p.size[0] as i64, p.size[1] as i64, p.size[2] as i64, p.pos[0] as i64, p.pos[1] as i64, p.pos[2] as i64, p.orientation as i64, colour]);
+        flat.extend([p.kind as i64 + 1, p.size[0] as i64, p.size[1] as i64, p.size[2] as i64, (p.pos[0] + odd[0]) as i64, (p.pos[1] + odd[1]) as i64, (p.pos[2] + odd[2]) as i64, p.orientation as i64, colour]);
     }
 
     // the player's current paint, or white plastic if it can't be read

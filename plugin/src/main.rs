@@ -59,7 +59,7 @@ fn command(shared: &Shared, player: &str, args: &[String]) {
             }
         },
         Some("calibrate") => {
-            let bricks = place::calibration(&shared.config.models);
+            let bricks: Vec<_> = place::calibration(&shared.config.models).into_iter().map(|b| (b, [0; 3])).collect();
             let result = place::anchor(rpc, player).and_then(|at| place::place(rpc, &shared.config, player, at, &bricks, &place::Colours::default()));
             match result {
                 Ok(o) => rpc.whisper(

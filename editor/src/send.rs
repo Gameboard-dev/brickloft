@@ -24,7 +24,7 @@ pub fn body(token: &str, bricks: &[Painted]) -> Option<String> {
     let mut palette: Vec<[u8; 3]> = Vec::new();
     let paint: Vec<String> = bricks
         .iter()
-        .map(|(_, colour, _)| match colour {
+        .map(|(_, colour, _, _)| match colour {
             None => 0,
             Some(c) => 1 + palette.iter().position(|p| p == c).unwrap_or_else(|| {
                 palette.push(*c);
@@ -33,7 +33,7 @@ pub fn body(token: &str, bricks: &[Painted]) -> Option<String> {
         })
         .map(|i| i.to_string())
         .collect();
-    let cells: Vec<CellBrick> = bricks.iter().map(|b| b.0).collect();
+    let cells: Vec<(CellBrick, [i32; 3])> = bricks.iter().map(|b| (b.0, b.3)).collect();
     let flat: Vec<String> = palette.iter().flatten().map(|v| v.to_string()).collect();
     Some(format!("{{\"token\":\"{token}\",\"bricks\":{},\"palette\":[{}],\"paint\":[{}]}}", to_wire(&cells), flat.join(","), paint.join(",")))
 }
@@ -156,14 +156,17 @@ mod tests {
     #[test]
     fn body_takes_only_hex_tokens() {
         let brick = CellBrick { mask: 0xff, min: [0, 0, 0], ext: [1, 1, 1] };
-        let plain: Painted = (brick, None, 0);
+        let plain: Painted = (brick, None, 0, [0; 3]);
         assert_eq!(body("0a1B", &[plain]).unwrap(), r#"{"token":"0a1B","bricks":[255,0,0,0,1,1,1],"palette":[],"paint":[0]}"#);
         for bad in ["", "abc\"", "ab cd", "x", "a\",\"bricks\":[]"] {
             assert_eq!(body(bad, &[plain]), None, "{bad}");
         }
+        // a form standing an odd unit off is sent a unit on from its cells
+        let moved: Painted = (CellBrick { mask: 0xff, min: [3, -2, 0], ext: [1, 2, 1] }, None, 0, [1, 0, -3]);
+        assert!(body("ab", &[moved]).unwrap().contains(r#""bricks":[255,7,-4,-3,1,2,1]"#));
         // each colour is in the palette once, however many bricks use it
         let (red, blue) = (Some([200, 0, 0]), Some([0, 0, 200]));
-        let coloured: Vec<Painted> = [red, None, blue, red].into_iter().map(|c| (brick, c, 0)).collect();
+        let coloured: Vec<Painted> = [red, None, blue, red].into_iter().map(|c| (brick, c, 0, [0; 3])).collect();
         let text = body("ab", &coloured).unwrap();
         assert!(text.ends_with(r#""palette":[200,0,0,0,0,200],"paint":[1,0,2,1]}"#), "{text}");
     }

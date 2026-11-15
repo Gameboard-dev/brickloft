@@ -43,7 +43,8 @@ written in Rust, in four parts:
 **Workspace** holds several forms at once. Add a copy of the one being
 edited, add a saved form (its Add button, or drag it from the list onto the
 view), and click a form in the view to edit it. Drag a form by its bricks to
-move it. Forms never share a cell: one dragged into another stops beside it
+move it: it moves one game unit at a time (half a microbrick), snapped to the
+brick grid, and stays the same bricks wherever it stands. Forms never share a cell: one dragged into another stops beside it
 or comes to rest on top of it, and one reshaped until it reaches another
 pushes that one away.
 
