@@ -317,6 +317,7 @@ pub fn fit_planar_towards(
             far_corner,
             reach,
             solid: &solid,
+            rows: row_counts(&solid, w, h),
             sat: &sat,
             solid_sat: &solid_sat,
             corner: &corner,
@@ -711,6 +712,8 @@ struct Search<'a> {
     /// how far in the narrower outline is, in cells (0 if there is none)
     reach: i32,
     solid: &'a [u64],
+    /// running counts of the solid's samples along each sample row; see [`row_counts`]
+    rows: Option<Vec<u32>>,
     /// summed-area table of the unit pieces' errors
     sat: &'a [i64],
     /// the solid's value at each lattice point
@@ -808,7 +811,11 @@ impl Search<'_> {
                 w: dx.abs(),
                 h: dy.abs(),
             };
-            (piece, triangle_error(&piece, corner, self.solid, self.w))
+            let wrong = match &self.rows {
+                Some(rows) => triangle_error_by_rows(&piece, corner, rows, self.w),
+                None => triangle_error(&piece, corner, self.solid, self.w),
+            };
+            (piece, wrong)
         };
         let result = if (value(c1) - value(c2)).abs() > 1e-9 {
             Some(make(if value(c1) < value(c2) { c1 } else { c2 }))
@@ -1238,6 +1245,61 @@ fn outlines(shape: &[u8], w: usize, h: usize) -> (Vec<Vec<(i32, i32)>>, HashSet<
     (loops, touching)
 }
 
+/// Most cells a grid may have for [`row_counts`] to be kept: 256 bytes a
+/// cell, so about 64 MB at this limit.
+const ROW_COUNT_CELLS: usize = 250_000;
+
+/// For each row of samples, how many of the solid's samples lie before each
+/// position along it: `K * h` rows of `K * w + 1` counts.
+///
+/// With these a triangle is measured in one step per sample row instead of
+/// one per cell of the row (see [`triangle_error_by_rows`]). A large curve
+/// has triangles tens of cells across, and measuring them cell by cell was
+/// nine tenths of the time a large flat arch took to fit.
+/// https://en.wikipedia.org/wiki/Prefix_sum
+///
+/// `None` for a grid too large to keep them for; it is then measured the
+/// slow way.
+fn row_counts(solid: &[u64], w: usize, h: usize) -> Option<Vec<u32>> {
+    if w * h > ROW_COUNT_CELLS {
+        return None;
+    }
+    let across = K * w + 1;
+    let mut counts = vec![0u32; across * K * h];
+    for y in 0..h {
+        for sy in 0..K {
+            let row = &mut counts[(y * K + sy) * across..(y * K + sy + 1) * across];
+            for x in 0..w {
+                let bits = (solid[x + y * w] >> (sy * K)) as u8;
+                for sx in 0..K {
+                    row[x * K + sx + 1] = row[x * K + sx] + (bits >> sx & 1) as u32;
+                }
+            }
+        }
+    }
+    Some(counts)
+}
+
+/// [`triangle_error`] from [`row_counts`]: the same number, found a sample
+/// row at a time.
+///
+/// In each row the triangle covers one run of samples. What it gets wrong
+/// there is the samples of its run the solid lacks, and the solid's samples
+/// in the rest of the box's row; both are differences of two counts.
+fn triangle_error_by_rows(p: &Piece, corner: u8, rows: &[u32], w: usize) -> u32 {
+    let (nx, ny) = (p.w as usize * K, p.h as usize * K);
+    let across = K * w + 1;
+    let mut error = 0;
+    for sy in 0..ny {
+        let (lo, hi) = row_span(corner, sy, nx, ny);
+        let at = (p.y as usize * K + sy) * across + p.x as usize * K;
+        let in_run = rows[at + hi.max(lo)] - rows[at + lo];
+        let in_box = rows[at + nx] - rows[at];
+        error += (hi.saturating_sub(lo) as u32 - in_run) + (in_box - in_run);
+    }
+    error
+}
+
 /// How many samples in the triangle's box disagree with the solid. `corner`
 /// is its right-angle corner, `cx | cy<<1`.
 ///
@@ -1268,6 +1330,35 @@ fn triangle_error(p: &Piece, corner: u8, solid: &[u64], w: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_triangle_measures_the_same_by_rows_as_by_cells() {
+        // a solid with no pattern to it, and every triangle that fits in it
+        let (w, h) = (9, 7);
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let solid: Vec<u64> = (0..w * h)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed
+            })
+            .collect();
+        let rows = row_counts(&solid, w, h).unwrap();
+        let mut tried = 0;
+        for corner in 0..4u8 {
+            for (x, y, pw, ph) in (0..w as i32).flat_map(|x| (0..h as i32).flat_map(move |y| (1..=5).flat_map(move |pw| (1..=5).map(move |ph| (x, y, pw, ph))))) {
+                if x + pw > w as i32 || y + ph > h as i32 {
+                    continue;
+                }
+                let piece = Piece { mask: 15 & !(1 << (corner ^ 3)), x, y, w: pw, h: ph };
+                assert_eq!(triangle_error_by_rows(&piece, corner, &rows, w), triangle_error(&piece, corner, &solid, w), "{piece:?}");
+                tried += 1;
+            }
+        }
+        assert!(tried > 2000);
+    }
+
     use std::f64::consts::PI;
 
     fn no_overlap(pieces: &[Piece]) {

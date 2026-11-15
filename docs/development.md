@@ -105,6 +105,29 @@ The two thin shells are over budget: see "Limits" in
 
 ## Where the time goes, and what was done about it
 
+Measured again after the changes below (release build, brick size 1), as
+the editor builds while a form is being dragged, and in full:
+
+| Form | Dragging | Let go (measured) |
+|---|---|---|
+| Flat arch, span 320 | 156 ms | 156 ms (was 1,250 ms) |
+| Arch as a pipe, span 320 | 33 ms | 127 ms |
+| Ring as a pipe, radius 80 | 41 ms | 175 ms |
+| Solid sphere, radius 80 | 7 ms | 295 ms (was 51,000 bricks, now 3,400) |
+
+- **Triangles are measured a sample row at a time**, from running counts
+  along each row, not a cell at a time across their whole box. On a large
+  flat arch that was nine tenths of the time.
+- **A form laid out whole is measured only once the mouse is let go.**
+  Measuring a sphere or a pipe against its form takes several times as long
+  as building it, and while dragging only the bricks are wanted.
+- **Measuring has no record to keep**, so its limit is the build's own. The
+  report's 16 bytes a cell had capped it at 4 million cells, and a sphere
+  over 78 in radius was fitted cell by cell for want of a measurement.
+
+Still slow: a thin hollow sphere above about radius 45 is fitted cell by
+cell (see how-it-fits.md), half a second at radius 80 and several at 160.
+
 - **Volume fitter:** the form is tested once per 8 × 8 × 8 block of cells;
   blocks wholly inside or outside are never sampled. Each remaining cell's 64
   samples are one `u64`, compared with each candidate shape by XOR and a

@@ -278,6 +278,8 @@ pub fn run_form(form: usize) {
         }
 
         // rebuild only when the spec changed; a frame with nothing new costs nothing
+        // dragging a dot or a form in the view, or anything in the panel
+        state.busy = dragging.is_some() || gui.context().input(|i| i.pointer.any_down());
         let rebuilt = state.refresh(now_ms);
         if rebuilt || first || shown_gap != state.floor_gap || shown_scene != state.scene {
             shown_gap = state.floor_gap;

@@ -249,6 +249,28 @@ pub fn analyse(spec: &Spec, built: &Built) -> Result<Analysis, String> {
 
 /// [`analyse`] against a form already in hand.
 pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
+    scan(probe, built, true)
+}
+
+/// Most cells [`measure`] will look at: 4 bytes each.
+const MAX_MEASURE_CELLS: usize = 32_000_000;
+
+/// How well bricks fit a form, as the form's volume and the volume where the
+/// two disagree, without the cell-by-cell record [`analyse_probe`] keeps.
+///
+/// That record is 16 bytes and more a cell and is only wanted for a report.
+/// Building needs just the two numbers, and needs them for forms far larger
+/// than a report would be read for: with the record's limit in the way, a
+/// sphere over 78 cells in radius could not be measured, and so was fitted
+/// cell by cell after all, as fifty thousand bricks instead of five hundred.
+pub(crate) fn measure(probe: &Probe, built: &Built) -> Result<(f64, f64), String> {
+    let found = scan(probe, built, false)?;
+    Ok((found.form_volume, found.missing + found.extra))
+}
+
+/// The bricks against the form, cell by cell. `keep` says whether to keep
+/// what was found in each cell, for a report, or only the totals.
+fn scan(probe: &Probe, built: &Built, keep: bool) -> Result<Analysis, String> {
     if built.bricks.is_empty() {
         return Err("there are no bricks to analyse".into());
     }
@@ -266,8 +288,9 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
     });
     let dims = [0, 1, 2].map(|i| (max[i] - min[i]) as usize);
     let count = dims[0] * dims[1] * dims[2];
-    if count > MAX_ANALYSIS_CELLS {
-        return Err(format!("the build spans {count} cells, too many to analyse cell by cell (the limit is {MAX_ANALYSIS_CELLS})"));
+    let limit = if keep { MAX_ANALYSIS_CELLS } else { MAX_MEASURE_CELLS };
+    if count > limit {
+        return Err(format!("the build spans {count} cells, too many to analyse cell by cell (the limit is {limit})"));
     }
     let index = |c: [i32; 3]| {
         (c[0] - min[0]) as usize
@@ -292,9 +315,31 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
             (s / (K * K)) as f64 + 0.5,
         ) / K as f64
     };
-    let (mut form_bits, mut brick_bits) = (vec![0u64; count], vec![0u64; count]);
+    let kept = if keep { count } else { 0 };
+    let (mut form_bits, mut brick_bits) = (vec![0u64; kept], vec![0u64; kept]);
+    let mut inside = 0u64;
     let (mut missing, mut extra) = (0u64, 0u64);
     let mut cells = Vec::new();
+    // The form is asked about once for each block of cells before any cell
+    // in it: where the block's middle is further from the surface than its
+    // own corners are, every cell in it is wholly in or wholly out, and
+    // none of them is asked about at all. Most of a solid's box is such
+    // blocks; asking about every cell's middle was four fifths of the time
+    // a large sphere took to build, the fitting itself a fiftieth.
+    const BLOCK: i32 = 8;
+    let blocks = [0, 1, 2].map(|k| (dims[k] as i32 + BLOCK - 1) / BLOCK);
+    let mut far = vec![0i8; (blocks[0] * blocks[1] * blocks[2]) as usize];
+    for bz in 0..blocks[2] {
+        for by in 0..blocks[1] {
+            for bx in 0..blocks[0] {
+                let middle = DVec3::new((min[0] + bx * BLOCK) as f64, (min[1] + by * BLOCK) as f64, (min[2] + bz * BLOCK) as f64) + BLOCK as f64 / 2.0;
+                let d = probe.distance(middle);
+                // half the block's diagonal, and a cell's own half diagonal beyond it
+                let reach = BLOCK as f64 * 0.867 + 0.87;
+                far[(bx + blocks[0] * (by + blocks[1] * bz)) as usize] = if d > reach { 1 } else if d < -reach { -1 } else { 0 };
+            }
+        }
+    }
     for z in min[2]..max[2] {
         for y in min[1]..max[1] {
             for x in min[0]..max[0] {
@@ -303,7 +348,12 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
                 let corner = DVec3::new(x as f64, y as f64, z as f64);
                 // a cell whose centre is further from the surface than its
                 // corners are from its centre is wholly in or out
-                let centre = probe.distance(corner + 0.5);
+                let block = far[((x - min[0]) / BLOCK + blocks[0] * ((y - min[1]) / BLOCK + blocks[1] * ((z - min[2]) / BLOCK))) as usize];
+                let centre = match block {
+                    1 => f64::INFINITY,
+                    -1 => f64::NEG_INFINITY,
+                    _ => probe.distance(corner + 0.5),
+                };
                 // `edge` marks the samples that lie on the form's surface itself
                 let (form, edge) = if centre > 0.87 {
                     (0, 0)
@@ -336,14 +386,20 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
                 // for the samples on that face, and a pyramid built exactly
                 // measured 5% wrong.
                 let form = (form & !edge) | (bricks & edge);
-                form_bits[i] = form;
-                brick_bits[i] = bricks;
+                inside += form.count_ones() as u64;
+                if keep {
+                    form_bits[i] = form;
+                    brick_bits[i] = bricks;
+                }
                 let wrong = (form ^ bricks).count_ones();
                 if wrong == 0 {
                     continue;
                 }
                 missing += (form & !bricks).count_ones() as u64;
                 extra += (bricks & !form).count_ones() as u64;
+                if !keep {
+                    continue;
+                }
                 let &(best, pattern) = patterns()
                     .iter()
                     .min_by_key(|(_, p)| (form ^ p).count_ones())
@@ -369,7 +425,7 @@ pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
     }
     cells.sort_by_key(|c| (std::cmp::Reverse(c.wrong), c.at));
     let per = SAMPLES as f64;
-    let form_volume = form_bits.iter().map(|b| b.count_ones() as f64).sum::<f64>() / per;
+    let form_volume = inside as f64 / per;
     Ok(Analysis {
         missing: missing as f64 / per,
         extra: extra as f64 / per,

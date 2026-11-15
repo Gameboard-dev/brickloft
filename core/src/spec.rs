@@ -125,7 +125,7 @@ pub struct Built {
     /// the brick size it was fitted at, in cells
     pub grain: i32,
     /// `solid` and `error` are still to be measured (see `build_at`)
-    pub(crate) unmeasured: bool,
+    pub unmeasured: bool,
 }
 
 /// The furthest apart, in cells, a form's points may be, and the largest its
@@ -169,6 +169,19 @@ impl Spec {
 /// Build a form. The spec is snapped to the unit grid first (see
 /// [`Spec::snapped`]), so nothing off the grid can reach the fitters.
 pub fn build(spec: &Spec) -> Result<Built, String> {
+    build_as(spec, true)
+}
+
+/// [`build`], with the choice of leaving the fit unmeasured.
+///
+/// Forms laid out whole (spheres, pipes, pyramids) are measured against the
+/// form after they are built, and for those the measuring takes several
+/// times as long as the building: four fifths of a large sphere's time.
+/// While a form is being dragged only its bricks are wanted, many times a
+/// second, so the editor builds unmeasured then and measures once when the
+/// mouse is let go. An unmeasured build has `unmeasured` set and its `solid`
+/// and `error` at 0.
+pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
     if !(spec.thick > 0.0) || spec.depth < 1 || !(spec.radius > 0.0) || spec.max_ext < 1 {
         return Err("thickness, depth and radius must all be positive".into());
     }
@@ -186,7 +199,7 @@ pub fn build(spec: &Spec) -> Result<Built, String> {
         return Err(format!("the form is too large to build: nothing may be more than {MAX_SPAN} microbricks across; bring its points closer together"));
     }
     if spec.grain > 0 {
-        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]));
+        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured);
     }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
@@ -197,7 +210,7 @@ pub fn build(spec: &Spec) -> Result<Built, String> {
     let mut last_error = None;
     let limit = spec.snapped().coarsest_grain();
     for &grain in GRAINS.iter().rev().filter(|g| **g <= limit) {
-        match build_at(spec, grain) {
+        match build_at(spec, grain, measured) {
             Ok(built) if built.bricks.is_empty() => {} // too coarse to hold the form at all
             Ok(built) => {
                 let over = built.bricks.len() > spec.budget;
@@ -287,12 +300,12 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
     })
 }
 
-fn build_at(spec: &Spec, grain: i32) -> Result<Built, String> {
+fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
     let g = grain.max(1) as f64;
     let coarse = coarse(spec, grain);
     let (solid, path) = solid(&coarse)?;
     let mut built = fit(&coarse, &solid, path, g);
-    if built.unmeasured && !built.bricks.is_empty() {
+    if built.unmeasured && measured && !built.bricks.is_empty() {
         // Bricks laid out as a whole, not cell by cell against the form, come
         // with no figure for how well they fit it. Measure them against the
         // form itself. A build too large to measure that way is fitted cell
@@ -301,10 +314,10 @@ fn build_at(spec: &Spec, grain: i32) -> Result<Built, String> {
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::analyse_probe(&Probe::of(solid), &built) {
-            Ok(measured) => {
-                built.solid = measured.form_volume;
-                built.error = measured.missing + measured.extra;
+        match crate::report::measure(&Probe::of(solid), &built) {
+            Ok((volume, wrong)) => {
+                built.solid = volume;
+                built.error = wrong;
             }
             Err(e) => match field {
                 Some(field) => {

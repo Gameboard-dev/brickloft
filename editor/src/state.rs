@@ -183,6 +183,8 @@ pub struct State {
     pub folders: Vec<String>,
     pub forms: Vec<String>,
     built_from: Option<Spec>,
+    /// whether a dot, a form or a slider is being dragged this frame
+    pub busy: bool,
     /// the workspace as it was before each change, oldest first, and after
     /// each change undone, for Ctrl+Z and Ctrl+Y
     undone: Vec<Snapshot>,
@@ -238,6 +240,7 @@ impl State {
             folders: Vec::new(),
             forms: Vec::new(),
             built_from: None,
+            busy: false,
             undone: Vec::new(),
             redone: Vec::new(),
             noted: Vec::new(),
@@ -658,11 +661,15 @@ impl State {
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
         let spec = self.full_spec();
-        if self.built_from.as_ref() == Some(&spec) {
+        // Built while something was being dragged, a form is left unmeasured
+        // (see `arcs_core::spec::build_as`): once the mouse is let go it is
+        // built again, measured this time.
+        let owed = self.built.unmeasured && !self.busy;
+        if self.built_from.as_ref() == Some(&spec) && !owed {
             return false;
         }
         let start = now_ms();
-        match build(&spec) {
+        match arcs_core::spec::build_as(&spec, !self.busy) {
             Ok(built) => {
                 // worked out once per build, not once per frame
                 self.bounds = bounds_of(&built);
@@ -904,6 +911,28 @@ mod tests {
         arc.points.insert(1, cell(0.0, 0.0, 6.0));
         state.load_spec(arc);
         assert_eq!((state.form, state.spec.points.len()), (ARCH, 3));
+    }
+
+    #[test]
+    fn a_form_is_measured_once_the_mouse_is_let_go() {
+        let mut state = State::new();
+        state.form = SPHERE;
+        state.preset();
+        state.refresh(|| 0.0);
+        assert!(state.built.solid > 0.0 && !state.built.unmeasured);
+        // dragged: bricks, and no measurement
+        state.busy = true;
+        state.spec.radius += 2.0;
+        assert!(state.refresh(|| 0.0));
+        assert!(state.built.unmeasured && state.built.solid == 0.0 && !state.built.bricks.is_empty());
+        let bricks = state.built.bricks.clone();
+        assert!(!state.refresh(|| 0.0), "nothing changed, and it is still being dragged");
+        // let go: the same bricks, measured
+        state.busy = false;
+        assert!(state.refresh(|| 0.0));
+        assert!(!state.built.unmeasured && state.built.solid > 0.0 && state.built.error > 0.0);
+        assert_eq!(state.built.bricks, bricks);
+        assert!(!state.refresh(|| 0.0));
     }
 
     #[test]
