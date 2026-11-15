@@ -2,11 +2,31 @@
 //! `cargo run --release -p arcs-core --example timing`
 
 use arcs_core::curves::ArchType;
-use arcs_core::spec::{build, Form, Spec};
+use arcs_core::spec::{build, build_as, Form, Spec};
 use arcs_core::DVec3;
 use std::time::Instant;
 
 fn main() {
+    // `-- <a saved report> [scale]`: time the form in that report instead,
+    // measured and unmeasured, at its own size or so many times larger
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(path) = args.first() {
+        let text = std::fs::read_to_string(path).expect("the report could not be read");
+        let mut spec = arcs_core::report::parse_spec(&text).expect("no form in the report");
+        let scale: f64 = args.get(1).map_or(1.0, |s| s.parse().expect("the scale is not a number"));
+        let about = spec.points[0];
+        for p in &mut spec.points {
+            *p = about + (*p - about) * scale;
+        }
+        (spec.radius, spec.thick) = (spec.radius * scale, spec.thick * scale);
+        for measured in [true, false] {
+            let start = Instant::now();
+            let built = build_as(&spec, measured).expect("it does not build");
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            println!("{} {ms:>8.1}ms {:>7} bricks {:>6.2}%", if measured { "measured  " } else { "unmeasured" }, built.bricks.len(), 100.0 * built.error / built.solid.max(1e-9));
+        }
+        return;
+    }
     let at = |x: f64, y: f64, z: f64| DVec3::new(x + 0.5, y + 0.5, z + 0.5);
     let arch = |half: f64| Spec {
         form: Form::Arch(ArchType::Round),

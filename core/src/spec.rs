@@ -368,7 +368,18 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
     let g = grain.max(1) as f64;
     let coarse = coarse(spec, grain);
     let (solid, path) = solid(&coarse)?;
-    let mut built = fit(&coarse, &solid, path, g);
+    // A turned form is laid out two ways and the closer kept, which means
+    // measuring both. Unmeasured, it is laid out one way only: what is on
+    // screen during a drag may then change a little when the mouse is let
+    // go, for a drag several times as quick.
+    let quick = match &solid {
+        Solid::Lathe { .. } if !measured => [false, true].into_iter().find_map(|short_sides| turned(&coarse, &solid, g, short_sides)),
+        _ => None,
+    };
+    let mut built = match quick {
+        Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true },
+        None => fit(&coarse, &solid, path, g),
+    };
     if coarse.symmetric && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
@@ -984,6 +995,15 @@ fn volume(
 /// `g` squared: deliberately not by the volume its depth gives each piece,
 /// since depth only pushes the outline through the grid and making the form
 /// deeper must not change how its outline is fitted.
+/// A turned form laid out one of the two ways `fit_lathe` knows; `None` if
+/// `solid` is not one or cannot be laid out so.
+fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool) -> Option<Vec<CellBrick>> {
+    let Solid::Lathe { profile, axis, far, low, high, .. } = solid else { return None };
+    let section = |out: f64, up: f64| profile.eval(DVec2::new(out, up));
+    let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext };
+    fit_lathe(&lathe).filter(|_| spec.wedges)
+}
+
 fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
     match solid {
         Solid::Volume { field, min, max } => {
@@ -1002,19 +1022,21 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 unmeasured: false,
             }
         }
-        Solid::Lathe { profile, axis, far, low, high, field, min, max } => {
-            let section = |out: f64, up: f64| profile.eval(DVec2::new(out, up));
+        Solid::Lathe { field, min, max, .. } => {
             // Laid out both ways `fit_lathe` knows, and the closer kept: which
             // way suits depends on the form (a straight cone one, a thin
             // curved wall the other), and measuring both is cheaper than a
             // rule that would have to guess.
+            let mut seen = crate::report::Seen::new();
+            let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
             let ways = [false, true].map(|short_sides| {
-                let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext };
-                let bricks = fit_lathe(&lathe).filter(|_| spec.wedges)?;
+                let bricks = turned(spec, solid, g, short_sides)?;
                 let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true };
-                let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
-                if let Ok(measured) = crate::report::analyse_probe(&form, &built) {
-                    (built.solid, built.error, built.unmeasured) = (measured.form_volume, measured.missing + measured.extra, false);
+                // The two totals only: the record a report keeps of every
+                // cell took most of the time here, and was thrown away. And
+                // what the form holds of each cell is asked once for both.
+                if let Ok((volume, wrong)) = crate::report::measure_with(&form, &built, &mut seen) {
+                    (built.solid, built.error, built.unmeasured) = (volume, wrong, false);
                 }
                 Some(built)
             });
@@ -1970,6 +1992,14 @@ mod tests {
         // the same all the way round: mirrored in x and in y, and with the two exchanged
         let cells: HashSet<[i32; 3]> = built.bricks.iter().flat_map(|b| (0..b.ext[0]).flat_map(move |x| (0..b.ext[1]).flat_map(move |y| (0..b.ext[2]).map(move |z| [b.min[0] + x, b.min[1] + y, b.min[2] + z])))).collect();
         assert!(cells.iter().all(|c| cells.contains(&[-c[0], c[1], c[2]]) && cells.contains(&[c[0], -c[1], c[2]]) && cells.contains(&[c[1], c[0], c[2]])), "the bell is not the same all round");
+        // Built for a drag it is laid out, sloped rings and all, but not
+        // measured; and the two ways it can be laid out are measured as one
+        // way alone would be.
+        let quick = build_as(&bell, false).unwrap();
+        assert!(quick.unmeasured && quick.error == 0.0 && quick.bricks.iter().any(|b| b.mask != CUBE));
+        assert!(!built.unmeasured && built.error > 0.0);
+        let (volume, wrong) = crate::report::measure(&Probe::new(&bell, built.grain).unwrap(), &built).unwrap();
+        assert!((volume - built.solid).abs() < 1e-9 && (wrong - built.error).abs() < 1e-9, "measured apart {wrong} of {volume}, together {} of {}", built.error, built.solid);
         // solid, and a plain dome's profile
         let (_, solid) = stepped(&Spec { fill: true, ..bell.clone() });
         let (_, dome) = stepped(&Spec { points: vec![at(0.0, 0.0, 14.0), at(9.0, 0.0, 11.0), at(14.0, 0.0, 0.0)], fill: true, ..bell.clone() });

@@ -251,7 +251,7 @@ pub fn analyse(spec: &Spec, built: &Built) -> Result<Analysis, String> {
 
 /// [`analyse`] against a form already in hand.
 pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
-    scan(probe, built, true)
+    scan(probe, built, true, &mut Seen::new())
 }
 
 /// Most cells [`measure`] will look at: 4 bytes each.
@@ -266,13 +266,30 @@ const MAX_MEASURE_CELLS: usize = 32_000_000;
 /// sphere over 78 cells in radius could not be measured, and so was fitted
 /// cell by cell after all, as fifty thousand bricks instead of five hundred.
 pub(crate) fn measure(probe: &Probe, built: &Built) -> Result<(f64, f64), String> {
-    let found = scan(probe, built, false)?;
+    measure_with(probe, built, &mut Seen::new())
+}
+
+/// What the form holds of each cell its surface passes through, as found by
+/// one measurement and good for the next of the same form.
+pub(crate) type Seen = std::collections::HashMap<[i32; 3], (u64, u64)>;
+
+/// [`measure`], for several builds of one form in turn.
+///
+/// Nearly all the time goes on asking the form about the 64 samples of each
+/// cell its surface passes through, and the answers do not depend on the
+/// bricks. A turned form is built two ways and both measured; with the
+/// answers kept in `seen`, the second measurement asks almost nothing. A
+/// lookup in a map for each such cell is nothing beside the 64 questions it
+/// saves, and a map holds only the cells at the surface, where an array over
+/// the whole box would hold every cell of two boxes that need not coincide.
+pub(crate) fn measure_with(probe: &Probe, built: &Built, seen: &mut Seen) -> Result<(f64, f64), String> {
+    let found = scan(probe, built, false, seen)?;
     Ok((found.form_volume, found.missing + found.extra))
 }
 
 /// The bricks against the form, cell by cell. `keep` says whether to keep
 /// what was found in each cell, for a report, or only the totals.
-fn scan(probe: &Probe, built: &Built, keep: bool) -> Result<Analysis, String> {
+fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Analysis, String> {
     if built.bricks.is_empty() {
         return Err("there are no bricks to analyse".into());
     }
@@ -362,9 +379,11 @@ fn scan(probe: &Probe, built: &Built, keep: bool) -> Result<Analysis, String> {
                 } else if centre < -0.87 {
                     (u64::MAX, 0)
                 } else {
-                    (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
-                        let d = probe.distance(corner + sample(s));
-                        (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
+                    *seen.entry(at).or_insert_with(|| {
+                        (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
+                            let d = probe.distance(corner + sample(s));
+                            (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
+                        })
                     })
                 };
                 let holds = (owner[i] > 0).then(|| owner[i] as usize - 1);
