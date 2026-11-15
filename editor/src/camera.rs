@@ -1,7 +1,7 @@
 //! Moving the view: the camera is flown. Right-drag turns it where it
 //! stands, a middle click turns it to face whatever the cursor is on,
 //! W A S D move it the way it looks and sideways, Space or E raise it,
-//! Q lowers it, and the scroll wheel sets how fast it goes.
+//! Q lowers it, and Shift with the scroll wheel sets how fast it goes.
 //!
 //! It can be tilted right over backwards. Its direction is kept as a
 //! heading about the upright and a tilt from level, and its own "up" is
@@ -14,7 +14,7 @@
 //! point happened to be, and left the point behind when the forms were
 //! moved. Now there is no such point: the camera turns about itself and is
 //! brought nearer by moving it. The wheel, with nothing to zoom, sets the
-//! speed instead: one speed is too slow across a large build and too fast
+//! speed instead, while Shift is held: one speed is too slow across a large build and too fast
 //! beside a small one, and a key held to go faster gave only two. (With
 //! Ctrl the wheel still resizes the form being edited.)
 //!
@@ -102,8 +102,11 @@ impl Controls {
                     self.aim(camera);
                     *handled = true;
                 }
-                Event::MouseWheel { delta, handled, .. } if !*handled => {
-                    self.speed = faster(self.speed, delta.1);
+                // Only with Shift held: the wheel alone scrolls the panel,
+                // and changed the speed as it did. (With Shift, some systems
+                // report the wheel as turning sideways.)
+                Event::MouseWheel { delta, modifiers, handled, .. } if !*handled && modifiers.shift => {
+                    self.speed = faster(self.speed, if delta.1 != 0.0 { delta.1 } else { delta.0 });
                     changed = Some(self.speed);
                     *handled = true;
                 }

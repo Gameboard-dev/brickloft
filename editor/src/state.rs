@@ -244,6 +244,9 @@ pub struct State {
     built_from: Option<Spec>,
     /// whether a dot, a form or a slider is being dragged this frame
     pub busy: bool,
+    /// whether Ctrl is held during a drag: a point added to a circle then
+    /// moves straight out of the circle's plane instead of within it
+    pub lift: bool,
     /// the workspace as it was before each change, oldest first, and after
     /// each change undone, for Ctrl+Z and Ctrl+Y
     undone: Vec<Snapshot>,
@@ -325,6 +328,7 @@ impl State {
             forms: Vec::new(),
             built_from: None,
             busy: false,
+            lift: false,
             undone: Vec::new(),
             redone: Vec::new(),
             noted: Vec::new(),
@@ -945,17 +949,22 @@ impl State {
     /// Move `handle` to where the ray from the eye through the cursor meets
     /// its drag plane.
     pub fn drag(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
-        // A point added to a circle is dragged within the circle's plane
-        // when that plane is seen face on, and straight out of it when it is
-        // seen from the side: never a little of both, since a curve pulled
-        // even slightly out of its plane can no longer be built as a flat
-        // band (see `arcs_core::spec::pulled`), and a drag in the plane
-        // facing the eye is nearly always a little of both.
+        // A point added to a circle is dragged within the circle's plane, or
+        // with Ctrl held, straight out of it: never a little of both, since
+        // a curve pulled even slightly out of its plane can no longer be
+        // built as a flat band (see `arcs_core::spec::pulled`), and a drag
+        // in the plane facing the eye is nearly always a little of both.
+        // Which of the two was once decided by how the plane was seen, face
+        // on or from the side; but a ring lying flat is usually looked at
+        // from somewhere between, and the point then went up when it was
+        // meant to go out. Only seen almost exactly edge on, where the
+        // cursor cannot pick a place in the plane, does it go out of it
+        // unasked.
         if let (Handle::Pull(i), CIRCLE, Lock::Free) = (handle, self.form, self.lock) {
             let Some(&(from, by)) = self.spec.pulls.get(i) else { return };
             let axis = self.spec.plane.min(2);
             let normal = [DVec3::X, DVec3::Y, DVec3::Z][axis];
-            if view.dot(normal).abs() < 0.7 {
+            if self.lift || view.dot(normal).abs() < 0.15 {
                 let mut within = by;
                 within[axis] = 0.0;
                 let foot = from + within + self.standing();
@@ -1347,8 +1356,16 @@ mod tests {
         assert!(state.problem.is_none(), "{:?}", state.problem);
         assert!(far(&state, out) >= out_before + 4.0, "it did not grow outwards");
         assert_eq!(far(&state, normal), up_before, "it left its plane");
-        // Seen from the side, the same point goes straight out of the plane
+        // Seen from well to one side, it still moves in the plane: a ring
+        // lying flat is mostly looked at from above and to one side.
+        let slanted = (normal * 0.4 + out * 0.9).normalize();
+        let further = held + out * 7.0;
+        state.drag(handle, further - slanted * 80.0, slanted, slanted);
+        assert!((state.spec.pulls[0].1.dot(out) - 7.0).abs() <= 0.5 && state.spec.pulls[0].1[across] == 0.0, "pulled by {:?}", state.spec.pulls[0].1);
+        state.spec.pulls[0].1 = by;
+        // With Ctrl held, the same point goes straight out of the plane
         // and keeps what it had within it.
+        state.lift = true;
         let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
         let side = normal.cross(out).normalize();
         let eye = at - side * 80.0;
@@ -1357,6 +1374,26 @@ mod tests {
         assert!((lifted[across] - 3.0).abs() <= 0.5 && (lifted.dot(out) - by.dot(out)).abs() < 1e-9, "pulled by {lifted:?}");
         assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
         assert!(far(&state, normal) >= up_before + 2.0, "it did not rise out of its plane");
+        // Further than the circle is wide, both ways: an added point is not
+        // held within the circle's own size.
+        for lift in [4.0, 9.0, 20.0, 45.0] {
+            let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
+            let eye = at - side * 80.0;
+            let target = centre + out * radius + by + normal * lift;
+            state.drag(handle, eye, (target - eye).normalize(), side);
+            assert!((state.spec.pulls[0].1[across] - lift).abs() <= 0.5, "asked for {lift}, got {:?}", state.spec.pulls[0].1);
+            assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+            assert!(far(&state, normal) >= up_before + lift - 2.0, "lifted {lift}, the bricks reach {}", far(&state, normal));
+        }
+        state.spec.pulls[0].1 = by;
+        state.lift = false;
+        for reach in [9.0, 20.0, 45.0] {
+            let target = held + out * reach;
+            state.drag(handle, target - askew * 80.0, askew, normal);
+            assert!((state.spec.pulls[0].1.dot(out) - reach).abs() <= 0.5, "asked for {reach}, got {:?}", state.spec.pulls[0].1);
+            assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+            assert!(far(&state, out) >= out_before + reach - 2.0, "pulled {reach}, the bricks reach {}", far(&state, out));
+        }
         state.spec.pulls[0].1 = by;
         state.refresh(|| 0.0);
         let top_before = out_before;

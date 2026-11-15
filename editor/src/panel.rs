@@ -124,8 +124,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");
-        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a form adds a point there to pull it out of shape.");
-        ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, the scroll wheel sets how fast.");
+        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a form adds a point there to pull it out of shape; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
+        ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
 
         let before = state.form;

@@ -238,7 +238,8 @@ pub fn run_form(form: usize) {
                         }
                     }
                 }
-                Event::MouseMotion { position, handled, .. } if dragging.is_some() => {
+                Event::MouseMotion { position, modifiers, handled, .. } if dragging.is_some() => {
+                    state.lift = modifiers.ctrl || modifiers.command;
                     let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
                     state.drag(dragging.unwrap(), d(origin), d(dir), d(camera.view_direction()));
                     *handled = true;
