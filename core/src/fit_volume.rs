@@ -88,7 +88,8 @@ pub(crate) fn patterns() -> &'static [(u8, u64)] {
         // against, for a piece that belongs on a ridge and nowhere else.
         for mask in all_masks().into_iter().filter(|&m| m != CUBE) {
             let info = shape_info(mask).unwrap();
-            if info.kind == Kind::Hip {
+            // nor the kinds that came with it, for the same reason
+            if !matches!(info.kind, Kind::Ramp | Kind::Tet | Kind::Cut) {
                 continue;
             }
             let bits = (0..K * K * K).fold(0u64, |bits, s| {
@@ -672,7 +673,7 @@ pub(crate) fn merge(mut shape: Vec<u8>, n: [usize; 3], max_ext: usize) -> Vec<Ce
                             ext[a] += 1;
                         }
                     }
-                    Kind::Tet | Kind::Cut | Kind::Hip => {}
+                    Kind::Tet | Kind::Cut | Kind::Hip | Kind::Inner | Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => {}
                 }
                 for zz in z..z + ext[2] {
                     for yy in y..y + ext[1] {

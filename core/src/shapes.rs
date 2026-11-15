@@ -1,4 +1,4 @@
-//! The four microbrick shapes, as subsets of a box's 8 corners.
+//! The microbrick shapes, as subsets of a box's 8 corners.
 //!
 //! A corner is a bit index `x | y<<1 | z<<2` (0 = min side, 1 = max side) and
 //! a shape is the 8-bit mask of the corners it keeps; the solid is their
@@ -12,6 +12,21 @@
 //! | tet  | 4, one corner and its three neighbours | 8 |
 //! | cut  | 7, the cube with a corner tet removed | 8 |
 //! | hip  | 5, one face and one corner of the face opposite | 24 |
+//! | half outer | 5, a right triangle of one face and the two corners above its long side | 24 |
+//! | half inner | 4, a right triangle of one face and the corner above one end of its long side | 12, and 12 mirror images |
+//! | inner | see below | 24 |
+//!
+//! The inner corner is the one shape that is not the hull of its corners. It
+//! is a box less a hip, a valley where two slopes meet, and it holds the same
+//! seven corners a cut cube does. So its mask is not the corners it holds:
+//! it is the three corners the hip it lacks does not touch, which no other
+//! shape's mask can be (every other has four corners or more). Turning or
+//! mirroring a mask by moving its bits still turns or mirrors the shape,
+//! since the lacking hip moves with it. Only code that reads a mask as
+//! "these corners are solid" has to ask [`shape_info`] first.
+//!
+//! The shapes' geometry is the game's own: each is one of its procedural
+//! micro-wedge bricks, and the canonical pose here is that brick unturned.
 
 use std::sync::OnceLock;
 
@@ -25,9 +40,21 @@ pub enum Kind {
     /// a quarter of a square pyramid, the piece at the corner of a hipped
     /// roof where two slopes meet along a ridge.
     Hip,
+    /// A box less a hip: the valley where two slopes meet in an inside
+    /// corner. The game's micro-wedge inner corner.
+    Inner,
+    /// Over half of the box's floor, a right triangle, rising from nothing
+    /// at the right angle to full height all along the long side. The game's
+    /// micro-wedge half outer corner.
+    HalfOuter,
+    /// A tetrahedron on the same triangle of floor, its fourth corner above
+    /// one end of the long side. Its mirror image is a different brick,
+    /// [`Kind::HalfInnerInv`]. The game's micro-wedge half inner corner.
+    HalfInner,
+    HalfInnerInv,
 }
 
-pub const KINDS: [Kind; 5] = [Kind::Cube, Kind::Ramp, Kind::Tet, Kind::Cut, Kind::Hip];
+pub const KINDS: [Kind; 9] = [Kind::Cube, Kind::Ramp, Kind::Tet, Kind::Cut, Kind::Hip, Kind::Inner, Kind::HalfOuter, Kind::HalfInner, Kind::HalfInnerInv];
 
 impl Kind {
     /// The pose every other pose of this kind is a rotation of.
@@ -38,6 +65,12 @@ impl Kind {
             Kind::Tet => 0x17,  // corner 0 and its neighbours: x + y + z <= 1
             Kind::Cut => 0x7f,  // missing corner 7: x + y + z <= 2
             Kind::Hip => 0x1f,  // the face z=0 and corner 4 above corner 0: x <= 1 - z and y <= 1 - z
+            // the box less the hip of the face z=1 and corner 3; not the
+            // corners it holds (see the top of this file): min(x, y) + z <= 1
+            Kind::Inner => 0x07,
+            Kind::HalfOuter => 0x67,    // corners 0 1 2, and 5 6 above 1 2: x + y <= 1 and z <= x + y
+            Kind::HalfInner => 0x47,    // corners 0 1 2, and 6 above 2: x + y <= 1 and z <= y
+            Kind::HalfInnerInv => 0x27, // corners 0 1 2, and 5 above 1: x + y <= 1 and z <= x
         }
     }
 
@@ -49,7 +82,16 @@ impl Kind {
             Kind::Tet => 1.0 / 6.0,
             Kind::Cut => 5.0 / 6.0,
             Kind::Hip => 1.0 / 3.0,
+            Kind::Inner => 2.0 / 3.0,
+            Kind::HalfOuter => 1.0 / 3.0,
+            Kind::HalfInner | Kind::HalfInnerInv => 1.0 / 6.0,
         }
+    }
+
+    /// Whether the kind is described by `corner` and `axis` of its
+    /// [`ShapeInfo`]; the others by `pose` (see [`ShapeInfo::local`]).
+    pub const fn by_corner(self) -> bool {
+        matches!(self, Kind::Cube | Kind::Ramp | Kind::Tet | Kind::Cut | Kind::Hip)
     }
 }
 
@@ -125,6 +167,79 @@ pub struct ShapeInfo {
     /// ramp: the axis its missing edge, and so the prism, runs along.
     /// hip: the axis from its whole face to its apex.
     pub axis: u8,
+    /// the mask itself
+    pub mask: u8,
+    /// an orientation (an index into [`ORIENT`]) that turns the kind's
+    /// canonical pose into this one
+    pub pose: u8,
+}
+
+impl ShapeInfo {
+    /// A point of the box (each coordinate 0 to 1) in the box of the kind's
+    /// canonical pose. The newer kinds are described there, in the frame the
+    /// game's own brick is made in, instead of by a corner and an axis: they
+    /// have too little symmetry for those two numbers to say which way up
+    /// they are.
+    pub fn local(&self, t: [f64; 3]) -> [f64; 3] {
+        let Orientation { perm, neg } = ORIENT[self.pose as usize];
+        let mut l = [0.0; 3];
+        for i in 0..3 {
+            l[perm[i] as usize] = if neg >> i & 1 == 1 { 1.0 - t[i] } else { t[i] };
+        }
+        l
+    }
+
+    /// The reverse of [`ShapeInfo::local`].
+    pub fn world(&self, l: [f64; 3]) -> [f64; 3] {
+        let Orientation { perm, neg } = ORIENT[self.pose as usize];
+        [0, 1, 2].map(|i| if neg >> i & 1 == 1 { 1.0 - l[perm[i] as usize] } else { l[perm[i] as usize] })
+    }
+}
+
+/// The corners of its box a shape holds: its mask, for every shape but the
+/// inner corner (see the top of this file), which holds all but the one
+/// corner of the lacking hip's whole face that stands over its apex.
+pub fn corners(mask: u8) -> u8 {
+    match shape_info(mask) {
+        Some(info) if info.kind == Kind::Inner => {
+            let hip = shape_info(!mask).expect("an inner corner's mask is the rest of a hip's");
+            CUBE & !(1 << (hip.corner ^ (1 << hip.axis)))
+        }
+        _ => mask,
+    }
+}
+
+/// A newer kind's faces that are not square to the box, as triangles in its
+/// canonical box, and a point inside it to tell their outsides by.
+pub fn sloped_triangles(kind: Kind) -> (&'static [[[f64; 3]; 3]], [f64; 3]) {
+    const A: [f64; 3] = [1.0, 0.0, 0.0];
+    const B: [f64; 3] = [0.0, 1.0, 0.0];
+    const O: [f64; 3] = [0.0, 0.0, 0.0];
+    const TOP: [f64; 3] = [0.0, 0.0, 1.0];
+    const OVER_A: [f64; 3] = [1.0, 0.0, 1.0];
+    const OVER_B: [f64; 3] = [0.0, 1.0, 1.0];
+    const FAR: [f64; 3] = [1.0, 1.0, 0.0];
+    match kind {
+        Kind::Inner => (&[[OVER_A, TOP, FAR], [TOP, OVER_B, FAR]], [0.2, 0.2, 0.2]),
+        // the upright face on the long side, in two halves, and the slope
+        Kind::HalfOuter => (&[[A, B, OVER_B], [A, OVER_B, OVER_A], [O, OVER_A, OVER_B]], [0.3, 0.3, 0.2]),
+        Kind::HalfInner => (&[[A, B, OVER_B], [O, A, OVER_B]], [0.2, 0.5, 0.2]),
+        Kind::HalfInnerInv => (&[[A, B, OVER_A], [O, B, OVER_A]], [0.5, 0.2, 0.2]),
+        _ => (&[], [0.5; 3]),
+    }
+}
+
+/// How far outside each of a newer kind's sloped faces a point of its
+/// canonical box is: negative inside. A point is in the shape if it is
+/// inside them all, or for the inner corner, inside either.
+pub fn sloped_sides(kind: Kind, [x, y, z]: [f64; 3]) -> [f64; 2] {
+    match kind {
+        Kind::Inner => [y + z - 1.0, x + z - 1.0],
+        Kind::HalfOuter => [x + y - 1.0, z - (x + y)],
+        Kind::HalfInner => [x + y - 1.0, z - y],
+        Kind::HalfInnerInv => [x + y - 1.0, z - x],
+        _ => [-1.0; 2],
+    }
 }
 
 fn table() -> &'static [Option<ShapeInfo>; 256] {
@@ -136,7 +251,7 @@ fn table() -> &'static [Option<ShapeInfo>; 256] {
                 let mask = transform_mask(kind.canonical(), orientation);
                 let missing: Vec<u8> = (0..8).filter(|c| mask >> c & 1 == 0).collect();
                 let (corner, axis) = match kind {
-                    Kind::Cube => (0, 0),
+                    Kind::Cube | Kind::Inner | Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => (0, 0),
                     Kind::Cut => (missing[0], 0),
                     // the axis along which one side keeps all four corners;
                     // the apex is the corner kept on the other side
@@ -159,7 +274,9 @@ fn table() -> &'static [Option<ShapeInfo>; 256] {
                         0,
                     ),
                 };
-                t[mask as usize] = Some(ShapeInfo { kind, corner, axis });
+                // no two kinds share a mask
+                assert!(t[mask as usize].is_none_or(|s: ShapeInfo| s.kind == kind));
+                t[mask as usize] = Some(ShapeInfo { kind, corner, axis, mask, pose: orientation as u8 });
             }
         }
         t
@@ -171,13 +288,19 @@ pub fn shape_info(mask: u8) -> Option<ShapeInfo> {
     table()[mask as usize]
 }
 
-/// Every representable mask: 1 cube, 12 ramps, 8 tets, 8 cuts and 24 hips.
+/// Every representable mask: 1 cube, 12 ramps, 8 tets, 8 cuts, 24 hips, and
+/// 24 each of inner corners and half outer corners, and 12 each of the two
+/// half inner corners.
 pub fn all_masks() -> Vec<u8> {
     (0..=255u8).filter(|&m| shape_info(m).is_some()).collect()
 }
 
 /// Whether the point `(u, v, w)`, each in 0..1 across the box, is in the shape.
 pub fn inside_shape(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
+    if !info.kind.by_corner() {
+        let [p, q] = sloped_sides(info.kind, info.local([u, v, w]));
+        return if info.kind == Kind::Inner { p < 0.0 || q < 0.0 } else { p < 0.0 && q < 0.0 };
+    }
     let c = info.corner;
     let a = if c & 1 != 0 { 1.0 - u } else { u };
     let b = if c & 2 != 0 { 1.0 - v } else { v };
@@ -209,6 +332,7 @@ pub fn inside_shape(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
             };
             p < t && q < t
         }
+        Kind::Inner | Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => unreachable!("answered above"),
     }
 }
 
@@ -224,8 +348,31 @@ pub fn inside_shape(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
 /// mirror image of its samples and symmetric forms still fit symmetrically.
 /// (Tetrahedra and cut cubes have no samples on their faces at 4 a side.)
 pub fn inside_sampled(info: ShapeInfo, u: f64, v: f64, w: f64) -> bool {
+    if info.kind == Kind::Inner {
+        // what is left of the box by the hip it lacks, sample for sample
+        let hip = shape_info(!info.mask).expect("an inner corner's mask is the rest of a hip's");
+        return !inside_sampled(hip, u, v, w);
+    }
     if inside_shape(info, u, v, w) {
         return true;
+    }
+    if !info.kind.by_corner() {
+        // The half corners' faces line up with the sample grid too. As for
+        // a ramp, of the samples on a face the middle half count as inside:
+        // 22 of a cell's 64 for the half outer corner, where a third is
+        // 21.3, and 12 for a half inner, where a sixth is 10.7. (10 can be
+        // had for the half inner by taking the low half of one face and the
+        // high half of the other, but which face is which then depends on
+        // which way round the brick is thought of, and a brick and its
+        // mirror image could be counted differently.)
+        let l = info.local([u, v, w]);
+        let sides = sloped_sides(info.kind, l);
+        // each face's samples are told apart by the coordinate that runs along it
+        let along = match info.kind {
+            Kind::HalfInner => [l[0], l[1]],
+            _ => [l[0], l[0]],
+        };
+        return (0..2).all(|k| sides[k] < -1e-9 || (sides[k].abs() < 1e-9 && (along[k] - 0.5).abs() < 0.25));
     }
     if info.kind == Kind::Hip {
         // A hip's two sloped faces line up with the sample grid as a ramp's
@@ -364,6 +511,49 @@ mod tests {
     }
 
     #[test]
+    fn the_newer_shapes_have_their_poses_volumes_and_corners() {
+        for (kind, held) in [(Kind::Inner, 7), (Kind::HalfOuter, 5), (Kind::HalfInner, 4), (Kind::HalfInnerInv, 4)] {
+            let masks: Vec<u8> = all_masks().into_iter().filter(|&m| shape_info(m).unwrap().kind == kind).collect();
+            // (a half inner corner turned end for end is itself again)
+            assert_eq!(masks.len(), if held == 4 { 12 } else { 24 }, "{kind:?}");
+            for mask in masks {
+                let info = shape_info(mask).unwrap();
+                assert_eq!(corners(mask).count_ones(), held);
+                // to and from its canonical box
+                let p = [0.1, 0.25, 0.7];
+                let back = info.world(info.local(p));
+                assert!((0..3).all(|k| (back[k] - p[k]).abs() < 1e-12));
+                // its volume, on a fine grid and on the 64 samples of a cell
+                let n = 40;
+                let at = |i: usize, n: usize| (i as f64 + 0.5) / n as f64;
+                let fine = (0..n * n * n).filter(|s| inside_shape(info, at(s % n, n), at(s / n % n, n), at(s / (n * n), n))).count() as f64 / (n * n * n) as f64;
+                assert!((fine - kind.volume()).abs() < 0.02, "{kind:?} {mask:#x}: {fine}");
+                let coarse = (0..64).filter(|s| inside_sampled(info, at(s % 4, 4), at(s / 4 % 4, 4), at(s / 16, 4))).count() as f64;
+                assert!((coarse - 64.0 * kind.volume()).abs() < 1.5, "{kind:?} {mask:#x}: {coarse} of 64");
+                // each corner it holds is on it, and the middle of each sloped face is on its surface
+                let (triangles, within) = sloped_triangles(kind);
+                assert!(inside_shape(info, info.world(within)[0], info.world(within)[1], info.world(within)[2]));
+                for t in triangles {
+                    let mid = [0, 1, 2].map(|k| (t[0][k] + t[1][k] + t[2][k]) / 3.0);
+                    let [inwards, outwards] = [0.01, -0.01].map(|step| info.world([0, 1, 2].map(|k| mid[k] + (within[k] - mid[k]) * step)));
+                    assert!(inside_shape(info, inwards[0], inwards[1], inwards[2]) && !inside_shape(info, outwards[0], outwards[1], outwards[2]), "{kind:?} {mask:#x}");
+                }
+            }
+        }
+        // a half inner corner and its mirror image are different bricks
+        let mirrored = |mask: u8| (0..8u8).fold(0u8, |m, c| m | (mask >> c & 1) << (c ^ 1));
+        assert_eq!(shape_info(mirrored(0x47)).unwrap().kind, Kind::HalfInnerInv);
+        assert_eq!(shape_info(mirrored(0x07)).unwrap().kind, Kind::Inner);
+        // and a hip with the inner corner that lacks it fills the box
+        for hip in all_masks().into_iter().filter(|&m| shape_info(m).unwrap().kind == Kind::Hip) {
+            let (a, b) = (shape_info(hip).unwrap(), shape_info(!hip).unwrap());
+            assert_eq!(b.kind, Kind::Inner);
+            let at = |i: usize| (i as f64 + 0.5) / 4.0;
+            assert!((0..64).all(|s| inside_sampled(a, at(s % 4), at(s / 4 % 4), at(s / 16)) != inside_sampled(b, at(s % 4), at(s / 4 % 4), at(s / 16))));
+        }
+    }
+
+    #[test]
     fn there_are_29_shapes() {
         let count = |k| {
             all_masks()
@@ -387,6 +577,9 @@ mod tests {
     fn inside_shape_matches_the_corners_and_the_volume() {
         for mask in all_masks() {
             let info = shape_info(mask).unwrap();
+            if !info.kind.by_corner() {
+                continue; // see `the_newer_shapes_have_their_poses_volumes_and_corners`
+            }
             // the middle of the shape's own corners, which is inside it
             let kept = mask.count_ones() as f64;
             let mid = |bit: u8| {

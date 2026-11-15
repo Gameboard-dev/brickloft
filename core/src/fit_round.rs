@@ -244,8 +244,11 @@ pub(crate) fn rest_of_box(mask: u8) -> u8 {
     let c = info.corner;
     match info.kind {
         Kind::Cube => 0,
-        // what a hip leaves is a valley, which no one brick is
-        Kind::Hip => 0,
+        // a hip and the valley that lacks it, whose mask is written as
+        // what the hip leaves (see `shapes`)
+        Kind::Hip | Kind::Inner => !mask,
+        // what these leave is no one brick
+        Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => 0,
         // a corner piece and the cube that lacks it
         Kind::Tet => CUBE & !(1 << c),
         Kind::Cut => 1 << c | 1 << (c ^ 1) | 1 << (c ^ 2) | 1 << (c ^ 4),
@@ -678,7 +681,7 @@ mod tests {
     fn the_rest_of_a_box_fills_it() {
         for mask in crate::shapes::all_masks() {
             let rest = rest_of_box(mask);
-            if mask == CUBE || shape_info(mask).unwrap().kind == Kind::Hip {
+            if mask == CUBE || matches!(shape_info(mask).unwrap().kind, Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv) {
                 assert_eq!(rest, 0);
                 continue;
             }

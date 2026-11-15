@@ -656,13 +656,15 @@ pub fn report(spec: &Spec) -> Result<String, String> {
     writeln!(w, "brick size = {}", built.grain).unwrap();
     writeln!(
         w,
-        "bricks = {} ({} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips)",
+        "bricks = {} ({} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips, {} inner corners, {} half corners)",
         built.bricks.len(),
         count(Kind::Cube),
         count(Kind::Ramp),
         count(Kind::Tet),
         count(Kind::Cut),
-        count(Kind::Hip)
+        count(Kind::Hip),
+        count(Kind::Inner),
+        count(Kind::HalfOuter) + count(Kind::HalfInner) + count(Kind::HalfInnerInv)
     )
     .unwrap();
     writeln!(w, "form volume = {:.2}", built.solid).unwrap();

@@ -97,6 +97,24 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
         });
     }
+    // Something done that needs no answer, said at the top of the view for
+    // a few seconds and then faded away. A notice that has to be closed
+    // (above) is kept for what went wrong.
+    if let Some((text, since)) = state.toast.as_mut() {
+        const SHOWN: f64 = 2.5;
+        const FADE: f64 = 0.8;
+        let now = ui.input(|i| i.time);
+        let age = now - *since.get_or_insert(now);
+        if age > SHOWN + FADE {
+            state.toast = None;
+        } else {
+            let text = text.clone();
+            egui::Area::new(egui::Id::new("toast")).anchor(egui::Align2::CENTER_TOP, [0.0, 16.0]).interactable(false).show(ui.ctx(), |ui| {
+                ui.set_opacity((1.0 - (age - SHOWN) / FADE).clamp(0.0, 1.0) as f32);
+                egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(text));
+            });
+        }
+    }
     // how far a best-fit search has got, in the top right corner while it runs
     if let Some(done) = state.search_progress() {
         egui::Area::new(egui::Id::new("search progress")).anchor(egui::Align2::RIGHT_TOP, [-12.0, 12.0]).interactable(false).show(ui.ctx(), |ui| {
@@ -313,7 +331,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.separator();
         let built = &state.built;
         let count = |kind: Kind| built.bricks.iter().filter(|b| shape_info(b.mask).is_some_and(|s| s.kind == kind)).count();
-        ui.label(format!("{} bricks: {} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips", built.bricks.len(), count(Kind::Cube), count(Kind::Ramp), count(Kind::Tet), count(Kind::Cut), count(Kind::Hip)));
+        ui.label(format!("{} bricks: {} cubes, {} ramps, {} tetrahedra, {} cut cubes, {} hips, {} inner corners, {} half corners", built.bricks.len(), count(Kind::Cube), count(Kind::Ramp), count(Kind::Tet), count(Kind::Cut), count(Kind::Hip), count(Kind::Inner), count(Kind::HalfOuter) + count(Kind::HalfInner) + count(Kind::HalfInnerInv)));
         if built.grain > 1 {
             ui.label(format!("Brick size {} microbricks", built.grain));
         }

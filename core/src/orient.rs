@@ -10,7 +10,7 @@ use crate::shapes::{shape_info, transform_mask, CellBrick, Kind, KINDS, ORIENT};
 /// again if an update or a change of assets puts them in doubt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Models {
-    pub local_mask: [u8; 5],
+    pub local_mask: [u8; 9],
 }
 
 impl Default for Models {
@@ -20,9 +20,11 @@ impl Default for Models {
     /// - the outer corner is the cube missing its +x +y +z corner
     fn default() -> Self {
         Models {
-            // the last is the micro wedge corner, a hip: the wedge above
-            // with one more corner taken off
-            local_mask: [0xff, 0x77, 0x17, 0x7f, 0x57],
+            // From the micro wedge corner (the hip) on, each is the pose
+            // the game itself makes the brick in, which is also the pose
+            // `shapes` calls canonical. The three before it were found by
+            // looking in the game, and are the same as the game makes them.
+            local_mask: [0xff, 0x77, 0x17, 0x7f, 0x1f, 0x07, 0x67, 0x47, 0x27],
         }
     }
 }

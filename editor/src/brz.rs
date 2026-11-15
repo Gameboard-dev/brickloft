@@ -24,6 +24,10 @@ const fn asset(kind: Kind) -> &'static str {
         Kind::Tet => "PB_DefaultMicroWedgeTriangleCorner",
         Kind::Cut => "PB_DefaultMicroWedgeOuterCorner",
         Kind::Hip => "PB_DefaultMicroWedgeCorner",
+        Kind::Inner => "PB_DefaultMicroWedgeInnerCorner",
+        Kind::HalfOuter => "PB_DefaultMicroWedgeHalfOuterCorner",
+        Kind::HalfInner => "PB_DefaultMicroWedgeHalfInnerCorner",
+        Kind::HalfInnerInv => "PB_DefaultMicroWedgeHalfInnerCornerInverted",
     }
 }
 
@@ -233,7 +237,7 @@ mod tests {
         let blend = Paint { mode: crate::paint::Mode::Stripes, colours: vec![[1, 2, 3], [250, 0, 9]], axis: 0, width: 3 };
         let forms = vec![(arch, blend, [3, 0, -1]), (Spec { form: arcs_core::spec::Form::Sphere, points: vec![arcs_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default(), [0; 3])];
         let world = prefab(&bricks, &forms).unwrap();
-        assert_eq!(world.bricks.len(), 53);
+        assert_eq!(world.bricks.len(), 125);
         assert_eq!(world.meta.bundle.level_type, "Prefab");
         let solver = Solver::new(&Models::default());
         for (brick, (cell, colour, _, place)) in world.bricks.iter().zip(&bricks) {

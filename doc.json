@@ -16,7 +16,15 @@
     "mask-ramp": { "description": "Which corners of its box the ramp asset fills when unrotated (see docs/calibration.md).", "type": "number", "default": 119 },
     "mask-tetrahedron": { "description": "The same for the tetrahedron asset.", "type": "number", "default": 23 },
     "mask-cut-cube": { "description": "The same for the cut-cube asset.", "type": "number", "default": 127 },
-    "mask-hip": { "description": "The same for the hip asset.", "type": "number", "default": 87 }
+    "asset-inner-corner": { "description": "Brick asset for the inner corner: a box less a hip, the valley where two slopes meet.", "type": "string", "default": "PB_DefaultMicroWedgeInnerCorner" },
+    "asset-half-outer-corner": { "description": "Brick asset for the half outer corner.", "type": "string", "default": "PB_DefaultMicroWedgeHalfOuterCorner" },
+    "asset-half-inner-corner": { "description": "Brick asset for the half inner corner.", "type": "string", "default": "PB_DefaultMicroWedgeHalfInnerCorner" },
+    "asset-half-inner-corner-inverted": { "description": "Brick asset for the half inner corner's mirror image.", "type": "string", "default": "PB_DefaultMicroWedgeHalfInnerCornerInverted" },
+    "mask-hip": { "description": "The same for the hip asset.", "type": "number", "default": 31 },
+    "mask-inner-corner": { "description": "The same for the inner corner asset. Not the corners it fills, which are a cut cube's: the three corners that the hip it lacks does not touch.", "type": "number", "default": 7 },
+    "mask-half-outer-corner": { "description": "The same for the half outer corner asset.", "type": "number", "default": 103 },
+    "mask-half-inner-corner": { "description": "The same for the half inner corner asset.", "type": "number", "default": 71 },
+    "mask-half-inner-corner-inverted": { "description": "The same for its mirror image.", "type": "number", "default": 39 }
   },
   "commands": [
     { "name": "/arc", "description": "Get your link to the editor.", "example": "/arc", "args": [] },

@@ -160,6 +160,11 @@ fn from_corner(info: ShapeInfo, t: [f64; 3]) -> [f64; 3] {
 /// where a sloped face meets it: counted all in or all out, a triangular
 /// face would measure a quarter or three quarters of its square.
 fn part(info: ShapeInfo, t: [f64; 3]) -> f64 {
+    if !info.kind.by_corner() {
+        let held = crate::shapes::sloped_sides(info.kind, info.local(t)).map(|d| -> f64 { if d.abs() < 1e-5 { 0.5 } else if d < 0.0 { 1.0 } else { 0.0 } });
+        // inside both faces; for the inner corner, which is two ramps together, inside either
+        return if info.kind == Kind::Inner { held[0].max(held[1]) } else { held[0].min(held[1]) };
+    }
     let c = from_corner(info, t);
     let side = |sum: f64, solid_beyond: bool| {
         if (sum - 1.0).abs() < 1e-5 {
@@ -186,6 +191,7 @@ fn part(info: ShapeInfo, t: [f64; 3]) -> f64 {
             let within = |x: f64| -> f64 { if (x - along).abs() < 1e-5 { 0.5 } else if x < along { 1.0 } else { 0.0 } };
             within(c[p]).min(within(c[q]))
         }
+        Kind::Inner | Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => unreachable!("answered above"),
     }
 }
 
@@ -234,6 +240,43 @@ fn square_faces(b: &CellBrick, info: ShapeInfo) -> Vec<(DVec3, Vec<Sample>)> {
 /// A brick's sloped faces: each one's direction and samples. A hip has two,
 /// the other shapes one, a cube none.
 fn sloped_faces(b: &CellBrick, info: ShapeInfo) -> Vec<(DVec3, Vec<Sample>)> {
+    if !info.kind.by_corner() {
+        // The newer kinds: each face a triangle given in the kind's own box,
+        // cut into n * n smaller ones of equal area and sampled at the
+        // middle of each, as a tetrahedron's is.
+        let ext = b.ext.map(|e| e as f64);
+        let place = |l: [f64; 3]| {
+            let t = info.world(l);
+            DVec3::from_array([0, 1, 2].map(|k| b.min[k] as f64 + t[k] * ext[k]))
+        };
+        let (triangles, within) = crate::shapes::sloped_triangles(info.kind);
+        let n = (b.ext.iter().max().unwrap() * PER_CELL as i32).clamp(2, 12) as usize;
+        return triangles
+            .iter()
+            .map(|t| {
+                let [o, u, v] = t.map(|l| DVec3::from_array(l));
+                let (at, side_u, side_v) = (place(t[0]), place(t[1]) - place(t[0]), place(t[2]) - place(t[0]));
+                let mut normal = side_u.cross(side_v);
+                let area = normal.length() / 2.0;
+                if normal.dot(place(within) - at) > 0.0 {
+                    normal = -normal;
+                }
+                let mut samples = Vec::new();
+                for i in 0..n {
+                    for j in 0..n - i {
+                        for third in [1.0, 2.0] {
+                            if third == 2.0 && i + j + 1 >= n {
+                                continue;
+                            }
+                            let (p, q) = ((i as f64 + third / 3.0) / n as f64, (j as f64 + third / 3.0) / n as f64);
+                            samples.push((place((o + (u - o) * p + (v - o) * q).to_array()), area / (n * n) as f64));
+                        }
+                    }
+                }
+                (normal.normalize(), samples)
+            })
+            .collect();
+    }
     if info.kind != Kind::Hip {
         return sloped_face(b, info).into_iter().collect();
     }
@@ -299,7 +342,7 @@ fn sloped_face(b: &CellBrick, info: ShapeInfo) -> Option<(DVec3, Vec<Sample>)> {
         n.normalize()
     };
     match info.kind {
-        Kind::Cube | Kind::Hip => None,
+        Kind::Cube | Kind::Hip | Kind::Inner | Kind::HalfOuter | Kind::HalfInner | Kind::HalfInnerInv => None,
         Kind::Ramp => {
             let axis = info.axis as usize;
             let (p, q) = [(1, 2), (0, 2), (0, 1)][axis];
@@ -607,7 +650,20 @@ mod tests {
                 _ => (x, y, z),
             };
             let slope = 0.5 * ((x * y).powi(2) + (y * z).powi(2) + (x * z).powi(2)).sqrt();
+            // the brick's size along each axis of its kind's own box
+            let perm = crate::shapes::ORIENT[info.pose as usize].perm;
+            let mut own = [0.0; 3];
+            for i in 0..3 {
+                own[perm[i] as usize] = b.ext[i] as f64;
+            }
+            let [lx, ly, lz] = own;
             let expected = match info.kind {
+                // floor, two whole walls, two triangular ones, two slopes
+                Kind::Inner => lx * ly + 1.5 * lz * (lx + ly) + 0.5 * (lx * ly.hypot(lz) + ly * lx.hypot(lz)),
+                // floor and two walls, all triangles; the upright long side; the slope
+                Kind::HalfOuter => 0.5 * (lx * ly + ly * lz + lx * lz) + lz * lx.hypot(ly) + slope,
+                Kind::HalfInner => 0.5 * (lx * ly + ly * lz + lz * lx.hypot(ly) + lx * ly.hypot(lz)),
+                Kind::HalfInnerInv => 0.5 * (lx * ly + lx * lz + lz * lx.hypot(ly) + ly * lx.hypot(lz)),
                 Kind::Cube => 2.0 * (x * y + y * z + x * z),
                 // two triangular ends, two legs and the slope
                 Kind::Ramp => p * q + a * (p + q) + a * p.hypot(q),

@@ -16,7 +16,7 @@ pub struct Config {
     pub max_bricks: usize,
     pub max_ext: i32,
     /// game asset per kind, in `Kind` order
-    pub assets: [String; 5],
+    pub assets: [String; 9],
     pub models: Models,
 }
 
@@ -41,6 +41,10 @@ impl Config {
                 text("asset-tetrahedron", "PB_DefaultMicroWedgeTriangleCorner"),
                 text("asset-cut-cube", "PB_DefaultMicroWedgeOuterCorner"),
                 text("asset-hip", "PB_DefaultMicroWedgeCorner"),
+                text("asset-inner-corner", "PB_DefaultMicroWedgeInnerCorner"),
+                text("asset-half-outer-corner", "PB_DefaultMicroWedgeHalfOuterCorner"),
+                text("asset-half-inner-corner", "PB_DefaultMicroWedgeHalfInnerCorner"),
+                text("asset-half-inner-corner-inverted", "PB_DefaultMicroWedgeHalfInnerCornerInverted"),
             ],
             models: Models {
                 local_mask: [
@@ -49,6 +53,10 @@ impl Config {
                     num("mask-tetrahedron", defaults[2] as i64, 0, 255) as u8,
                     num("mask-cut-cube", defaults[3] as i64, 0, 255) as u8,
                     num("mask-hip", defaults[4] as i64, 0, 255) as u8,
+                    num("mask-inner-corner", defaults[5] as i64, 0, 255) as u8,
+                    num("mask-half-outer-corner", defaults[6] as i64, 0, 255) as u8,
+                    num("mask-half-inner-corner", defaults[7] as i64, 0, 255) as u8,
+                    num("mask-half-inner-corner-inverted", defaults[8] as i64, 0, 255) as u8,
                 ],
             },
         }
@@ -207,7 +215,9 @@ pub fn calibration(models: &Models) -> Vec<CellBrick> {
         let mask = models.local_mask[kind as usize];
         let min = [kind as i32 * 8, 0, 1];
         bricks.push(CellBrick { mask, min, ext });
-        for corner in (0..8u8).filter(|c| mask >> c & 1 == 1) {
+        // (an inner corner's mask is not the corners it holds: see `shapes`)
+        let held = arcs_core::shapes::corners(mask);
+        for corner in (0..8u8).filter(|c| held >> c & 1 == 1) {
             // diagonally outside the corner, touching it at a point
             let at = [0, 1, 2].map(|i| if corner >> i & 1 == 1 { min[i] + ext[i] } else { min[i] - 1 });
             bricks.push(CellBrick { mask: CUBE, min: at, ext: [1; 3] });
@@ -262,8 +272,9 @@ mod tests {
         let models = Models::default();
         let bricks = calibration(&models);
         let solver = Solver::new(&models);
-        // 5 bricks and a marker per filled corner: 8 + 6 + 4 + 7 + 5
-        assert_eq!(bricks.len(), 5 + 30);
+        // 9 bricks and a marker per filled corner: 8 + 6 + 4 + 7 + 5, and
+        // 7 + 5 + 4 + 4 for the inner corner and the half corners
+        assert_eq!(bricks.len(), 9 + 30 + 20);
         let mut cells = std::collections::HashSet::new();
         for b in &bricks {
             assert!(shape_info(b.mask).is_some());

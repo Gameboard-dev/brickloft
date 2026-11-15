@@ -4,7 +4,10 @@
 //! found by brute force over those at most 8 points: every plane through
 //! three of them that has all the others on one side is a face. This runs
 //! once per shape at start-up; a general convex-hull routine would be more
-//! code for the same 29 meshes.
+//! code for the same meshes.
+//!
+//! One shape is not a convex hull: the inner corner, a valley (see
+//! `arcs_core::shapes`). Its seven faces are written out instead.
 
 use arcs_core::DVec3;
 
@@ -28,11 +31,54 @@ pub struct ShapeMesh {
 /// Triangles for the shape with corner mask `mask`, in a unit box from
 /// (0,0,0) to (1,1,1).
 pub fn shape_mesh(mask: u8) -> ShapeMesh {
+    use arcs_core::shapes::{shape_info, sloped_triangles, Kind};
+    let (mut positions, mut normals, mut rim) = (Vec::new(), Vec::new(), Vec::new());
+    // a triangle from the face's middle to each of its sides, its corners
+    // taken in order around its normal
+    let mut emit = |mut face: Vec<DVec3>, normal: DVec3| {
+        let centre = face.iter().sum::<DVec3>() / face.len() as f64;
+        let u = (face[0] - centre).normalize();
+        let v = normal.cross(u);
+        face.sort_by(|a, b| {
+            let angle = |p: &DVec3| (*p - centre).dot(v).atan2((*p - centre).dot(u));
+            angle(a).total_cmp(&angle(b))
+        });
+        for t in 0..face.len() {
+            for (p, at_rim) in [(centre, 1.0), (face[t], 0.0), (face[(t + 1) % face.len()], 0.0)] {
+                positions.push([p.x as f32, p.y as f32, p.z as f32]);
+                normals.push([normal.x as f32, normal.y as f32, normal.z as f32]);
+                rim.push(at_rim);
+            }
+        }
+    };
+    if let Some(info) = shape_info(mask).filter(|i| i.kind == Kind::Inner) {
+        // In its own box: the floor, the two whole walls, the two walls cut
+        // to triangles, and the two slopes that meet in the valley.
+        let (slopes, within) = sloped_triangles(Kind::Inner);
+        let c = |x: i32, y: i32, z: i32| [x as f64, y as f64, z as f64];
+        let mut faces = vec![
+            vec![c(0, 0, 0), c(1, 0, 0), c(1, 1, 0), c(0, 1, 0)],
+            vec![c(0, 0, 0), c(0, 1, 0), c(0, 1, 1), c(0, 0, 1)],
+            vec![c(0, 0, 0), c(1, 0, 0), c(1, 0, 1), c(0, 0, 1)],
+            vec![c(1, 0, 0), c(1, 1, 0), c(1, 0, 1)],
+            vec![c(0, 1, 0), c(1, 1, 0), c(0, 1, 1)],
+        ];
+        faces.extend(slopes.iter().map(|t| t.to_vec()));
+        let inside = DVec3::from_array(info.world(within));
+        for face in faces {
+            let face: Vec<DVec3> = face.into_iter().map(|l| DVec3::from_array(info.world(l))).collect();
+            let mut normal = (face[1] - face[0]).cross(face[2] - face[0]).normalize();
+            if normal.dot(inside - face[0]) > 0.0 {
+                normal = -normal;
+            }
+            emit(face, normal);
+        }
+        return ShapeMesh { positions, normals, rim };
+    }
     let points: Vec<DVec3> = (0..8u8)
         .filter(|c| mask >> c & 1 == 1)
         .map(|c| DVec3::new((c & 1) as f64, (c >> 1 & 1) as f64, (c >> 2 & 1) as f64))
         .collect();
-    let (mut positions, mut normals, mut rim) = (Vec::new(), Vec::new(), Vec::new());
     let mut seen: Vec<(DVec3, f64)> = Vec::new();
     let n = points.len();
     for i in 0..n {
@@ -55,23 +101,7 @@ pub fn shape_mesh(mask: u8) -> ShapeMesh {
                 }
                 seen.push((normal, offset));
 
-                // the face's corners, in order around its normal
-                let mut face: Vec<DVec3> = points.iter().copied().filter(|p| (p.dot(normal) - offset).abs() < 1e-9).collect();
-                let centre = face.iter().sum::<DVec3>() / face.len() as f64;
-                let u = (face[0] - centre).normalize();
-                let v = normal.cross(u);
-                face.sort_by(|a, b| {
-                    let angle = |p: &DVec3| (*p - centre).dot(v).atan2((*p - centre).dot(u));
-                    angle(a).total_cmp(&angle(b))
-                });
-                // a triangle from the middle to each side of the face
-                for t in 0..face.len() {
-                    for (p, at_rim) in [(centre, 1.0), (face[t], 0.0), (face[(t + 1) % face.len()], 0.0)] {
-                        positions.push([p.x as f32, p.y as f32, p.z as f32]);
-                        normals.push([normal.x as f32, normal.y as f32, normal.z as f32]);
-                        rim.push(at_rim);
-                    }
-                }
+                emit(points.iter().copied().filter(|p| (p.dot(normal) - offset).abs() < 1e-9).collect(), normal);
             }
         }
     }

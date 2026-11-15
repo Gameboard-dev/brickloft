@@ -257,7 +257,7 @@ pub fn run_form(form: usize) {
                                 state.record();
                                 let count = forms.len();
                                 state.paste(forms);
-                                state.alert = Some(("Pasted", format!("Added {count} form{} from the clipboard to the workspace.", if count == 1 { "" } else { "s" })));
+                                state.toast = Some((format!("Pasted {count} form{} from the clipboard", if count == 1 { "" } else { "s" }), None));
                             }
                             // not a .brz file on the clipboard: nothing to paste
                             Ok(None) => {}
@@ -350,10 +350,15 @@ pub fn run_form(form: usize) {
         }
         #[cfg(not(target_arch = "wasm32"))]
         if asked.copy || copy_keyed {
-            // said in a notice over the view as well as in the panel: the
-            // keys give no other sign that anything happened
+            // Said over the view as well as in the panel: the keys give no
+            // other sign that anything happened. A copy that worked is said
+            // in passing; one that did not has to be read and closed.
             let said = brz::copy(&state.painted(), &state.forms());
-            state.alert = Some((if said.starts_with("Copied") { "Copied" } else { "Not copied" }, said.clone()));
+            if said.starts_with("Copied") {
+                state.toast = Some((said.clone(), None));
+            } else {
+                state.alert = Some(("Not copied", said.clone()));
+            }
             state.report_note = said;
         }
         if asked.report {
