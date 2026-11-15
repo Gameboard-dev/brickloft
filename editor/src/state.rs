@@ -243,6 +243,8 @@ pub struct State {
     /// whether Ctrl is held during a drag: a point added to a circle then
     /// moves straight out of the circle's plane instead of within it
     pub lift: bool,
+    /// how much of a dragged dot's movement the dots near it share, 0 to 1
+    pub follow: f64,
     /// the workspace as it was before each change, oldest first, and after
     /// each change undone, for Ctrl+Z and Ctrl+Y
     undone: Vec<Snapshot>,
@@ -270,6 +272,9 @@ fn along_line(from: DVec3, a: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
     // as for a drag in a plane: never flung to the horizon
     (t.abs() <= 4.0 * w.length().max(15.0)).then_some(t)
 }
+
+/// How far from a dragged dot others go with it, in reaches of an added point.
+const FOLLOW_REACH: f64 = 3.0;
 
 /// Most points that may be added to one curve.
 pub const PULLS: usize = 12;
@@ -322,6 +327,7 @@ impl State {
             built_from: None,
             busy: false,
             lift: false,
+            follow: 0.5,
             undone: Vec::new(),
             redone: Vec::new(),
             noted: Vec::new(),
@@ -925,6 +931,38 @@ impl State {
     /// Move `handle` to where the ray from the eye through the cursor meets
     /// its drag plane.
     pub fn drag(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
+        let place = |state: &State| match handle {
+            Handle::Point(i) => state.spec.points.get(i).copied(),
+            Handle::Pull(i) => state.spec.pulls.get(i).map(|(at, by)| *at + *by),
+            _ => None,
+        };
+        let before = place(self);
+        self.drag_alone(handle, origin, dir, view);
+        // The dots near the one dragged go with it, by less the further off
+        // they are, and by `follow` of its own movement at most: a run of
+        // points is then moved as a shape, not one point at a time out of a
+        // line the others still hold. Added points follow whichever dot is
+        // dragged; the form's own dots follow only one another, since an
+        // added point is there to change the form's outline and not where
+        // the form is: a circle's middle stays put when its rim is pulled.
+        let (Some(before), Some(after)) = (before, place(self)) else { return };
+        let moved = after - before;
+        if self.follow <= 0.0 || moved == DVec3::ZERO {
+            return;
+        }
+        let reach = FOLLOW_REACH * self.spec.pull_reach.max(1.0);
+        let share = |at: DVec3| {
+            let d = at.distance(before);
+            if d < reach { self.follow * 0.5 * (1.0 + (std::f64::consts::PI * d / reach).cos()) } else { 0.0 }
+        };
+        let on_grid = |v: f64| if self.fine_snap { snap(v) } else { v.floor() + 0.5 };
+        let points: Vec<DVec3> = self.spec.points.iter().enumerate().map(|(j, p)| if handle == Handle::Point(j) || matches!(handle, Handle::Pull(_)) { *p } else { (*p + moved * share(*p)).map(on_grid) }).collect();
+        let pulls: Vec<(DVec3, DVec3)> = self.spec.pulls.iter().enumerate().map(|(j, (at, by))| if handle == Handle::Pull(j) { (*at, *by) } else { (*at, (*by + moved * share(*at + *by)).map(snap)) }).collect();
+        (self.spec.points, self.spec.pulls) = (points, pulls);
+    }
+
+    /// [`State::drag`], for the one dot alone.
+    fn drag_alone(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
         // A point added to a circle is dragged within the circle's plane, or
         // with Ctrl held, straight out of it: never a little of both, since
         // a curve pulled even slightly out of its plane can no longer be
@@ -951,7 +989,7 @@ impl State {
             // face on: in the plane, as if the plane's axis were locked
             let (was, kept) = (self.lock, by[axis]);
             self.lock = Lock::Axis(axis);
-            self.drag(handle, origin, dir, view);
+            self.drag_alone(handle, origin, dir, view);
             self.lock = was;
             self.spec.pulls[i].1[axis] = kept;
             return;
@@ -1404,6 +1442,38 @@ mod tests {
         assert_eq!(state.spec.points, dots);
         // and leaves how it is fitted alone
         assert_eq!((state.spec.simplify, state.spec.budget), fit);
+    }
+
+    #[test]
+    fn the_dots_near_a_dragged_one_go_with_it() {
+        let mut state = State::new();
+        state.form = SPLINE; // four points in a row, held in their upright plane
+        state.preset();
+        let was = state.spec.points.clone();
+        let drag_up = |state: &mut State, by: f64| {
+            let at = state.handles()[1].1;
+            state.drag(Handle::Point(1), at + DVec3::new(0.0, -90.0, by), DVec3::Y, DVec3::Y);
+        };
+        // on its own
+        state.follow = 0.0;
+        drag_up(&mut state, 6.0);
+        assert_eq!(state.spec.points[1], was[1] + DVec3::Z * 6.0);
+        assert!([0, 2, 3].iter().all(|k| state.spec.points[*k] == was[*k]));
+        // with its neighbours following: the nearer by more, none by more than it, none off the grid
+        state.spec.points = was.clone();
+        state.follow = 0.8;
+        drag_up(&mut state, 6.0);
+        let rose: Vec<f64> = (0..4).map(|k| state.spec.points[k].z - was[k].z).collect();
+        assert_eq!(rose[1], 6.0);
+        assert!(rose[0] > 0.0 && rose[2] > 0.0 && rose[0] < 6.0 && rose[2] < 6.0, "{rose:?}");
+        assert!(rose[3] <= rose[2], "{rose:?}");
+        assert!(state.spec.points.iter().all(|p| (p.z - 0.5).fract() == 0.0 && p.y == was[0].y), "{:?}", state.spec.points);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        // an added point follows too
+        state.spec.points = was.clone();
+        state.spec.pulls = vec![(was[1] + DVec3::new(1.0, 0.0, 1.0), DVec3::ZERO)];
+        drag_up(&mut state, 6.0);
+        assert!(state.spec.pulls[0].1.z > 3.0 && state.spec.pulls[0].1.z <= 6.0, "{:?}", state.spec.pulls);
     }
 
     #[test]

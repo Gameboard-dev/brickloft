@@ -279,6 +279,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 s.pulls.pop();
             }
         }
+        ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")).on_hover_text("How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.");
         ui.label("Sizes are in microbricks. Half steps are single game units.");
         if is_curve && s.tube && s.thick < 3.0 {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
