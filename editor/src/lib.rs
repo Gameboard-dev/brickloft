@@ -134,6 +134,15 @@ pub fn run_form(form: usize) {
     // drawn over the bricks whatever is in front: a sphere's centre dot would
     // otherwise be buried inside it, out of sight and out of reach
     handle_mesh.material.render_states.depth_test = DepthTest::Always;
+    // The three rings that turn the form being edited, a quarter turn a
+    // click: red about x, green about y, blue about z. One mesh, lying
+    // about z, turned to face each axis.
+    let (ring_corners, ring_triangles) = mesh::ring_mesh(0.012);
+    let ring = CpuMesh { positions: Positions::F32(ring_corners.iter().map(|c| vec3(c[0], c[1], c[2])).collect()), indices: Indices::U32(ring_triangles), ..Default::default() };
+    let mut rings: Vec<Gm<Mesh, ColorMaterial>> = [Srgba::new_opaque(230, 60, 60), Srgba::new_opaque(70, 200, 80), Srgba::new_opaque(70, 120, 240)]
+        .into_iter()
+        .map(|albedo| Gm::new(Mesh::new(&context, &ring), ColorMaterial::new_opaque(&context, &CpuMaterial { albedo, ..Default::default() })))
+        .collect();
     // The three arrows that move the form being edited: red along x, green
     // along y, blue along z. Drawn over the bricks, like the dots, since
     // they start inside the form. They also show which way the axes run,
@@ -210,11 +219,21 @@ pub fn run_form(form: usize) {
                             }
                         }
                     }
+                    // then the rings: a click on one turns the form a quarter
+                    // turn about its axis, or with Shift the other way
+                    if dragging.is_none() && !*handled && state.rings().is_some() {
+                        if let Ok(Some(hit)) = pick(&context, &camera, *position, rings.iter().map(|r| &r.geometry), Cull::None) {
+                            if (hit.geometry_id as usize) < 3 {
+                                state.turn(hit.geometry_id as usize, modifiers.shift);
+                                *handled = true;
+                            }
+                        }
+                    }
                     // Otherwise a press on a brick takes hold of its form: a
                     // form other than the one being edited becomes the one
                     // being edited, and either way dragging from there moves
                     // it. Where the press landed is what the drag holds on to.
-                    if dragging.is_none() {
+                    if dragging.is_none() && !*handled {
                         // the meshes that have bricks, in the order they are given to `pick`
                         let drawn: Vec<usize> = (0..brick_meshes.len()).filter(|&m| brick_meshes[m].geometry.instance_count() > 0).collect();
                         let hit = pick(&context, &camera, *position, drawn.iter().map(|&m| &brick_meshes[m].geometry), Cull::Back);
@@ -320,6 +339,9 @@ pub fn run_form(form: usize) {
         if asked.best {
             state.snap_best(None);
         }
+        if let Some(axis) = asked.turn {
+            state.turn(axis, false);
+        }
         // A search under way is given half of a frame at 60 a second, so
         // that the view still turns and the progress bar still moves while
         // it runs. A form that takes longer than that to build once holds
@@ -414,6 +436,14 @@ pub fn run_form(form: usize) {
         screen.clear(ClearState::color_and_depth(0.17, 0.19, 0.23, 1.0, 1.0));
         screen.render(&camera, &ground, &lights);
         screen.render(&camera, brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
+        if let Some((middle, wide)) = state.rings() {
+            // the ring's mesh lies about z, one wide: turned to face its axis and grown to clear the form
+            let faces = [Mat4::from_angle_y(degrees(90.0)), Mat4::from_angle_x(degrees(90.0)), Mat4::identity()];
+            for (ring, face) in rings.iter_mut().zip(faces) {
+                ring.set_transformation(Mat4::from_translation(v(middle)) * face * Mat4::from_scale(wide as f32));
+            }
+            screen.render(&camera, &rings, &lights);
+        }
         if let Some((middle, reach)) = state.gizmo() {
             // the arrow's mesh lies along x, one long: turned to its axis and stretched to its length
             let turns = [Mat4::identity(), Mat4::from_angle_z(degrees(90.0)), Mat4::from_angle_y(degrees(-90.0))];

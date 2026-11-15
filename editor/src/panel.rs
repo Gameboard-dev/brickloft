@@ -80,6 +80,8 @@ pub struct Asked {
     pub copy: bool,
     /// search for the best fit near the current settings
     pub best: bool,
+    /// turn the form a quarter turn about this axis
+    pub turn: Option<usize>,
 }
 
 /// Draw the panel.
@@ -284,6 +286,14 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if is_curve && s.tube && s.thick < 3.0 {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
         }
+        ui.horizontal(|ui| {
+            ui.label("Turn").on_hover_text("Turn the form a quarter turn about an axis. Clicking the red, green or blue ring around the form does the same; Shift + click turns it the other way. The form is the same bricks whichever way it faces.");
+            for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
+                if ui.button(*name).clicked() {
+                    asked.turn = Some(axis);
+                }
+            }
+        });
         ui.horizontal(|ui| {
             ui.label("Mirror").on_hover_text("Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.");
             for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {

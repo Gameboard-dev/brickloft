@@ -106,6 +106,8 @@ over backwards, a middle click turns it to face what the cursor is on, W A S D m
 the way it looks and sideways, Space or E raise it, Q lowers it, and Shift
 with the scroll wheel makes it faster or slower. The form being edited has a red, a green and a blue
 arrow through its middle; dragging one moves the form along x, y or z alone.
+Three rings round it in the same colours turn it: a click on one is a
+quarter turn about that axis, and Shift + click a quarter turn back.
 Shift + click on a form adds a point that pulls it out of shape there.
 
 By default the editor is reachable only from the server's own machine. To let

@@ -739,7 +739,7 @@ impl State {
         let s = &mut self.spec;
         (s.radius, s.thick, s.depth, s.stretch, s.plane) = (fresh.radius, fresh.thick, fresh.depth, fresh.stretch, fresh.plane);
         (s.protrude, s.flip, s.symmetric, s.pull_reach) = (fresh.protrude, fresh.flip, fresh.symmetric, fresh.pull_reach);
-        s.mirror = fresh.mirror;
+        (s.mirror, s.turned) = (fresh.mirror, fresh.turned);
         self.arch = 0;
         self.segment = (2.0, 6.0);
         self.preset();
@@ -866,7 +866,32 @@ impl State {
         }
     }
 
+    /// Turn the form being edited a quarter turn about x, y or z, or with
+    /// `back`, a quarter turn the other way.
+    pub fn turn(&mut self, axis: usize, back: bool) {
+        use arcs_core::shapes::{compose, quarter};
+        for _ in 0..if back { 3 } else { 1 } {
+            self.spec.turned = compose(self.spec.turned, quarter(axis));
+        }
+    }
+
+    /// The rings the form is turned by: their middle and how wide they are,
+    /// which is clear of the form.
+    pub fn rings(&self) -> Option<(DVec3, f64)> {
+        let ((lo, hi), (middle, _)) = (self.bounds?, self.gizmo()?);
+        let across = (0..3).map(|k| ((hi[k] - lo[k]) as f64).powi(2)).sum::<f64>().sqrt();
+        Some((middle, across / 2.0 + 2.0))
+    }
+
+    /// The dots as they are seen: where the form's dots are once it is turned.
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
+        let (turn, standing) = (arcs_core::spec::Turn::of(&self.spec.snapped()), self.standing());
+        self.dots().into_iter().map(|(h, at)| (h, turn.point(at - standing) + standing)).collect()
+    }
+
+    /// The dots of the form as it is fitted, before it is turned: where
+    /// dragging works, since the form's points and sizes are kept that way.
+    fn dots(&self) -> Vec<(Handle, DVec3)> {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
         // an added point is shown where it has pulled the curve to
@@ -937,6 +962,17 @@ impl State {
             _ => None,
         };
         let before = place(self);
+        // A form that has been turned is dragged as it was before the turn:
+        // the cursor's ray is turned back, and then moves the dots of the
+        // form as fitted. Not a move of the whole form, which is the same
+        // whichever way it faces.
+        let turn = arcs_core::spec::Turn::of(&self.spec.snapped());
+        let (origin, dir, view) = if turn.is_none() || matches!(handle, Handle::Move | Handle::Slide(_)) {
+            (origin, dir, view)
+        } else {
+            let standing = self.standing();
+            (turn.back(origin - standing) + standing, turn.back_way(dir), turn.back_way(view))
+        };
         self.drag_alone(handle, origin, dir, view);
         // The dots near the one dragged go with it, by less the further off
         // they are, and by `follow` of its own movement at most: a run of
@@ -1003,7 +1039,7 @@ impl State {
             return;
         }
         // a form is moved by the point of it that was taken hold of; it has no dot
-        let held = if handle == Handle::Move { self.grab } else { self.handles().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
+        let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
         let Some(at) = held else { return };
         let normal = match (handle, self.lock) {
             (Handle::Point(_) | Handle::Move | Handle::Pull(_), Lock::Axis(a)) => [DVec3::X, DVec3::Y, DVec3::Z][a],
@@ -1097,14 +1133,16 @@ impl State {
             return None;
         }
         let at = at - self.standing();
-        // On a curve, or a turned form's profile, the point takes hold of
-        // the curve as last built (which is in the form's own space) where
-        // it comes nearest the click. A sphere or a pyramid has no curve:
-        // the point takes hold of its surface where it was clicked.
+        // On a curve, or a profile spun about an axis, the point takes hold
+        // of the curve as last built where it comes nearest the click. A
+        // sphere or a pyramid has no curve: the point takes hold of its
+        // surface where it was clicked. Either way the place is kept as it
+        // is in the form before any turn, as all the form's points are.
         let on = match self.form {
             SPHERE | PYRAMID => at,
             _ => self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?,
         };
+        let on = arcs_core::spec::Turn::of(&self.spec.snapped()).back(on);
         self.spec.pulls.push((on, DVec3::ZERO));
         Some(Handle::Pull(self.spec.pulls.len() - 1))
     }
@@ -1474,6 +1512,37 @@ mod tests {
         state.spec.pulls = vec![(was[1] + DVec3::new(1.0, 0.0, 1.0), DVec3::ZERO)];
         drag_up(&mut state, 6.0);
         assert!(state.spec.pulls[0].1.z > 3.0 && state.spec.pulls[0].1.z <= 6.0, "{:?}", state.spec.pulls);
+    }
+
+    #[test]
+    fn a_turned_form_shows_its_dots_where_it_now_is_and_is_dragged_by_them() {
+        let mut state = State::new(); // an arch, standing up along z across x
+        state.refresh(|| 0.0);
+        let tall = state.bounds.unwrap().1[2] - state.bounds.unwrap().0[2];
+        let rise_before = state.arch_rise();
+        // a quarter turn about x lays it down along y
+        state.turn(0, false);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        let (lo, hi) = state.bounds.unwrap();
+        assert_eq!(hi[1] - lo[1], tall, "it is not lying along y");
+        // its crown's dot is at the crown as it lies: out along y, not up
+        let (_, crown) = *state.handles().iter().find(|h| h.0 == Handle::Rise).unwrap();
+        let (_, foot) = state.handles()[0];
+        assert!((crown.y - foot.y).abs() > rise_before - 1.0 && (crown.z - foot.z).abs() < 1.0, "crown {crown:?}, foot {foot:?}");
+        // pulled three cells further out along y, it is three cells taller as an arch
+        let further = crown + DVec3::Y * 3.0 * (crown.y - foot.y).signum();
+        state.drag(Handle::Rise, further + DVec3::Z * 80.0, -DVec3::Z, -DVec3::Z);
+        assert!((state.arch_rise() - (rise_before + 3.0)).abs() <= 0.5, "rise {} from {rise_before}", state.arch_rise());
+        // its rings stand clear of it, and four turns bring it back
+        let (middle, wide) = state.rings().unwrap();
+        assert!(wide > (hi[1] - lo[1]) as f64 / 2.0 && middle == state.gizmo().unwrap().0);
+        for _ in 0..3 {
+            state.turn(0, false);
+        }
+        assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+        state.turn(2, false);
+        state.turn(2, true);
+        assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
     }
 
     #[test]

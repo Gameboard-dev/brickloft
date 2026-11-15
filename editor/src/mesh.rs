@@ -108,6 +108,27 @@ pub fn shape_mesh(mask: u8) -> ShapeMesh {
     ShapeMesh { positions, normals, rim }
 }
 
+/// A thin ring of radius 1 about the z axis, as triangles: its corners,
+/// and three numbers into them for each triangle. `thick` is how thick the
+/// ring's own wire is.
+pub fn ring_mesh(thick: f32) -> (Vec<[f32; 3]>, Vec<u32>) {
+    let (round, about) = (64u32, 6u32);
+    let mut corners = Vec::new();
+    let mut triangles = Vec::new();
+    for i in 0..round {
+        let a = i as f32 / round as f32 * std::f32::consts::TAU;
+        for j in 0..about {
+            let b = j as f32 / about as f32 * std::f32::consts::TAU;
+            let out = 1.0 + thick * b.cos();
+            corners.push([out * a.cos(), out * a.sin(), thick * b.sin()]);
+            // the four corners of one patch of the wire, as two triangles
+            let at = |i: u32, j: u32| (i % round) * about + j % about;
+            triangles.extend([at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1)]);
+        }
+    }
+    (corners, triangles)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

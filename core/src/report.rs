@@ -74,6 +74,7 @@ pub fn spec_text(spec: &Spec) -> String {
     line("flip", spec.flip.map(|f| f.to_string()).join(","));
     line("symmetric", spec.symmetric.to_string());
     line("mirror", spec.mirror.map(|f| f.to_string()).join(","));
+    line("turned", spec.turned.to_string());
     // each pull as where it takes hold, then how far it moves
     line("pulls", list(spec.pulls.iter().map(|(at, by)| format!("{} > {}", vec3(at), vec3(by))).collect()));
     line("pull_reach", number(spec.pull_reach));
@@ -192,6 +193,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             }
             "wedges" => spec.wedges = flag(value)?,
             "symmetric" => spec.symmetric = flag(value)?,
+            "turned" => spec.turned = (whole(value)?.rem_euclid(24)) as u8,
             "mirror" => {
                 let flags: Vec<bool> = value.split(',').map(|f| flag(f.trim())).collect::<Result<_, _>>()?;
                 spec.mirror = <[bool; 3]>::try_from(flags).map_err(|_| bad("expected three of true or false"))?;
@@ -852,6 +854,7 @@ mod tests {
                 flip: [true, false, true],
                 symmetric: true,
                 mirror: [false, true, false],
+                turned: 7,
                 pulls: vec![(DVec3::new(1.0, 2.5, -3.0), DVec3::new(0.0, 0.5, 4.0))],
                 pull_reach: 6.5,
                 simplify: 0.25,

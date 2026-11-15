@@ -139,6 +139,23 @@ pub const ORIENT: [Orientation; 24] = [
     o([1, 0, 2], 0b111), // 23 Z- 270: (-y, -x, -z)
 ];
 
+/// The orientation that leaves everything as it is.
+pub const UPRIGHT: u8 = 16;
+
+/// The orientation that is a quarter turn about x, y or z: the turn that
+/// takes y towards z, z towards x, or x towards y.
+pub const fn quarter(axis: usize) -> u8 {
+    [15, 2, 17][axis % 3]
+}
+
+/// The one orientation that does what `first` and then `then` do together.
+pub fn compose(first: u8, then: u8) -> u8 {
+    let (a, b) = (ORIENT[first as usize % 24], ORIENT[then as usize % 24]);
+    let perm = [0, 1, 2].map(|i| a.perm[b.perm[i] as usize]);
+    let neg = (0..3).fold(0u8, |n, i| n | ((b.neg >> i & 1) ^ (a.neg >> b.perm[i] & 1)) << i);
+    ORIENT.iter().position(|o| o.perm == perm && o.neg == neg).expect("the orientations are closed under composition") as u8
+}
+
 /// The world corner mask of a brick whose local corner mask is `mask`, at
 /// orientation `orientation`.
 pub fn transform_mask(mask: u8, orientation: usize) -> u8 {
@@ -550,6 +567,26 @@ mod tests {
             assert_eq!(b.kind, Kind::Inner);
             let at = |i: usize| (i as f64 + 0.5) / 4.0;
             assert!((0..64).all(|s| inside_sampled(a, at(s % 4), at(s / 4 % 4), at(s / 16)) != inside_sampled(b, at(s % 4), at(s / 4 % 4), at(s / 16))));
+        }
+    }
+
+    #[test]
+    fn quarter_turns_compose_as_turns_do() {
+        // four quarter turns about any axis are no turn; and each is a turn about its own axis
+        for axis in 0..3 {
+            let q = quarter(axis);
+            assert_eq!((0..4).fold(UPRIGHT, |o, _| compose(o, q)), UPRIGHT);
+            assert_eq!(ORIENT[q as usize].perm[axis] as usize, axis);
+            assert_eq!(ORIENT[q as usize].neg >> axis & 1, 0);
+            assert_ne!(q, UPRIGHT);
+        }
+        // x towards y: the corner at +x goes to +y
+        assert_eq!(transform_mask(0b0000_0010, quarter(2) as usize), 0b0000_1000);
+        // turning a shape by two turns in a row is turning it by the two together
+        for first in 0..24u8 {
+            for then in [quarter(0), quarter(1), quarter(2), 7, 22] {
+                assert_eq!(transform_mask(transform_mask(0x1f, first as usize), then as usize), transform_mask(0x1f, compose(first, then) as usize));
+            }
         }
     }
 

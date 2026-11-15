@@ -12,7 +12,7 @@ use crate::fit_pyramid::{fit_pyramid, Pyramid};
 use crate::fit_round::{fit_round, Round};
 use crate::fit_volume::{self, fit_volume};
 use crate::sdf::{Field, Fill, Region, Stroke};
-use crate::shapes::{CellBrick, CUBE};
+use crate::shapes::{CellBrick, CUBE, UPRIGHT};
 use glam::{DVec2, DVec3};
 use std::f64::consts::PI;
 
@@ -96,6 +96,14 @@ pub struct Spec {
     /// most bricks wanted when `grain` is 0
     pub budget: usize,
     pub max_ext: i32,
+    /// How the finished form is turned, in quarter turns: one of the game's
+    /// 24 orientations (`shapes::ORIENT`), [`UPRIGHT`] for not at all. The
+    /// form is fitted as it stands and its bricks are turned afterwards,
+    /// about the middle of its points (see [`Turn`]), so a form is the same
+    /// bricks whichever way it faces, and forms that can only be fitted
+    /// upright (a pyramid, a profile spun about the vertical) can lie on
+    /// their sides.
+    pub turned: u8,
     /// Places where a curve is pulled out of its shape: a point on it, and
     /// how far that point is moved. The curve to either side follows, less
     /// and less, out to `pull_reach` along it (see [`pulled`]). Curves only:
@@ -125,6 +133,7 @@ impl Default for Spec {
             flip: [false; 3],
             symmetric: false,
             mirror: [false; 3],
+            turned: UPRIGHT,
             pulls: Vec::new(),
             pull_reach: 8.0,
             simplify: 0.0,
@@ -200,7 +209,84 @@ pub fn build(spec: &Spec) -> Result<Built, String> {
     build_as(spec, true)
 }
 
+/// A turn of a form's bricks by quarter turns about a point of the lattice.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Turn {
+    orientation: u8,
+    about: [i32; 3],
+}
+
+impl Turn {
+    /// The turn `spec` asks for: about the middle of its points, to the
+    /// nearest lattice point, so that turned bricks are on the lattice too.
+    pub fn of(spec: &Spec) -> Turn {
+        let about = [0, 1, 2].map(|k| {
+            let lo = spec.points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min);
+            let hi = spec.points.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max);
+            if lo.is_finite() { ((lo + hi) / 2.0).round() as i32 } else { 0 }
+        });
+        Turn { orientation: spec.turned % 24, about }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.orientation == UPRIGHT
+    }
+
+    fn parts(&self) -> ([usize; 3], [f64; 3], [f64; 3]) {
+        let o = crate::shapes::ORIENT[self.orientation as usize];
+        (o.perm.map(|p| p as usize), [0, 1, 2].map(|i| if o.neg >> i & 1 == 1 { -1.0 } else { 1.0 }), self.about.map(|v| v as f64))
+    }
+
+    /// Where a point of the form as fitted is once the form is turned.
+    pub fn point(&self, p: DVec3) -> DVec3 {
+        let (perm, sign, about) = self.parts();
+        DVec3::from_array([0, 1, 2].map(|i| about[i] + sign[i] * (p[perm[i]] - about[perm[i]])))
+    }
+
+    /// The reverse: where a point of the turned form was as fitted.
+    pub fn back(&self, p: DVec3) -> DVec3 {
+        let (perm, sign, about) = self.parts();
+        let mut q = DVec3::ZERO;
+        for i in 0..3 {
+            q[perm[i]] = about[perm[i]] + sign[i] * (p[i] - about[i]);
+        }
+        q
+    }
+
+    /// [`Turn::back`] for a direction.
+    pub fn back_way(&self, d: DVec3) -> DVec3 {
+        let (perm, sign, _) = self.parts();
+        let mut q = DVec3::ZERO;
+        for i in 0..3 {
+            q[perm[i]] = sign[i] * d[i];
+        }
+        q
+    }
+
+    fn brick(&self, b: &CellBrick) -> CellBrick {
+        let o = crate::shapes::ORIENT[self.orientation as usize];
+        let (mut min, mut ext) = ([0; 3], [0; 3]);
+        for i in 0..3 {
+            let j = o.perm[i] as usize;
+            ext[i] = b.ext[j];
+            min[i] = if o.neg >> i & 1 == 1 { self.about[i] - (b.min[j] + b.ext[j] - self.about[j]) } else { self.about[i] + (b.min[j] - self.about[j]) };
+        }
+        CellBrick { mask: crate::shapes::transform_mask(b.mask, self.orientation as usize), min, ext }
+    }
+}
+
 /// [`build`], with the choice of leaving the fit unmeasured.
+pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
+    let mut built = build_upright(spec, measured)?;
+    let turn = Turn::of(&spec.snapped());
+    if !turn.is_none() {
+        built.bricks = built.bricks.iter().map(|b| turn.brick(b)).collect();
+        built.path = built.path.iter().map(|p| turn.point(*p)).collect();
+    }
+    Ok(built)
+}
+
+/// [`build_as`], before the form is turned.
 ///
 /// Forms laid out whole (spheres, pipes, pyramids) are measured against the
 /// form after they are built, and for those the measuring takes several
@@ -209,7 +295,7 @@ pub fn build(spec: &Spec) -> Result<Built, String> {
 /// second, so the editor builds unmeasured then and measures once when the
 /// mouse is let go. An unmeasured build has `unmeasured` set and its `solid`
 /// and `error` at 0.
-pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
+fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     if !(spec.thick > 0.0) || spec.depth < 1 || !(spec.radius > 0.0) || spec.max_ext < 1 {
         return Err("thickness, depth and radius must all be positive".into());
     }
@@ -575,6 +661,8 @@ pub struct Probe {
     grain: f64,
     /// see [`mirrors`]
     mirror: [Option<f64>; 3],
+    /// see `Spec::turned`
+    turn: Turn,
 }
 
 impl Probe {
@@ -582,11 +670,13 @@ impl Probe {
     pub fn new(spec: &Spec, grain: i32) -> Result<Probe, String> {
         let coarse = coarse(spec, grain);
         let (solid, _) = solid(&coarse)?;
-        Ok(Probe { solid, grain: grain.max(1) as f64, mirror: mirrors(&coarse) })
+        Ok(Probe { solid, grain: grain.max(1) as f64, mirror: mirrors(&coarse), turn: Turn::of(&spec.snapped()) })
     }
 
     /// Signed distance from the form's surface at `p`, in cells: negative inside.
     pub fn distance(&self, p: DVec3) -> f64 {
+        // asked about the form as it faces; answered about the form as fitted
+        let p = if self.turn.is_none() { p } else { self.turn.back(p) };
         let mut q = p / self.grain;
         for (k, twice) in self.mirror.into_iter().enumerate() {
             if let Some(twice) = twice {
@@ -618,7 +708,7 @@ impl Probe {
 
     /// A probe of a form at hand, for measuring bricks fitted to it at brick size 1.
     fn of(solid: Solid) -> Probe {
-        Probe { solid, grain: 1.0, mirror: [None; 3] }
+        Probe { solid, grain: 1.0, mirror: [None; 3], turn: Turn { orientation: UPRIGHT, about: [0; 3] } }
     }
 }
 
@@ -2502,6 +2592,33 @@ mod tests {
         // every brick it keeps on the far side is one the plain ring has
         let plain: HashSet<(u8, [i32; 3], [i32; 3])> = flat.bricks.iter().map(key).collect();
         assert!(raised.bricks.iter().filter(|b| b.min[0] > 5).all(|b| plain.contains(&key(b))));
+    }
+
+    #[test]
+    fn a_turned_form_is_the_same_bricks_facing_another_way() {
+        use crate::shapes::{compose, quarter};
+        let pyramid = Spec { form: Form::Pyramid, points: vec![at(3.0, -2.0, 5.0)], radius: 6.5, rise: Some(9.0), fill: true, ..Spec::default() };
+        let upright = build(&pyramid).unwrap();
+        // a quarter turn about x: what stood up along z lies along y
+        let lying = Spec { turned: quarter(0), ..pyramid.clone() };
+        let built = check(&lying);
+        let span = |b: &Built, k: usize| b.bricks.iter().map(|p| p.min[k] + p.ext[k]).max().unwrap() - b.bricks.iter().map(|p| p.min[k]).min().unwrap();
+        assert_eq!([span(&built, 0), span(&built, 1), span(&built, 2)], [span(&upright, 0), span(&upright, 2), span(&upright, 1)]);
+        assert_eq!(built.bricks.len(), upright.bricks.len());
+        // as well fitted lying down as standing: measured against the form as it now faces
+        assert!((built.error - upright.error).abs() < 1e-6 && (built.solid - upright.solid).abs() < 1e-6);
+        // four quarter turns, one after another, are the form as it was
+        let round = (0..4).fold(crate::shapes::UPRIGHT, |o, _| compose(o, quarter(2)));
+        let mut again = build(&Spec { turned: round, ..pyramid.clone() }).unwrap().bricks;
+        let mut first = upright.bricks.clone();
+        again.sort_by_key(|b| (b.min, b.ext, b.mask));
+        first.sort_by_key(|b| (b.min, b.ext, b.mask));
+        assert_eq!(again, first);
+        // a point of the form goes where the turn says, and comes back
+        let turn = Turn::of(&lying);
+        let p = DVec3::new(1.25, -4.0, 9.5);
+        assert!((turn.back(turn.point(p)) - p).length() < 1e-12);
+        assert!((turn.point(p) - turn.point(DVec3::ZERO) - turn.back_way(turn.back_way(turn.back_way(p)))).length() < 1e-12, "three turns back are one turn on");
     }
 
     #[test]
