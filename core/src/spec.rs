@@ -653,6 +653,20 @@ fn curve(
     volume(field, lo, hi, path)
 }
 
+/// Whether a band `width` cells wide along `path` would have its edges half
+/// way between lattice lines, where no brick can end.
+///
+/// Judged where the path sets out: an arch's foot. A closed path has no such
+/// place, so it is judged at its furthest reach along the axis, which for a
+/// ring is where its edge runs straight. Left half a cell off there, a
+/// ring's outline fits that straight run as a row of unit triangles, each
+/// half a cell, which is right by area and looks like the teeth of a saw.
+fn off_lattice(path: &[DVec3], closed: bool, axis: usize, width: i32) -> bool {
+    let at = if closed { path.iter().map(|p| p[axis]).fold(f64::NEG_INFINITY, f64::max) } else { path[0][axis] };
+    let edge = at + width as f64 / 2.0;
+    (edge - edge.round()).abs() > 0.25
+}
+
 fn planar(
     spec: &Spec,
     path: Vec<DVec3>,
@@ -667,8 +681,14 @@ fn planar(
     // instead, or each side would cover half a row. Moving it half a cell
     // towards the origin does that, and puts its ends on lattice lines too
     // (an arch's feet land on the same floor either way), so it is not extended.
-    let even = !spec.fill && (spec.thick.round() as i64) % 2 == 0;
-    let (shift, extend) = if even { (-0.5, 0.0) } else { (0.0, 0.5) };
+    //
+    // That is the usual case, of points at cell centres. What decides is
+    // whether the band's edge falls on a lattice line or half way between
+    // two (see `off_lattice`): a ring of radius 38.5 about a cell's centre
+    // runs along lattice lines, and it is then the odd widths that need the
+    // half cell.
+    let shifted = !spec.fill && off_lattice(&path, closed, ua, (spec.thick.round() as i32).max(1));
+    let (shift, extend) = if shifted { (-0.5, 0.0) } else { (0.0, 0.5) };
     let flat: Vec<DVec3> = path
         .iter()
         .map(|p| DVec3::new(p[ua] + shift, p[va] + shift, 0.0))
@@ -741,8 +761,7 @@ fn stacked(
     let (below, above) = ((spec.thick.floor() as i32).max(1), (spec.thick.ceil() as i32).max(1));
     let pipe = spec.wedges && !spec.protrude;
     let count = if !pipe { (spec.thick.round() as i32).max(1) } else if octagon(below) <= octagon(above) { below } else { above };
-    let even = count % 2 == 0;
-    let (shift, extend) = if even { (-0.5, 0.0) } else { (0.0, 0.5) };
+    let (shift, extend) = if off_lattice(&path, closed, ua, count) { (-0.5, 0.0) } else { (0.0, 0.5) };
     let flat: Vec<DVec3> = path
         .iter()
         .map(|p| DVec3::new(p[ua] + shift, p[va] + shift, 0.0))
@@ -1631,12 +1650,10 @@ mod tests {
             let survey = crate::surface::survey(&Probe::new(spec, built.grain).unwrap(), &built).unwrap();
             (built, survey.stepped / survey.area)
         };
-        let arch = Spec { form: Form::Arch(ArchType::Round), points: vec![at(-8.0, 0.0, 0.0), at(8.0, 0.0, 0.0)], thick: 6.5, tube: true, ..Spec::default() };
+        let arch = Spec { form: Form::Arch(ArchType::Round), points: vec![at(-8.0, 0.0, 0.0), at(8.0, 0.0, 0.0)], thick: 6.5, tube: true, simplify: 0.25, ..Spec::default() };
         let (pipe, pipe_steps) = stepped(&arch);
         let (_, band_steps) = stepped(&Spec { protrude: true, ..arch.clone() });
-        // this arch turns tightly for its thickness, which limits what the
-        // chamfer on its inside can do; it is still far from the bands
-        assert!(pipe_steps < 0.15 && band_steps > 0.25, "pipe {pipe_steps}, bands {band_steps}");
+        assert!(pipe_steps < 0.06 && band_steps > 0.25, "pipe {pipe_steps}, bands {band_steps}");
         // an octagon across: 6 cells wide, the outer 2 each side sloping
         let across: HashSet<(i32, i32)> = pipe.bricks.iter().map(|b| (b.min[1], b.ext[1])).collect();
         assert_eq!(across, HashSet::from([(-2, 2), (0, 2), (2, 2), (-2, 6)]), "{across:?}");
@@ -1667,9 +1684,7 @@ mod tests {
         let torus = Spec { form: Form::Torus, points: vec![at(0.0, 0.0, 0.0)], radius: 18.5, thick: 5.5, ..Spec::default() };
         let (_, ring_steps) = stepped(&torus);
         let (_, cell_steps) = stepped(&Spec { wedges: false, ..torus.clone() });
-        // (its inside edge is a quarter cell off the lattice, which costs a
-        // lone cell at each of the four points where it crosses an axis)
-        assert!(ring_steps < 0.2 && ring_steps < cell_steps / 2.0, "pipe {ring_steps}, cubes {cell_steps}");
+        assert!(ring_steps < 0.06 && ring_steps < cell_steps / 2.0, "pipe {ring_steps}, cubes {cell_steps}");
     }
 
     #[test]
@@ -1716,6 +1731,38 @@ mod tests {
                     assert!(sloped.contains(&mirrored), "thick {thick} tube {tube} rise {rise}: {mask:#x} at {min:?} size {ext:?} has no mirror image");
                 }
             }
+        }
+    }
+
+    /// From saved report 23 and a screenshot of it: a torus of radius 38.5,
+    /// 5.5 thick, had a row of unit triangles like saw teeth where its
+    /// outline crosses each axis, and elsewhere alternated between two
+    /// slopes instead of turning steadily.
+    #[test]
+    fn a_ring_turns_steadily_all_the_way_round() {
+        for (radius, thick) in [(38.5, 5.5), (19.0, 6.5), (19.0, 3.0), (26.0, 4.0)] {
+            let spec = Spec { form: Form::Torus, points: vec![at(0.0, 0.0, 1.0)], radius, thick, ..Spec::default() };
+            let built = check(&spec);
+            // the wall's upright sloped pieces: one quarter of the outer outline,
+            // in order round it, as the angle each side makes with the y axis
+            let mid = built.bricks.iter().map(|b| b.min[2]).min().unwrap() + (thick as i32) / 2;
+            let centre = built.bricks.iter().fold([i32::MAX, i32::MIN, i32::MAX, i32::MIN], |m, b| [m[0].min(b.min[0]), m[1].max(b.min[0] + b.ext[0]), m[2].min(b.min[1]), m[3].max(b.min[1] + b.ext[1])]);
+            let (cx, cy) = ((centre[0] + centre[1]) as f64 / 2.0, (centre[2] + centre[3]) as f64 / 2.0);
+            let mut sides: Vec<(f64, f64)> = built
+                .bricks
+                .iter()
+                .filter(|b| b.min[2] <= mid && mid < b.min[2] + b.ext[2] && shape_info(b.mask).unwrap().kind == Kind::Ramp)
+                .filter_map(|b| {
+                    let (x, y) = (b.min[0] as f64 + b.ext[0] as f64 / 2.0 - cx, b.min[1] as f64 + b.ext[1] as f64 / 2.0 - cy);
+                    (x > 0.0 && y > 0.0 && x.hypot(y) > radius).then(|| (y.atan2(x), (b.ext[0] as f64).atan2(b.ext[1] as f64).to_degrees()))
+                })
+                .collect();
+            sides.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let slopes: Vec<f64> = sides.iter().map(|s| s.1.round()).collect();
+            assert!(slopes.len() >= 5, "radius {radius}: only {} sloped sides in a quarter", slopes.len());
+            assert!(slopes.windows(2).all(|w| w[0] <= w[1]), "radius {radius} thick {thick}: the outline's slopes go back and forth: {slopes:?}");
+            // nearly upright where it leaves the x axis, nearly level at the y axis
+            assert!(slopes[0] < 30.0 && slopes[slopes.len() - 1] > 60.0, "radius {radius} thick {thick}: {slopes:?}");
         }
     }
 

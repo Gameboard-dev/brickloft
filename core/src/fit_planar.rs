@@ -39,6 +39,13 @@ const FULL: u64 = u64::MAX;
 /// that can be seen at all.
 const CORNER: f64 = 0.1;
 
+/// What it costs an outline to change the way it turns, in samples: three
+/// quarters of a cell. Enough that two slopes are not alternated to gain the
+/// fraction of a cell that alternating them fits closer by; not so much that
+/// a form that really does bend both ways, an S or the foot of an arch, is
+/// straightened to avoid it.
+const WIGGLE: i64 = (K * K) as i64 * 3 / 4;
+
 /// A rectangle or right triangle covering cells `x..x+w`, `y..y+h`. `mask` has
 /// a bit per filled corner of that box, bit `cx | cy<<1`; 15 is a rectangle.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -825,7 +832,7 @@ impl Search<'_> {
     /// stretch between them stray from the segment's row and from its
     /// column, and `next` whether they are neighbours on the stretch. `None`
     /// if the side cannot be used.
-    fn side(&mut self, p: (i32, i32), q: (i32, i32), off: [i32; 2], next: bool, inner: bool) -> Option<i64> {
+    fn side(&mut self, p: (i32, i32), q: (i32, i32), off: [i32; 2], next: bool, inner: bool, backwards: bool) -> Option<i64> {
         if p == q {
             return Some(0);
         }
@@ -867,7 +874,12 @@ impl Search<'_> {
             let line = if level { p.1 } else { p.0 };
             let forward = if level { q.0 > p.0 } else { q.1 > p.1 };
             // level and going +x, or upright and going -y: the solid is on the higher side
-            let solid_above = level == forward;
+            // (walked backwards, as `solve` also does, it is on the right:
+            // without allowing for that, this cost was worked out for the
+            // wrong side on every backward pass, and a stretch and its
+            // mirror image, which is the same stretch walked the other way,
+            // could be given different corners)
+            let solid_above = (level == forward) != backwards;
             let (inner, outer) = if solid_above {
                 (line, line - 1)
             } else {
@@ -934,22 +946,42 @@ impl Search<'_> {
     /// The cheapest way along `nodes` from first to last, as the indexes of
     /// the points kept as corners.
     ///
-    /// An exact shortest-path search: `best[j]` is the least cost of reaching
-    /// point `j`, found from every earlier point that can reach it in one
-    /// side. Greedy choice, taking the longest side that fits from each
-    /// point, is simpler and was tried in spirit by the fitter this replaced:
-    /// it commits to a long side that leaves an awkward remainder.
+    /// An exact shortest-path search over sides: the least cost of arriving
+    /// at point `j` by a side from point `i`, found from every side that can
+    /// lead into `i`. Greedy choice, taking the longest side that fits from
+    /// each point, is simpler and was tried in spirit by the fitter this
+    /// replaced: it commits to a long side that leaves an awkward remainder.
     /// https://en.wikipedia.org/wiki/Shortest_path_problem#Directed_acyclic_graphs
-    fn cheapest(&mut self, nodes: &[(i32, i32)]) -> Vec<usize> {
+    ///
+    /// The search remembers the side it arrived by, and which way the outline
+    /// last turned, because one thing it charges for cannot be seen from a
+    /// single side: a change in the way the outline turns ([`WIGGLE`]).
+    /// Round a curve an outline should turn one way throughout. Choosing
+    /// each side on its fit alone, a slope the lattice has no single side
+    /// for is made by alternating the two nearest (1 in 1, 1 in 2, 1 in 1,
+    /// 1 in 2), which fits a little closer by area and turns left, right,
+    /// left, right all the way along: seen from above, a curve with a ripple
+    /// in it. With the charge, the same sides are taken in order of slope.
+    ///
+    /// `backwards` says the points are given against the outline's own
+    /// direction, so that the solid is on their right.
+    ///
+    /// Also returned: whether the answer was a toss-up between ending on a
+    /// left turn and ending on a right turn, which a mirror image would call
+    /// the other way.
+    fn cheapest(&mut self, nodes: &[(i32, i32)], backwards: bool) -> (Vec<usize>, bool) {
+        // an arrival at a point: the point it came from, and for each way the
+        // outline may have last turned (not yet, left, right) the least cost
+        // of arriving so and the arrival at the earlier point it follows
+        struct Arrival {
+            from: usize,
+            cost: [i64; 3],
+            back: [(usize, usize); 3],
+        }
         let last = nodes.len() - 1;
-        let mut best = vec![i64::MAX; nodes.len()];
-        let mut from = vec![0usize; nodes.len()];
-        best[0] = 0;
+        let mut arrivals: Vec<Vec<Arrival>> = (0..=last).map(|_| Vec::new()).collect();
         // the way the stretch runs: a side may not run against it
-        let run = (
-            (nodes[last].0 - nodes[0].0).signum(),
-            (nodes[last].1 - nodes[0].1).signum(),
-        );
+        let run = ((nodes[last].0 - nodes[0].0).signum(), (nodes[last].1 - nodes[0].1).signum());
         for j in 1..=last {
             let q = nodes[j];
             // how far the points from i to j stray from q's column, and its row
@@ -964,33 +996,71 @@ impl Search<'_> {
                 off = [off[0].max((p.0 - q.0).abs()), off[1].max((p.1 - q.1).abs())];
                 // beyond one brick's reach both ways, and no longer a straight
                 // run: nothing further back can reach q either
-                if off[0] > 1
-                    && off[1] > 1
-                    && ((q.0 - p.0).abs() > self.max_ext || (q.1 - p.1).abs() > self.max_ext)
-                {
+                if off[0] > 1 && off[1] > 1 && ((q.0 - p.0).abs() > self.max_ext || (q.1 - p.1).abs() > self.max_ext) {
                     break;
                 }
-                if best[i] == i64::MAX {
+                if i > 0 && arrivals[i].is_empty() {
                     continue;
                 }
                 let against = (q.0 - p.0).signum() * run.0 < 0 || (q.1 - p.1).signum() * run.1 < 0;
                 if against && j - i > 1 {
                     continue;
                 }
-                if let Some(cost) = self.side(p, q, between, j - i == 1, i > 0 && j < last) {
-                    if best[i] + cost < best[j] {
-                        best[j] = best[i] + cost;
-                        from[j] = i;
+                let Some(cost) = self.side(p, q, between, j - i == 1, i > 0 && j < last, backwards) else { continue };
+                let mut arrival = Arrival { from: i, cost: [i64::MAX; 3], back: [(0, 0); 3] };
+                if i == 0 {
+                    arrival.cost[0] = cost;
+                }
+                for (e, earlier) in arrivals[i].iter().enumerate() {
+                    let h = nodes[earlier.from];
+                    let turn = ((p.0 - h.0) as i64 * (q.1 - p.1) as i64 - (p.1 - h.1) as i64 * (q.0 - p.0) as i64).signum();
+                    for was in 0..3 {
+                        if earlier.cost[was] == i64::MAX {
+                            continue;
+                        }
+                        let now = match turn {
+                            0 => was,
+                            1 => 1,
+                            _ => 2,
+                        };
+                        let wiggle = if was != 0 && now != was { WIGGLE } else { 0 };
+                        let total = earlier.cost[was] + cost + wiggle;
+                        // Between equal costs, the way that kept turning as
+                        // it was, then the one that had not turned yet. Not
+                        // simply the first met: left and right change places
+                        // in a mirror image, and "left before right" would
+                        // choose differently for the two sides of a
+                        // symmetric form.
+                        let rank = |from: usize| if from == now { 0 } else if from == 0 { 1 } else { 2 };
+                        let better = total < arrival.cost[now] || (total == arrival.cost[now] && (e, rank(was)) < (arrival.back[now].0, rank(arrival.back[now].1)));
+                        if better {
+                            arrival.cost[now] = total;
+                            arrival.back[now] = (e, was);
+                        }
                     }
+                }
+                if arrival.cost.iter().any(|c| *c != i64::MAX) {
+                    arrivals[j].push(arrival);
                 }
             }
         }
+        // the cheapest arrival at the last point, and back along the way it came
+        let mut at = (0..arrivals[last].len())
+            .flat_map(|e| (0..3).map(move |turned| (e, turned)))
+            .min_by_key(|&(e, turned)| arrivals[last][e].cost[turned])
+            .expect("a unit step of the outline can always be walked");
+        let least = arrivals[last][at.0].cost[at.1];
+        let toss_up = arrivals[last].iter().any(|a| a.cost[1] == least) && arrivals[last].iter().any(|a| a.cost[2] == least);
         let mut keep = vec![last];
-        while *keep.last().unwrap() != 0 {
-            keep.push(from[*keep.last().unwrap()]);
+        let mut point = last;
+        while point != 0 {
+            let arrival = &arrivals[point][at.0];
+            keep.push(arrival.from);
+            point = arrival.from;
+            at = arrival.back[at.1];
         }
         keep.reverse();
-        keep
+        (keep, toss_up)
     }
 
     /// [`Search::cheapest`], made the same from either end.
@@ -1008,15 +1078,15 @@ impl Search<'_> {
         if last == 0 {
             return vec![0];
         }
-        let forward = self.cheapest(nodes);
+        let (forward, toss_up) = self.cheapest(nodes, false);
         let reversed: Vec<(i32, i32)> = nodes.iter().rev().copied().collect();
-        let mut backward: Vec<usize> = self
-            .cheapest(&reversed)
-            .into_iter()
-            .map(|i| last - i)
-            .collect();
+        // a toss-up seen from either end is one: this stretch walked
+        // forwards is its mirror image walked backwards
+        let (back, back_toss_up) = self.cheapest(&reversed, true);
+        let toss_up = toss_up || back_toss_up;
+        let mut backward: Vec<usize> = back.into_iter().map(|i| last - i).collect();
         backward.reverse();
-        if forward == backward || last == 1 || depth >= 12 {
+        if (forward == backward && !toss_up) || last == 1 || depth >= 12 {
             return forward;
         }
         // the middle point, or for an odd number of steps the middle step

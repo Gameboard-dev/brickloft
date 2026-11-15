@@ -714,27 +714,25 @@ mod tests {
         }
     }
 
-    /// From saved reports: a 2-thick ring of radius 12.5 has its walls half a
-    /// cell off the grid, and radius 13 or 12 does not.
+    /// From saved reports: a 2-thick ring of radius 12.5 came out with its
+    /// walls half a cell off the grid, and best fit had to move it to radius
+    /// 13 or 12. A ring is now set on the grid whatever its radius.
     #[test]
-    fn best_fit_moves_a_ring_onto_the_grid() {
-        let mut state = State::new();
-        state.form = 2;
-        state.preset();
-        state.spec.radius = 12.5;
-        state.spec.thick = 2.0;
-        let before = state.misfit().unwrap();
+    fn a_ring_is_on_the_grid_without_best_fit() {
+        let misfit_at = |radius: f64| {
+            let mut state = State::new();
+            state.form = 2;
+            state.preset();
+            state.spec.radius = radius;
+            state.spec.thick = 2.0;
+            (state.misfit().unwrap(), state)
+        };
+        let (half, mut state) = misfit_at(12.5);
+        let (whole, _) = misfit_at(13.0);
+        // (off the grid it was 14% and more)
+        assert!(half < 0.1 && whole < 0.14, "radius 12.5 fits {half}, radius 13 fits {whole}");
         state.snap_best(None);
-        let after = state.misfit().unwrap();
-        // a whole radius, where a ring 2 thick has both walls on lattice lines
-        assert!(state.spec.radius.fract() == 0.0 && (state.spec.radius - 12.5).abs() <= 2.0, "radius {}", state.spec.radius);
-        assert!(after < before * 0.8, "{before} -> {after}");
-        assert!(state.best_note.contains("closer fit"));
-        // and from there, nothing nearby is better
-        let settled = state.spec.clone();
-        state.snap_best(None);
-        assert_eq!(state.spec, settled);
-        assert!(state.best_note.contains("already"));
+        assert!(state.misfit().unwrap() <= half);
     }
 
     #[test]

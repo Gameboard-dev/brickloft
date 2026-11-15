@@ -222,6 +222,18 @@ keeps mirror images identical. The planar fitter counts them outside for both
 the form and the triangle, which is exact for lattice-aligned slopes and
 reads a triangle about 6% small otherwise.
 
+## Turning one way
+
+Round a curve an outline should turn one way throughout. Chosen on fit
+alone, a slope the lattice has no single side for is made by alternating the
+two nearest (1 in 1, 1 in 2, 1 in 1, 1 in 2), which is a little closer by
+area and turns left, right, left, right: from above, a curve with a ripple
+in it. So the outline search charges three quarters of a cell for each
+change in the way the outline turns, and the same sides come out in order of
+slope. A ring is also set on the lattice whatever its radius: left half a
+cell off, the straight run where it crosses an axis fits best, by area, as a
+row of unit triangles, which looks like the teeth of a saw.
+
 ## Symmetry
 
 Where two candidates tie exactly, they are almost always mirror images on a
@@ -238,21 +250,19 @@ symmetric.
   round tubes and tori have a fitter that lays the surface out whole.
 - **A thin pipe's outline has few directions.** No sloped side of a pipe's
   outline may be deeper than its chamfer, so a tube under 6 across, whose
-  chamfer is one cell, can only use slopes of 1 in n. A ring of it is a
-  polygon of long straight runs with uneven turns between them (at radius
-  20: slopes 6, 2, 2, 2, 1, 1, 1, 1 round a quarter). Letting sides go a
-  cell deeper, on both faces or on the outer face only, was tried: it gave
-  no smoother an outline and brought steps back (0.2% to 4% and 1% to 8% on
-  the two rings measured), because the deeper pieces collide across the
-  narrow top. A flat band, or a protruded tube, has no such limit.
+  chamfer is one cell, can only use slopes of 1 in n: round a quarter of a
+  ring, a few straight runs (at radius 38: slopes of 9, 14, 27, 45, 63, 76
+  and 81 degrees), each turning the same way into the next. Letting sides
+  go a cell deeper was tried and brought steps back, because the deeper
+  pieces collide across the narrow top.
 - **A pipe has one chamfer.** Its section is an octagon whatever its size; a
   very thick tube would look rounder with two or three slopes.
-- **A pipe's chamfer is weak on a tight curve.** Where the inside of a
+- **A pipe's chamfer is weaker on a tight curve.** Where the inside of a
   curve has a radius under about three times the chamfer, its outline is
-  mostly unit triangles, which carry only a shallow chamfer; where pieces
-  from two sides would cross, one is left out and the solid stands a little
-  proud there. A tube 6.5 across on a radius of 8 is about 10% steps, where
-  on a radius of 19 it is 1%.
+  mostly unit triangles, which carry only a shallow chamfer, and where
+  pieces from two sides would cross, one is left out and the solid stands a
+  little proud there. A tube 6.5 across on a radius of 8 is about 3% steps,
+  where on a radius of 19 it is under 1%.
 - **A sphere's radius should end on the lattice.** Centred in a cell, a
   radius of 12.5 or 13.5 ends on a lattice plane and 13 does not; the poles
   are then half a cell out.
