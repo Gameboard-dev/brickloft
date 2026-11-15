@@ -91,7 +91,7 @@ struct Grid {
     dims: [usize; 3],
     owner: Vec<u32>,
     /// the cells with more than one brick, and the others in each: half
-    /// bricks either side of a diagonal share a box (see `fit_surface`)
+    /// bricks either side of a diagonal share a box (see `fit_ribbon`)
     shared: std::collections::HashMap<usize, Vec<u32>>,
 }
 

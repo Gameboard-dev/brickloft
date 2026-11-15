@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, SURFACE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
 use arcs_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -227,20 +227,12 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 s.rise = Some(height);
             }
         }
-        if state.form == SURFACE {
-            ui.label("Drag the blue dots up and down to shape the surface.");
-            ui.label("Stretch:");
-            for (axis, name) in ["X", "Y"].iter().enumerate() {
-                ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
-            }
-        }
-        if matches!(state.form, CIRCLE | SPHERE | PYRAMID | SURFACE) {
+        if matches!(state.form, CIRCLE | SPHERE | PYRAMID) {
             // A size beyond the slider's reach (set by Ctrl + scroll, or
             // before the reach was lowered) is left as it is: the slider
             // would otherwise put it back to its own top value every frame.
             let name = match state.form {
                 PYRAMID => "Half its base",
-                SURFACE => "Half its size",
                 _ => "Radius",
             };
             ui.add(Slider::new(&mut s.radius, 0.5..=largest).step_by(0.5).clamping(egui::SliderClamping::Never).text(name));
@@ -258,9 +250,6 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             PYRAMID => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)");
             }
-            SURFACE => {
-                ui.checkbox(&mut s.fill, "Solid down to its base (untick for a skin)");
-            }
             _ => {
                 ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
                 ui.checkbox(&mut s.tube, "Round tube instead of a flat band");
@@ -275,11 +264,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         let wall = match state.form {
             SPHERE | REVOLVE | PYRAMID => "Wall thickness",
-            SURFACE => "Skin thickness",
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any)
-        if !(matches!(state.form, PYRAMID | SURFACE) && s.fill) {
+        if !(state.form == PYRAMID && s.fill) {
             ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
         }
         if is_curve && !s.tube {

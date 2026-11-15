@@ -37,40 +37,6 @@ pub enum Form {
     /// 1 point, the middle of its base: a pyramid `radius` to each side of
     /// it (scaled by `stretch` along x and y) and `rise` tall
     Pyramid,
-    /// 1 point, the middle of the ground it covers: a surface over a square
-    /// `radius` to each side (scaled by `stretch` along x and y), whose
-    /// heights above that point are `weights`, [`SURFACE_POINTS`] each way.
-    /// Filled, it is solid down to the point's level; not, `thick` through.
-    Surface,
-}
-
-/// How many heights a surface has along each side.
-pub const SURFACE_POINTS: usize = 4;
-
-/// The ground a surface covers, on the lattice (low corner, high corner),
-/// and the level its heights are measured from.
-pub fn surface_ground(spec: &Spec) -> Option<([f64; 2], [f64; 2], f64)> {
-    let centre = *spec.points.first()?;
-    let half = [spec.radius * spec.stretch.x.max(0.05), spec.radius * spec.stretch.y.max(0.05)];
-    let min = [0, 1].map(|k| (centre[k] - half[k]).round());
-    // at least two cells each way
-    let max = [0, 1].map(|k| (centre[k] + half[k]).round().max(min[k] + 2.0));
-    Some((min, max, centre.z.floor()))
-}
-
-/// Where a surface's heights are: the points it passes through, x fastest.
-pub fn surface_points(spec: &Spec) -> Vec<DVec3> {
-    let Some((min, max, base)) = surface_ground(spec) else { return Vec::new() };
-    let n = SURFACE_POINTS;
-    spec.weights
-        .iter()
-        .take(n * n)
-        .enumerate()
-        .map(|(k, h)| {
-            let part = |i: usize, a: usize| min[a] + (max[a] - min[a]) * i as f64 / (n - 1) as f64;
-            DVec3::new(part(k % n, 0), part(k / n, 1), base + h)
-        })
-        .collect()
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -309,15 +275,17 @@ impl Spec {
             Form::Torus => self.thick / 4.0,
             // a pyramid is exact at any size: nothing is gained by coarser bricks
             Form::Pyramid => 1.0,
-            // a surface chooses the size of its own squares (see `fit_surface`)
-            Form::Surface => 1.0,
+            // a curve pulled out of shape is fitted at the finest size: the
+            // bump is the detail wanted, and a band raised to follow its
+            // curve is built from the bricks of the finest flat fit
+            _ if !self.pulls.is_empty() => 1.0,
             Form::Revolve if self.fill => f64::INFINITY,
             Form::Sphere | Form::Revolve => self.thick / 2.0,
             // a curve
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Surface) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -793,52 +761,6 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
-        Form::Surface => {
-            need(1)?;
-            let n = SURFACE_POINTS;
-            if spec.weights.len() != n * n {
-                return Err(format!("a surface needs {} heights, and has {}", n * n, spec.weights.len()));
-            }
-            let (min, max, base) = surface_ground(spec).ok_or("a surface needs a point")?;
-            // (heights far beyond anything buildable would only overflow the sums below)
-            let mut heights: Vec<f64> = spec.weights.iter().map(|h| h.clamp(-MAX_SPAN, MAX_SPAN)).collect();
-            // mirrored along x or y, the heights on the high side are those of the low side
-            for k in 0..n * n {
-                let (a, b) = (k % n, k / n);
-                let from = (if spec.mirror[0] { a.min(n - 1 - a) } else { a }, if spec.mirror[1] { b.min(n - 1 - b) } else { b });
-                heights[k] = heights[from.0 + n * from.1];
-            }
-            let skin = (!spec.fill).then(|| spec.thick.round().max(2.0));
-            let above = |x: f64, y: f64| crate::sdf::height_at(min, max, n, &heights, x, y);
-            // over every lattice point of its ground: how high and low it goes, and how steeply
-            let (lo, hi) = (min.map(|v| v as i32), max.map(|v| v as i32));
-            check_size(&[(hi[0] - lo[0]) as i64, (hi[1] - lo[1]) as i64])?;
-            let (mut low, mut high, mut steep) = (f64::MAX, f64::MIN, 0.0f64);
-            for y in lo[1]..=hi[1] {
-                for x in lo[0]..=hi[0] {
-                    let here = above(x as f64, y as f64);
-                    (low, high) = (low.min(here), high.max(here));
-                    if x < hi[0] {
-                        steep = steep.max((above(x as f64 + 1.0, y as f64) - here).abs());
-                    }
-                    if y < hi[1] {
-                        steep = steep.max((above(x as f64, y as f64 + 1.0) - here).abs());
-                    }
-                }
-            }
-            let height = |x: f64, y: f64| base + above(x, y);
-            let surface = crate::fit_surface::Surface { height: &height, min: lo, max: hi, floor: base as i32, skin: skin.map(|t| t as i32), max_ext: spec.max_ext };
-            let bricks = crate::fit_surface::fit_surface(&surface);
-            let field = Field::Heights { min, max, base, n, heights: heights.clone(), skin, steep };
-            let bottom = match skin {
-                Some(thick) => base + low - thick,
-                None => base,
-            };
-            let (solid, path) = volume(field.clone(), DVec3::new(min[0], min[1], bottom), DVec3::new(max[0], max[1], base + high.max(1.0)), Vec::new())?;
-            let Solid::Volume { min, max, .. } = solid else { unreachable!() };
-            // laid out whole and measured afterwards, as a pyramid is
-            Ok((Solid::Pyramid { bricks, field, min, max }, path))
-        }
         Form::Revolve => {
             let p = need(2)?;
             let axis = p[0].truncate();
@@ -1017,8 +939,12 @@ fn curve(
     if path.len() < 2 {
         return Err("the curve has no length".into());
     }
-    // Pulled out of its plane, a curve has no plane any more: it is then
-    // built as a curve in space is, which for a band means a round tube.
+    // the axis it lies flat across before anything is done to it
+    let lay_across = (0..3).rev().find(|&a| path.iter().all(|p| (p[a] - path[0][a]).abs() < 1e-6) && normal.is_none_or(|n| n[a].abs() > 1.0 - 1e-9));
+    let lay_at = path[0];
+    // Pulled out of its plane, a curve has no plane any more. A flat band
+    // is then raised to follow it (below); anything else is built as a
+    // curve in space is, a round tube fitted cell by cell.
     let (path, normal) = if spec.pulls.is_empty() {
         (path, normal)
     } else {
@@ -1030,6 +956,13 @@ fn curve(
     for axis in (0..3).filter(|a| spec.mirror[*a]) {
         if let Some(plane) = mirror_plane(spec, axis) {
             path = mirrored(&path, closed, axis, plane);
+        }
+    }
+    if let (Some(axis), false, false) = (lay_across, spec.tube, spec.fill) {
+        if path.iter().any(|p| (p[axis] - lay_at[axis]).abs() > 1e-6) {
+            if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis])? {
+                return Ok(raised);
+            }
         }
     }
     // the axis the curve lies flat across, if any: every point shares that coordinate
@@ -1068,6 +1001,45 @@ fn curve(
         _ => Field::Tube(Stroke::new(&path, half, closed, Some(0.5))),
     };
     volume(field, lo, hi, path)
+}
+
+/// A flat band whose curve has been pulled out of the plane it lay in, at
+/// `plane` along `axis`: the band as it would be flat, raised to follow the
+/// curve (see `fit_ribbon`). `None` if it cannot be laid out that way.
+fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
+    let level: Vec<DVec3> = path
+        .iter()
+        .map(|p| {
+            let mut q = *p;
+            q[axis] = plane;
+            q
+        })
+        .collect();
+    let (flat, _) = planar(spec, level, closed, axis)?;
+    let Solid::Flat { region, w0, depth, min, max, .. } = &flat else { return Ok(None) };
+    let (region, w0, depth, lo, hi) = (region.clone(), *w0, *depth, *min, *max);
+    let bricks = fit(spec, &flat, Vec::new(), 1.0).bricks;
+    let lift = |u: f64, v: f64| crate::sdf::lift_at(path, axis, plane, u, v);
+    let bricks = crate::fit_ribbon::fit_ribbon(&crate::fit_ribbon::Ribbon { flat: &bricks, axis, lift: &lift, max_ext: spec.max_ext });
+    // how steeply the curve climbs, for each cell it goes across the plane
+    let (ua, va) = plane_axes(axis);
+    let steep = path
+        .windows(2)
+        .map(|p| {
+            let across = (p[1][ua] - p[0][ua]).hypot(p[1][va] - p[0][va]);
+            if across > 1e-9 { (p[1][axis] - p[0][axis]).abs() / across } else { 0.0 }
+        })
+        .fold(0.0, f64::max)
+        .min(8.0);
+    let (low, high) = path.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[axis] - plane), b.max(p[axis] - plane)));
+    let field = Field::Ribbon { region, axis, w0: w0 as f64, depth: depth as f64, path: path.to_vec(), plane, steep };
+    let (mut from, mut to) = (DVec3::ZERO, DVec3::ZERO);
+    (from[ua], from[va], from[axis]) = (lo[0] as f64, lo[1] as f64, w0 as f64 + low);
+    (to[ua], to[va], to[axis]) = (hi[0] as f64, hi[1] as f64, (w0 + depth) as f64 + high);
+    let (solid, path) = volume(field.clone(), from, to, path.to_vec())?;
+    let Solid::Volume { min, max, .. } = solid else { unreachable!() };
+    // laid out whole and measured afterwards, as a pyramid is
+    Ok(Some((Solid::Pyramid { bricks, field, min, max }, path)))
 }
 
 /// Whether a band `width` cells wide along `path` would have its edges half
@@ -2340,52 +2312,24 @@ mod tests {
         assert!(moved.iter().all(|p| p.z >= -20.0 - 1e-9) && moved.iter().any(|p| (p.z + 20.0).abs() < 1e-6));
         // smooth: no two neighbours of the finer curve further apart than a cell
         assert!(moved.windows(2).all(|w| w[0].distance(w[1]) < 1.0));
-        // Out of its plane the ring is a curve in space: built as a round
-        // tube, cell by cell, which for one this thin is a rough fit.
-        let leaning = build(&Spec { pulls: vec![(top, DVec3::new(0.0, 5.0, 0.0))], ..ring }).unwrap();
+        // Out of its plane the band keeps its outline and is raised to
+        // follow the curve: sloped bricks above and below, far fewer bricks
+        // and far fewer steps than the same curve fitted cell by cell as a tube.
+        let lifted = Spec { pulls: vec![(top, DVec3::new(0.0, 5.0, 0.0))], thick: 3.0, ..ring.clone() };
+        let leaning = build(&lifted).unwrap();
         assert!(leaning.bricks.iter().any(|b| b.min[1] >= 4), "nothing was pulled out of the plane");
-    }
-
-    #[test]
-    fn a_surface_passes_through_its_heights_and_is_built_of_sloped_bricks() {
-        // a saddle: up along x, down along y
-        let n = SURFACE_POINTS;
-        let weights: Vec<f64> = (0..n * n).map(|k| {
-            let (u, v) = (2.0 * (k % n) as f64 / (n - 1) as f64 - 1.0, 2.0 * (k / n) as f64 / (n - 1) as f64 - 1.0);
-            10.0 + 6.0 * (u * u - v * v)
-        }).collect();
-        let spec = Spec { form: Form::Surface, points: vec![DVec3::ZERO], radius: 12.0, weights, fill: true, ..Spec::default() };
-        // Not `check`, which wants every brick's box to itself: a surface
-        // puts two half bricks in one box wherever a square is folded along
-        // its diagonal. That no two of them hold the same point is tested
-        // with the fitter (`fit_surface`).
-        let solver = crate::orient::Solver::new(&crate::orient::Models::default());
-        let whole = |spec: &Spec| {
-            let built = build(spec).unwrap();
-            assert!(built.bricks.iter().all(|b| solver.place(b).is_some() && b.ext.iter().all(|e| *e >= 1 && *e <= spec.max_ext)));
-            built
+        let stepped = |spec: &Spec, built: &Built| {
+            let survey = crate::surface::survey(&Probe::new(spec, built.grain).unwrap(), built).unwrap();
+            survey.stepped / survey.area
         };
-        let built = whole(&spec);
-        let of = |b: &Built, k: Kind| b.bricks.iter().filter(|p| shape_info(p.mask).unwrap().kind == k).count();
-        assert!(of(&built, Kind::HalfOuter) >= 4 && of(&built, Kind::Ramp) >= 4, "{} half outer corners, {} ramps", of(&built, Kind::HalfOuter), of(&built, Kind::Ramp));
-        assert!(built.error < 0.05 * built.solid, "{} wrong of {}", built.error, built.solid);
-        // the points it is drawn through are on it: over the ground's corners and at their heights
-        let points = surface_points(&spec);
-        assert_eq!((points.len(), points[0], points[n * n - 1]), (n * n, DVec3::new(-12.0, -12.0, 10.0), DVec3::new(12.0, 12.0, 10.0)));
-        let (min, max, base) = surface_ground(&spec).unwrap();
-        for p in &points {
-            assert!((crate::sdf::height_at(min, max, n, &spec.weights, p.x, p.y) - (p.z - base)).abs() < 1e-9);
-        }
-        // few steps: level and upright faces well off the surface are a small share of it
-        let survey = crate::surface::survey(&Probe::new(&spec, built.grain).unwrap(), &built).unwrap();
-        assert!(survey.stepped / survey.area < 0.12, "{} of {} stepped", survey.stepped, survey.area);
-        // not filled, it is a skin: far less of it, and the same on top
-        let skin = whole(&Spec { fill: false, thick: 2.0, ..spec.clone() });
-        assert!(skin.solid < 0.5 * built.solid);
-        let top = |b: &Built| b.bricks.iter().map(|p| p.min[2] + p.ext[2]).max().unwrap();
-        assert_eq!(top(&skin), top(&built));
-        // the wrong number of heights is said, not built
-        assert!(build(&Spec { weights: vec![1.0; 3], ..spec }).unwrap_err().contains("heights"));
+        let tube = Spec { tube: true, ..lifted.clone() };
+        let as_tube = build(&tube).unwrap();
+        let (band_steps, tube_steps) = (stepped(&lifted, &leaning), stepped(&tube, &as_tube));
+        assert!(band_steps < 0.12 && band_steps < tube_steps, "the band is {band_steps} steps, a tube {tube_steps}");
+        assert!(leaning.bricks.len() < as_tube.bricks.len());
+        // seen along its axis it is the flat ring still: the same cells of the plane
+        let plan = |b: &Built| -> HashSet<[i32; 2]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[2] + z]))).collect() };
+        assert_eq!(plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
     }
 
     #[test]

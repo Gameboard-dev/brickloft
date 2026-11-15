@@ -331,41 +331,36 @@ pub enum Field {
     /// `inner` made its own mirror image along `axis` about `plane`: its
     /// low side, and that side again on the high side
     Mirror { inner: Box<Field>, axis: usize, plane: f64 },
+    /// A band that lay flat across `axis`, from `w0` to `w0 + depth` along
+    /// it and with the outline `region` seen along it, raised to follow
+    /// `path`: over each point of the outline, by as much as the nearest
+    /// part of the path is off `plane` (see [`lift_at`]). `steep` is the
+    /// most the path climbs for each cell it goes.
+    Ribbon { region: Region, axis: usize, w0: f64, depth: f64, path: Vec<DVec3>, plane: f64, steep: f64 },
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
-    /// A surface over the ground from `min` to `max`, its height above
-    /// `base` given at `n` by `n` points spread evenly over that ground (see
-    /// [`height_at`]). Solid down to `base`, or `skin` thick straight down.
-    /// `steep` is the most it climbs in one cell along x or y, which the
-    /// value is scaled by so as never to claim the surface is further off
-    /// than it is.
-    Heights { min: [f64; 2], max: [f64; 2], base: f64, n: usize, heights: Vec<f64>, skin: Option<f64>, steep: f64 },
 }
 
-/// The height of a surface through `n` by `n` heights spread evenly over the
-/// ground from `min` to `max` (x fastest), at the point (x, y).
-///
-/// A Catmull-Rom spline each way: it passes through every height given and
-/// has no creases between them, where joining the heights with flat
-/// triangles would crease along every line of the grid.
-/// <https://en.wikipedia.org/wiki/Centripetal_Catmull%E2%80%93Rom_spline>
-pub fn height_at(min: [f64; 2], max: [f64; 2], n: usize, heights: &[f64], x: f64, y: f64) -> f64 {
-    if n < 2 || heights.len() < n * n {
-        return heights.first().copied().unwrap_or(0.0);
+/// How far along `axis` a path is from `plane`, at the part of it nearest
+/// the point (u, v) as seen along that axis. Between two of the path's
+/// points the answer runs evenly from one's to the other's, so it has no
+/// jumps along the path.
+pub fn lift_at(path: &[DVec3], axis: usize, plane: f64, u: f64, v: f64) -> f64 {
+    let (ua, va) = [(1, 2), (0, 2), (0, 1)][axis.min(2)];
+    let at = DVec2::new(u, v);
+    let flat = |p: DVec3| DVec2::new(p[ua], p[va]);
+    let mut best = (f64::INFINITY, 0.0);
+    for pair in path.windows(2) {
+        let (a, b) = (flat(pair[0]), flat(pair[1]));
+        let along = b - a;
+        let t = if along.length_squared() > 1e-18 { ((at - a).dot(along) / along.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+        let off = (a + along * t).distance_squared(at);
+        if off < best.0 {
+            best = (off, pair[0][axis] + (pair[1][axis] - pair[0][axis]) * t - plane);
+        }
     }
-    // through four values a step apart, between the middle two
-    let spline = |p: [f64; 4], t: f64| 0.5 * (2.0 * p[1] + (p[2] - p[0]) * t + (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]) * t * t + (3.0 * p[1] - p[0] - 3.0 * p[2] + p[3]) * t * t * t);
-    let place = |v: f64, k: usize| {
-        let at = ((v - min[k]) / (max[k] - min[k]).max(1e-9)).clamp(0.0, 1.0) * (n - 1) as f64;
-        let cell = (at.floor() as usize).min(n - 2);
-        (cell, at - cell as f64)
-    };
-    let ((i, tx), (j, ty)) = (place(x, 0), place(y, 1));
-    // the four rows and four columns about the point, the outermost repeated at the rim
-    let pick = |cell: usize, k: usize| (cell + k).saturating_sub(1).min(n - 1);
-    let rows = [0, 1, 2, 3].map(|b| spline([0, 1, 2, 3].map(|a| heights[pick(i, a) + n * pick(j, b)]), tx));
-    spline(rows, ty)
+    best.1
 }
 
 impl Field {
@@ -421,6 +416,13 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
+            Field::Ribbon { region, axis, w0, depth, path, plane, steep } => {
+                let (ua, va) = [(1, 2), (0, 2), (0, 1)][(*axis).min(2)];
+                let middle = w0 + depth / 2.0 + lift_at(path, *axis, *plane, p[ua], p[va]);
+                // straight along the axis, made no more than the true distance
+                let slab = ((p[*axis] - middle).abs() - depth / 2.0) / (1.0 + steep * steep).sqrt();
+                region.eval(DVec2::new(p[ua], p[va])).max(slab)
+            }
             Field::Warp { inner, pulls, reach, scale } => {
                 // Where this point was before the pulls moved it. A pull
                 // moves a point x to x + by * w(x), with w falling from 1 at
@@ -454,17 +456,6 @@ impl Field {
                 let mut low = p;
                 low[*axis] = plane - (p[*axis] - plane).abs();
                 inner.eval(low)
-            }
-            Field::Heights { min, max, base, n, heights, skin, steep } => {
-                let top = base + height_at(*min, *max, *n, heights, p.x, p.y);
-                // straight up and down, made no more than the true distance
-                let scale = 1.0 / (1.0 + 2.0 * steep * steep).sqrt();
-                let under = match skin {
-                    Some(thick) => (top - thick - p.z) * scale,
-                    None => base - p.z,
-                };
-                let sides = (min[0] - p.x).max(p.x - max[0]).max(min[1] - p.y).max(p.y - max[1]);
-                ((p.z - top) * scale).max(under).max(sides)
             }
             Field::Without(a, b) => a.eval(p).max(-b.eval(p)),
             Field::Pyramid { base, half, top, height } => {

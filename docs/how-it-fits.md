@@ -34,26 +34,9 @@ a form has such a ridge, which so far is the pyramid; the fitters that work
 cell by cell are not offered it. The inner corner is what a hip leaves of
 its box: a valley, where two slopes meet in an inside corner. It and the
 inner corner is used on the inside ridges of a hollow pyramid, where two
-ramps meet in an inside corner of a sloped ring, and in a surface. The half
-outer corner is used in a surface. The two half inner corners can be
-placed, drawn, measured and saved, but no fitter lays them out yet.
-
-## A surface
-
-A surface is given by sixteen heights, four each way over a square of
-ground, and passes smoothly through them. Its height is taken at the corners
-of a grid of squares and rounded to whole cells; where neighbouring corners
-differ by one cell at most, each square is exact in bricks: a ramp, a hip,
-an inner corner, or, where the square is folded along its diagonal, a half
-outer corner and a tetrahedron on half the square each. A saddle is two half
-outer corners back to back.
-
-The squares are as large as the surface's steepest slope allows, so a gentle
-surface is long ramps and not flats with a short ramp now and then. A
-surface steeper than one cell up per cell across is worn down to that.
-
-Two half bricks in one square share one box. Every other form keeps each
-box to a single brick; this is the one that does not.
+ramps meet in an inside corner of a sloped ring, and in a band raised to
+follow its curve. That band is also where the half corners are used. Its
+half squares are the one place two bricks share a box.
 
 ## Points added to a form
 
@@ -62,12 +45,13 @@ it moves that part of the form, and the form around it follows by less the
 further off it is. The form's own points and sizes are untouched.
 
 - On a curve, and on a turned form's profile, the reach is measured along
-  the curve. Pulled out of its plane, a flat curve is built as a round tube,
-  cell by cell, which is rougher than a flat band.
+  the curve. A flat band pulled out of its plane keeps its outline and is
+  raised to follow the curve: sloped bricks above and below where one brick
+  can make the slope, and a step where none can. A round tube pulled out of
+  its plane is fitted cell by cell, which is rougher.
 - On a sphere or a pyramid the reach is all round the point. The result is
   no longer a sphere or a pyramid, so it is fitted cell by cell and not laid
   out whole, which is rougher too.
-- A surface takes none: it is shaped by its own sixteen points.
 
 ## Mirror
 

@@ -377,7 +377,7 @@ pub fn run_form(form: usize) {
                     Handle::Move | Handle::Slide(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
-                    Handle::Radius | Handle::Rise | Handle::Height(_) => Srgba::new_opaque(70, 230, 240),
+                    Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
                 });
             }
             instances.colors = Some(colours);

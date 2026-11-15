@@ -29,7 +29,6 @@ fn form_name(form: Form) -> String {
         Form::Torus => "torus".into(),
         Form::Revolve => "revolve".into(),
         Form::Pyramid => "pyramid".into(),
-        Form::Surface => "surface".into(),
     }
 }
 
@@ -143,7 +142,6 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("torus", _) => Form::Torus,
                     ("revolve", _) => Form::Revolve,
                     ("pyramid", _) => Form::Pyramid,
-                    ("surface", _) => Form::Surface,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
