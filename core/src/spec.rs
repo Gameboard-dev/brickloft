@@ -12,7 +12,7 @@ use crate::fit_pyramid::{fit_pyramid, Pyramid};
 use crate::fit_round::{fit_round, Round};
 use crate::fit_volume::{self, fit_volume};
 use crate::sdf::{Field, Fill, Region, Stroke};
-use crate::shapes::CellBrick;
+use crate::shapes::{CellBrick, CUBE};
 use glam::{DVec2, DVec3};
 use std::f64::consts::PI;
 
@@ -625,18 +625,20 @@ impl Probe {
 /// The form of an already snapped spec, and its curve for drawing.
 ///
 /// A sphere or a pyramid with points added to it (`Spec::pulls`), or
-/// mirrored after that, is no longer a sphere or a pyramid: it is the
-/// solid pulled out of shape, and is fitted cell by cell as any solid
-/// without a layout of its own is. That is rougher than the layout it
-/// replaces, and is the price of a shape the layouts do not know.
+/// mirrored after that, is no longer a sphere or a pyramid where it was
+/// pulled. It keeps its own layout wherever the pulls do not reach, and
+/// only what they change is fitted cell by cell (see [`patched`]).
 fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
     let (plain, path) = solid_as_made(spec)?;
     if spec.pulls.is_empty() || !matches!(spec.form, Form::Sphere | Form::Pyramid) {
         return Ok((plain, path));
     }
+    // the solid as it would be laid out with nothing added to it
+    let laid = fit(spec, &plain, Vec::new(), 1.0).bricks;
     let (Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Volume { field, min, max }) = plain else {
         return Ok((plain, path));
     };
+    let before = field.clone();
     let reach = spec.pull_reach.max(0.5);
     let furthest = spec.pulls.iter().map(|(_, by)| by.length()).fold(0.0, f64::max);
     // each pull stretches space by up to its length over half its reach, a quarter turn of the cosine
@@ -648,7 +650,117 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         }
     }
     let (lo, hi) = (min.map(|v| v as f64), max.map(|v| v as f64));
-    volume(field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path)
+    patched(spec, laid, &before, 1.0 / (1.0 + stretch), field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path)
+}
+
+/// A form laid out whole, then changed in places: its own bricks kept
+/// wherever the change does not reach, and the changed part fitted cell by
+/// cell in their place.
+///
+/// `laid` are the bricks of the form as it was, `before` its distance
+/// function then and `after` its distance function now, which is `scale`
+/// times `before` wherever nothing has changed.
+///
+/// One point added to a ring or a sphere used to hand the whole of it to
+/// the cell-by-cell fitter, which is rougher than a layout everywhere and
+/// not only where the point was added (report 30: a ring 70 across, a fifth
+/// of its faces steps, for one bump on its side).
+///
+/// A cell is unchanged if the form's distance is as it was at the cell's
+/// middle and one cell to each side of it. A brick is kept if all its cells
+/// are unchanged; a cube is kept cell by cell. The fitter then fills the
+/// changed cells and no others, so no cell is filled twice and none is left
+/// out. Along the seam the two fits meet as two fits of the same solid do:
+/// nearly, with here and there a sliver's difference.
+#[allow(clippy::too_many_arguments)]
+fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after: Field, lo: DVec3, hi: DVec3, path: Vec<DVec3>) -> Result<(Solid, Vec<DVec3>), String> {
+    let (solid, path) = volume(after.clone(), lo, hi, path)?;
+    let Solid::Volume { min, max, .. } = solid else { unreachable!() };
+    if laid.is_empty() || !spec.wedges {
+        return Ok((Solid::Volume { field: after, min, max }, path));
+    }
+    let as_it_was = |p: DVec3| (before.eval(p) * scale - after.eval(p)).abs() < 1e-6;
+    let unchanged = |c: [i32; 3]| {
+        let middle = DVec3::new(c[0] as f64 + 0.5, c[1] as f64 + 0.5, c[2] as f64 + 0.5);
+        as_it_was(middle) && [DVec3::X, DVec3::Y, DVec3::Z].iter().all(|step| as_it_was(middle + *step) && as_it_was(middle - *step))
+    };
+    let cells = |b: &CellBrick| {
+        let (m, e) = (b.min, b.ext);
+        (0..e[2]).flat_map(move |z| (0..e[1]).flat_map(move |y| (0..e[0]).map(move |x| [m[0] + x, m[1] + y, m[2] + z])))
+    };
+    let mut bricks: Vec<CellBrick> = Vec::new();
+    // single cubes to be joined up again: those left of a cube cut by the
+    // change, and those the fitter adds
+    let mut loose: Vec<[i32; 3]> = Vec::new();
+    // the box of everything that changed
+    let (mut from, mut to) = ([i32::MAX; 3], [i32::MIN; 3]);
+    let mut changed_at = |c: [i32; 3]| {
+        for k in 0..3 {
+            (from[k], to[k]) = (from[k].min(c[k]), to[k].max(c[k] + 1));
+        }
+    };
+    for b in &laid {
+        let same: Vec<bool> = cells(b).map(unchanged).collect();
+        if same.iter().all(|s| *s) {
+            bricks.push(*b);
+        } else if b.mask == CUBE {
+            for (cell, same) in cells(b).zip(same) {
+                if same { loose.push(cell) } else { changed_at(cell) }
+            }
+        } else {
+            cells(b).for_each(&mut changed_at);
+        }
+    }
+    // and wherever a point was pulled to, which may be clear of every brick there was
+    let margin = spec.pull_reach + 2.0;
+    let mut places: Vec<DVec3> = spec.pulls.iter().flat_map(|(at, by)| [*at, *at + *by]).collect();
+    // and their mirror images, where the form is mirrored
+    for axis in (0..3).filter(|a| spec.mirror[*a]) {
+        if let Some(plane) = mirror_plane(spec, axis) {
+            let images: Vec<DVec3> = places
+                .iter()
+                .map(|p| {
+                    let mut q = *p;
+                    q[axis] = 2.0 * plane - p[axis];
+                    q
+                })
+                .collect();
+            places.extend(images);
+        }
+    }
+    for p in places {
+        changed_at((p - margin).floor().to_array().map(|v| v as i32));
+        changed_at((p + margin).ceil().to_array().map(|v| v as i32));
+    }
+    let from = [0, 1, 2].map(|k| from[k].max(min[k]) - 1);
+    let to = [0, 1, 2].map(|k| to[k].min(max[k]) + 1);
+    if (0..3).all(|k| to[k] > from[k]) {
+        // every ramp one cell long, so that each can be taken or left by its own cell
+        let opts = fit_volume::Opts { max_ext: spec.max_ext, wedges: true, stretch: false };
+        for b in fit_volume(&|p| after.eval(p), from, to, &opts).bricks {
+            if b.mask == CUBE {
+                loose.extend(cells(&b).filter(|c| !unchanged(*c)));
+            } else {
+                // a sloped brick longer than a cell is a ramp joined along its length: cell by cell again
+                bricks.extend(cells(&b).filter(|c| !unchanged(*c)).map(|c| CellBrick { mask: b.mask, min: c, ext: [1; 3] }).filter(|_| b.ext.iter().filter(|e| **e > 1).count() <= 1));
+            }
+        }
+    }
+    if !loose.is_empty() {
+        let lo = [0, 1, 2].map(|k| loose.iter().map(|c| c[k]).min().unwrap());
+        let n = [0, 1, 2].map(|k| (loose.iter().map(|c| c[k]).max().unwrap() + 1 - lo[k]) as usize);
+        if (n[0] * n[1] * n[2]) as i64 <= MAX_CELLS {
+            let mut grid = vec![0u8; n[0] * n[1] * n[2]];
+            for c in &loose {
+                grid[(c[0] - lo[0]) as usize + n[0] * ((c[1] - lo[1]) as usize + n[1] * (c[2] - lo[2]) as usize)] = CUBE;
+            }
+            bricks.extend(fit_volume::merge(grid, n, spec.max_ext.max(1) as usize).into_iter().map(|b| CellBrick { mask: CUBE, min: [b.min[0] + lo[0], b.min[1] + lo[1], b.min[2] + lo[2]], ext: b.ext }));
+        } else {
+            bricks.extend(loose.iter().map(|c| CellBrick { mask: CUBE, min: *c, ext: [1; 3] }));
+        }
+    }
+    // laid out whole and measured afterwards, as a pyramid is
+    Ok((Solid::Pyramid { bricks: Some(bricks).filter(|b| !b.is_empty()), field: after, min, max }, path))
 }
 
 /// [`solid`], before any points added to a sphere or pyramid are applied.
@@ -963,6 +1075,30 @@ fn curve(
             if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis])? {
                 return Ok(raised);
             }
+        }
+    }
+    // A round tube pulled out of its plane keeps its pipe wherever the pull
+    // does not reach (see `patched`). Not one made oval, whose pipe is not
+    // the plain tube the pulled curve is measured as.
+    if let (Some(axis), true) = (lay_across, spec.tube) {
+        let half = spec.thick / 2.0;
+        let round = (spec.stretch[axis] - 1.0).abs() < 1e-9 && !spec.fill;
+        if round && path.iter().any(|p| (p[axis] - lay_at[axis]).abs() > 1e-6) {
+            let level: Vec<DVec3> = path
+                .iter()
+                .map(|p| {
+                    let mut q = *p;
+                    q[axis] = lay_at[axis];
+                    q
+                })
+                .collect();
+            let (flat, _) = stacked(spec, level.clone(), closed, axis)?;
+            let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+            let before = Field::Tube(Stroke::new(&level, half, closed, Some(0.5)));
+            let after = Field::Tube(Stroke::new(&path, half, closed, Some(0.5)));
+            let lo = path.iter().chain(&level).fold(DVec3::MAX, |a, p| a.min(*p)) - half;
+            let hi = path.iter().chain(&level).fold(DVec3::MIN, |a, p| a.max(*p)) + half;
+            return patched(spec, laid, &before, 1.0, after, lo, hi, path);
         }
     }
     // the axis the curve lies flat across, if any: every point shares that coordinate
@@ -2325,11 +2461,47 @@ mod tests {
         let tube = Spec { tube: true, ..lifted.clone() };
         let as_tube = build(&tube).unwrap();
         let (band_steps, tube_steps) = (stepped(&lifted, &leaning), stepped(&tube, &as_tube));
-        assert!(band_steps < 0.12 && band_steps < tube_steps, "the band is {band_steps} steps, a tube {tube_steps}");
-        assert!(leaning.bricks.len() < as_tube.bricks.len());
+        // (the tube keeps its pipe where it was not lifted: see `patched`)
+        assert!(band_steps < 0.12 && tube_steps < 0.12, "the band is {band_steps} steps, a tube {tube_steps}");
         // seen along its axis it is the flat ring still: the same cells of the plane
         let plan = |b: &Built| -> HashSet<[i32; 2]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[2] + z]))).collect() };
         assert_eq!(plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+    }
+
+    #[test]
+    fn a_point_added_to_a_laid_out_form_changes_it_only_there() {
+        let key = |b: &CellBrick| (b.mask, b.min, b.ext);
+        let kept = |plain: &Built, pulled: &Built| {
+            let now: HashSet<(u8, [i32; 3], [i32; 3])> = pulled.bricks.iter().map(key).collect();
+            plain.bricks.iter().filter(|b| now.contains(&key(b))).count() as f64 / plain.bricks.len() as f64
+        };
+        let stepped = |spec: &Spec, built: &Built| {
+            let survey = crate::surface::survey(&Probe::new(spec, built.grain).unwrap(), built).unwrap();
+            survey.stepped / survey.area
+        };
+        let no_two_share = |built: &Built| {
+            let mut seen = HashSet::new();
+            built.bricks.iter().all(|b| (0..b.ext[0]).all(|x| (0..b.ext[1]).all(|y| (0..b.ext[2]).all(|z| seen.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z])))))
+        };
+        // a ball with a bump pulled out of one side: the rest of it is the ball's own bricks
+        let ball = Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, fill: true, ..Spec::default() };
+        let lump = Spec { pulls: vec![(at(20.0, 0.0, 0.0), DVec3::new(6.0, 0.0, 0.0))], pull_reach: 8.0, ..ball.clone() };
+        let (round, lumpy) = (build(&ball).unwrap(), build(&lump).unwrap());
+        assert!(kept(&round, &lumpy) > 0.7, "only {} of the ball's bricks are left", kept(&round, &lumpy));
+        assert!(no_two_share(&lumpy));
+        assert!(stepped(&lump, &lumpy) < 0.08, "{} stepped", stepped(&lump, &lumpy));
+        assert!(lumpy.error < 0.05 * lumpy.solid, "{} wrong of {}", lumpy.error, lumpy.solid);
+        assert!(lumpy.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap() >= round.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap() + 4);
+        // a large ring as a round tube, one side of it lifted: the far side is the pipe still
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 30.0, thick: 8.0, tube: true, ..Spec::default() };
+        let lifted = Spec { pulls: vec![(at(-30.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 6.0))], pull_reach: 10.0, ..ring.clone() };
+        let (flat, raised) = (build(&ring).unwrap(), build(&lifted).unwrap());
+        assert!(kept(&flat, &raised) > 0.5, "only {} of the pipe's bricks are left", kept(&flat, &raised));
+        assert!(no_two_share(&raised));
+        assert!(raised.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() >= flat.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() + 4);
+        // every brick it keeps on the far side is one the plain ring has
+        let plain: HashSet<(u8, [i32; 3], [i32; 3])> = flat.bricks.iter().map(key).collect();
+        assert!(raised.bricks.iter().filter(|b| b.min[0] > 5).all(|b| plain.contains(&key(b))));
     }
 
     #[test]

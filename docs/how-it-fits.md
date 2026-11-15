@@ -47,11 +47,11 @@ further off it is. The form's own points and sizes are untouched.
 - On a curve, and on a turned form's profile, the reach is measured along
   the curve. A flat band pulled out of its plane keeps its outline and is
   raised to follow the curve: sloped bricks above and below where one brick
-  can make the slope, and a step where none can. A round tube pulled out of
-  its plane is fitted cell by cell, which is rougher.
-- On a sphere or a pyramid the reach is all round the point. The result is
-  no longer a sphere or a pyramid, so it is fitted cell by cell and not laid
-  out whole, which is rougher too.
+  can make the slope, and a step where none can.
+- On a sphere or a pyramid the reach is all round the point. The form keeps
+  its own layout wherever the point does not reach; only the part it
+  changes is fitted cell by cell, which is rougher. A round tube pulled out
+  of its plane is treated the same way: the pipe is kept away from the pull.
 
 ## Mirror
 
