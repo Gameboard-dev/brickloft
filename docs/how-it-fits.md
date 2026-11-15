@@ -20,6 +20,10 @@ faces exactly. In a unit box:
 | Tetrahedron | `x + y + z ≤ 1` | 4 | 1/6 | 8 |
 | Cut cube | `x + y + z ≥ 1` | 7 | 5/6 | 8 |
 | Hip | `x ≤ 1 − z` and `y ≤ 1 − z` | 5 | 1/3 | 24 |
+| Inner corner | `min(x, y) + z ≤ 1` | 7 | 2/3 | 24 |
+| Half outer corner | `x + y ≤ 1` and `z ≤ x + y` | 5 | 1/3 | 24 |
+| Half inner corner | `x + y ≤ 1` and `z ≤ y` | 4 | 1/6 | 12 |
+| its mirror image | `x + y ≤ 1` and `z ≤ x` | 4 | 1/6 | 12 |
 
 The tetrahedron and the cut cube are complements: together they fill the box,
 and a plane tilted on all three axes passes through the grid cutting
@@ -27,7 +31,10 @@ alternate layers of cells into one and the other. The hip is one whole face
 of the box and a single corner of the opposite face: a quarter of a square
 pyramid, with two sloped faces meeting along a ridge. It is used only where
 a form has such a ridge, which so far is the pyramid; the fitters that work
-cell by cell are not offered it. All five can be stretched by whole cells
+cell by cell are not offered it. The inner corner is what a hip leaves of
+its box: a valley, where two slopes meet in an inside corner. It and the
+three half corners can be placed, drawn, measured and saved, but no fitter
+lays them out yet. All five can be stretched by whole cells
 along each axis.
 
 ## Pyramids

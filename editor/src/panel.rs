@@ -125,7 +125,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");
         ui.label("Drag the coloured dots to reshape the form. Drag the form itself to move it.");
-        ui.label("View: right-drag turns, Shift + drag slides, scroll zooms, W A S D move, Space rises, Shift sinks.");
+        ui.label("View: right-drag looks around, W A S D fly, Space or E rises, Q sinks, Shift doubles the speed.");
         ui.separator();
 
         let before = state.form;

@@ -11,12 +11,16 @@ at different bricks. The check below is for those cases.
 1. Take out a brick and aim at open ground.
 2. Type `/arc calibrate`.
 
-Five test bricks appear in a row along X, each 2 × 3 × 4 microbricks: cube,
-ramp, tetrahedron, cut cube, hip. Around each are small marker cubes.
+Nine test bricks appear in a row along X, each 2 × 3 × 4 microbricks: cube,
+ramp, tetrahedron, cut cube, hip, inner corner, half outer corner, half
+inner corner and its mirror image. Around each are small marker cubes.
 
-The hip is the game's `PB_DefaultMicroWedgeCorner`, used on a pyramid's
-ridges. It was the last to be added and has been confirmed in the game like
-the others.
+The cube, ramp, tetrahedron and cut cube have been confirmed in the game.
+The five after them (the game's `PB_DefaultMicroWedgeCorner`,
+`...InnerCorner`, `...HalfOuterCorner`, `...HalfInnerCorner` and
+`...HalfInnerCornerInverted`) are set from how the game itself makes those
+bricks, which for the first four agrees with what was confirmed. They are
+worth one look here all the same.
 
 **It is correct when every filled corner of a test brick has a marker touching
 it, and no marker sits beside an empty corner.** `/arc undo` removes them.

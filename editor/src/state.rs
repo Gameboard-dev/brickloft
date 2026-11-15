@@ -154,6 +154,8 @@ pub type Placed = (Spec, Paint, [i32; 3]);
 pub enum Handle {
     /// moves the whole form
     Move,
+    /// moves the whole form along x, y or z alone: one of its three arrows
+    Slide(usize),
     /// a control point
     Point(usize),
     /// pulls a circle, sphere or torus wider or narrower
@@ -827,9 +829,71 @@ impl State {
         all
     }
 
+    /// Where the arrows that move the form being edited are drawn: the
+    /// middle of its bricks, and how long each arrow is, which is far enough
+    /// to stand clear of the form.
+    ///
+    /// Dragging a form by its bricks moves it in the plane facing the eye,
+    /// which is two directions at once and neither of them chosen: setting
+    /// one form against another that way meant turning the view between
+    /// every move. An arrow moves it along one axis and no other, whatever
+    /// the view.
+    pub fn gizmo(&self) -> Option<(DVec3, [f64; 3])> {
+        let (lo, hi) = self.bounds?;
+        let middle = DVec3::new((lo[0] + hi[0]) as f64, (lo[1] + hi[1]) as f64, (lo[2] + hi[2]) as f64) / 2.0 + self.standing();
+        Some((middle, [0, 1, 2].map(|k| (hi[k] - lo[k]) as f64 / 2.0 + 5.0)))
+    }
+
+    /// Where along arrow `axis` the ray from the eye through the cursor
+    /// comes nearest it, as a point; `None` if the ray runs along the arrow
+    /// or meets it implausibly far off.
+    fn on_arrow(&self, axis: usize, origin: DVec3, dir: DVec3) -> Option<DVec3> {
+        let (middle, _) = self.gizmo()?;
+        let a = [DVec3::X, DVec3::Y, DVec3::Z][axis];
+        // the nearest points of two lines: https://en.wikipedia.org/wiki/Skew_lines#Nearest_points
+        let (w, b) = (middle - origin, a.dot(dir));
+        let across = 1.0 - b * b;
+        if across < 1e-4 {
+            return None;
+        }
+        let t = (b * dir.dot(w) - a.dot(w)) / across;
+        // as for a drag in a plane: never flung to the horizon
+        (t.abs() <= 4.0 * w.length().max(15.0)).then(|| middle + a * t)
+    }
+
+    /// Take hold of arrow `axis` where the cursor's ray passes it. Returns
+    /// whether it could be.
+    pub fn hold_arrow(&mut self, axis: usize, origin: DVec3, dir: DVec3) -> bool {
+        self.grab = self.on_arrow(axis, origin, dir);
+        self.grab.is_some()
+    }
+
+    /// Move the form being edited by so many units, short of any other form
+    /// in the way; `held` is the point of it the drag has hold of.
+    fn move_by(&mut self, by: [i32; 3], held: DVec3) {
+        // not into another form: onto it or beside it
+        let Some(by) = self.clear_of_others(by) else { return };
+        if by == [0; 3] {
+            return;
+        }
+        let limit = (HANDLE_LIMIT * 2.0) as i32;
+        self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
+        self.scene += 1;
+        // what is held moves with the form
+        self.grab = Some(held + DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64) / 2.0);
+    }
+
     /// Move `handle` to where the ray from the eye through the cursor meets
     /// its drag plane.
     pub fn drag(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
+        if let Handle::Slide(axis) = handle {
+            // along its arrow and no other way, a unit (half a cell) at a time
+            let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
+            let mut by = [0; 3];
+            by[axis] = ((now[axis] - held[axis]) * 2.0).round() as i32;
+            self.move_by(by, held);
+            return;
+        }
         // a form is moved by the point of it that was taken hold of; it has no dot
         let held = if handle == Handle::Move { self.grab } else { self.handles().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
         let Some(at) = held else { return };
@@ -876,17 +940,9 @@ impl State {
                 if let Lock::Axis(a) = self.lock {
                     by[a] = 0;
                 }
-                // not into another form: onto it or beside it
-                let Some(by) = self.clear_of_others(by) else { return };
-                if by == [0; 3] {
-                    return;
-                }
-                let limit = (HANDLE_LIMIT * 2.0) as i32;
-                self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
-                self.scene += 1;
-                // what is held moves with the form
-                self.grab = Some(at + DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64) / 2.0);
+                self.move_by(by, at);
             }
+            Handle::Slide(_) => unreachable!("answered above"),
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
@@ -1273,6 +1329,26 @@ mod tests {
         assert!(state.painted().iter().filter(|b| b.2 == 0).all(|b| b.3 == [7, 0, 4]));
         // and a second, smaller pull carries on from where the first left it
         assert_eq!(state.grab, Some(at + DVec3::new(3.5, 0.0, 2.0)));
+
+        // By an arrow it moves along that arrow's axis alone, whatever the
+        // view and whatever is locked: here along y, which the lock holds.
+        let (middle, reach) = state.gizmo().unwrap();
+        assert!(reach.iter().all(|r| *r >= 5.0));
+        let far = middle + DVec3::new(-60.0, -20.0, 40.0);
+        let towards = |p: DVec3| (p - far).normalize();
+        assert!(state.hold_arrow(1, far, towards(middle + DVec3::Y * 3.0)));
+        let before = state.place;
+        // the cursor wanders off the arrow as it goes: 2.3 cells along it, and well aside
+        state.drag(Handle::Slide(1), far, towards(middle + DVec3::new(0.0, 5.3, 1.5)), DVec3::X);
+        let went = [0, 1, 2].map(|k| state.place[k] - before[k]);
+        assert!(went[0] == 0 && went[2] == 0 && (3..=6).contains(&went[1]), "went {went:?}");
+        assert_eq!(state.gizmo().unwrap().0, middle + DVec3::Y * went[1] as f64 / 2.0);
+        assert!(!state.refresh(|| 0.0) && state.built.bricks == bricks);
+        // looking straight down an arrow, there is nowhere along it to take hold
+        assert!(!state.hold_arrow(0, middle - DVec3::X * 50.0, DVec3::X));
+        state.place = before;
+        state.scene += 1;
+        state.grab = Some(at + DVec3::new(3.5, 0.0, 2.0));
 
         // only a form with one size all round is resized by the wheel
         assert!(!state.resize(1.0), "an arch has no single size");

@@ -99,7 +99,7 @@ pub fn run_form(form: usize) {
 
     // Brickadia's up is Z, so the camera's is too
     let mut camera = Camera::new_perspective(window.viewport(), vec3(22.0, -42.0, 26.0), vec3(0.0, 0.0, 6.0), vec3(0.0, 0.0, 1.0), degrees(45.0), 0.5, 4000.0);
-    let mut controls = camera::Controls::new(camera.target());
+    let mut controls = camera::Controls::new();
     let mut gui = GUI::new(&context);
     // A sun that casts shadows, a weak light from the other side so that
     // faces turned away from the sun still differ from one another, and a
@@ -135,6 +135,17 @@ pub fn run_form(form: usize) {
     // otherwise be buried inside it, out of sight and out of reach
     handle_mesh.material.render_states.depth_test = DepthTest::Always;
     let axes = Axes::new(&context, 0.12, 5.0);
+    // The three arrows that move the form being edited: red along x, green
+    // along y, blue along z, as the axes at the origin are coloured. Drawn
+    // over the bricks, like the dots, since they start inside the form.
+    let mut arrows: Vec<Gm<Mesh, ColorMaterial>> = [Srgba::new_opaque(230, 60, 60), Srgba::new_opaque(70, 200, 80), Srgba::new_opaque(70, 120, 240)]
+        .into_iter()
+        .map(|albedo| {
+            let mut arrow = Gm::new(Mesh::new(&context, &CpuMesh::arrow(0.9, 0.45, 16)), ColorMaterial::new_opaque(&context, &CpuMaterial { albedo, ..Default::default() }));
+            arrow.material.render_states.depth_test = DepthTest::Always;
+            arrow
+        })
+        .collect();
     // the floor the build stands on, to catch its shadow
     let mut ground = Gm::new(
         Mesh::new(&context, &CpuMesh::square()),
@@ -183,6 +194,17 @@ pub fn run_form(form: usize) {
                         dragging = shown_handles.get(hit.instance_id as usize).map(|h| h.0);
                         *handled = dragging.is_some();
                     }
+                    // then the arrows, which move the form along one axis
+                    if dragging.is_none() && state.gizmo().is_some() {
+                        if let Ok(Some(hit)) = pick(&context, &camera, *position, arrows.iter().map(|a| &a.geometry), Cull::Back) {
+                            let axis = hit.geometry_id as usize;
+                            let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
+                            if axis < 3 && state.hold_arrow(axis, d(origin), d(dir)) {
+                                dragging = Some(Handle::Slide(axis));
+                                *handled = true;
+                            }
+                        }
+                    }
                     // Otherwise a press on a brick takes hold of its form: a
                     // form other than the one being edited becomes the one
                     // being edited, and either way dragging from there moves
@@ -210,7 +232,8 @@ pub fn run_form(form: usize) {
                     *handled = true;
                 }
                 Event::MouseRelease { button: MouseButton::Left, .. } => {
-                    if let (Some(handle), true) = (dragging.take(), state.auto_best) {
+                    // a form only moved is the same form: there is no better fit to look for
+                    if let (Some(handle), true) = (dragging.take().filter(|h| !matches!(h, Handle::Move | Handle::Slide(_))), state.auto_best) {
                         state.snap_best(Some(handle));
                     }
                 }
@@ -334,7 +357,7 @@ pub fn run_form(form: usize) {
             for (handle, at) in &handles {
                 instances.transformations.push(Mat4::from_translation(v(*at)) * Mat4::from_scale(0.7));
                 colours.push(match handle {
-                    Handle::Move => Srgba::new_opaque(250, 250, 250),
+                    Handle::Move | Handle::Slide(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
                 });
@@ -374,6 +397,14 @@ pub fn run_form(form: usize) {
         screen.render(&camera, &ground, &lights);
         screen.render(&camera, brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
         screen.render(&camera, &axes, &lights);
+        if let Some((middle, reach)) = state.gizmo() {
+            // the arrow's mesh lies along x, one long: turned to its axis and stretched to its length
+            let turns = [Mat4::identity(), Mat4::from_angle_z(degrees(90.0)), Mat4::from_angle_y(degrees(-90.0))];
+            for ((arrow, turn), length) in arrows.iter_mut().zip(turns).zip(reach) {
+                arrow.set_transformation(Mat4::from_translation(v(middle)) * turn * Mat4::from_nonuniform_scale(length as f32, 1.0, 1.0));
+            }
+            screen.render(&camera, &arrows, &lights);
+        }
         screen.render(&camera, &handle_mesh, &lights);
         if let Err(e) = screen.write(|| gui.render()) {
             // the panel failing to draw should not take the view down with it
