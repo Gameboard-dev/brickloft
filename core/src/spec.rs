@@ -111,6 +111,15 @@ pub struct Spec {
     /// Where the form is its own mirror image, make its bricks so too (see
     /// [`symmetrise`]).
     pub symmetric: bool,
+    /// Make the form itself symmetric along x, y or z: its low side along
+    /// that axis is kept and the high side replaced by its mirror image,
+    /// about the middle of the form's points (see [`mirrored`]). Unlike
+    /// `symmetric`, which only tidies the bricks of a form that is already
+    /// its own mirror image, this changes the form: an arch with one foot
+    /// higher than the other becomes an arch with both feet as the low
+    /// side's is, and a point added to one side of a circle appears on the
+    /// other too.
+    pub mirror: [bool; 3],
     /// What a brick costs in cells of disagreement; see the fitters'
     /// `brick_cost`. 0 fits as closely as possible, whatever the count.
     pub simplify: f64,
@@ -149,6 +158,7 @@ impl Default for Spec {
             wedges: true,
             flip: [false; 3],
             symmetric: false,
+            mirror: [false; 3],
             pulls: Vec::new(),
             pull_reach: 8.0,
             simplify: 0.0,
@@ -431,7 +441,8 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true },
         None => fit(&coarse, &solid, path, g),
     };
-    if coarse.symmetric && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
+    // (a mirrored form is its own mirror image, so its bricks are held to it too)
+    if (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
     }
@@ -644,7 +655,36 @@ impl Probe {
 }
 
 /// The form of an already snapped spec, and its curve for drawing.
+///
+/// A sphere or a pyramid with points added to it (`Spec::pulls`), or
+/// mirrored after that, is no longer a sphere or a pyramid: it is the
+/// solid pulled out of shape, and is fitted cell by cell as any solid
+/// without a layout of its own is. That is rougher than the layout it
+/// replaces, and is the price of a shape the layouts do not know.
 fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
+    let (plain, path) = solid_as_made(spec)?;
+    if spec.pulls.is_empty() || !matches!(spec.form, Form::Sphere | Form::Pyramid) {
+        return Ok((plain, path));
+    }
+    let (Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Volume { field, min, max }) = plain else {
+        return Ok((plain, path));
+    };
+    let reach = spec.pull_reach.max(0.5);
+    let furthest = spec.pulls.iter().map(|(_, by)| by.length()).fold(0.0, f64::max);
+    // each pull stretches space by up to its length over half its reach, a quarter turn of the cosine
+    let stretch: f64 = spec.pulls.iter().map(|(_, by)| by.length() * PI / (2.0 * reach)).sum();
+    let mut field = Field::Warp { inner: Box::new(field), pulls: spec.pulls.clone(), reach, scale: 1.0 / (1.0 + stretch) };
+    for axis in (0..3).filter(|a| spec.mirror[*a]) {
+        if let Some(plane) = mirror_plane(spec, axis) {
+            field = Field::Mirror { inner: Box::new(field), axis, plane };
+        }
+    }
+    let (lo, hi) = (min.map(|v| v as f64), max.map(|v| v as f64));
+    volume(field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path)
+}
+
+/// [`solid`], before any points added to a sphere or pyramid are applied.
+fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
     let need = |n: usize| {
         if spec.points.len() < n {
             Err(format!(
@@ -761,7 +801,13 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             }
             let (min, max, base) = surface_ground(spec).ok_or("a surface needs a point")?;
             // (heights far beyond anything buildable would only overflow the sums below)
-            let heights: Vec<f64> = spec.weights.iter().map(|h| h.clamp(-MAX_SPAN, MAX_SPAN)).collect();
+            let mut heights: Vec<f64> = spec.weights.iter().map(|h| h.clamp(-MAX_SPAN, MAX_SPAN)).collect();
+            // mirrored along x or y, the heights on the high side are those of the low side
+            for k in 0..n * n {
+                let (a, b) = (k % n, k / n);
+                let from = (if spec.mirror[0] { a.min(n - 1 - a) } else { a }, if spec.mirror[1] { b.min(n - 1 - b) } else { b });
+                heights[k] = heights[from.0 + n * from.1];
+            }
             let skin = (!spec.fill).then(|| spec.thick.round().max(2.0));
             let above = |x: f64, y: f64| crate::sdf::height_at(min, max, n, &heights, x, y);
             // over every lattice point of its ground: how high and low it goes, and how steeply
@@ -801,6 +847,19 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
                 .map(|q| DVec3::new(q.truncate().distance(axis), q.z, 0.0))
                 .collect();
             let path = catmull_rom(&profile, false)?;
+            // Points added to the profile pull it as they pull any curve,
+            // within the half-plane it is drawn in: each by how far out
+            // from the axis and how far up it was dragged.
+            let pulls: Vec<(DVec3, DVec3)> = spec
+                .pulls
+                .iter()
+                .map(|(at, by)| {
+                    let out = at.truncate() - axis;
+                    let outwards = if out.length() > 1e-9 { out.normalize() } else { DVec2::X };
+                    (DVec3::new(out.length(), at.z, 0.0), DVec3::new(by.truncate().dot(outwards), by.z, 0.0))
+                })
+                .collect();
+            let path: Vec<DVec3> = pulled(&path, false, &pulls, spec.pull_reach).into_iter().map(|q| DVec3::new(q.x.max(0.0), q.y, 0.0)).collect();
             let region = if spec.fill {
                 // close the profile along the axis
                 let mut poly: Vec<DVec2> = path.iter().map(|q| q.truncate()).collect();
@@ -824,6 +883,82 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             Ok((Solid::Lathe { profile: region, axis, far, low: z0 - half, high: z1 + half, field, min, max }, path))
         }
     }
+}
+
+/// Where a form is mirrored along `axis` (see `Spec::mirror`): the middle
+/// of its points, to the nearest half cell, so that a mirror image of a
+/// brick is on the lattice too.
+fn mirror_plane(spec: &Spec, axis: usize) -> Option<f64> {
+    let lo = spec.points.iter().map(|p| p[axis]).fold(f64::INFINITY, f64::min);
+    let hi = spec.points.iter().map(|p| p[axis]).fold(f64::NEG_INFINITY, f64::max);
+    lo.is_finite().then(|| snap((lo + hi) / 2.0))
+}
+
+/// A curve made its own mirror image along `axis` about the plane at
+/// `plane`: the part of it on the low side is kept, and followed by its
+/// mirror image back the other way.
+///
+/// This is done to the curve and not to the bricks afterwards, as
+/// [`symmetrise`] does for a form that is already symmetric: a brick that
+/// lies across the middle of a lopsided form has no mirror image that
+/// fits, and the two halves of the form would not meet. Mirrored first, the
+/// form is fitted as any symmetric form is.
+///
+/// A curve that crosses the plane more than once (twice, if it is closed)
+/// has no one low side to keep, and is returned as it is.
+pub fn mirrored(path: &[DVec3], closed: bool, axis: usize, plane: f64) -> Vec<DVec3> {
+    let n = path.len();
+    if n < 2 {
+        return path.to_vec();
+    }
+    let low = |p: DVec3| p[axis] <= plane + 1e-9;
+    let image = |p: DVec3| {
+        let mut q = p;
+        q[axis] = 2.0 * plane - p[axis];
+        q
+    };
+    // where the piece from `a` to `b` meets the plane
+    let meets = |a: DVec3, b: DVec3| {
+        let mut at = a + (b - a) * ((plane - a[axis]) / (b[axis] - a[axis]));
+        at[axis] = plane;
+        at
+    };
+    let pieces = if closed { n } else { n - 1 };
+    // the pieces that go from one side to the other
+    let crossings: Vec<usize> = (0..pieces).filter(|&i| low(path[i]) != low(path[(i + 1) % n])).collect();
+    // the low side, from where it comes in to where it goes out
+    let kept: Vec<DVec3> = match (closed, crossings.as_slice()) {
+        (false, &[i]) if low(path[0]) => path[..=i].iter().copied().chain([meets(path[i], path[i + 1])]).collect(),
+        // it ends on the low side: kept from the plane to its end, then turned round to start there
+        (false, &[i]) => {
+            let mut kept: Vec<DVec3> = [meets(path[i], path[i + 1])].into_iter().chain(path[i + 1..].iter().copied()).collect();
+            kept.reverse();
+            kept
+        }
+        (true, &[i, j]) => {
+            // comes in over one crossing and goes out over the other
+            let (into, out) = if low(path[(i + 1) % n]) { (i, j) } else { (j, i) };
+            let mut kept = vec![meets(path[into], path[(into + 1) % n])];
+            let mut at = (into + 1) % n;
+            loop {
+                kept.push(path[at]);
+                if at == out {
+                    break;
+                }
+                at = (at + 1) % n;
+            }
+            kept.push(meets(path[out], path[(out + 1) % n]));
+            // from the plane, round the low side, back to the plane; the
+            // image then comes back, less the two points on the plane
+            let back: Vec<DVec3> = kept[1..kept.len() - 1].iter().rev().map(|p| image(*p)).collect();
+            kept.extend(back);
+            return kept;
+        }
+        _ => return path.to_vec(),
+    };
+    // out along the low side to the plane, and its image back from there
+    let back: Vec<DVec3> = kept[..kept.len() - 1].iter().rev().map(|p| image(*p)).collect();
+    kept.into_iter().chain(back).collect()
 }
 
 /// A curve with its pulls applied: each pull moves the point of the curve
@@ -890,6 +1025,13 @@ fn curve(
         let in_plane = normal.is_some_and(|n| spec.pulls.iter().all(|(_, by)| by.dot(n).abs() < 1e-9));
         (pulled(&path, closed, &spec.pulls, spec.pull_reach), normal.filter(|_| in_plane))
     };
+    // then made its own mirror image, along each axis asked for
+    let mut path = path;
+    for axis in (0..3).filter(|a| spec.mirror[*a]) {
+        if let Some(plane) = mirror_plane(spec, axis) {
+            path = mirrored(&path, closed, axis, plane);
+        }
+    }
     // the axis the curve lies flat across, if any: every point shares that coordinate
     let flat = (0..3).rev().find(|&a| {
         path.iter().all(|p| (p[a] - path[0][a]).abs() < 1e-6)
@@ -2244,6 +2386,66 @@ mod tests {
         assert_eq!(top(&skin), top(&built));
         // the wrong number of heights is said, not built
         assert!(build(&Spec { weights: vec![1.0; 3], ..spec }).unwrap_err().contains("heights"));
+    }
+
+    #[test]
+    fn a_mirrored_form_is_its_low_side_twice() {
+        // an arch with one foot two cells higher than the other
+        let lopsided = Spec { form: Form::Arch(ArchType::Round), points: vec![at(-12.0, 0.0, -2.0), at(16.0, 0.0, 0.0)], thick: 3.0, ..Spec::default() };
+        let cells = |b: &Built| -> HashSet<[i32; 3]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[1]).flat_map(move |y| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[1] + y, k.min[2] + z])))).collect() };
+        // the middle of its points along x is 2.5, so cell x has its image at 4 - x
+        let same_both_sides = |c: &HashSet<[i32; 3]>| c.iter().all(|p| c.contains(&[4 - p[0], p[1], p[2]]));
+        let plain = cells(&build(&lopsided).unwrap());
+        assert!(!same_both_sides(&plain), "the arch was symmetric to begin with");
+        let fixed = check(&Spec { mirror: [true, false, false], ..lopsided.clone() });
+        let both = cells(&fixed);
+        assert!(same_both_sides(&both), "the mirrored arch is not the same on both sides");
+        // its low side is the arch's own low side, foot and all
+        let lowest = |c: &HashSet<[i32; 3]>, side: fn(i32) -> bool| c.iter().filter(|p| side(p[0])).map(|p| p[2]).min().unwrap();
+        assert_eq!(lowest(&both, |x| x < -6), lowest(&plain, |x| x < -6));
+        assert_eq!(lowest(&both, |x| x > 10), lowest(&plain, |x| x < -6), "the far foot is not the near foot's image");
+        // and brick for brick, not only cell for cell
+        let mut left: Vec<(u8, [i32; 3], [i32; 3])> = fixed.bricks.iter().map(|b| (b.mask, b.min, b.ext)).collect();
+        let mut right: Vec<(u8, [i32; 3], [i32; 3])> = fixed.bricks.iter().map(|b| ((0..8u8).fold(0u8, |m, c| m | (b.mask >> c & 1) << (c ^ 1)), [5 - b.min[0] - b.ext[0], b.min[1], b.min[2]], b.ext)).collect();
+        left.sort();
+        right.sort();
+        assert_eq!(left, right);
+
+        // a ring pulled out on its low side comes out on the other side too
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, plane: 1, thick: 2.0, pulls: vec![(at(-20.0, 0.0, 0.0), DVec3::new(-5.0, 0.0, 0.0))], pull_reach: 8.0, ..Spec::default() };
+        let reach = |b: &Built| (b.bricks.iter().map(|k| k.min[0]).min().unwrap(), b.bricks.iter().map(|k| k.min[0] + k.ext[0]).max().unwrap());
+        let (one, two) = (reach(&build(&ring).unwrap()), reach(&check(&Spec { mirror: [true, false, false], ..ring.clone() })));
+        assert_eq!(one.0, two.0);
+        // (about the ring's own middle, which is on a lattice line or in the middle of a cell)
+        assert!(two.0 + two.1 == 0 || two.0 + two.1 == 1, "the bump is on one side only: {two:?}");
+        assert!(two.1 > one.1 + 3);
+
+        // A ball with a point pulled out of its side is no longer round, and
+        // still builds; mirrored, it bulges on both sides alike.
+        let ball = Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 10.0, fill: true, ..Spec::default() };
+        let lump = Spec { pulls: vec![(at(-10.0, 0.0, 0.0), DVec3::new(-6.0, 0.0, 0.0))], pull_reach: 8.0, ..ball.clone() };
+        let (round, lumpy, both) = (reach(&build(&ball).unwrap()), reach(&build(&lump).unwrap()), reach(&build(&Spec { mirror: [true, false, false], ..lump.clone() }).unwrap()));
+        assert!(lumpy.0 <= round.0 - 4 && lumpy.1 == round.1, "round {round:?}, pulled {lumpy:?}");
+        assert!(both.0 == lumpy.0 && both.1 >= round.1 + 4 && both.0 + both.1 == 1, "mirrored {both:?}");
+        // and a turned form's profile takes a point as a curve does: wider all round at that height
+        let vase = Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 20.0), at(6.0, 0.0, 10.0), at(8.0, 0.0, 0.0)], thick: 2.0, fill: true, ..Spec::default() };
+        let belly = Spec { pulls: vec![(at(6.0, 0.0, 10.0), DVec3::new(5.0, 0.0, 0.0))], pull_reach: 6.0, ..vase.clone() };
+        let (slim, wide) = (reach(&build(&vase).unwrap()), reach(&check(&belly)));
+        assert!(wide.1 >= slim.1 + 2 && wide.0 <= slim.0 - 2, "slim {slim:?}, pulled {wide:?}");
+
+        // the curve itself: an open one kept from whichever end is low, a closed one round its low side
+        let open = [DVec3::new(-4.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 3.0), DVec3::new(2.0, 0.0, 5.0), DVec3::new(6.0, 0.0, 9.0)];
+        let made = mirrored(&open, false, 0, 1.0);
+        assert_eq!((made[0], made[made.len() - 1]), (open[0], DVec3::new(6.0, 0.0, 0.0)));
+        assert!(made.iter().zip(made.iter().rev()).all(|(p, q)| (p.x + q.x - 2.0).abs() < 1e-9 && (p.z - q.z).abs() < 1e-9));
+        let turned: Vec<DVec3> = open.iter().rev().copied().collect();
+        assert_eq!(mirrored(&turned, false, 0, 1.0), made);
+        let square = [DVec3::new(-3.0, 0.0, 0.0), DVec3::new(5.0, 0.0, 0.0), DVec3::new(5.0, 0.0, 4.0), DVec3::new(-3.0, 0.0, 2.0)];
+        let made = mirrored(&square, true, 0, 0.0);
+        assert!(made.iter().all(|p| made.iter().any(|q| (p.x + q.x).abs() < 1e-9 && (p.z - q.z).abs() < 1e-9)) && made.iter().any(|p| p.x == 3.0));
+        // crossing the middle three times, there is no one low side: left as it is
+        let wavy = [DVec3::new(-2.0, 0.0, 0.0), DVec3::new(2.0, 0.0, 1.0), DVec3::new(-2.0, 0.0, 2.0), DVec3::new(2.0, 0.0, 3.0)];
+        assert_eq!(mirrored(&wavy, false, 0, 0.0), wavy.to_vec());
     }
 
     #[test]

@@ -124,7 +124,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");
-        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a curve adds a point there to pull it out of shape.");
+        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a form adds a point there to pull it out of shape.");
         ui.label("View: right-drag looks around, W A S D fly, Space or E rises, Q sinks, the scroll wheel sets how fast.");
         ui.separator();
 
@@ -286,7 +286,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ui.add(Slider::new(&mut s.depth, 1..=64).text("Depth"));
         }
         if !s.pulls.is_empty() {
-            ui.add(Slider::new(&mut s.pull_reach, 1.0..=40.0).step_by(0.5).text("Reach of added points")).on_hover_text("How far along the curve, to either side, each added point takes the curve with it.");
+            ui.add(Slider::new(&mut s.pull_reach, 1.0..=40.0).step_by(0.5).text("Reach of added points")).on_hover_text("How far from each added point the form goes with it: along a curve to either side, or all round on a sphere or pyramid.");
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
             }
@@ -295,7 +295,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if is_curve && s.tube && s.thick < 3.0 {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
         }
-        ui.checkbox(&mut s.symmetric, "Fix symmetry").on_hover_text("Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.");
+        ui.horizontal(|ui| {
+            ui.label("Mirror").on_hover_text("Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.");
+            for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
+                ui.checkbox(&mut s.mirror[axis], *name);
+            }
+        });
+        ui.checkbox(&mut s.symmetric, "Tidy symmetric bricks").on_hover_text("Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.");
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {

@@ -736,6 +736,7 @@ impl State {
         let s = &mut self.spec;
         (s.radius, s.thick, s.depth, s.stretch, s.plane) = (fresh.radius, fresh.thick, fresh.depth, fresh.stretch, fresh.plane);
         (s.protrude, s.flip, s.symmetric, s.pull_reach) = (fresh.protrude, fresh.flip, fresh.symmetric, fresh.pull_reach);
+        s.mirror = fresh.mirror;
         self.arch = 0;
         self.segment = (2.0, 6.0);
         self.preset();
@@ -1064,9 +1065,10 @@ impl State {
     /// Add a point. To an arch, between its feet: the first at its crown,
     /// each one after half way between the last two, so that the feet stay
     /// its ends. To the other curves, a little beyond the last.
-    /// Whether the form is a curve, which is what an added point can pull.
+    /// Whether points can be added to the form to pull it out of shape:
+    /// any but a surface, which is shaped by its own points already.
     pub fn can_pull(&self) -> bool {
-        matches!(self.form, ARCH | CIRCLE | SPLINE | BEZIER)
+        self.form != SURFACE
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -1083,8 +1085,14 @@ impl State {
             return None;
         }
         let at = at - self.standing();
-        // the curve as last built, which is in the form's own space
-        let on = self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?;
+        // On a curve, or a turned form's profile, the point takes hold of
+        // the curve as last built (which is in the form's own space) where
+        // it comes nearest the click. A sphere or a pyramid has no curve:
+        // the point takes hold of its surface where it was clicked.
+        let on = match self.form {
+            SPHERE | PYRAMID => at,
+            _ => self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?,
+        };
         self.spec.pulls.push((on, DVec3::ZERO));
         Some(Handle::Pull(self.spec.pulls.len() - 1))
     }
@@ -1358,7 +1366,20 @@ mod tests {
         state.remove_pull();
         state.refresh(|| 0.0);
         assert_eq!(far(&state, out), top_before);
+        // a sphere takes a point where its surface is clicked, and bulges there
         state.form = SPHERE;
+        state.preset();
+        state.refresh(|| 0.0);
+        let wide = state.bounds.unwrap().1[0];
+        let side = state.spec.points[0] + DVec3::X * state.spec.radius;
+        let handle = state.add_pull(side).unwrap();
+        assert_eq!(state.spec.pulls[0].0, side);
+        state.drag(handle, side + DVec3::new(4.0, -80.0, 0.0), DVec3::Y, DVec3::Y);
+        assert!((state.spec.pulls[0].1.x - 4.0).abs() <= 0.5);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert!(state.bounds.unwrap().1[0] >= wide + 2, "the sphere did not bulge");
+        // a surface has its own points, and takes no others
+        state.form = SURFACE;
         state.preset();
         state.refresh(|| 0.0);
         assert!(state.add_pull(state.spec.points[0]).is_none());
@@ -1390,12 +1411,14 @@ mod tests {
         // Reset puts back the sizes and choices too, not only the dots
         state.spec.stretch = DVec3::new(2.0, 0.5, 1.0);
         state.spec.symmetric = true;
+        state.spec.mirror = [true, true, false];
         state.spec.flip = [true, false, true];
         state.spec.radius = 31.0;
         let fit = (state.spec.simplify, state.spec.budget);
         state.reset();
         let fresh = Spec::default();
         assert_eq!((state.spec.stretch, state.spec.symmetric, state.spec.flip), (fresh.stretch, fresh.symmetric, fresh.flip));
+        assert_eq!(state.spec.mirror, fresh.mirror);
         assert_eq!(state.spec.radius, 12.0, "a surface starts 12 to each side");
         assert_ne!(state.spec.weights[5], 1.0);
         // and leaves how it is fitted alone

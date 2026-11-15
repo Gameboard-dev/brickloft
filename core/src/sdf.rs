@@ -323,6 +323,14 @@ pub enum Field {
     Either(Box<Field>, Box<Field>),
     /// the first solid with the second taken out of it
     Without(Box<Field>, Box<Field>),
+    /// `inner` pulled out of shape: at each of `pulls` (a place, and how far
+    /// it is moved) the solid within `reach` of the place goes with it, by
+    /// less the further off it is. `scale` makes up for the stretching, so
+    /// that the value never claims the surface is further off than it is.
+    Warp { inner: Box<Field>, pulls: Vec<(DVec3, DVec3)>, reach: f64, scale: f64 },
+    /// `inner` made its own mirror image along `axis` about `plane`: its
+    /// low side, and that side again on the high side
+    Mirror { inner: Box<Field>, axis: usize, plane: f64 },
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
@@ -413,6 +421,40 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
+            Field::Warp { inner, pulls, reach, scale } => {
+                // Where this point was before the pulls moved it. A pull
+                // moves a point x to x + by * w(x), with w falling from 1 at
+                // the place pulled to 0 at `reach`; so the point that ended
+                // up here is here less some share t of `by`, where t is w
+                // at that point. Taking w at this point instead, the easy
+                // answer, is far out when the pull is as long as its reach:
+                // a sphere pulled six cells bulged three. The share is
+                // found by halving: it is between 0 and 1, and t - w
+                // changes sign between them.
+                let weight = |x: DVec3, at: DVec3| {
+                    let d = x.distance(at);
+                    if d < *reach { 0.5 * (1.0 + (std::f64::consts::PI * d / reach).cos()) } else { 0.0 }
+                };
+                let mut from = p;
+                // undone last pull first, as they were applied first pull first
+                for (at, by) in pulls.iter().rev() {
+                    if weight(from, *at) == 0.0 && weight(from - *by, *at) == 0.0 {
+                        continue;
+                    }
+                    let (mut low, mut high) = (0.0, 1.0);
+                    for _ in 0..14 {
+                        let t = (low + high) / 2.0;
+                        if t < weight(from - *by * t, *at) { low = t } else { high = t }
+                    }
+                    from -= *by * ((low + high) / 2.0);
+                }
+                inner.eval(from) * scale
+            }
+            Field::Mirror { inner, axis, plane } => {
+                let mut low = p;
+                low[*axis] = plane - (p[*axis] - plane).abs();
+                inner.eval(low)
+            }
             Field::Heights { min, max, base, n, heights, skin, steep } => {
                 let top = base + height_at(*min, *max, *n, heights, p.x, p.y);
                 // straight up and down, made no more than the true distance
