@@ -830,8 +830,8 @@ impl State {
     }
 
     /// Where the arrows that move the form being edited are drawn: the
-    /// middle of its bricks, and how long each arrow is, which is far enough
-    /// to stand clear of the form.
+    /// middle of its bricks, and how long each arrow is. They are short, and
+    /// drawn over the bricks, so that a large form is not buried in them.
     ///
     /// Dragging a form by its bricks moves it in the plane facing the eye,
     /// which is two directions at once and neither of them chosen: setting
@@ -841,7 +841,7 @@ impl State {
     pub fn gizmo(&self) -> Option<(DVec3, [f64; 3])> {
         let (lo, hi) = self.bounds?;
         let middle = DVec3::new((lo[0] + hi[0]) as f64, (lo[1] + hi[1]) as f64, (lo[2] + hi[2]) as f64) / 2.0 + self.standing();
-        Some((middle, [0, 1, 2].map(|k| (hi[k] - lo[k]) as f64 / 2.0 + 5.0)))
+        Some((middle, [5.0; 3]))
     }
 
     /// Where along arrow `axis` the ray from the eye through the cursor

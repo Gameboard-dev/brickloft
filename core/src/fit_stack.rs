@@ -67,6 +67,25 @@ pub(crate) struct Foot {
     pub(crate) h: i32,
     pub(crate) wide: u8,
     pub(crate) narrow: u8,
+    /// Whether it is the valley where two ramps meet in an inside corner:
+    /// whole at its wide end, and at its narrow end only the two edges the
+    /// ramps end on. Its corners are a cut cube's (see [`valley`]).
+    pub(crate) valley: bool,
+}
+
+/// The inner corner with the corners of the cut cube `cut`, narrowing along
+/// `axis`: the valley between two ramps that meet in an inside corner.
+///
+/// A cut cube was used there until the game's inner corner was added to the
+/// shapes. Its one sloped face lies across the corner, at an angle to both
+/// ramps and a triangle's worth past the narrow outline; the inner corner's
+/// two faces carry straight on from the two ramps.
+pub(crate) fn valley(cut: u8, axis: usize) -> u8 {
+    let lacks = (!cut).trailing_zeros() as u8;
+    // the hip it leaves of its box: the whole narrow end, and the corner of
+    // the wide end under the one the narrow end lacks (see `shapes`)
+    let narrow_end = (0..8u8).filter(|c| c >> axis & 1 == lacks >> axis & 1).fold(0u8, |m, c| m | 1 << c);
+    !(narrow_end | 1 << (lacks ^ (1 << axis)))
 }
 
 impl Plan {
@@ -420,8 +439,8 @@ pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> 
             let both_long = e.facing % 2 == 0 && f.facing % 2 == 0 && e.a != e.b && f.a != f.b;
             if !convex[i] && both_long {
                 // An inside corner between a level and an upright side: their
-                // two ramps would cross. Each stops short and the corner is a
-                // cube cut on the slant, high along both sides.
+                // two ramps would cross. Each stops short and the corner is
+                // the valley between them, high along both sides.
                 trim[(i + count - 1) % count].1 = f.reach;
                 trim[i].0 = e.reach;
                 feet.push(Foot {
@@ -431,6 +450,7 @@ pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> 
                     h,
                     wide: 15,
                     narrow: three,
+                    valley: true,
                 });
             } else {
                 feet.push(Foot {
@@ -440,6 +460,7 @@ pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> 
                     h,
                     wide: three,
                     narrow: 1 << bit(v),
+                    valley: false,
                 });
             }
         }
@@ -453,6 +474,7 @@ pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> 
                     h: p.h,
                     wide: 15,
                     narrow: p.mask,
+                    valley: false,
                 });
             } else if s.facing % 2 == 0 && s.reach > 0 && s.a != s.b {
                 // a ramp: from the side, less what its ends give up, out by its reach
@@ -474,6 +496,7 @@ pub(crate) fn grow(narrow: &Plan, want: &dyn Fn(f64, f64) -> f64, most: i32) -> 
                         h,
                         wide: 15,
                         narrow: 1 << bit(a) | 1 << bit(b),
+                        valley: false,
                     });
                 }
             }
@@ -602,7 +625,7 @@ pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
     };
     // a piece through layers `from..to`, given as the corners of its box it
     // reaches at the bottom and at the top
-    let mut place = |x: i32, y: i32, pw: i32, ph: i32, low: u8, high: u8, air: bool, from: i32, to: i32| {
+    let mut place = |x: i32, y: i32, pw: i32, ph: i32, low: u8, high: u8, air: bool, in_valley: bool, from: i32, to: i32| {
         if to <= from || pw > limit || ph > limit {
             return;
         }
@@ -611,6 +634,9 @@ pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
             let level = if c >> pipe.axis & 1 == 0 { low } else { high };
             m | (level >> corner & 1) << c
         });
+        if in_valley {
+            mask = valley(mask, pipe.axis);
+        }
         if air {
             // a piece of air: the brick is the rest of its box
             mask = crate::fit_round::rest_of_box(mask);
@@ -640,7 +666,7 @@ pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
         }
     }
     for p in &wall.triangles {
-        place(p.x, p.y, p.w, p.h, p.mask, p.mask, false, k, total - k);
+        place(p.x, p.y, p.w, p.h, p.mask, p.mask, false, false, k, total - k);
     }
     // The chamfers, at the bottom of the tube and at the top. A cell is
     // whole where the air never reaches it; each piece of air leaves the
@@ -657,7 +683,7 @@ pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
         }
         for f in &feet {
             let (low, high) = if wide_low { (f.wide, f.narrow) } else { (f.narrow, f.wide) };
-            place(f.x, f.y, f.w, f.h, low, high, true, from, to);
+            place(f.x, f.y, f.w, f.h, low, high, true, f.valley, from, to);
         }
     }
 
@@ -669,4 +695,58 @@ pub fn pipe(pipe: &Pipe) -> Vec<CellBrick> {
         bricks.push(CellBrick { mask: CUBE, min, ext });
     }
     bricks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shapes::{corners, inside_shape, shape_info, Kind};
+
+    #[test]
+    fn an_inside_corner_between_two_ramps_is_a_valley() {
+        // every cut cube, narrowing along each axis in turn
+        for cut in (0..8u8).map(|c| CUBE & !(1 << c)) {
+            for axis in 0..3 {
+                let mask = valley(cut, axis);
+                let info = shape_info(mask).unwrap();
+                // an inner corner, with the corners the cut cube had
+                assert_eq!((info.kind, corners(mask)), (Kind::Inner, cut));
+                // Its narrow end is the end the cut cube lacks a corner of.
+                // Just inside that end it holds only the two edges that
+                // meet opposite the lacking corner: the middle of the end,
+                // which the cut cube's slanted face covered, is clear.
+                let lacks = (!cut).trailing_zeros() as u8;
+                let near = |bit: u8, t: f64| if lacks >> bit & 1 == 1 { 1.0 - t } else { t };
+                let at = |across: f64, along: f64| {
+                    let mut p = [0.0; 3];
+                    for k in 0..3u8 {
+                        p[k as usize] = if k as usize == axis { near(k, along) } else { near(k, across) };
+                    }
+                    p
+                };
+                let [m, e] = [at(0.6, 0.05), at(0.6, 0.95)];
+                assert!(!inside_shape(info, m[0], m[1], m[2]), "{cut:#x} along {axis}");
+                assert!(inside_shape(shape_info(cut).unwrap(), m[0], m[1], m[2]));
+                // and at its wide end it is whole
+                assert!(inside_shape(info, e[0], e[1], e[2]), "{cut:#x} along {axis}");
+            }
+        }
+
+        // An L of two bars, grown by two cells: one inside corner, where the
+        // ramps along the two bars meet.
+        let bars = [Piece { mask: 15, x: 0, y: 0, w: 12, h: 4 }, Piece { mask: 15, x: 0, y: 4, w: 4, h: 8 }];
+        let narrow = Plan::new(&bars, 4);
+        let inside_l = |x: f64, y: f64| (x > 0.0 && x < 12.0 && y > 0.0 && y < 4.0) || (x > 0.0 && x < 4.0 && y > 0.0 && y < 12.0);
+        // within two cells of the L, measured squarely
+        let want = |x: f64, y: f64| {
+            let near = [-1.75, -1.0, 0.0, 1.0, 1.75].iter().any(|dx| [-1.75, -1.0, 0.0, 1.0, 1.75].iter().any(|dy| inside_l(x + dx, y + dy)));
+            if near { -1.0 } else { 1.0 }
+        };
+        let (feet, _) = grow(&narrow, &want, 2);
+        let valleys: Vec<&Foot> = feet.iter().filter(|f| f.valley).collect();
+        assert_eq!(valleys.len(), 1, "{feet:?}");
+        let v = valleys[0];
+        // in the crook of the L, two cells square, whole at its wide end
+        assert_eq!(([v.x, v.y, v.w, v.h], v.wide, v.narrow.count_ones()), ([4, 4, 2, 2], 15, 3));
+    }
 }

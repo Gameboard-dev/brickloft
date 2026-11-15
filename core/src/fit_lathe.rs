@@ -181,7 +181,7 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 for p in outside.live_triangles() {
                     let inside_half = 15 & !(1 << ((!p.mask & 15).trailing_zeros() ^ 3));
                     let mask = if track.hollow { p.mask } else { inside_half };
-                    upright(&mut pieces, [p.x, p.y, p.w, p.h], mask, mask, false, low, high, limit)?;
+                    upright(&mut pieces, [p.x, p.y, p.w, p.h], mask, mask, false, false, low, high, limit)?;
                 }
                 bands.push(Band { hollow: track.hollow, low, high, radius: (radius(r(k)), radius(r(k))), outside, pieces });
             } else {
@@ -196,7 +196,7 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 let mut pieces = Vec::new();
                 for f in &feet {
                     let (below, above) = if wide_below { (f.narrow, f.wide) } else { (f.wide, f.narrow) };
-                    upright(&mut pieces, [f.x, f.y, f.w, f.h], below, above, !track.hollow, low, high, limit)?;
+                    upright(&mut pieces, [f.x, f.y, f.w, f.h], below, above, !track.hollow, f.valley, low, high, limit)?;
                 }
                 let ends = if wide_below { (radius(wide), to) } else { (to, radius(wide)) };
                 bands.push(Band { hollow: track.hollow, low, high, radius: ends, outside: shrunk, pieces });
@@ -372,11 +372,14 @@ fn stepped(nodes: &[(i32, i32)]) -> Vec<(i32, i32)> {
 /// top (bits `cx | cy << 1`); or, with `rest`, the brick that fills what
 /// that shape leaves of the box. `None` if it is longer than a brick may be.
 #[allow(clippy::too_many_arguments)]
-fn upright(pieces: &mut Vec<CellBrick>, [x, y, w, h]: [i32; 4], below: u8, above: u8, rest: bool, low: i32, high: i32, limit: i32) -> Option<()> {
+fn upright(pieces: &mut Vec<CellBrick>, [x, y, w, h]: [i32; 4], below: u8, above: u8, rest: bool, valley: bool, low: i32, high: i32, limit: i32) -> Option<()> {
     if w > limit || h > limit {
         return None;
     }
     let mut mask = (0..8u8).fold(0u8, |m, corner| m | ((if corner >> 2 == 0 { below } else { above }) >> (corner & 3) & 1) << corner);
+    if valley {
+        mask = crate::fit_stack::valley(mask, 2);
+    }
     if rest {
         mask = rest_of_box(mask);
     }
