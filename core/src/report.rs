@@ -11,7 +11,7 @@
 
 use crate::curves::{ArchType, ARCH_TYPES};
 use crate::fit_volume::{patterns, K};
-use crate::shapes::{inside_sampled, shape_info, Kind, CUBE};
+use crate::shapes::{inside_sampled, shape_info, CellBrick, Kind, CUBE};
 use crate::spec::{build, plane_axes, Built, Form, Probe, Spec};
 use glam::DVec3;
 use std::fmt::Write;
@@ -29,6 +29,7 @@ fn form_name(form: Form) -> String {
         Form::Torus => "torus".into(),
         Form::Revolve => "revolve".into(),
         Form::Pyramid => "pyramid".into(),
+        Form::Surface => "surface".into(),
     }
 }
 
@@ -141,6 +142,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("torus", _) => Form::Torus,
                     ("revolve", _) => Form::Revolve,
                     ("pyramid", _) => Form::Pyramid,
+                    ("surface", _) => Form::Surface,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -330,11 +332,21 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Ana
     };
 
     let mut owner = vec![0u32; count];
+    let mut shared: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
     for (i, b) in built.bricks.iter().enumerate() {
         for z in 0..b.ext[2] {
             for y in 0..b.ext[1] {
                 for x in 0..b.ext[0] {
-                    owner[index([b.min[0] + x, b.min[1] + y, b.min[2] + z])] = i as u32 + 1;
+                    let cell = index([b.min[0] + x, b.min[1] + y, b.min[2] + z]);
+                    if owner[cell] == 0 {
+                        owner[cell] = i as u32 + 1;
+                    } else {
+                        // Two bricks in one box: half bricks either side of
+                        // a diagonal, as a surface is built of. Few cells
+                        // have a second, so they are kept apart from the
+                        // one number every cell has.
+                        shared.entry(cell).or_default().push(i);
+                    }
                 }
             }
         }
@@ -400,19 +412,26 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Ana
                     })
                 };
                 let holds = (owner[i] > 0).then(|| owner[i] as usize - 1);
-                let bricks = match holds.map(|h| built.bricks[h]) {
-                    None => 0,
-                    Some(b) if b.mask == CUBE => u64::MAX,
-                    Some(b) => {
-                        let info =
-                            shape_info(b.mask).ok_or("a brick has a mask that is not a shape")?;
-                        (0..K * K * K).fold(0u64, |bits, s| {
-                            let p = corner + sample(s);
-                            let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
-                            bits | (inside_sampled(info, u[0], u[1], u[2]) as u64) << s
-                        })
+                let samples_of = |b: CellBrick| -> Result<u64, String> {
+                    if b.mask == CUBE {
+                        return Ok(u64::MAX);
                     }
+                    let info = shape_info(b.mask).ok_or("a brick has a mask that is not a shape")?;
+                    Ok((0..K * K * K).fold(0u64, |bits, s| {
+                        let p = corner + sample(s);
+                        let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+                        bits | (inside_sampled(info, u[0], u[1], u[2]) as u64) << s
+                    }))
                 };
+                let mut bricks = match holds {
+                    None => 0,
+                    Some(h) => samples_of(built.bricks[h])?,
+                };
+                if let Some(others) = shared.get(&i) {
+                    for &other in others {
+                        bricks |= samples_of(built.bricks[other])?;
+                    }
+                }
                 // A sample exactly on the form's surface is on neither side of
                 // it, so it agrees with whatever the bricks do there. Counted
                 // as outside, as a strict test has it, every sloped brick

@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, SURFACE};
 use arcs_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -125,7 +125,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");
         ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a curve adds a point there to pull it out of shape.");
-        ui.label("View: right-drag looks around, W A S D fly, Space or E rises, Q sinks, Shift doubles the speed.");
+        ui.label("View: right-drag looks around, W A S D fly, Space or E rises, Q sinks, the scroll wheel sets how fast.");
         ui.separator();
 
         let before = state.form;
@@ -137,9 +137,14 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if state.form != before {
             state.preset();
         }
-        if ui.button("Reset this form").on_hover_text("Put the dots and sizes back to how this form starts out.").clicked() {
-            state.preset();
+        if ui.button("Reset this form").on_hover_text("Put the dots, sizes, stretch, flips and other choices back to how this form starts out. How it is fitted and coloured is left alone.").clicked() {
+            state.reset();
         }
+        ui.horizontal(|ui| {
+            ui.label("Sliders go up to");
+            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=400.0).speed(1.0)).on_hover_text("How far the size sliders reach, in microbricks. Large forms take longer to fit.");
+        });
+        let largest = state.max_size;
         ui.separator();
         workspace(ui, state);
         ui.separator();
@@ -216,14 +221,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
             }
             let mut height = s.rise.unwrap_or(s.radius);
-            ui.add(Slider::new(&mut height, 1.0..=80.0).step_by(1.0).text("Height"));
+            ui.add(Slider::new(&mut height, 1.0..=largest.max(80.0)).step_by(1.0).text("Height"));
             // left alone it is as tall as it is wide to one side
             if height != s.rise.unwrap_or(s.radius) {
                 s.rise = Some(height);
             }
         }
-        if matches!(state.form, CIRCLE | SPHERE | PYRAMID) {
-            ui.add(Slider::new(&mut s.radius, 0.5..=60.0).step_by(0.5).text(if state.form == PYRAMID { "Half its base" } else { "Radius" }));
+        if state.form == SURFACE {
+            ui.label("Drag the blue dots up and down to shape the surface.");
+            ui.label("Stretch:");
+            for (axis, name) in ["X", "Y"].iter().enumerate() {
+                ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
+            }
+        }
+        if matches!(state.form, CIRCLE | SPHERE | PYRAMID | SURFACE) {
+            // A size beyond the slider's reach (set by Ctrl + scroll, or
+            // before the reach was lowered) is left as it is: the slider
+            // would otherwise put it back to its own top value every frame.
+            let name = match state.form {
+                PYRAMID => "Half its base",
+                SURFACE => "Half its size",
+                _ => "Radius",
+            };
+            ui.add(Slider::new(&mut s.radius, 0.5..=largest).step_by(0.5).clamping(egui::SliderClamping::Never).text(name));
         }
 
         ui.separator();
@@ -237,6 +257,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             PYRAMID => {
                 ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)");
+            }
+            SURFACE => {
+                ui.checkbox(&mut s.fill, "Solid down to its base (untick for a skin)");
             }
             _ => {
                 ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
@@ -252,10 +275,11 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         let wall = match state.form {
             SPHERE | REVOLVE | PYRAMID => "Wall thickness",
+            SURFACE => "Skin thickness",
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any)
-        if state.form != PYRAMID || !s.fill {
+        if !(matches!(state.form, PYRAMID | SURFACE) && s.fill) {
             ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
         }
         if is_curve && !s.tube {

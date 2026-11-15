@@ -90,9 +90,11 @@ it back to how it starts. Under **Saved forms** you can keep forms in folders
 text files under `arcs-forms/`, in the browser they are kept by the browser.
 
 In the view the camera is flown: right-drag looks around, W A S D move it
-the way it looks and sideways, Space or E raise it, Q lowers it, and Shift
-doubles the speed. The form being edited has a red, a green and a blue
+the way it looks and sideways, Space or E raise it, Q lowers it, and the
+scroll wheel makes it faster or slower. The form being edited has a red, a green and a blue
 arrow through its middle; dragging one moves the form along x, y or z alone.
+Shift + click on a curve adds a point that pulls the curve out of shape
+there. A Surface is shaped by dragging its sixteen blue dots up and down.
 
 By default the editor is reachable only from the server's own machine. To let
 other players use it, see [docs/security.md](docs/security.md).

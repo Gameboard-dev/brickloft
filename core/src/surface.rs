@@ -90,6 +90,9 @@ struct Grid {
     min: [i32; 3],
     dims: [usize; 3],
     owner: Vec<u32>,
+    /// the cells with more than one brick, and the others in each: half
+    /// bricks either side of a diagonal share a box (see `fit_surface`)
+    shared: std::collections::HashMap<usize, Vec<u32>>,
 }
 
 impl Grid {
@@ -104,6 +107,7 @@ impl Grid {
             ));
         }
         let mut owner = vec![0u32; count];
+        let mut shared: std::collections::HashMap<usize, Vec<u32>> = std::collections::HashMap::new();
         for (i, b) in bricks.iter().enumerate() {
             for z in 0..b.ext[2] {
                 for y in 0..b.ext[1] {
@@ -111,29 +115,34 @@ impl Grid {
                         + dims[0]
                             * ((b.min[1] + y - min[1]) as usize
                                 + dims[1] * (b.min[2] + z - min[2]) as usize);
-                    owner[row..row + b.ext[0] as usize].fill(i as u32 + 1);
+                    for cell in row..row + b.ext[0] as usize {
+                        if owner[cell] == 0 {
+                            owner[cell] = i as u32 + 1;
+                        } else {
+                            shared.entry(cell).or_default().push(i as u32 + 1);
+                        }
+                    }
                 }
             }
         }
-        Ok(Grid { min, dims, owner })
+        Ok(Grid { min, dims, owner, shared })
     }
 
-    /// The brick whose box holds `p`, if any.
-    fn holder(&self, p: DVec3) -> Option<usize> {
-        let mut at = 0;
+    /// The bricks whose boxes hold `p`.
+    fn holders(&self, p: DVec3) -> impl Iterator<Item = usize> + '_ {
+        let mut at = Some(0usize);
         for i in (0..3).rev() {
             let c = p[i].floor() as i64 - self.min[i] as i64;
-            if c < 0 || c >= self.dims[i] as i64 {
-                return None;
-            }
-            at = at * self.dims[i] + c as usize;
+            at = at.filter(|_| c >= 0 && c < self.dims[i] as i64).map(|a| a * self.dims[i] + c as usize);
         }
-        (self.owner[at] > 0).then(|| self.owner[at] as usize - 1)
+        let first = at.map(|a| self.owner[a]).filter(|o| *o > 0);
+        let rest = at.and_then(|a| self.shared.get(&a)).map(|v| v.as_slice()).unwrap_or(&[]);
+        first.into_iter().chain(rest.iter().copied()).map(|o| o as usize - 1)
     }
 
     /// Whether `p` is inside a brick.
     fn solid(&self, bricks: &[CellBrick], p: DVec3) -> bool {
-        self.holder(p).is_some_and(|h| {
+        self.holders(p).any(|h| {
             let b = &bricks[h];
             let t = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
             shape_info(b.mask).is_some_and(|info| part(info, t) >= 0.5)

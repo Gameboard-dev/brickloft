@@ -258,7 +258,9 @@ pub fn run_form(form: usize) {
             // camera's.
             if let Event::MouseWheel { delta, modifiers, handled, .. } = event {
                 if !*handled && (modifiers.ctrl || modifiers.command) && delta.1 != 0.0 {
-                    *handled = state.resize(if delta.1 > 0.0 { 1.0 } else { -1.0 });
+                    state.resize(if delta.1 > 0.0 { 1.0 } else { -1.0 });
+                    // with Ctrl the wheel is never the camera's, resized or not
+                    *handled = true;
                 }
             }
             if let Event::KeyPress { kind, modifiers, handled } = event {
@@ -305,7 +307,9 @@ pub fn run_form(form: usize) {
         if dragging.is_none() && !gui.context().input(|i| i.pointer.any_down()) && !state.searching() {
             state.record();
         }
-        controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing);
+        if let Some(speed) = controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing) {
+            state.toast = Some((format!("Camera speed: {speed:.0} microbricks a second"), None));
+        }
         if asked.best {
             state.snap_best(None);
         }
@@ -366,7 +370,7 @@ pub fn run_form(form: usize) {
                     Handle::Move | Handle::Slide(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
-                    Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
+                    Handle::Radius | Handle::Rise | Handle::Height(_) => Srgba::new_opaque(70, 230, 240),
                 });
             }
             instances.colors = Some(colours);

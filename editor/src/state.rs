@@ -13,7 +13,7 @@ use std::rc::Rc;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 7] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid"];
+pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Surface"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -25,6 +25,7 @@ pub const BEZIER: usize = 3;
 pub const SPHERE: usize = 4;
 pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
+pub const SURFACE: usize = 7;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -132,6 +133,7 @@ fn form_index(form: Form) -> usize {
         Form::Sphere => SPHERE,
         Form::Revolve => REVOLVE,
         Form::Pyramid => PYRAMID,
+        Form::Surface => SURFACE,
     }
 }
 
@@ -159,6 +161,8 @@ pub enum Handle {
     /// a point added to a curve with Shift + click, which pulls the curve
     /// out of shape where it was added
     Pull(usize),
+    /// one of the points a surface passes through, which goes up and down
+    Height(usize),
     /// a control point
     Point(usize),
     /// pulls a circle, sphere or torus wider or narrower
@@ -211,6 +215,11 @@ pub struct State {
     pub panel_right: f32,
     /// whether the rulers are drawn
     pub show_ruler: bool,
+    /// How far the sliders for a form's size go. Their reach was fixed at
+    /// 60, which is as far as most forms are wanted and keeps the slider
+    /// fine enough to set small ones; how large a form is worth building
+    /// depends on the machine and the form, so the user says.
+    pub max_size: f64,
     /// the box of cells the bricks occupy, low corner and high, for the rulers
     pub bounds: Option<Bounds>,
     /// How far below the form's lowest brick the floor is drawn, in
@@ -263,6 +272,9 @@ fn along_line(from: DVec3, a: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
     (t.abs() <= 4.0 * w.length().max(15.0)).then_some(t)
 }
 
+/// How far above or below its base a surface's point may be dragged.
+const HEIGHT_LIMIT: f64 = 120.0;
+
 /// Most points that may be added to one curve.
 pub const PULLS: usize = 12;
 
@@ -299,6 +311,7 @@ impl State {
             open_adds: false,
             panel_right: 0.0,
             show_ruler: true,
+            max_size: 60.0,
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
@@ -390,7 +403,7 @@ impl State {
     /// pyramid. Returns whether it is. By whole cells, so that a radius that
     /// ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | SURFACE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -716,6 +729,18 @@ impl State {
         self.search.is_some()
     }
 
+    /// Put the form back to how it starts out: its dots, and every size and
+    /// choice that shapes it. How it is fitted and coloured is left alone.
+    pub fn reset(&mut self) {
+        let fresh = Spec::default();
+        let s = &mut self.spec;
+        (s.radius, s.thick, s.depth, s.stretch, s.plane) = (fresh.radius, fresh.thick, fresh.depth, fresh.stretch, fresh.plane);
+        (s.protrude, s.flip, s.symmetric, s.pull_reach) = (fresh.protrude, fresh.flip, fresh.symmetric, fresh.pull_reach);
+        self.arch = 0;
+        self.segment = (2.0, 6.0);
+        self.preset();
+    }
+
     /// Start the chosen form from a sensible example of itself.
     pub fn preset(&mut self) {
         let s = &mut self.spec;
@@ -744,6 +769,19 @@ impl State {
             }
             SPHERE => {
                 s.points = vec![cell(0.0, 0.0, s.radius.ceil())];
+                s.fill = true;
+            }
+            SURFACE => {
+                // a saddle: up towards two sides and down towards the other two
+                s.points = vec![DVec3::ZERO];
+                s.radius = 12.0;
+                let n = arcs_core::spec::SURFACE_POINTS;
+                s.weights = (0..n * n)
+                    .map(|k| {
+                        let (u, v) = (2.0 * (k % n) as f64 / (n - 1) as f64 - 1.0, 2.0 * (k / n) as f64 / (n - 1) as f64 - 1.0);
+                        (8.0 + 5.0 * (u * u - v * v)).round()
+                    })
+                    .collect();
                 s.fill = true;
             }
             PYRAMID => {
@@ -782,6 +820,7 @@ impl State {
             BEZIER => Form::Bezier,
             SPHERE => Form::Sphere,
             PYRAMID => Form::Pyramid,
+            SURFACE => Form::Surface,
             _ => Form::Revolve,
         };
         // a curve through an arch's points is open, whatever a spline left behind
@@ -840,6 +879,9 @@ impl State {
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
+        if self.form == SURFACE {
+            all.extend(arcs_core::spec::surface_points(&self.spec).into_iter().enumerate().map(|(k, at)| (Handle::Height(k), at)));
+        }
         // an added point is shown where it has pulled the curve to
         all.extend(self.spec.pulls.iter().enumerate().map(|(i, (at, by))| (Handle::Pull(i), *at + *by)));
         let standing = self.standing();
@@ -928,6 +970,17 @@ impl State {
             self.spec.pulls[i].1[axis] = kept;
             return;
         }
+        if let Handle::Height(k) = handle {
+            // straight up and down, whatever the view: where the cursor's
+            // ray passes nearest the upright line through the point
+            let Some(at) = arcs_core::spec::surface_points(&self.spec).get(k).copied() else { return };
+            let foot = DVec3::new(at.x, at.y, at.z - self.spec.weights[k]) + self.standing();
+            let Some(up) = along_line(foot, DVec3::Z, origin, dir) else { return };
+            // a filled surface stands on its base, so it is at least a cell above it
+            let lowest = if self.spec.fill { 1.0 } else { -HEIGHT_LIMIT };
+            self.spec.weights[k] = snap(up).clamp(lowest, HEIGHT_LIMIT);
+            return;
+        }
         if let Handle::Slide(axis) = handle {
             // along its arrow and no other way, a unit (half a cell) at a time
             let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
@@ -984,7 +1037,7 @@ impl State {
                 }
                 self.move_by(by, at);
             }
-            Handle::Slide(_) => unreachable!("answered above"),
+            Handle::Slide(_) | Handle::Height(_) => unreachable!("answered above"),
             Handle::Pull(i) => {
                 let Some(&(from, _)) = self.spec.pulls.get(i) else { return };
                 let mut by = DVec3::new(snap(hit.x - from.x), snap(hit.y - from.y), snap(hit.z - from.z));
@@ -1309,6 +1362,44 @@ mod tests {
         state.preset();
         state.refresh(|| 0.0);
         assert!(state.add_pull(state.spec.points[0]).is_none());
+    }
+
+    #[test]
+    fn a_surface_point_goes_up_and_down_and_reset_puts_everything_back() {
+        let mut state = State::new();
+        state.form = SURFACE;
+        state.preset();
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let heights: Vec<(Handle, DVec3)> = state.handles().into_iter().filter(|h| matches!(h.0, Handle::Height(_))).collect();
+        assert_eq!(heights.len(), 16);
+        // a point in the middle, pulled 6 up, seen from the side and with the cursor a little off its line
+        let (handle, at) = heights[5];
+        let was = state.spec.weights[5];
+        let eye = at + DVec3::new(-70.0, -30.0, 20.0);
+        state.drag(handle, eye, (at + DVec3::new(0.3, 0.2, 6.0) - eye).normalize(), DVec3::X);
+        assert!((state.spec.weights[5] - (was + 6.0)).abs() <= 0.5, "{} from {was}", state.spec.weights[5]);
+        // nothing else of it moved
+        let now = state.handles();
+        let moved = now.iter().find(|h| h.0 == handle).unwrap().1;
+        assert_eq!((moved.x, moved.y), (at.x, at.y));
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // never under its base while it is filled
+        state.drag(handle, eye, (at - DVec3::Z * 60.0 - eye).normalize(), DVec3::X);
+        assert_eq!(state.spec.weights[5], 1.0);
+
+        // Reset puts back the sizes and choices too, not only the dots
+        state.spec.stretch = DVec3::new(2.0, 0.5, 1.0);
+        state.spec.symmetric = true;
+        state.spec.flip = [true, false, true];
+        state.spec.radius = 31.0;
+        let fit = (state.spec.simplify, state.spec.budget);
+        state.reset();
+        let fresh = Spec::default();
+        assert_eq!((state.spec.stretch, state.spec.symmetric, state.spec.flip), (fresh.stretch, fresh.symmetric, fresh.flip));
+        assert_eq!(state.spec.radius, 12.0, "a surface starts 12 to each side");
+        assert_ne!(state.spec.weights[5], 1.0);
+        // and leaves how it is fitted alone
+        assert_eq!((state.spec.simplify, state.spec.budget), fit);
     }
 
     #[test]

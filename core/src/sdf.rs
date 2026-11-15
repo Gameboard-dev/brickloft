@@ -326,6 +326,38 @@ pub enum Field {
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
+    /// A surface over the ground from `min` to `max`, its height above
+    /// `base` given at `n` by `n` points spread evenly over that ground (see
+    /// [`height_at`]). Solid down to `base`, or `skin` thick straight down.
+    /// `steep` is the most it climbs in one cell along x or y, which the
+    /// value is scaled by so as never to claim the surface is further off
+    /// than it is.
+    Heights { min: [f64; 2], max: [f64; 2], base: f64, n: usize, heights: Vec<f64>, skin: Option<f64>, steep: f64 },
+}
+
+/// The height of a surface through `n` by `n` heights spread evenly over the
+/// ground from `min` to `max` (x fastest), at the point (x, y).
+///
+/// A Catmull-Rom spline each way: it passes through every height given and
+/// has no creases between them, where joining the heights with flat
+/// triangles would crease along every line of the grid.
+/// <https://en.wikipedia.org/wiki/Centripetal_Catmull%E2%80%93Rom_spline>
+pub fn height_at(min: [f64; 2], max: [f64; 2], n: usize, heights: &[f64], x: f64, y: f64) -> f64 {
+    if n < 2 || heights.len() < n * n {
+        return heights.first().copied().unwrap_or(0.0);
+    }
+    // through four values a step apart, between the middle two
+    let spline = |p: [f64; 4], t: f64| 0.5 * (2.0 * p[1] + (p[2] - p[0]) * t + (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]) * t * t + (3.0 * p[1] - p[0] - 3.0 * p[2] + p[3]) * t * t * t);
+    let place = |v: f64, k: usize| {
+        let at = ((v - min[k]) / (max[k] - min[k]).max(1e-9)).clamp(0.0, 1.0) * (n - 1) as f64;
+        let cell = (at.floor() as usize).min(n - 2);
+        (cell, at - cell as f64)
+    };
+    let ((i, tx), (j, ty)) = (place(x, 0), place(y, 1));
+    // the four rows and four columns about the point, the outermost repeated at the rim
+    let pick = |cell: usize, k: usize| (cell + k).saturating_sub(1).min(n - 1);
+    let rows = [0, 1, 2, 3].map(|b| spline([0, 1, 2, 3].map(|a| heights[pick(i, a) + n * pick(j, b)]), tx));
+    spline(rows, ty)
 }
 
 impl Field {
@@ -381,6 +413,17 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
+            Field::Heights { min, max, base, n, heights, skin, steep } => {
+                let top = base + height_at(*min, *max, *n, heights, p.x, p.y);
+                // straight up and down, made no more than the true distance
+                let scale = 1.0 / (1.0 + 2.0 * steep * steep).sqrt();
+                let under = match skin {
+                    Some(thick) => (top - thick - p.z) * scale,
+                    None => base - p.z,
+                };
+                let sides = (min[0] - p.x).max(p.x - max[0]).max(min[1] - p.y).max(p.y - max[1]);
+                ((p.z - top) * scale).max(under).max(sides)
+            }
             Field::Without(a, b) => a.eval(p).max(-b.eval(p)),
             Field::Pyramid { base, half, top, height } => {
                 let up = p.z - base.z;
