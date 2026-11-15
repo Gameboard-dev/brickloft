@@ -14,6 +14,7 @@
 //! - [`surface`] measures a build's outside against the form's: steps and slopes
 
 pub mod curves;
+pub mod fit_lathe;
 pub mod fit_planar;
 pub mod fit_pyramid;
 pub mod fit_round;
