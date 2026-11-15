@@ -5,10 +5,11 @@ and build it in Brickadia at your ghost brick.
 
 Forms: arches (round, pointed, triangular, elliptical, parabolic, catenary),
 arcs and circles through points, splines, weighted Bézier curves, spheres,
-ellipsoids, domes, segments, hollow shells, tori, pyramids, and any profile
-spun about an axis. Each is fitted with cubes, ramps, tetrahedra and cut cubes
-(and, on a pyramid's ridges, the game's corner wedge) so that
-the volume where bricks and form disagree is as small as it can be made.
+ellipsoids, domes, segments, hollow shells, tori, pyramids solid or hollow,
+and any profile spun about an axis. Each is fitted with the game's
+microbricks (cubes, ramps and its corner wedges) so that the volume where
+bricks and form disagree is as small as it can be made, and so that a
+surface meant to be smooth is sloped bricks and not a staircase.
 
 It is an [omegga](https://github.com/brickadia-community/omegga) plugin,
 written in Rust, in four parts:
@@ -24,6 +25,17 @@ written in Rust, in four parts:
 
 - omegga 1.23 or newer, with the [omegga-ue4ss](https://github.com/Meshiest/omegga-ue4ss) plugin installed (bricks are placed through it).
 - Rust, to build: <https://rustup.rs>
+
+## Download
+
+A Windows build is on the [releases page](../../releases): the desktop
+editor (`arcs.exe`), the plugin (`omegga-arcs.exe`) and the browser editor
+(`dist/`). The desktop editor needs nothing else: forms made in it are
+copied to the clipboard with Ctrl+C and pasted into the game.
+
+The programs are not code-signed, so an antivirus may hold them back as
+unknown the first time they are run. Building from source, below, gives the
+same programs.
 
 ## Install
 
@@ -52,10 +64,10 @@ pushes that one away.
 gives it a third, and it becomes the arc through all three; more, up to
 eight, and it is the smooth curve through them all. Everything in the workspace is sent together.
 
-**Fix symmetry** makes a form's bricks mirror images of each other wherever
-the form itself is one: side to side for an arch, in every direction for a
-sphere. It keeps the low side along each such axis and rebuilds the high
-side from it.
+**Mirror**, along X, Y or Z, makes a form its own mirror image: its low
+side along that axis is kept and the high side becomes its image. An arch
+with one foot higher than the other gets two feet alike, and a point added
+to one side of a circle appears on the other.
 
 **A torus** is the Circle form with "Round tube" ticked; there is no
 separate Torus form. Its Stretch sliders make it an ellipse within its plane
