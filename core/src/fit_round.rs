@@ -391,9 +391,14 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
         }
     }
     let (score, count, t, layers) = best?;
-    // A wall further than this from the true one, counting both its faces,
-    // is too thin for the layers the lattice can give it.
-    if round.shell.is_some() && score > 1.0 {
+    // A wall too far from the true one, counting both its faces, is too
+    // thin for the layers the lattice can give it. Too far is more than a
+    // cell, or for a thicker wall, more than six tenths of its thickness.
+    // It was a cell whatever the wall: a shell 70 in radius with a wall 4
+    // thick missed by a fifth of a cell, and was fitted cell by cell
+    // instead, as 70,000 bricks a fifth of them steps, where laid out it
+    // is a tenth as many and none.
+    if round.shell.is_some_and(|thick| score > (0.6 * thick).max(1.0)) {
         return None;
     }
 
