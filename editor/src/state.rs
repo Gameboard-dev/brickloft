@@ -58,6 +58,33 @@ pub enum Cut {
     Segment,
 }
 
+/// A best-fit search under way (see [`State::snap_best`]).
+struct Search {
+    /// the numbers it may change, and how many times over it goes through them
+    tunables: Vec<Tune>,
+    rounds: usize,
+    /// where it has got to: the round, the number, and the value of it to try next
+    round: usize,
+    which: usize,
+    step: usize,
+    /// the misfit it began with, once measured, and the least found so far
+    start: Option<f64>,
+    best: f64,
+    /// the settings each value is tried from, and the whole spec they make
+    at: Spec,
+    full: Spec,
+    /// the best settings found for the number being tried, if any beat `best`
+    choice: Option<Spec>,
+    /// whether this round has changed anything
+    improved: bool,
+    /// builds done, and the most there can be: it may well end sooner, when
+    /// a round changes nothing
+    done: usize,
+    total: usize,
+    /// whether a frame has been drawn since it was begun
+    waited: bool,
+}
+
 /// One number the best-fit search may change.
 #[derive(Clone, Copy)]
 enum Tune {
@@ -185,6 +212,8 @@ pub struct State {
     pub auto_best: bool,
     /// what the last best-fit search did
     pub best_note: String,
+    /// a best-fit search not yet finished
+    search: Option<Search>,
     /// saving: the folder chosen, the name typed, a new folder's name typed,
     /// and what the last save or open came to
     pub folder: String,
@@ -247,6 +276,7 @@ impl State {
             floor_gap: 0.0,
             auto_best: false,
             best_note: String::new(),
+            search: None,
             folder: crate::store::STARTER_FOLDERS[0].to_string(),
             save_name: String::new(),
             new_folder: String::new(),
@@ -542,7 +572,7 @@ impl State {
         (built.solid > 0.0 && !built.bricks.is_empty()).then(|| built.error / built.solid)
     }
 
-    /// Move to the best fit within a cell of here.
+    /// Begin moving to the best fit within a cell of here.
     ///
     /// A form fits cleanly only where its surfaces fall on the grid: an arch
     /// whose radius comes to 8.3 has walls a third of a cell off every brick
@@ -555,44 +585,108 @@ impl State {
     /// good fit and not some far better one elsewhere.
     ///
     /// `only` limits it to one handle's numbers (the one just dragged).
+    ///
+    /// The search is only begun here. It builds the form once for every value
+    /// tried, a few dozen times in all, and a large form takes seconds to
+    /// build: done in one go, the window stopped answering until it was over.
+    /// So it is carried on a little each frame by [`State::search_for`], with
+    /// [`State::search_progress`] to show how far it has got. A second thread
+    /// would keep the view moving even during a single slow build, but the
+    /// browser build has no threads to give it
+    /// (<https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html>),
+    /// and two ways of running one search is more to go wrong than one.
     pub fn snap_best(&mut self, only: Option<Handle>) {
-        let Some(start) = self.misfit() else { return };
-        let mut best = start;
-        // a slow form gets one round, so that the editor does not stall
+        let tunables = self.tunable(only);
+        // a slow form gets one round, to be done in reasonable time
         let rounds = if self.build_ms > 60.0 { 1 } else { 3 };
-        for _ in 0..rounds {
-            let mut improved = false;
-            for what in self.tunable(only) {
-                let steps: &[f64] = match what {
-                    // points sit on cell centres unless half steps are asked for
-                    Tune::Point(..) if !self.fine_snap => &[-1.0, 1.0],
-                    _ => &[-1.0, -0.5, 0.5, 1.0],
-                };
-                let before = self.spec.clone();
-                let mut choice = None;
-                for &by in steps {
-                    self.tune(what, by);
-                    // a clear gain only: never wander off for the sake of noise
-                    if let Some(fit) = self.misfit().filter(|f| *f < best * 0.97 - 1e-9) {
-                        best = fit;
-                        choice = Some(self.spec.clone());
-                    }
-                    self.spec = before.clone();
-                }
-                if let Some(spec) = choice {
-                    self.spec = spec;
-                    improved = true;
-                }
+        let tries: usize = tunables.iter().map(|t| self.steps(*t).len()).sum();
+        self.search = Some(Search { tunables, rounds, round: 0, which: 0, step: 0, start: None, best: 0.0, at: self.spec.clone(), full: self.full_spec(), choice: None, improved: false, done: 0, total: 1 + rounds * tries, waited: false });
+    }
+
+    /// The amounts the search tries adding to one of its numbers.
+    fn steps(&self, what: Tune) -> &'static [f64] {
+        match what {
+            // points sit on cell centres unless half steps are asked for
+            Tune::Point(..) if !self.fine_snap => &[-1.0, 1.0],
+            _ => &[-1.0, -0.5, 0.5, 1.0],
+        }
+    }
+
+    /// How far a search under way has got, from 0 to 1; `None` if there is none.
+    pub fn search_progress(&self) -> Option<f32> {
+        self.search.as_ref().map(|s| s.done as f32 / s.total as f32)
+    }
+
+    /// Carry a search on for about `budget_ms`, and by one build at least.
+    ///
+    /// The frame in which a search is begun does none of it, so that the
+    /// progress bar is on the screen before the first build, which for a
+    /// large form is the first long wait.
+    pub fn search_for(&mut self, budget_ms: f64, now_ms: impl Fn() -> f64) {
+        if let Some(search) = self.search.as_mut().filter(|s| !s.waited) {
+            search.waited = true;
+            return;
+        }
+        let start = now_ms();
+        while self.search_step() && now_ms() - start < budget_ms {}
+    }
+
+    /// Try one value (one build of the form). Returns whether there is more to do.
+    fn search_step(&mut self) -> bool {
+        let Some(mut s) = self.search.take() else { return false };
+        // Anything changed by hand since the last step ends the search: what
+        // it has measured was for a form that is no longer the one on screen.
+        if self.full_spec() != s.full {
+            return false;
+        }
+        let Some(start) = s.start else {
+            // the first build is of the form as it stands, to have something to beat
+            let Some(fit) = self.misfit() else { return false };
+            (s.start, s.best, s.done) = (Some(fit), fit, 1);
+            let more = !s.tunables.is_empty();
+            self.search = more.then_some(s);
+            return more;
+        };
+        let what = s.tunables[s.which];
+        let steps = self.steps(what);
+        self.tune(what, steps[s.step]);
+        // a clear gain only: never wander off for the sake of noise
+        if let Some(fit) = self.misfit().filter(|f| *f < s.best * 0.97 - 1e-9) {
+            s.best = fit;
+            s.choice = Some(self.spec.clone());
+        }
+        self.spec = s.at.clone();
+        s.done += 1;
+        s.step += 1;
+        if s.step == steps.len() {
+            // every value of this number tried: keep the best, go on to the next
+            (s.step, s.which) = (0, s.which + 1);
+            if let Some(spec) = s.choice.take() {
+                self.spec = spec.clone();
+                s.at = spec;
+                s.full = self.full_spec();
+                s.improved = true;
             }
-            if !improved {
-                break;
+            if s.which == s.tunables.len() {
+                (s.which, s.round) = (0, s.round + 1);
+                if !s.improved || s.round == s.rounds {
+                    self.best_note = if s.best < start {
+                        format!("Moved to a closer fit: discrepancy {:.1}% -> {:.1}%", start * 100.0, s.best * 100.0)
+                    } else {
+                        "This is already the best fit within a microbrick of here.".into()
+                    };
+                    return false;
+                }
+                s.improved = false;
             }
         }
-        self.best_note = if best < start {
-            format!("Moved to a closer fit: discrepancy {:.1}% -> {:.1}%", start * 100.0, best * 100.0)
-        } else {
-            "This is already the best fit within a microbrick of here.".into()
-        };
+        self.search = Some(s);
+        true
+    }
+
+    /// Whether a best-fit search is under way.
+    pub fn searching(&self) -> bool {
+        self.search.is_some()
     }
 
     /// Start the chosen form from a sensible example of itself.
@@ -1034,8 +1128,60 @@ mod tests {
         let (whole, _) = misfit_at(13.0);
         // (off the grid it was 14% and more)
         assert!(half < 0.1 && whole < 0.14, "radius 12.5 fits {half}, radius 13 fits {whole}");
-        state.snap_best(None);
+        best_now(&mut state, None);
         assert!(state.misfit().unwrap() <= half);
+    }
+
+    /// A best-fit search from start to finish.
+    fn best_now(state: &mut State, only: Option<Handle>) {
+        state.snap_best(only);
+        while state.search_step() {}
+    }
+
+    #[test]
+    fn best_fit_is_done_a_little_at_a_time_and_says_how_far_it_has_got() {
+        let mut state = State::new(); // an arch
+        state.spec.rise = Some(10.5);
+        let mut whole = State::new();
+        whole.spec.rise = Some(10.5);
+        best_now(&mut whole, None);
+        assert!(!whole.searching() && !whole.best_note.is_empty());
+
+        // a clock that says a build takes 10 ms, and frames of 15
+        let clock = std::cell::Cell::new(0.0);
+        let now = || {
+            clock.set(clock.get() + 5.0);
+            clock.get()
+        };
+        state.snap_best(None);
+        assert_eq!(state.search_progress(), Some(0.0));
+        // the frame it is begun in only shows the bar
+        state.search_for(15.0, now);
+        assert_eq!(state.search_progress(), Some(0.0));
+        let (mut frames, mut last) = (0, 0.0);
+        while state.searching() {
+            state.search_for(15.0, now);
+            if let Some(p) = state.search_progress() {
+                assert!(p > last && p <= 1.0, "progress went from {last} to {p}");
+                last = p;
+            }
+            frames += 1;
+        }
+        assert!(frames > 3, "the whole search was done in {frames} frames");
+        // and it comes to what it came to done all at once
+        assert_eq!((state.spec.clone(), state.best_note.clone()), (whole.spec.clone(), whole.best_note.clone()));
+
+        // a change made by hand part way through ends it, and is kept
+        state.spec.rise = Some(10.5);
+        state.snap_best(None);
+        state.search_for(15.0, now);
+        state.search_for(15.0, now);
+        assert!(state.searching());
+        state.spec.thick += 1.0;
+        let mine = state.spec.clone();
+        state.search_for(15.0, now);
+        assert!(!state.searching());
+        assert_eq!(state.spec, mine);
     }
 
     #[test]
@@ -1043,10 +1189,10 @@ mod tests {
         let mut state = State::new(); // an arch, with y held
         state.spec.rise = Some(10.5);
         let feet = state.spec.points.clone();
-        state.snap_best(Some(Handle::Rise));
+        best_now(&mut state, Some(Handle::Rise));
         assert_eq!(state.spec.points, feet, "only the rise was to change");
         assert_ne!(state.spec.rise, Some(10.5));
-        state.snap_best(None);
+        best_now(&mut state, None);
         assert!(state.spec.points.iter().all(|p| p.y == 0.5), "y is locked");
     }
 

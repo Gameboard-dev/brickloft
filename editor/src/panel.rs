@@ -97,6 +97,12 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
         });
     }
+    // how far a best-fit search has got, in the top right corner while it runs
+    if let Some(done) = state.search_progress() {
+        egui::Area::new(egui::Id::new("search progress")).anchor(egui::Align2::RIGHT_TOP, [-12.0, 12.0]).interactable(false).show(ui.ctx(), |ui| {
+            ui.add(egui::ProgressBar::new(done).desired_width(180.0).text("Finding the best fit"));
+        });
+    }
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");

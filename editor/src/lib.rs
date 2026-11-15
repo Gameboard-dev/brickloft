@@ -271,13 +271,20 @@ pub fn run_form(form: usize) {
         }
         // A change is noted as one step to undo once the mouse is let go: a
         // drag of a dot or of a slider is then one step, not one per frame.
-        if dragging.is_none() && !gui.context().input(|i| i.pointer.any_down()) {
+        // nor in the middle of a best-fit search, which is one step however
+        // many of the form's numbers it ends up changing.
+        if dragging.is_none() && !gui.context().input(|i| i.pointer.any_down()) && !state.searching() {
             state.record();
         }
         controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing);
         if asked.best {
             state.snap_best(None);
         }
+        // A search under way is given half of a frame at 60 a second, so
+        // that the view still turns and the progress bar still moves while
+        // it runs. A form that takes longer than that to build once holds
+        // each frame for one build.
+        state.search_for(8.0, now_ms);
 
         // rebuild only when the spec changed; a frame with nothing new costs nothing
         // dragging a dot or a form in the view, or anything in the panel
