@@ -156,6 +156,9 @@ pub enum Handle {
     Move,
     /// moves the whole form along x, y or z alone: one of its three arrows
     Slide(usize),
+    /// a point added to a curve with Shift + click, which pulls the curve
+    /// out of shape where it was added
+    Pull(usize),
     /// a control point
     Point(usize),
     /// pulls a circle, sphere or torus wider or narrower
@@ -244,6 +247,24 @@ pub struct State {
 /// is coloured, the one being edited first. Bricks are not kept; they are
 /// built again from the form, which keeps a long history small.
 type Snapshot = Vec<Placed>;
+
+/// How far along the line through `from` in direction `a` the ray from
+/// `origin` along `dir` comes nearest it; `None` if the ray runs along the
+/// line or meets it implausibly far off. Both directions are of length one.
+fn along_line(from: DVec3, a: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
+    // the nearest points of two lines: https://en.wikipedia.org/wiki/Skew_lines#Nearest_points
+    let (w, b) = (from - origin, a.dot(dir));
+    let across = 1.0 - b * b;
+    if across < 1e-4 {
+        return None;
+    }
+    let t = (b * dir.dot(w) - a.dot(w)) / across;
+    // as for a drag in a plane: never flung to the horizon
+    (t.abs() <= 4.0 * w.length().max(15.0)).then_some(t)
+}
+
+/// Most points that may be added to one curve.
+pub const PULLS: usize = 12;
 
 /// How many changes can be undone. Each is a few hundred bytes.
 const HISTORY: usize = 200;
@@ -699,6 +720,7 @@ impl State {
     pub fn preset(&mut self) {
         let s = &mut self.spec;
         s.weights.clear();
+        s.pulls.clear();
         s.rise = None;
         s.closed = false;
         s.tube = false;
@@ -818,6 +840,8 @@ impl State {
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
+        // an added point is shown where it has pulled the curve to
+        all.extend(self.spec.pulls.iter().enumerate().map(|(i, (at, by))| (Handle::Pull(i), *at + *by)));
         let standing = self.standing();
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
@@ -850,15 +874,7 @@ impl State {
     fn on_arrow(&self, axis: usize, origin: DVec3, dir: DVec3) -> Option<DVec3> {
         let (middle, _) = self.gizmo()?;
         let a = [DVec3::X, DVec3::Y, DVec3::Z][axis];
-        // the nearest points of two lines: https://en.wikipedia.org/wiki/Skew_lines#Nearest_points
-        let (w, b) = (middle - origin, a.dot(dir));
-        let across = 1.0 - b * b;
-        if across < 1e-4 {
-            return None;
-        }
-        let t = (b * dir.dot(w) - a.dot(w)) / across;
-        // as for a drag in a plane: never flung to the horizon
-        (t.abs() <= 4.0 * w.length().max(15.0)).then(|| middle + a * t)
+        along_line(middle, a, origin, dir).map(|t| middle + a * t)
     }
 
     /// Take hold of arrow `axis` where the cursor's ray passes it. Returns
@@ -886,6 +902,32 @@ impl State {
     /// Move `handle` to where the ray from the eye through the cursor meets
     /// its drag plane.
     pub fn drag(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
+        // A point added to a circle is dragged within the circle's plane
+        // when that plane is seen face on, and straight out of it when it is
+        // seen from the side: never a little of both, since a curve pulled
+        // even slightly out of its plane can no longer be built as a flat
+        // band (see `arcs_core::spec::pulled`), and a drag in the plane
+        // facing the eye is nearly always a little of both.
+        if let (Handle::Pull(i), CIRCLE, Lock::Free) = (handle, self.form, self.lock) {
+            let Some(&(from, by)) = self.spec.pulls.get(i) else { return };
+            let axis = self.spec.plane.min(2);
+            let normal = [DVec3::X, DVec3::Y, DVec3::Z][axis];
+            if view.dot(normal).abs() < 0.7 {
+                let mut within = by;
+                within[axis] = 0.0;
+                let foot = from + within + self.standing();
+                let Some(t) = along_line(foot, normal, origin, dir) else { return };
+                self.spec.pulls[i].1 = within + normal * snap(t);
+                return;
+            }
+            // face on: in the plane, as if the plane's axis were locked
+            let (was, kept) = (self.lock, by[axis]);
+            self.lock = Lock::Axis(axis);
+            self.drag(handle, origin, dir, view);
+            self.lock = was;
+            self.spec.pulls[i].1[axis] = kept;
+            return;
+        }
         if let Handle::Slide(axis) = handle {
             // along its arrow and no other way, a unit (half a cell) at a time
             let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
@@ -898,7 +940,7 @@ impl State {
         let held = if handle == Handle::Move { self.grab } else { self.handles().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
         let Some(at) = held else { return };
         let normal = match (handle, self.lock) {
-            (Handle::Point(_) | Handle::Move, Lock::Axis(a)) => [DVec3::X, DVec3::Y, DVec3::Z][a],
+            (Handle::Point(_) | Handle::Move | Handle::Pull(_), Lock::Axis(a)) => [DVec3::X, DVec3::Y, DVec3::Z][a],
             _ => view,
         };
         let facing = dir.dot(normal);
@@ -943,6 +985,14 @@ impl State {
                 self.move_by(by, at);
             }
             Handle::Slide(_) => unreachable!("answered above"),
+            Handle::Pull(i) => {
+                let Some(&(from, _)) = self.spec.pulls.get(i) else { return };
+                let mut by = DVec3::new(snap(hit.x - from.x), snap(hit.y - from.y), snap(hit.z - from.z));
+                if let Lock::Axis(a) = self.lock {
+                    by[a] = 0.0; // kept in the curve's own plane
+                }
+                self.spec.pulls[i].1 = by;
+            }
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
@@ -961,6 +1011,36 @@ impl State {
     /// Add a point. To an arch, between its feet: the first at its crown,
     /// each one after half way between the last two, so that the feet stay
     /// its ends. To the other curves, a little beyond the last.
+    /// Whether the form is a curve, which is what an added point can pull.
+    pub fn can_pull(&self) -> bool {
+        matches!(self.form, ARCH | CIRCLE | SPLINE | BEZIER)
+    }
+
+    /// Add a point to the curve nearest `at`, a place in the view (where a
+    /// brick was clicked), to be dragged from there. Returns its handle, or
+    /// `None` if the form is not a curve or there are already enough.
+    ///
+    /// The point takes hold of the curve where it is added and moves that
+    /// part of it as it is dragged; the form's own points and sizes stay as
+    /// they were. A bump on a circle could be had by turning the circle into
+    /// a curve through many points, but then it would be a circle no longer:
+    /// its radius could not be changed, nor the bump taken off again.
+    pub fn add_pull(&mut self, at: DVec3) -> Option<Handle> {
+        if !self.can_pull() || self.spec.pulls.len() >= PULLS {
+            return None;
+        }
+        let at = at - self.standing();
+        // the curve as last built, which is in the form's own space
+        let on = self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?;
+        self.spec.pulls.push((on, DVec3::ZERO));
+        Some(Handle::Pull(self.spec.pulls.len() - 1))
+    }
+
+    /// Take off the point added last.
+    pub fn remove_pull(&mut self) {
+        self.spec.pulls.pop();
+    }
+
     pub fn add_point(&mut self) {
         let grid = |q: DVec3| DVec3::new(q.x.floor() + 0.5, q.y.floor() + 0.5, q.z.floor() + 0.5);
         if self.form == ARCH {
@@ -1172,6 +1252,63 @@ mod tests {
         assert_ne!(other.place, was, "the other form did not move");
         // moved whole: only where it stands has changed
         assert_eq!(other.built.bricks, bricks);
+    }
+
+    #[test]
+    fn a_point_added_to_a_circle_pulls_it_out_of_shape_there() {
+        let mut state = State::new();
+        state.form = CIRCLE;
+        state.preset();
+        state.refresh(|| 0.0);
+        let (radius, centre) = (state.spec.radius, state.spec.points[0]);
+        // which way the circle faces, and a direction out from its middle within its plane
+        let across = state.spec.plane.min(2);
+        let (normal, out) = ([DVec3::X, DVec3::Y, DVec3::Z][across], state.radius_dir());
+        let far = |state: &State, way: DVec3| {
+            let (lo, hi) = state.bounds.unwrap();
+            (0..3).map(|k| if way[k] > 0.5 { hi[k] as f64 } else if way[k] < -0.5 { -lo[k] as f64 } else { 0.0 }).sum::<f64>()
+        };
+        let (out_before, up_before) = (far(&state, out), far(&state, normal));
+        // clicked a little off the circle, and off its plane: the point lands on the curve
+        let handle = state.add_pull(centre + out * (radius + 0.8) + normal * 0.6).unwrap();
+        assert_eq!(handle, Handle::Pull(0));
+        let held = state.spec.pulls[0].0;
+        assert!((held - (centre + out * radius)).length() < 1.0, "held at {held:?}");
+        assert_eq!(state.handles().iter().find(|h| h.0 == handle).unwrap().1, held);
+        // Seen face on and dragged five cells outwards, with the cursor's
+        // ray a little askew: it moves in the plane and not out of it.
+        let target = held + out * 5.0;
+        let askew = (normal + out * 0.05).normalize();
+        state.drag(handle, target - askew * 80.0, askew, normal);
+        let by = state.spec.pulls[0].1;
+        assert!((by.dot(out) - 5.0).abs() <= 0.5 && by[across] == 0.0, "pulled by {by:?}");
+        assert!(state.refresh(|| 0.0));
+        assert!(state.problem.is_none(), "{:?}", state.problem);
+        assert!(far(&state, out) >= out_before + 4.0, "it did not grow outwards");
+        assert_eq!(far(&state, normal), up_before, "it left its plane");
+        // Seen from the side, the same point goes straight out of the plane
+        // and keeps what it had within it.
+        let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
+        let side = normal.cross(out).normalize();
+        let eye = at - side * 80.0;
+        state.drag(handle, eye, (at + normal * 3.0 + out * 0.4 - eye).normalize(), side);
+        let lifted = state.spec.pulls[0].1;
+        assert!((lifted[across] - 3.0).abs() <= 0.5 && (lifted.dot(out) - by.dot(out)).abs() < 1e-9, "pulled by {lifted:?}");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert!(far(&state, normal) >= up_before + 2.0, "it did not rise out of its plane");
+        state.spec.pulls[0].1 = by;
+        state.refresh(|| 0.0);
+        let top_before = out_before;
+        // the circle is still a circle: its radius and centre are as they were
+        assert_eq!((state.spec.radius, state.spec.points[0]), (radius, centre));
+        // taken off again, it is round again; and a solid has no such points
+        state.remove_pull();
+        state.refresh(|| 0.0);
+        assert_eq!(far(&state, out), top_before);
+        state.form = SPHERE;
+        state.preset();
+        state.refresh(|| 0.0);
+        assert!(state.add_pull(state.spec.points[0]).is_none());
     }
 
     #[test]

@@ -188,8 +188,7 @@ pub fn run_form(form: usize) {
         // handles take the mouse before the camera does
         for event in frame.events.iter_mut() {
             match event {
-                // Shift + left-drag slides the view, so it does not pick up a handle
-                Event::MousePress { button: MouseButton::Left, position, modifiers, handled, .. } if !*handled && !modifiers.shift => {
+                Event::MousePress { button: MouseButton::Left, position, modifiers, handled, .. } if !*handled => {
                     if let Ok(Some(hit)) = pick(&context, &camera, *position, &handle_mesh, Cull::Back) {
                         dragging = shown_handles.get(hit.instance_id as usize).map(|h| h.0);
                         *handled = dragging.is_some();
@@ -216,11 +215,18 @@ pub fn run_form(form: usize) {
                         if let Ok(Some(hit)) = hit {
                             let form = drawn.get(hit.geometry_id as usize).and_then(|&m| owners[m].get(hit.instance_id as usize));
                             if let Some(&form) = form {
-                                if form > 0 {
-                                    state.activate(form - 1);
+                                // With Shift, on the curve being edited: a new
+                                // point is added there, and dragged from there.
+                                let added = if modifiers.shift && form == 0 { state.add_pull(d(hit.position)) } else { None };
+                                if let Some(pull) = added {
+                                    dragging = Some(pull);
+                                } else {
+                                    if form > 0 {
+                                        state.activate(form - 1);
+                                    }
+                                    state.grab = Some(d(hit.position));
+                                    dragging = Some(Handle::Move);
                                 }
-                                state.grab = Some(d(hit.position));
-                                dragging = Some(Handle::Move);
                                 *handled = true;
                             }
                         }
@@ -359,6 +365,7 @@ pub fn run_form(form: usize) {
                 colours.push(match handle {
                     Handle::Move | Handle::Slide(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
+                    Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
                     Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
                 });
             }

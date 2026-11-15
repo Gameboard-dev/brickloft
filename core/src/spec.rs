@@ -87,6 +87,12 @@ pub struct Spec {
     /// most bricks wanted when `grain` is 0
     pub budget: usize,
     pub max_ext: i32,
+    /// Places where a curve is pulled out of its shape: a point on it, and
+    /// how far that point is moved. The curve to either side follows, less
+    /// and less, out to `pull_reach` along it (see [`pulled`]). Curves only:
+    /// a sphere, a pyramid or a turned form has none.
+    pub pulls: Vec<(DVec3, DVec3)>,
+    pub pull_reach: f64,
 }
 
 impl Default for Spec {
@@ -109,6 +115,8 @@ impl Default for Spec {
             wedges: true,
             flip: [false; 3],
             symmetric: false,
+            pulls: Vec::new(),
+            pull_reach: 8.0,
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -167,6 +175,11 @@ impl Spec {
         s.thick = snap(s.thick).max(0.5);
         s.rise = s.rise.map(|r| snap(r).max(0.5));
         s.cut = s.cut.map(|(lo, hi)| (snap(lo), snap(hi)));
+        // (where a pull takes hold need not be on the grid: it is only looked for along the curve)
+        for pull in &mut s.pulls {
+            pull.1 = DVec3::new(snap(pull.1.x), snap(pull.1.y), snap(pull.1.z));
+        }
+        s.pull_reach = snap(s.pull_reach).max(1.0);
         s
     }
 }
@@ -279,6 +292,8 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.thick /= g;
     coarse.rise = coarse.rise.map(|r| r / g);
     coarse.cut = coarse.cut.map(|(lo, hi)| (lo / g, hi / g));
+    coarse.pulls = spec.pulls.iter().map(|(at, by)| (*at / g, *by / g)).collect();
+    coarse.pull_reach /= g;
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
     coarse.snapped()
@@ -735,6 +750,52 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
     }
 }
 
+/// A curve with its pulls applied: each pull moves the point of the curve
+/// nearest where it takes hold, and the curve within `reach` of there along
+/// its length by less the further off it is, falling away as a cosine does
+/// so that the bump joins the rest of the curve without a corner.
+///
+/// Distance is measured along the curve, not straight across: a pull on one
+/// side of a narrow loop then leaves the other side alone. The curve is cut
+/// finer first, to pieces of half a cell, since a straight run of it is one
+/// long piece that could only move by its ends.
+pub fn pulled(path: &[DVec3], closed: bool, pulls: &[(DVec3, DVec3)], reach: f64) -> Vec<DVec3> {
+    if pulls.is_empty() || path.len() < 2 {
+        return path.to_vec();
+    }
+    let mut fine = Vec::new();
+    let ends = if closed { path.len() } else { path.len() - 1 };
+    for i in 0..ends {
+        let (a, b) = (path[i], path[(i + 1) % path.len()]);
+        let pieces = (a.distance(b) / 0.5).ceil().max(1.0) as usize;
+        fine.extend((0..pieces).map(|k| a + (b - a) * (k as f64 / pieces as f64)));
+    }
+    if !closed {
+        fine.push(path[path.len() - 1]);
+    }
+    // how far along the curve each point is
+    let mut along = vec![0.0; fine.len()];
+    for i in 1..fine.len() {
+        along[i] = along[i - 1] + fine[i].distance(fine[i - 1]);
+    }
+    let whole = along[fine.len() - 1] + if closed { fine[fine.len() - 1].distance(fine[0]) } else { 0.0 };
+    let reach = reach.max(0.5);
+    let mut moved = fine.clone();
+    for (at, by) in pulls {
+        let held = (0..fine.len()).min_by(|a, b| fine[*a].distance_squared(*at).total_cmp(&fine[*b].distance_squared(*at))).unwrap();
+        for i in 0..fine.len() {
+            let mut d = (along[i] - along[held]).abs();
+            if closed {
+                d = d.min(whole - d);
+            }
+            if d < reach {
+                moved[i] += *by * (0.5 * (1.0 + (PI * d / reach).cos()));
+            }
+        }
+    }
+    moved
+}
+
 /// A curve as a flat band, a filled outline or a tube.
 fn curve(
     spec: &Spec,
@@ -745,6 +806,14 @@ fn curve(
     if path.len() < 2 {
         return Err("the curve has no length".into());
     }
+    // Pulled out of its plane, a curve has no plane any more: it is then
+    // built as a curve in space is, which for a band means a round tube.
+    let (path, normal) = if spec.pulls.is_empty() {
+        (path, normal)
+    } else {
+        let in_plane = normal.is_some_and(|n| spec.pulls.iter().all(|(_, by)| by.dot(n).abs() < 1e-9));
+        (pulled(&path, closed, &spec.pulls, spec.pull_reach), normal.filter(|_| in_plane))
+    };
     // the axis the curve lies flat across, if any: every point shares that coordinate
     let flat = (0..3).rev().find(|&a| {
         path.iter().all(|p| (p[a] - path[0][a]).abs() < 1e-6)
@@ -2026,6 +2095,37 @@ mod tests {
         let (_, cubes) = stepped(&Spec { wedges: false, ..bell.clone() });
         assert!(cubes > 0.4, "cubes {cubes}");
         check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell });
+    }
+
+    #[test]
+    fn a_pull_moves_the_curve_near_it_and_leaves_the_rest() {
+        // a ring of radius 20 in the upright plane, pulled 6 up at its top and 4 in at one side
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, plane: 1, thick: 2.0, ..Spec::default() };
+        let (top, side) = (at(0.0, 0.0, 20.0), at(20.0, 0.0, 0.0));
+        let both = Spec { pulls: vec![(top, DVec3::new(0.0, 0.0, 6.0)), (side, DVec3::new(-4.0, 0.0, 0.0))], pull_reach: 10.0, ..ring.clone() };
+        let (plain, bumped) = (build(&ring).unwrap(), check(&both));
+        let highest = |b: &Built| b.bricks.iter().map(|k| k.min[2] + k.ext[2]).max().unwrap();
+        let widest = |b: &Built| b.bricks.iter().map(|k| k.min[0] + k.ext[0]).max().unwrap();
+        let lowest = |b: &Built| b.bricks.iter().map(|k| k.min[2]).min().unwrap();
+        assert_eq!(highest(&bumped), highest(&plain) + 6, "the top went up by the pull");
+        // the bottom, far round the ring from both, has not moved
+        assert_eq!(lowest(&bumped), lowest(&plain));
+        // the side pulled in is no longer the widest part, which is now just above or below it
+        assert!(widest(&bumped) <= widest(&plain));
+        // still flat in its plane, so still a band of whole bricks one deep
+        assert!(bumped.bricks.iter().all(|b| b.min[1] == plain.bricks[0].min[1] && b.ext[1] == plain.bricks[0].ext[1]));
+        // the curve itself: the point held moves by exactly the pull, a point beyond its reach not at all
+        let path: Vec<DVec3> = (0..360).map(|d| (d as f64).to_radians()).map(|a| DVec3::new(20.0 * a.cos(), 0.0, 20.0 * a.sin())).collect();
+        let moved = pulled(&path, true, &[(DVec3::new(0.0, 0.0, 20.0), DVec3::new(0.0, 0.0, 6.0))], 10.0);
+        let top_now = moved.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+        assert!((top_now - 26.0).abs() < 1e-6, "{top_now}");
+        assert!(moved.iter().all(|p| p.z >= -20.0 - 1e-9) && moved.iter().any(|p| (p.z + 20.0).abs() < 1e-6));
+        // smooth: no two neighbours of the finer curve further apart than a cell
+        assert!(moved.windows(2).all(|w| w[0].distance(w[1]) < 1.0));
+        // Out of its plane the ring is a curve in space: built as a round
+        // tube, cell by cell, which for one this thin is a rough fit.
+        let leaning = build(&Spec { pulls: vec![(top, DVec3::new(0.0, 5.0, 0.0))], ..ring }).unwrap();
+        assert!(leaning.bricks.iter().any(|b| b.min[1] >= 4), "nothing was pulled out of the plane");
     }
 
     #[test]

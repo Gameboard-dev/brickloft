@@ -124,7 +124,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Arcs");
-        ui.label("Drag the coloured dots to reshape the form. Drag the form itself to move it.");
+        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a curve adds a point there to pull it out of shape.");
         ui.label("View: right-drag looks around, W A S D fly, Space or E rises, Q sinks, Shift doubles the speed.");
         ui.separator();
 
@@ -260,6 +260,12 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         if is_curve && !s.tube {
             ui.add(Slider::new(&mut s.depth, 1..=64).text("Depth"));
+        }
+        if !s.pulls.is_empty() {
+            ui.add(Slider::new(&mut s.pull_reach, 1.0..=40.0).step_by(0.5).text("Reach of added points")).on_hover_text("How far along the curve, to either side, each added point takes the curve with it.");
+            if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
+                s.pulls.pop();
+            }
         }
         ui.label("Sizes are in microbricks. Half steps are single game units.");
         if is_curve && s.tube && s.thick < 3.0 {
