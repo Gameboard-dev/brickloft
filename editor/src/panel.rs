@@ -321,12 +321,18 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     })
                         .response
                 });
-                // within its plane, into an ellipse; across it, the depth of a round tube
+                // Within its plane, into an ellipse. There was a third
+                // slider, across the plane, for the depth of a round
+                // tube. It did what Thickness does and did it worse: the
+                // tube it deepened kept the round ends of the thinner
+                // tube and gained flat sides between them. A tube's size
+                // is its Thickness, and one control says so.
                 ui.label("Stretch:");
-                for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-                    let across = axis == s.plane.min(2);
-                    helped(ui, help("stretch_circle"), |ui| ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() })));
+                for (axis, name) in ["X", "Y", "Z"].iter().enumerate().filter(|(axis, _)| *axis != s.plane.min(2)) {
+                    helped(ui, help("stretch_circle"), |ui| ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name)));
                 }
+                // (a circle from before, deepened across its plane, is as round as its Thickness makes it from the next change on)
+                s.stretch[s.plane.min(2)] = 1.0;
             }
             CUBE => {
                 // Its three lengths in microbricks, as it is built. The

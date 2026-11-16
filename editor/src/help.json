@@ -77,7 +77,7 @@
   "stone_size": "About how far apart the middles of neighbouring stones are, in microbricks. A stone is a little under this across.",
   "stone_uneven": "0 gives stones as alike in size as scattered stones can be. 1 gives some crowded small and others left large.",
   "stretch": "Stretches the form along this axis: 2 makes it twice as long that way, 0.5 half as long.",
-  "stretch_circle": "Stretches the form along this axis: 2 makes it twice as long that way, 0.5 half as long. Across the circle's plane it sets how deep a round tube is.",
+  "stretch_circle": "Stretches the circle along this axis into an ellipse: 2 makes it twice as long that way, 0.5 half as long. How thick a ring or a round tube is, is its Thickness.",
   "stripe_width": "How wide each stripe is, in microbricks.",
   "thickness": "How thick the band, the tube or the wall is, in microbricks.",
   "tube_protruded": "Flat bands side by side, each standing proud of the next.",
