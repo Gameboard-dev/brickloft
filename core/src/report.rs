@@ -337,7 +337,7 @@ pub fn analyse(spec: &Spec, built: &Built) -> Result<Analysis, String> {
 
 /// [`analyse`] against a form already in hand.
 pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
-    scan(probe, built, true, &mut Seen::new(), Threads::available())
+    scan(probe, built, true, None, Threads::available())
 }
 
 /// Most cells [`measure`] will look at: 4 bytes each.
@@ -352,7 +352,8 @@ const MAX_MEASURE_CELLS: usize = 32_000_000;
 /// sphere over 78 cells in radius could not be measured, and so was fitted
 /// cell by cell after all, as fifty thousand bricks instead of five hundred.
 pub(crate) fn measure(probe: &Probe, built: &Built, threads: Threads) -> Result<(f64, f64), String> {
-    measure_with(probe, built, &mut Seen::new(), threads)
+    let found = scan(probe, built, false, None, threads)?;
+    Ok((found.form_volume, found.missing + found.extra))
 }
 
 /// What the form holds of each cell its surface passes through, as found by
@@ -369,7 +370,7 @@ pub(crate) type Seen = std::collections::HashMap<[i32; 3], (u64, u64)>;
 /// saves, and a map holds only the cells at the surface, where an array over
 /// the whole box would hold every cell of two boxes that need not coincide.
 pub(crate) fn measure_with(probe: &Probe, built: &Built, seen: &mut Seen, threads: Threads) -> Result<(f64, f64), String> {
-    let found = scan(probe, built, false, seen, threads)?;
+    let found = scan(probe, built, false, Some(seen), threads)?;
     Ok((found.form_volume, found.missing + found.extra))
 }
 
@@ -405,7 +406,18 @@ const CELLS_A_THREAD: usize = 8_000;
 /// cells kept for a report are put end to end in the order of the layers.
 /// Only `seen` is shared, and it is read while the layers are looked at
 /// and added to afterwards, in order.
-fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Threads) -> Result<Analysis, String> {
+///
+/// `seen` is `None` for a form measured once. Keeping what the form holds
+/// of every cell at its surface, to be thrown away, was a fifth of what
+/// measuring a large sphere took once the layers were shared out: a
+/// hundred thousand entries put into a map, one at a time, on one thread.
+///
+/// Which brick holds each cell is worked out for each range of layers by
+/// the thread that looks at them, from the bricks that reach into those
+/// layers. It was one table of the whole box filled before any layer was
+/// looked at, on one thread, and for a large sphere that took as long
+/// again as a sixth of the layers.
+fn scan(probe: &Probe, built: &Built, keep: bool, mut seen: Option<&mut Seen>, threads: Threads) -> Result<Analysis, String> {
     if built.bricks.is_empty() {
         return Err("there are no bricks to analyse".into());
     }
@@ -431,27 +443,6 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Thre
         (c[0] - min[0]) as usize
             + dims[0] * ((c[1] - min[1]) as usize + dims[1] * (c[2] - min[2]) as usize)
     };
-
-    let mut owner = vec![0u32; count];
-    let mut shared: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
-    for (i, b) in built.bricks.iter().enumerate() {
-        for z in 0..b.ext[2] {
-            for y in 0..b.ext[1] {
-                for x in 0..b.ext[0] {
-                    let cell = index([b.min[0] + x, b.min[1] + y, b.min[2] + z]);
-                    if owner[cell] == 0 {
-                        owner[cell] = i as u32 + 1;
-                    } else {
-                        // Two bricks in one box: half bricks either side of
-                        // a diagonal, as a surface is built of. Few cells
-                        // have a second, so they are kept apart from the
-                        // one number every cell has.
-                        shared.entry(cell).or_default().push(i);
-                    }
-                }
-            }
-        }
-    }
 
     let sample = |s: usize| {
         DVec3::new(
@@ -480,21 +471,45 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Thre
             }
         }
     }
-    let seen_before: &Seen = seen;
+    let seen_before: Option<&Seen> = seen.as_deref();
     let layer = dims[0] * dims[1];
     let found = threads.map_ranges(dims[2], CELLS_A_THREAD.div_ceil(layer.max(1)), |layers| -> Result<Layers, String> {
         let kept = if keep { layers.len() * layer } else { 0 };
         let (mut form_bits, mut brick_bits) = (vec![0u64; kept], vec![0u64; kept]);
-        let first = index([min[0], min[1], min[2] + layers.start as i32]);
+        // these layers, and the place in the whole box of their first cell
+        let (low, high) = (min[2] + layers.start as i32, min[2] + layers.end as i32);
+        let first = index([min[0], min[1], low]);
+        // the brick that holds each of their cells, counted from 1
+        let mut owner = vec![0u32; layers.len() * layer];
+        let mut shared: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        for (i, b) in built.bricks.iter().enumerate() {
+            for z in b.min[2].max(low)..(b.min[2] + b.ext[2]).min(high) {
+                for y in 0..b.ext[1] {
+                    for x in 0..b.ext[0] {
+                        let cell = index([b.min[0] + x, b.min[1] + y, z]) - first;
+                        if owner[cell] == 0 {
+                            owner[cell] = i as u32 + 1;
+                        } else {
+                            // Two bricks in one box: half bricks either side of
+                            // a diagonal, as a surface is built of. Few cells
+                            // have a second, so they are kept apart from the
+                            // one number every cell has.
+                            shared.entry(cell).or_default().push(i);
+                        }
+                    }
+                }
+            }
+        }
         let mut inside = 0u64;
         let (mut missing, mut extra) = (0u64, 0u64);
         let mut cells = Vec::new();
         let mut asked = Vec::new();
-        for z in min[2] + layers.start as i32..min[2] + layers.end as i32 {
+        for z in low..high {
             for y in min[1]..max[1] {
                 for x in min[0]..max[0] {
                     let at = [x, y, z];
-                    let i = index(at);
+                    // (the cell's place among these layers)
+                    let i = index(at) - first;
                     let corner = DVec3::new(x as f64, y as f64, z as f64);
                     // a cell whose centre is further from the surface than its
                     // corners are from its centre is wholly in or out
@@ -510,14 +525,16 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Thre
                     } else if centre < -0.87 {
                         (u64::MAX, 0)
                     } else {
-                        match seen_before.get(&at) {
+                        match seen_before.and_then(|seen| seen.get(&at)) {
                             Some(held) => *held,
                             None => {
                                 let held = (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
                                     let d = probe.distance(corner + sample(s));
                                     (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
                                 });
-                                asked.push((at, held));
+                                if seen_before.is_some() {
+                                    asked.push((at, held));
+                                }
                                 held
                             }
                         }
@@ -552,8 +569,8 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Thre
                     let form = (form & !edge) | (bricks & edge);
                     inside += form.count_ones() as u64;
                     if keep {
-                        form_bits[i - first] = form;
-                        brick_bits[i - first] = bricks;
+                        form_bits[i] = form;
+                        brick_bits[i] = bricks;
                     }
                     let wrong = (form ^ bricks).count_ones();
                     if wrong == 0 {
@@ -602,7 +619,9 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Thre
         cells.extend(layers.cells);
         form_bits.extend(layers.form_bits);
         brick_bits.extend(layers.brick_bits);
-        seen.extend(layers.asked);
+        if let Some(seen) = seen.as_deref_mut() {
+            seen.extend(layers.asked);
+        }
     }
     cells.sort_by_key(|c| (std::cmp::Reverse(c.wrong), c.at));
     let per = SAMPLES as f64;
@@ -1251,16 +1270,19 @@ mod tests {
         let probe = Probe::new(&spec, built.grain).unwrap();
         let told = |a: &Analysis| (a.missing.to_bits(), a.extra.to_bits(), a.form_volume.to_bits(), a.form_bits.clone(), a.brick_bits.clone(), a.cells.iter().map(|c| (c.at, c.form, c.bricks, c.wrong, c.holds, c.best, c.best_wrong, c.tied)).collect::<Vec<_>>());
         let (mut seen_by_one, mut seen_by_several) = (Seen::new(), Seen::new());
-        let one = scan(&probe, &built, true, &mut seen_by_one, Threads::ONE).unwrap();
+        let one = scan(&probe, &built, true, Some(&mut seen_by_one), Threads::ONE).unwrap();
         assert!(one.cells.len() > 100 && one.form_bits.iter().any(|bits| *bits != 0));
         for threads in [2, 3, 7] {
             seen_by_several.clear();
-            let several = scan(&probe, &built, true, &mut seen_by_several, Threads::forced(threads)).unwrap();
+            let several = scan(&probe, &built, true, Some(&mut seen_by_several), Threads::forced(threads)).unwrap();
             assert!(told(&one) == told(&several), "{threads} threads");
             assert_eq!(seen_by_one, seen_by_several, "{threads} threads");
         }
         // and with what the form holds already known from the measurement before
-        let again = scan(&probe, &built, true, &mut seen_by_several, Threads::forced(3)).unwrap();
+        let again = scan(&probe, &built, true, Some(&mut seen_by_several), Threads::forced(3)).unwrap();
         assert!(told(&one) == told(&again));
+        // and with nothing kept of what the form holds, as a form measured once is
+        let unkept = scan(&probe, &built, true, None, Threads::forced(3)).unwrap();
+        assert!(told(&one) == told(&unkept));
     }
 }

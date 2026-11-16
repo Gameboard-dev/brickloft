@@ -119,7 +119,7 @@ pub fn fit_volume(f: &(impl Fn(DVec3) -> f64 + Sync), min: [i32; 3], max: [i32; 
     }
     let mut bricks = Vec::new();
     if opts.wedges && opts.stretch {
-        let (stretched, saved) = stretch_ramps(&mut shape, &sampled, n, max_ext);
+        let (stretched, saved) = stretch_ramps(&mut shape, &sampled, n, max_ext, opts.threads);
         bricks = stretched;
         error -= saved;
     }
@@ -440,6 +440,7 @@ fn stretch_ramps(
     sampled: &[(usize, u64)],
     n: [usize; 3],
     max_ext: usize,
+    threads: Threads,
 ) -> (Vec<CellBrick>, u64) {
     let strides = [1, n[0], n[0] * n[1]];
     // each unit shape's samples, by mask
@@ -509,61 +510,75 @@ fn stretch_ramps(
         start: usize,
         which: usize,
     }
-    let mut cands = Vec::new();
     let all = stretches();
-    for &(cell, bits) in sampled {
-        // Which ramp could lie along the surface here. A ramp's face is
-        // level along its prism axis and slopes across the other two, so the
-        // prism axis is the one the form changes least along, and the ramp's
-        // open side is, on each other axis, the end with less of the form.
-        // Trying all twelve ramps at every cell instead finds the same fits
-        // at six times the work, since eleven of them face the wrong way.
-        let lean: [i32; 3] = [0, 1, 2].map(|k| {
-            (bits & upper[k]).count_ones() as i32 - (bits & !upper[k]).count_ones() as i32
-        });
-        let axis = (0..3).min_by_key(|k| lean[*k].abs()).unwrap();
-        let (p, q) = [(1, 2), (0, 2), (0, 1)][axis];
-        if lean[p] == 0 || lean[q] == 0 {
-            continue; // the surface is square to the grid here: nothing for a ramp to do
-        }
-        let pose = facing[axis][(lean[p] > 0) as usize ^ 1][(lean[q] > 0) as usize ^ 1];
-
-        let at = [cell % n[0], cell / n[0] % n[1], cell / (n[0] * n[1])];
-        for (which, st) in all.iter().enumerate().filter(|(_, st)| st.mask == pose) {
-            let len = st.cells.len();
-            if len > max_ext {
-                continue;
+    // The ramps worth laying are found on `threads`, from the bricks as
+    // they stand: nothing is laid until all are found, so what is found
+    // from one cell does not depend on what is found from another. This
+    // was a quarter of a cell-by-cell fit, and all of what was left on one
+    // thread once the cells were shared out. A surface cell takes about 1.2
+    // microseconds, so 400 of them are worth a thread of their own (see
+    // `par::Threads::map_ranges`). Taking the ramps, largest saving first,
+    // goes by what is already taken and stays on one thread.
+    let standing: &[u8] = shape;
+    let found = threads.map_ranges(sampled.len(), 400, |range| {
+        let shape = standing;
+        let mut cands = Vec::new();
+        for &(cell, bits) in &sampled[range] {
+            // Which ramp could lie along the surface here. A ramp's face is
+            // level along its prism axis and slopes across the other two, so the
+            // prism axis is the one the form changes least along, and the ramp's
+            // open side is, on each other axis, the end with less of the form.
+            // Trying all twelve ramps at every cell instead finds the same fits
+            // at six times the work, since eleven of them face the wrong way.
+            let lean: [i32; 3] = [0, 1, 2].map(|k| {
+                (bits & upper[k]).count_ones() as i32 - (bits & !upper[k]).count_ones() as i32
+            });
+            let axis = (0..3).min_by_key(|k| lean[*k].abs()).unwrap();
+            let (p, q) = [(1, 2), (0, 2), (0, 1)][axis];
+            if lean[p] == 0 || lean[q] == 0 {
+                continue; // the surface is square to the grid here: nothing for a ramp to do
             }
-            // every placement of this ramp that covers this cell
-            for back in 0..len {
-                if at[st.dir] < back || at[st.dir] - back + len > n[st.dir] {
+            let pose = facing[axis][(lean[p] > 0) as usize ^ 1][(lean[q] > 0) as usize ^ 1];
+
+            let at = [cell % n[0], cell / n[0] % n[1], cell / (n[0] * n[1])];
+            for (which, st) in all.iter().enumerate().filter(|(_, st)| st.mask == pose) {
+                let len = st.cells.len();
+                if len > max_ext {
                     continue;
                 }
-                let start = cell - back * strides[st.dir];
-                let (mut now, mut then) = (0u32, 0u32);
-                let mut reaches = true;
-                for (i, pattern) in st.cells.iter().enumerate() {
-                    let c = start + i * strides[st.dir];
-                    let f = form(c, shape);
-                    // A ramp may not enter a cell the form does not reach at
-                    // all. Its thin end would add little there by volume and
-                    // could still win overall, but it would poke through
-                    // every flat face a form has: under the rim of a dome,
-                    // for one.
-                    reaches &= f != 0;
-                    now += (f ^ unit[shape[c] as usize]).count_ones();
-                    then += (f ^ pattern).count_ones();
-                }
-                if reaches && then < now {
-                    cands.push(Cand {
-                        saved: now - then,
-                        start,
-                        which,
-                    });
+                // every placement of this ramp that covers this cell
+                for back in 0..len {
+                    if at[st.dir] < back || at[st.dir] - back + len > n[st.dir] {
+                        continue;
+                    }
+                    let start = cell - back * strides[st.dir];
+                    let (mut now, mut then) = (0u32, 0u32);
+                    let mut reaches = true;
+                    for (i, pattern) in st.cells.iter().enumerate() {
+                        let c = start + i * strides[st.dir];
+                        let f = form(c, shape);
+                        // A ramp may not enter a cell the form does not reach at
+                        // all. Its thin end would add little there by volume and
+                        // could still win overall, but it would poke through
+                        // every flat face a form has: under the rim of a dome,
+                        // for one.
+                        reaches &= f != 0;
+                        now += (f ^ unit[shape[c] as usize]).count_ones();
+                        then += (f ^ pattern).count_ones();
+                    }
+                    if reaches && then < now {
+                        cands.push(Cand {
+                            saved: now - then,
+                            start,
+                            which,
+                        });
+                    }
                 }
             }
         }
-    }
+        cands
+    });
+    let mut cands: Vec<Cand> = found.into_iter().flatten().collect();
     // the same placement is found from each cell it covers
     cands.sort_unstable_by_key(|c| (c.start, c.which));
     cands.dedup_by_key(|c| (c.start, c.which));
