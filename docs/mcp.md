@@ -128,6 +128,7 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
+| `bloom` | `[flower, tilt, turn, stem, fallen]` says which flower a `tree` of the kind `flower` is and how it lies; only the flower is needed (see below) |
 | `furniture` | `[kind, seed, board, shelves, spacing, bay, plinth, back, moulding, books]` says which piece a `furniture` form is; only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` and then `0, depth` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
@@ -166,7 +167,7 @@ gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
 `tree` names the kind first: `pine`, `palm`, `oak`, `beech`, `boxwood`,
-`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds`, `grass`, `birch`, `willow`, `datepalm`, `scotspine`, `cypress`, `yucca`, `daisy`, `daffodil`, `bed` or `cherry`
+`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds`, `grass`, `birch`, `willow`, `datepalm`, `scotspine`, `cypress`, `yucca`, `daisy`, `daffodil`, `bed`, `cherry` or `flower`
 (`rose`, a kind that is gone, is read as `peony`). Whatever follows it replaces that kind's usual
 settings in order: the seed, how full (0 to 100), how many (a pine's
 tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, the plants
@@ -195,6 +196,21 @@ spread `radius`. Added with neither, it is its usual size, a pine 140
 microbricks tall, and comes in its kind's own eight colours with the mode
 `pattern`. A tree is tens of thousands of bricks and takes up to a second
 to build, so a call that changes one takes that long to answer.
+
+The kind `flower` is a single flower head with no plant under it, and
+`bloom` says the rest about it. `bloom` names the flower first: `rose`,
+`waterlily` or `gerbera`. Whatever follows replaces the usual settings
+in order: the tilt (0 to 90 degrees from facing straight up), the turn
+(0 to 359 degrees about the upright, 0 towards +x), and 1 or 0 for a
+short stem and for fallen petals beside it. For this kind the `tree`
+setting's fullness is how many petals, its bend is how open the bloom is
+(0 a closed bud, 100 full blown) and its extras are the sepals.
+`"tree": "flower"` alone is a red rose 60% open, facing up, 48
+microbricks across when full blown. Adding `"bloom": "rose,60,45,1,1"`
+tips it 60 degrees over towards the diagonal, on a stem, with petals
+beside it. The two settings are kept apart so that a tilt is the second
+value of `bloom` and not the fourteenth of `tree`, after a pine's
+decorations. A bloom is 3,000 to 7,000 bricks.
 
 `furniture` names the kind first, and `bookcase` is the one kind so far.
 Whatever follows it replaces that kind's usual settings in order:
