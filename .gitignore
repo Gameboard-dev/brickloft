@@ -4,7 +4,6 @@ dist/
 
 # written by the editor while it runs
 arcs-report*.txt
-arcs-screenshot*.png
 arcs-build.brz
 arcs-forms/
 

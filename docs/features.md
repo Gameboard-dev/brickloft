@@ -189,10 +189,13 @@ form** lowers the floor so a form can be looked at from underneath.
 
 ## Screenshots
 
-**Save screenshot**, or **F12**, writes a picture of the window to
-`arcs-screenshot-1.png`, `-2` and so on beside where the program was
-started. **Shift+F12** leaves the panel out and saves the view alone. The
-browser page cannot write files, so it has neither.
+**Save screenshot**, or **F12**, saves a picture of the window as
+`arcs-1.png`, `-2` and so on in the folder `omegga-arcs` inside your
+pictures folder (`Pictures/omegga-arcs` in your home folder on Windows,
+macOS and Linux). On Windows the picture is also put on the clipboard,
+ready to paste, which replaces a form copied there with Ctrl+C.
+**Shift+F12** leaves the panel out and takes the view alone. The browser
+page cannot write files, so it has neither.
 
 ## Reports
 

@@ -418,7 +418,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if cfg!(not(target_arch = "wasm32")) {
             asked.screenshot = ui
                 .button("Save screenshot")
-                .on_hover_text("Writes a picture of the window to arcs-screenshot-1.png, -2 and so on, beside where the program was started. F12 does the same, and Shift+F12 leaves this panel out of the picture.")
+                .on_hover_text("Saves a picture of the window in Pictures/omegga-arcs and puts it on the clipboard. F12 does the same, and Shift+F12 leaves this panel out of the picture.")
                 .clicked();
             asked.copy = ui
                 .add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard"))

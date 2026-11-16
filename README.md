@@ -3,6 +3,8 @@
 Design a curved form, see exactly which microbricks it becomes, and paste it
 into [Brickadia](https://brickadia.com).
 
+
+
 Brickadia's microbricks are small boxes and wedges on a grid. Building an
 arch, a dome or a torus from them by hand means choosing thousands of bricks
 so that a curve comes out as slopes and not as a staircase. arcs does the
@@ -13,7 +15,7 @@ result on the clipboard for the game to paste.
 It is a desktop program written in Rust. Nothing is installed in the game or
 on a server.
 
-## How does it work?
+## What algorithm does it use?
 
 > There isn't one algorithm, there's a small family of them, because a sphere and an arch need different algorithms. Bricks sit on a grid, and every brick shape is just a box with some of its corners "filled in". The program asks "which corners of this box are inside the shape I'm trying to build?" If all eight are, it's a cube. If one is missing, it's a cube with a corner sliced off. If only four are in, it's a wedge. Neighbouring bricks share corners, so if the corners are right, the bricks meet edge to edge. The clever part is choosing where to cut the grid so those corners land on the true shape. For a sphere, it slices each direction at carefully chosen distances so that every corner on the surface sits exactly on the sphere. For an arch, it traces the outline and picks the fewest corner points that still hug the curve, preferring one long slope over a staircase of short steps to minimize brick count. For a tube (or pipe), it fits the wide outline first and then cuts the edges down layer by layer. When none of those tricks apply, it falls back to going through the grid cell by cell and picking whichever brick matches best. That looks rougher, because no cell knows what its neighbours are doing. At the end it measures the result against the true shape, which is the volumetric discrepancy, and this is reported.
 >
