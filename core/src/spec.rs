@@ -169,6 +169,14 @@ pub struct Spec {
     /// far the rim of the hole is rounded. None of the form's own bricks are
     /// built (see [`crate::blend`]). Kept here for the reason `blend` is.
     pub carve: bool,
+    /// Whether the form is built as clipped hedge in place of plain brick:
+    /// the Plant form's hedge, grown over the form's own solid (see
+    /// [`crate::tree::over`]). An arch takes notice of it (see
+    /// [`Spec::hedged`]); `tree` then says how the hedge is grown. A
+    /// setting of its own and not the maze's (`maze.hedge`), which would
+    /// have asked for an arch of hedge over MCP as the ninth value of
+    /// `maze`.
+    pub hedge: bool,
     /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
     pub tree: crate::tree::Tree,
     /// Which furniture a `Form::Furniture` is (see [`crate::furniture`]). Other forms take no notice of it.
@@ -208,6 +216,7 @@ impl Default for Spec {
             mosaic: None,
             blend: None,
             carve: false,
+            hedge: false,
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
             maze: crate::maze::Maze::default(),
@@ -437,9 +446,10 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     // change, the last one that could be built standing there still. A
     // hedge has no exact thickness to lose, and its corridors keep their
     // width to within a brick of the larger size.
-    if spec.form == Form::Maze {
+    // (and so is a form built as hedge, by the same rule and for the same reason: a tuft is the same few cells at any size of arch)
+    if spec.form == Form::Maze || spec.hedged() {
         let fine = build_at(spec, 1, measured, threads);
-        if spec.maze.hedge && fine.as_ref().is_err_and(|e| e.contains("too much hedge")) {
+        if (spec.maze.hedge || spec.hedged()) && fine.as_ref().is_err_and(|e| e.contains("too much hedge")) {
             for &grain in &GRAINS[1..] {
                 match build_at(spec, grain, measured, threads) {
                     Err(e) if e.contains("too much hedge") => {}
@@ -511,6 +521,16 @@ impl Spec {
     /// bricks, or coarsening would change how deep it is. Past these limits
     /// the brick count would fall only because the form was no longer being
     /// built, so automatic mode stops and reports that it is over budget.
+    /// Whether the form is built as hedge: it is asked to be, and is a form
+    /// that can be. An arch can. Hedge is grown over any solid that has a
+    /// distance function (see [`crate::tree::over`]), and [`curve`] would
+    /// grow it over a spline or a Bézier curve as it does over an arch, so
+    /// offering it there is this line and the panel's list; they are left
+    /// out until they have been looked at as an arch has.
+    pub fn hedged(&self) -> bool {
+        self.hedge && matches!(self.form, Form::Arch(_))
+    }
+
     fn coarsest_grain(&self) -> i32 {
         let limit = match self.form {
             Form::Sphere if self.fill => self.radius * self.stretch.min_element() / 4.0,
@@ -1052,6 +1072,9 @@ pub enum Solid {
     /// A maze, which is several outlines and colours at once and is built
     /// by its own code (see [`crate::maze::walls`]).
     Maze(Box<crate::maze::walls::Walls>),
+    /// A patch of grass, which is laid out from the height of its ground
+    /// and is its bricks exactly, as furniture is (see [`crate::grass`]).
+    Grass(std::sync::Arc<crate::grass::Model>),
 }
 
 /// The two axes a flat form's outline is drawn in, given the one it lies across.
@@ -1072,6 +1095,7 @@ impl Solid {
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Furniture(model) => model.distance(p),
             Solid::Maze(walls) => walls.distance(p),
+            Solid::Grass(lawn) => lawn.distance(p),
             Solid::Flat {
                 region,
                 axis,
@@ -1139,6 +1163,7 @@ impl Probe {
             | Solid::Pyramid { .. }
             | Solid::Lathe { .. }
             | Solid::Furniture(_)
+            | Solid::Grass(_)
             | Solid::Maze(_)
             | Solid::Pipe { .. } => None,
         }
@@ -1428,6 +1453,10 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             // (a plant with no line takes no more room for one)
             let (long, wide) = if lay.run.is_empty() { (reach, reach) } else { ((run.1.x - run.0.x) as i64 / 2 + reach, (run.1.y - run.0.y) as i64 / 2 + reach) };
             check_size(&[long, wide, height as i64 + 8])?;
+            // Grass is laid out and not fitted (see `crate::grass`): it comes with its bricks, as furniture does.
+            if spec.tree.kind == crate::tree::Kind::Grass {
+                return Ok((Solid::Grass(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads))), path));
+            }
             let tree = std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spread, &lay));
             let (lo, hi) = tree.bounds();
             volume(Field::Tree(tree), lo, hi, path)
@@ -1651,6 +1680,9 @@ fn curve(
             path = mirrored(&path, closed, axis, plane);
         }
     }
+    if spec.hedged() {
+        return hedge_over(spec, path, closed, normal);
+    }
     if let (Some(axis), false, false) = (lay_across, spec.tube, spec.fill) {
         if path.iter().any(|p| (p[axis] - lay_at[axis]).abs() > 1e-6) {
             if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis], threads)? {
@@ -1735,6 +1767,51 @@ fn curve(
         _ => Field::Tube(Stroke::new(&path, half, closed, Some(0.5))),
     };
     volume(field, lo, hi, path)
+}
+
+/// How thick and how deep a form built as hedge is: what it was asked to
+/// be, and no less either way than a hedge can be (see
+/// [`crate::maze::LEAST_HEDGE`]). A maze's hedges are thickened the same
+/// way.
+pub fn hedge_size(spec: &Spec) -> (f64, f64) {
+    (spec.thick.max(crate::maze::LEAST_HEDGE), (spec.depth as f64).max(crate::maze::LEAST_HEDGE))
+}
+
+/// A curve's band or tube built as clipped hedge: the solid the plain form
+/// would be, with hedge grown over it (see [`crate::tree::over`]).
+///
+/// The solid is the band the cell-by-cell fitter is given for a curve
+/// that lies askew, whichever way this one lies, because the hedge needs a
+/// distance and not an outline. The opening of an arch is therefore the
+/// plain arch's: the hedge is cut off a cell outside the band at the most.
+/// Filling the opening (`fill`) is not done: a filled arch of hedge is a
+/// wall, which the Plant form's hedge is.
+///
+/// More hedge than may be built is refused in the words a maze's is, and
+/// [`build_upright`] then builds it at a larger brick size.
+fn hedge_over(spec: &Spec, path: Vec<DVec3>, closed: bool, normal: Option<DVec3>) -> Result<(Solid, Vec<DVec3>), String> {
+    let (thick, deep) = hedge_size(spec);
+    let half = thick / 2.0;
+    let long: f64 = path.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
+    let most = crate::maze::walls::MOST_HEDGE;
+    if long * thick * deep > most {
+        return Err(format!("the form is too much hedge to build: {long:.0} microbricks of it, {thick} thick and {deep} deep, is {:.0} cubic microbricks of hedge, and the limit is {most}; make it smaller, thinner or less deep", long * thick * deep));
+    }
+    let (field, reach, least) = match normal {
+        Some(normal) if !spec.tube => (Field::Band { stroke: Stroke::new(&path, half, closed, Some(0.5)), origin: path[0], normal, half_depth: deep / 2.0 }, half.max(deep / 2.0), half.min(deep / 2.0)),
+        // (a curve that has left its plane has no flat band, as in `curve`)
+        _ => (Field::Tube(Stroke::new(&path, half, closed, Some(0.5))), half, half),
+    };
+    let lo = path.iter().fold(DVec3::MAX, |a, p| a.min(*p)) - reach;
+    let hi = path.iter().fold(DVec3::MIN, |a, p| a.max(*p)) + reach;
+    // it stands on the floor of its lowest point, as a plant stands on the floor of its foot
+    let low = path.iter().map(|p| p.z).fold(f64::MAX, f64::min);
+    let foot = DVec3::new(0.0, 0.0, low);
+    let stand = DVec3::new(0.0, 0.0, low.floor());
+    let over = crate::tree::Over { solid: std::sync::Arc::new(move |p: DVec3| field.eval(p + stand)), lo: lo - stand, hi: hi - stand, half: least };
+    let hedge = std::sync::Arc::new(crate::tree::Model::over(&spec.tree, foot, &over));
+    let (grown_lo, grown_hi) = hedge.bounds();
+    volume(Field::Tree(hedge), grown_lo, grown_hi, path)
 }
 
 /// A round tube whose curve has been pulled out of the plane it lay in, at
@@ -2799,7 +2876,9 @@ fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Thread
 fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
         // nothing to fit, and nothing to measure: the furniture is these bricks
-        Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
+        Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: model.error, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
+        // (nor a lawn: it is these bricks)
+        Solid::Grass(lawn) => Built { bricks: lawn.bricks.clone(), solid: lawn.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: lawn.shades.clone() },
         Solid::Maze(walls) => {
             let (bricks, shades, solid, error) = walls.built(spec.mosaic.as_ref(), spec.wedges, spec.max_ext, threads);
             Built { bricks, solid, error, path, grain: 1, unmeasured: false, shades }
@@ -3043,13 +3122,45 @@ fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
 /// solid is.
 pub fn plant(spec: &Spec) -> Option<std::sync::Arc<crate::tree::Model>> {
     let spec = spec.snapped();
-    if spec.form != Form::Tree || spec.grain > 1 {
+    // (nor grass, which is laid out and has no such solid: see `lawn`)
+    if spec.form != Form::Tree || spec.grain > 1 || spec.tree.kind == crate::tree::Kind::Grass {
         return None;
     }
     let foot = *spec.points.first()?;
     let (lay, _) = tree_lay(&spec, foot).ok()?;
     let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
     Some(std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spec.radius, &lay)))
+}
+
+/// The lawn a spec describes, as it was laid out: its bricks, which part
+/// each is, and the ground under them (see [`crate::grass`]). `None` for
+/// a spec that is no patch of grass.
+///
+/// As [`plant`] is for the other plants, and for the same askers: what a
+/// brick of a lawn is made of in the game's file goes by its part.
+pub fn lawn(spec: &Spec) -> Option<std::sync::Arc<crate::grass::Model>> {
+    if spec.form != Form::Tree || spec.tree.kind != crate::tree::Kind::Grass {
+        return None;
+    }
+    let spec = spec.snapped();
+    let foot = *spec.points.first()?;
+    let (lay, _) = tree_lay(&spec, foot).ok()?;
+    let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
+    Some(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available())))
+}
+
+/// The ground under the lawn a spec describes, without its bricks: how
+/// high each cell of it is, how it slopes, and where water stands and
+/// runs (see [`crate::grass::Ground`]). `None` for a spec that is no
+/// patch of grass. A millisecond or two, where the bricks are several.
+pub fn lawn_ground(spec: &Spec) -> Option<crate::grass::Ground> {
+    if spec.form != Form::Tree || spec.tree.kind != crate::tree::Kind::Grass {
+        return None;
+    }
+    let spec = spec.snapped();
+    let foot = *spec.points.first()?;
+    let (lay, _) = tree_lay(&spec, foot).ok()?;
+    Some(crate::grass::Ground::new(&spec.tree.clamped(), foot, spec.radius, &lay, Threads::available()))
 }
 
 /// How high the ground of a patch of grass is at a place, over the floor

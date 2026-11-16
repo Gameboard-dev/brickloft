@@ -94,6 +94,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("blend", spec.blend.map_or("none".into(), number));
     // whether a joined form is taken away from the forms it joins
     line("carve", spec.carve.to_string());
+    // whether the form is built as clipped hedge (an arch is); a save from before it could be has no line for it
+    line("hedge", spec.hedge.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
     // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The eleventh was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused. The twelfth is whether planks are grooved or cobblestone's mortar is sunk, 1 or 0. It is apart from the third because the third was once a bevel that cobblestone had too and was taken from it: a file from then says 1 there, and must not come back with its mortar sunk.)
     line("mosaic", spec.mosaic.map_or("none".into(), |m| {
@@ -108,7 +110,9 @@ pub fn spec_text(spec: &Spec) -> String {
     // furniture: which kind, which arrangement of books, how thick its boards are, how many shelves (0 for as many as fit at the spacing), the spacing, the widest a bay may be (0 for no uprights), how tall its plinth is, whether it has a back and mouldings (1 or 0), and how full of books it is, 0 to 100
     {
         let f = &spec.furniture;
-        line("furniture", format!("{},{},{},{},{},{},{},{},{},{}", crate::furniture::KINDS[f.kind as usize].1, f.seed, f.board, f.shelves, f.spacing, f.bay, f.plinth, f.back as u8, f.moulding as u8, f.books));
+        // (and after those, which were all there was while a bookcase was the one kind: its style, a number and two choices of the kind's own, something it may have or not, and whether its lights shine, each 1 or 0)
+        let style = crate::furniture::STYLES.iter().find(|s| s.0 == f.style).map_or("classical", |s| s.1);
+        line("furniture", format!("{},{},{},{},{},{},{},{},{},{},{style},{},{},{},{},{}", crate::furniture::KINDS[f.kind as usize].1, f.seed, f.board, f.shelves, f.spacing, f.bay, f.plinth, f.back as u8, f.moulding as u8, f.books, f.count, f.choice, f.second, f.extra as u8, f.shine as u8));
     }
     // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
     let m = &spec.maze;
@@ -275,6 +279,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             }
             // (a file from before a form could be taken away has no such line, and its form adds)
             "carve" => spec.carve = flag(value)?,
+            "hedge" => spec.hedge = flag(value)?,
             "mosaic" => {
                 spec.mosaic = if value == "none" {
                     None
@@ -384,10 +389,11 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 // The kind, and then as many of the rest as are given, in
                 // order, as a tree is read: `bookcase` alone is the
                 // bookcase as it starts out.
-                if parts.len() > 10 {
-                    return Err(bad("expected `kind,seed,board,shelves,spacing,bay,plinth,back,moulding,books`, or the first few of them"));
+                // (a bookcase saved before there were other kinds has ten values, and is read as it was)
+                if parts.len() > 16 {
+                    return Err(bad("expected `kind,seed,board,shelves,spacing,bay,plinth,back,moulding,books,style,count,choice,second,extra,shine`, or the first few of them"));
                 }
-                let kind = crate::furniture::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of furniture: bookcase"))?.0;
+                let kind = crate::furniture::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of furniture: bookcase, cupboard, drawers, sideboard, kitchen, dining, coffee, side, desk, chair, armchair, stool, bench, sofa, tablelamp, floorlamp, pendant, chandelier, sconce, candlestick or bed"))?.0;
                 let mut furniture = crate::furniture::Furniture::of(kind);
                 if let Some(seed) = parts.get(1) {
                     furniture.seed = seed.parse().map_err(|_| bad("the seed is a whole number, not negative"))?;
@@ -407,6 +413,20 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 if let Some(books) = parts.get(9) {
                     furniture.books = within(books)?;
+                }
+                if let Some(style) = parts.get(10) {
+                    furniture.style = crate::furniture::STYLES.iter().find(|s| s.1 == *style).ok_or_else(|| bad("unknown style of furniture: modern, farmhouse, classical, rustic, industrial or random"))?.0;
+                }
+                for (at, field) in [&mut furniture.count, &mut furniture.choice, &mut furniture.second].into_iter().enumerate() {
+                    if let Some(given) = parts.get(11 + at) {
+                        *field = within(given)?;
+                    }
+                }
+                if let Some(extra) = parts.get(14) {
+                    furniture.extra = whole(extra)? != 0;
+                }
+                if let Some(shine) = parts.get(15) {
+                    furniture.shine = whole(shine)? != 0;
                 }
                 spec.furniture = furniture.clamped();
             }
@@ -1249,13 +1269,16 @@ mosaic = {values}
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
                 carve: true,
+                hedge: true,
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false, bloom: crate::tree::Bloom { flower: crate::tree::Flower::Gerbera, tilt: 35, turn: 250, stem: true, fallen: true } },
-                furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100 },
+                furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, hang: 80, lights: 0, shine: true, bloom: Default::default() }, ..Spec::default() },
             Spec { form: Form::Tree, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, rise: Some(24.0), tree: crate::tree::Tree { seed: 4, fullness: 80, bend: 15, extras: true, bloom: crate::tree::Bloom { flower: crate::tree::Flower::WaterLily, tilt: 90, turn: 359, stem: false, fallen: true }, ..crate::tree::Tree::of(crate::tree::Kind::Flower) }, ..Spec::default() },
-            Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35 }, ..Spec::default() },
+            Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) }, ..Spec::default() },
+            Spec { form: Form::Furniture, points: vec![at(1.0, 2.0, 11.5)], radius: 5.5, stretch: DVec3::new(1.0, 1.0, 2.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Chair, seed: 77, books: 40, style: crate::furniture::Style::Industrial, count: 3, choice: 2, second: 1, extra: true, shine: false, ..crate::furniture::Furniture::of(crate::furniture::Kind::Chair) }, ..Spec::default() },
+            Spec { form: Form::Furniture, points: vec![at(1.0, 2.0, 28.0)], radius: 5.0, furniture: crate::furniture::Furniture { style: crate::furniture::Style::Random, ..crate::furniture::Furniture::of(crate::furniture::Kind::Trellis) }, ..Spec::default() },
         ];
         // a save from before a trunk's width could be set has no number for it, and its tree is as it was
         assert_eq!(parse_spec("form = tree
@@ -1275,6 +1298,12 @@ tree = pine,1,60,15,50,0").unwrap().tree;
         assert!(["blend = 7", "blend = -1", "blend = inf", "blend = nan", "blend = round"].iter().all(|line| parse_spec(line).is_err()));
         // nor has one from before a form could be taken away
         assert!(!parse_spec("blend = 2").unwrap().carve && parse_spec("carve = true").unwrap().carve && parse_spec("carve = 1").is_err());
+        let old = parse_spec("form = furniture
+furniture = bookcase,7,3,4,17,40,5,0,1,35").unwrap().furniture;
+        assert_eq!(old, crate::furniture::Furniture { seed: 7, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) });
+        assert!(parse_spec("furniture = chair,1,2,0,11,34,3,1,1,85,gothic").is_err() && parse_spec("furniture = chair,1,2,0,11,34,3,1,1,85,modern,1,2,3,1,1,9").is_err());
+        // nor has one from before a form could be built as hedge
+        assert!(!parse_spec("form = arch round").unwrap().hedge && parse_spec("hedge = true").unwrap().hedge && parse_spec("hedge = 1").is_err());
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

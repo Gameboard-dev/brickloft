@@ -9,7 +9,7 @@ change happen in the editor's window.
 
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers fifteen tools. Claude Code, or
+offers. The editor is the MCP server and offers seventeen tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -88,6 +88,8 @@ file, the entry is a server of type `http` with the URL above.
 | `get_camera` | Gives the camera's position and the direction it looks in. |
 | `move_camera` | Sends the camera to a place, or along a path of places, looking at a chosen point at each. |
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
+| `start_gif` | Starts recording the window as an animated GIF in the editor's pictures folder, with the panel or without it. |
+| `stop_gif` | Stops the recording and says where the file is, how long it plays and how large it is. |
 | `set_view` | Switches the rulers, rings, arrows and dots on and off, and lowers the floor. |
 | `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
 | `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Alt + click and a drag do. |
@@ -128,8 +130,9 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
+| `hedge` | `true` builds an arch as clipped hedge, grown as the `tree` setting says a hedge is (`hedge,seed,fullness,count,bend,extras`); `false` for plain brick |
 | `bloom` | `[flower, tilt, turn, stem, fallen]` says which flower a `tree` of the kind `flower` is and how it lies; only the flower is needed (see below) |
-| `furniture` | `[kind, seed, board, shelves, spacing, bay, plinth, back, moulding, books]` says which piece a `furniture` form is; only the kind is needed (see below) |
+| `furniture` | `[kind, seed, board, shelves, spacing, bay, plinth, back, moulding, books, style, count, choice, second, extra, shine]` says which piece a `furniture` form is; only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` and then `0, depth` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
@@ -212,8 +215,45 @@ beside it. The two settings are kept apart so that a tilt is the second
 value of `bloom` and not the fourteenth of `tree`, after a pine's
 decorations. A bloom is 3,000 to 7,000 bricks.
 
-`furniture` names the kind first, and `bookcase` is the one kind so far.
-Whatever follows it replaces that kind's usual settings in order:
+`furniture` names the kind first. Six values follow the bookcase's ten:
+
+| Value | Meaning |
+|---|---|
+| `style` | `modern`, `farmhouse`, `classical`, `rustic`, `industrial`, or `random` for whichever the seed picks |
+| `count` | a number of the kind's own, 0 for as many as its size has room for: a cupboard's doors, a chest's drawers, a kitchen's units, a sofa's seats, a desk's drawers; a pot's height in tenths; the microbricks between a trellis's slats |
+| `choice` | a choice of the kind's own, 0 for the style's: a table's legs (1 square, 2 tapered, 3 turned, 4 trestle, 5 pedestal), a chair's or bench's back (1 slats, 2 ladder, 3 panel, 4 spindles), a stool's seat (1 square, 2 round), a sofa's arms (1 square, 2 rolled), a cupboard's handles (1 knobs, 2 bars, 3 none), a lamp's shade (1 drum, 2 cone, 3 globe), a bed's headboard (1 panel, 2 slats, 3 rails), a pot (1 terracotta, 2 glazed, 3 square, 4 tall), a lattice (1 square, 2 diamond, 3 arched), a painting's subject (1 sunset, 2 landscape, 3 abstract), what a sitter wears (1 nothing, 2 glasses, 3 a hat, 4 a beard) |
+| `second` | a second choice, 0 for the style's or the seed's: a table's top (1 rectangular, 2 round), a seat (1 bare, 2 cushion), what a sofa stands on (1 legs, 2 a skirt), what a cupboard stands on (1 a plinth, 2 feet), a chandelier's arms (1 two, 2 four, 3 eight candles), a candlestick's candles (1 one, 2 three), a bed's pillows (1 or 2), the plant in a pot (1 yucca, 2 boxwood, 3 hydrangea, 4 peonies, 5 tulips, 6 daffodils, 7 daisies, 8 petunias, 9 cypress, 10 palm, 11 cherry), a climber (1 ivy, 2 clematis, 3 rose, 4 wisteria, 5 none) |
+| `extra` | 1 or 0: a dining table's stretchers, a coffee table's shelf, a side table's drawer, a desk's second pedestal, a chair's arms, a bench's back, a cupboard's drawer row, a chest's two small top drawers, a sideboard's middle drawers, a kitchen unit's drawer, a bed's footboard, a picture's mount, and for a plant in a pot whether its leaves are walked through |
+| `shine` | 1 or 0: whether a lamp's lights carry a real light in the game as well as glowing |
+
+The kinds are `bookcase`, `cupboard`, `drawers`, `sideboard`, `kitchen`,
+`dining`, `coffee`, `side`, `desk`, `chair`, `armchair`, `stool`, `bench`,
+`sofa`, `tablelamp`, `floorlamp`, `pendant`, `chandelier`, `sconce`,
+`candlestick`, `bed`, `potted`, `basket`, `windowbox`, `trellis`,
+`painting` and `portrait`. A bookcase takes no notice of the six new
+values, and a bookcase saved with ten values is read as it was. The other
+kinds take no notice of the bookcase's values but `seed`, and a trellis
+reads `books` as how much of it its climber covers.
+
+Pieces of one `style` and one `seed` are a set: they share their legs,
+their weight and their woods. To furnish a room, give every piece the
+same two. A piece added with no `radius` or `stretch` is its kind's usual
+size (a dining table 44 by 24 by 19, a chair 11 by 11 by 23), and with no
+`colour` it comes in its style's colours. A pendant and a chandelier hang
+from the top of their box, and a sconce, a trellis and a picture are
+against its high y side. For example, this call adds the fourth
+farmhouse chair, with arms:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "furniture", "furniture": ["chair", 4, 2, 0, 11, 34, 3, 1, 1, 85, "farmhouse", 0, 0, 0, 1, 1] }
+  }
+}
+```
+
+For a bookcase, whatever follows the kind replaces its usual settings in order:
 
 | Value | Meaning |
 |---|---|
@@ -348,6 +388,18 @@ while the camera is flying is taken when the camera arrives. The picture is
 at most 1280 pixels wide unless Claude asks for another width, because a
 picture is costly for a model to read and a window's full width is seldom
 needed.
+
+`start_gif` and `stop_gif` record the window as an animated GIF, as the
+**Record GIF** button does ([features.md](features.md#recording-a-gif)):
+for a flight of the camera, or a form changing as Claude changes it.
+`start_gif` takes the same `panel` choice as a screenshot, a `size`
+(`full`, `half` or `third` of the window) and a `rate` (10, 20 or 25
+pictures a second). The file goes to `Pictures/brickloft` under a name
+with the date and time, and nowhere else: neither tool takes a path. The
+recording is not sent to Claude. `stop_gif` returns where the file is, how
+long it plays, how many pictures it holds, its size, and how long each
+picture took the editor. A recording left running stops by itself at 60
+seconds or 64 MB.
 
 ## Coordinates
 

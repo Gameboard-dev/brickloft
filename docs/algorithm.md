@@ -2586,6 +2586,77 @@ paint as two tones of blue, pink or white, or as blue running to pink.
 
 <img src="images/plant-hedge.png" width="330" alt="A clipped box hedge in bricks, five times as long as it is thick, with red berries over its top and sides"> <img src="images/plant-hydrangea.png" width="330" alt="A hydrangea in bricks: a rounded bush of leaves on a few stems, carrying domed flower heads of small blue and pink florets">
 
+#### An arch of hedge
+
+<img src="images/arch-hedge.png" width="330" alt="A round arch built as clipped hedge: lumpy tufts of leaves all over its band, light on top and dark underneath, standing on brown stems at its two feet"> <img src="images/arch-hedge-pointed.png" width="330" alt="A pointed arch of hedge with red berries among its leaves">
+
+With **Texture** set to hedge, an arch is built as clipped hedge
+([core/src/tree/over.rs](../core/src/tree/over.rs)). The hedge laid
+along a line, above, is grown straight and then bent, which suits a line
+on the ground. An arch's band climbs and comes down again, and a hedge
+bent along it would be a wall laid over: its top would face sideways at
+the crown and its stems would run along the soffit. The hedge is
+therefore grown from the arch's own distance function $`d`$ (section 5),
+which is negative inside the band.
+
+The tufts are the hedge's own, the same balls of leaves set back from a
+face by the same rule. What is new is where they go. Let
+$`e(p) = d(p) - 1`$, the band made one cell larger all round. Points are
+taken on a lattice $`s = 1.15\,m`$ apart, where $`m`$ is the size of a
+tuft, each layer half a step along from the last. A lattice point $`p`$
+with $`|e(p)| \le s/2`$ is moved onto the surface,
+
+```math
+q = p - e(p)\,n, \qquad n = \frac{\nabla e}{\lVert \nabla e \rVert}
+```
+
+with the slope $`\nabla e`$ taken by differences half a cell each way,
+and a tuft is set at $`q`$ looking along $`n`$. One layer of the lattice
+lies within half a step of any face, so every face has one layer of
+tufts a step apart whichever way it looks: both fronts, the outside and
+the soffit. A tuft of radius $`r`$ is then held $`r + 1`$ deep, or at
+the middle of a band thinner than that, so that the clusters of leaves
+that stand out of it stay inside. The inside is filled with balls on a
+coarser lattice, each of radius 0.4 less than its depth under the
+surface, so none of the filling shows.
+
+The finished hedge $`h`$ is cut off where the enlarged band ends:
+
+```math
+f(p) = \max\bigl(h(p),\ d(p) - 1\bigr)
+```
+
+Each of the two is no more than the distance to its own solid, so their
+maximum is no more than the distance to what the two share, and the
+fitter's skipping of far cells stays sound. The hedge therefore stands
+one cell outside the plain arch at the most, on any face, and the
+opening keeps its shape. Measured on arches 60 across, 10 thick and 12
+deep, the opening of a round arch is 46 wide and 25 high plain and 45 by
+25 as hedge, a pointed arch's 48 by 44 and 47 by 45, and a parabolic
+arch's 36 by 25 and 37 by 25.
+
+The band is enlarged by that cell because of what was measured without
+it. Held inside the band itself, as a hedge's tufts are held inside its
+box, the hedge filled three fifths of the plain arch's cells and looked a
+cell thin on every face. Grown over the enlarged band it fills seven
+tenths to three quarters of them, with the hollows between tufts at the
+arch's own surface and the tops of the tufts a cell proud of it, cut
+level there.
+
+Where the band stands on the ground its lowest tenth, 2 to 6 cells, is
+bare of leaves, and stems stand in it, as a hedge's do. Leaves are light
+where the sky is over them and dark where open air is under them, by the
+rule every plant's leaves have, which makes the soffit dark. A hedge is
+6 cells thick at the least, so a band thinner or less deep than that is
+grown 6 thick and 6 deep, as a maze's hedges are. More than a million
+cubic cells of band is built at the finest larger brick size that fits,
+as a hedge maze is.
+
+Nothing in this knows that the solid is an arch. A spline and a Bézier
+curve pass through the same function and would be grown the same way.
+They are not offered, because only arches have been looked at. The
+round arch above is 5,010 bricks.
+
 #### The flowers
 
 <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers in bricks, of different heights, facing the same way: dark hearts ringed with lighter seeds and yellow petals, on stout stems with broad drooping leaves"> <img src="images/plant-tulips.png" width="330" alt="A clump of tulips in bricks: orange cups flamed with red on bare stems, with strap-shaped leaves arching from the ground">
@@ -2693,18 +2764,31 @@ angle from upright grows with the cube of the way along the leaf.
 
 #### Grass
 
-<img src="images/plant-grass.png" width="640" alt="A lawn in bricks with a high hill and a lower one raised in it: tufts of blades in three greens over a thin skin of brown soil that follows the ground">
+<img src="images/plant-grass.png" width="640" alt="A lawn in bricks with a high hill and a lower one raised in it: blades a brick wide with sloped tips, in three greens, over a thin skin of brown soil that follows the ground">
 
 Grass covers the ground within its reach of a line, and everything the
 line encloses if it is closed, so it is a strip along a path or a lawn of
-any outline. It is a surface. Under the blades is a skin of soil about two
+any outline. It is a surface. Under the blades is a skin of soil two
 cells thick in a colour of its own, so that a patch set on a floor leaves
 no gap and a hill is closed on top. Under a hill there is nothing.
+
+Grass is the one plant that is not fitted. A lawn is a height field with
+things standing on it: the ground has one height at each place, so every
+brick can be written down from that height, as a bookcase's are from its
+size (section 7.12). It was first grown as the other plants are, soil,
+water and every blade as parts of one solid, and fitted cell by cell.
+A lawn 180 cells by 120 with 24 touches then took 15.6 million samples
+of its distance function, 0.53 s on sixteen threads, and every touch of
+the brush fitted all of it again. Written down it takes 4 ms
+([performance.md](performance.md#a-lawn)). The code is
+[core/src/grass.rs](../core/src/grass.rs).
+
+##### The ground
 
 The ground is shaped the way terrain is in games that have a tool for it,
 by touches of a brush. A touch has a place, a range $`R`$ and an amount
 $`a`$, and does one of two things. A push adds a smooth hill, or with a
-negative amount takes a hollow out of raised ground:
+negative amount takes a hollow out of the ground:
 
 ```math
 h \leftarrow h + a\,\frac{1 + \cos(\pi d / R)}{2} \qquad (d < R)
@@ -2716,11 +2800,46 @@ flat without a crease. A flattening touch moves the ground towards one
 height $`a`$: all the way within half its range, and by a share that
 falls on the same curve from there to its edge, which leaves a level
 terrace with a bank that runs back into the hill. The touches are applied
-in the order they were made, as strokes are, and the ground is never taken
-below the floor.
+in the order they were made, as strokes are.
 
-The first version raised the ground by the reach all added points share,
-8 cells, and a touch was a spike. Each touch now has its own range.
+A touch may also be a stroke: with Ctrl held while the button is down,
+the same touch is made again wherever the cursor has moved 0.4 of the
+brush's range along the ground. A patch takes 240 touches. A touch is one
+of the form's added points, so it is undone, saved and copied like any
+other. A brush dragged across the ground was considered and not built:
+the ground it leaves would have to be kept as a grid of heights in the
+form, where everything a form keeps now is a few numbers a person can
+read.
+
+The height $`h`$ is worked out once for the middle of every cell the lawn
+covers, and kept in a table with what else is at that cell (`Ground`).
+The top of the soil is the whole number
+
+```math
+t = \operatorname{round}(h + 1.6)
+```
+
+of cells over the floor the lawn lies on, so level ground has soil in the
+two cells under $`t = 2`$. The 1.6 is how far the soil stood over the
+ground when it was fitted, and keeps a lawn saved then at the height it
+had. The soil under a cell fills the cells from $`t - 2`$ up to $`t`$,
+and further down where the ground beside it is lower, to one cell under
+the lowest $`t`$ of the four cells beside it. A slope's skin then has no
+gap in it. Soil columns of the same height that stand side by side are
+joined into the largest boxes (`pattern::joined`), so level ground is one
+brick for each tile of 32 cells by 32.
+
+Where bare ground steps up one cell to one side and not on the side
+opposite, a sloped brick fills the step, so sand going down to water is a
+bank. A corner where two slopes meet is left a step.
+
+The table answers what the land is like without the bricks being built:
+`Ground::at` gives a cell's height, the top of its soil, the water
+standing there and whether that water is a stream's, and `Ground::slope`
+gives the rise each way from the heights of the cells beside it. Making
+the table takes about a third of a lawn's build.
+
+##### Ponds
 
 A push down may go below the level the lawn lies on, and a hollow dug
 deeper than the water stands is a pond. With the water $`w`$ below the
@@ -2730,17 +2849,30 @@ lawn and the ground at the height $`h`$:
 |---|---|
 | $`h > -w + 2`$ | grass as anywhere |
 | $`-w + 0.3 < h \le -w + 2`$ | grass thinning: a tuft is kept with the chance $`(h + w - 0.3) / 1.7`$ |
-| $`-w - 1.5 < h \le -w + 1.2`$ | the soil is sand |
-| $`h \le -w - 1.5`$ | the bed of the pond, with a stone on about one place in seventeen |
-| $`h < -w - 1`$ | water from the bed up to $`-w`$ |
+| $`h \le -w + 1.2`$, and not the bed | the soil is sand |
+| $`h \le -w - 1.5`$, under water | the bed of the pond, with a stone on about one cell in a hundred |
+| $`h < -w - 1`$ and $`t < -w`$ | water from the top of the soil up to $`-w`$ |
 
-The water is upright eight-sided columns with flat tops, wide enough to
-run together, so it is fitted as boxes and joined into few. Reeds stand
-where the ground is within 2.6 of the water's level, as thickly as asked.
-Stones and reeds are placed by a number worked out from each spot of
-ground and not from the run of numbers the blades use, so digging a pond
-leaves the lawn round it as it was. A patch with a pond reaches as far
-below its own level as it was dug.
+The water is the cells between the top of the soil and the level. It is
+joined into boxes greedily from the surface down: at each cell of water
+not yet in a box, a row along x widened along y or a row along y widened
+along x, whichever is larger, then made as deep as it can be. A pond is a
+bowl, so each layer of its water is a whole disc, which is a few wide
+boxes. The usual order, from the bottom up, leaves every layer above the
+lowest a ring round the box that came up through it. A pond 31 across and
+4 deep, 382 cells of water, is 58 bricks from the bottom up and 33 from
+the surface down.
+
+A stone is a low dome up to five cells across and two high, lying on
+the bed. Reeds
+stand where the ground is within 2.6 of the water's level, as thickly as
+asked. A reed is a bulrush laid out by rule: a stem one cell wide that
+leans by a cell half way up, a brown head three cells across with its
+four corners sloped and a slope at each end, the stem's tip above the
+head, and a leaf that arches away from the foot. A reed that would stand
+in another is left out. Stones and reeds are placed by numbers worked out
+from where they are, so digging a pond leaves the lawn round it as it
+was.
 
 In the game's file the water is the glass material at intensity 6 of 10,
 with all four of its collision flags off. The writer the editor uses
@@ -2750,9 +2882,9 @@ against the depth of the solid bricks and leaving none of their own. The
 basin then shows through the water, and whatever stands in front of the
 water still hides it. Ice is drawn more solid than water.
 
-With **Pond levels** at 2, water stands at two heights
-([core/src/tree.rs](../core/src/tree.rs), `Waters`). The ground is
-flooded from the edge of the patch inwards with a priority flood
+With **Pond levels** at 2, water stands at two heights (`Waters`). The
+ground is flooded from the edge of the patch inwards with a priority
+flood
 ([Barnes, Lehman and Mulla 2014](https://arxiv.org/abs/1511.04463)),
 which gives each place its spill height: the height water would reach
 there before it ran off the patch. A hollow is a connected set of places
@@ -2767,6 +2899,9 @@ and a hollow with $`s > 1.5`$ that is deeper than $`w + 1`$ is a raised
 pond. All raised ponds stand at the lowest $`\ell`$ among them, so there
 are two levels and none overflows. The lower level is $`-w`$ as before,
 and a patch with no raised hollow builds the same bricks at 2 as at 1.
+The flood is on a grid of places 2.4 cells apart, the grid the soil was
+laid on when it was fitted, so a lawn saved then has the levels and the
+streams it had.
 
 A stream leaves each raised pond for the nearest water at the lower
 level. Its way is the cheapest over the grid of the ground by Dijkstra's
@@ -2791,28 +2926,75 @@ next three cells, and $`z_0 = \ell`$ until the stream is out through the
 rim. The level never rises, it is a whole number, and it lies under both
 banks, so the water is flat reaches with a step down between them. The
 channel is cut 2.8 under the water over a width of 4.4, with banks that
-lie back further where the cut is deep. Its bed is sand, it has a third
-as many reeds as a pond's margin, and its water is the pond's water in
-the game's file, ice with it when frozen. Eight streams are made at
-most, and a patch over 400,000 places of ground keeps one level.
+lie back further where the cut is deep, which leaves water one cell deep
+along its bed. Its bed is sand, it has a third as many reeds as a pond's
+margin, and a stone in it is a single cell, since a pond's stone would
+dam it. Its water is the pond's water in the game's file, ice with it
+when frozen. Eight streams are made at most, and a patch over 400,000
+places of ground keeps one level.
 
-A touch may also be a stroke: with Ctrl held while the button is down,
-the same touch is made again wherever the cursor has moved 0.4 of the
-brush's range along the ground. A patch takes 240 touches.
+##### Blades
 
-The blades are in tufts on a grid shaken so that no rows show, two to four
-blades to a tuft, each of its own height and lean and one of three greens.
-They stand upright on the ground wherever it has been pushed to. A touch is
-one of the form's added points, so it is undone, saved and copied like any
-other. A brush dragged across the ground was considered and not built: the
-ground it leaves would have to be kept as a grid of heights in the form,
-where everything a form keeps now is a few numbers a person can read.
+The blades are in tufts on a grid shaken so that no rows show, three to
+five blades to a tuft, each on a cell of its own beside the tuft's
+middle, each of its own height and lean and one of three greens. A blade
+is a column one cell wide with a sloped brick for its tip, the top two
+fifths of it, sloping the way the blade leans. Where a blade leans far
+enough to pass over the next cell it goes on there, and its two lengths
+share one cell's height so that they meet face to face. Blades stand on
+the ground wherever it has been pushed to.
 
-The game's file gives each brick a flag for what it stops: the player,
-weapons, interaction and physics. The bricks of the blades are written
-with the first, second and fourth off, so a player walks through the grass
-and stands on the soil. Which part a brick is, is asked of the plant
-itself, grown again from the form when the file is written.
+A fitted blade was a round rib nearly two cells through, and what the
+fitter made of it was a column with sloped bricks about it. The column
+and its tip are that written down, one cell through, so a tuft has one
+more blade than it had, to cover the ground as before. The lawn of 24
+touches is 27,600 bricks where it was 63,500.
+
+Two blades may want the same cell. The tufts are always taken in one
+order, the first blade to ask for a cell has it, and nothing is put over
+a blade's tip. Each tuft is placed and shaped by numbers worked out from
+its own place on the grid of tufts. They were drawn in turn from one run
+of numbers, which gives a tuft another shape whenever a tuft before it
+changes, and makes one part of a lawn depend on all of it.
+
+##### Tiles
+
+The lawn is built in tiles of 32 cells by 32. A tile's bricks follow
+from the ground of its own cells and of the cells a little way round
+them (one cell for the soil, three for stones, a blade's reach for
+blades) and from nothing else. The tiles are shared out over the
+processor's cores and put end to end in their own order, so the bricks
+are the same on any number of threads. A touch of the brush changes the
+bricks of the tiles it reaches and of no others, which the editor uses
+to give the graphics card only those tiles of a very large lawn. Water
+and reeds belong to no tile: a pond's water is joined whole, and a reed
+is a dozen cells across with its leaf.
+
+##### Which part a brick is
+
+Each brick comes with the number of its part: soil, sand, the bed, a
+stone, water, or one of the three greens. The colours go by that
+number. The game's file gives each brick a flag for what it stops (the
+player, weapons, interaction and physics), and the bricks of the blades
+are written with the first, second and fourth off, so a player walks
+through the grass and stands on the soil. A brick's part is asked of the
+lawn by where the brick is (`grass::Model::part`), since a brick cut by a
+join is a piece of one of the lawn's bricks and has no number of its own.
+A form joined into a lawn asks how far a place is from the lawn's bricks
+(`grass::Model::distance`), as it does of furniture.
+
+##### A lawn saved before
+
+The form is kept as it was, in the same words, so a lawn saved when
+grass was fitted opens. Its ground is the same ground, its ponds stand at
+the same levels and its streams run the same ways. Its blades are the
+same number of tufts on the same grid, and each is in another place with
+another height, since their numbers are worked out differently. Its
+reeds are thinner in the stem and stand in other places along the same
+margins. The edge of the soil follows the lawn's outline cell by cell,
+where the fitted soil reached about two cells past it. A flat lawn with
+a pond dug in it has soil two cells thick everywhere, where the fitted
+one hung a cell lower over its whole area once any of it was dug.
 
 #### Trunks on the lattice
 
@@ -3583,8 +3765,8 @@ Fewer bricks come from fewer rings.
 
 Furniture is the one form whose bricks are worked out directly from its
 size and settings, with no solid to fit them to
-([core/src/furniture.rs](../core/src/furniture.rs)). There is one kind so
-far, a bookcase. It is boards and books, and each of those is a box on the
+([core/src/furniture.rs](../core/src/furniture.rs)). The first kind was
+a bookcase, and the method is explained on it. It is boards and books, and each of those is a box on the
 lattice, so each can be written down as a brick as soon as its place is
 known. The build is therefore exact at every size. A wall of bookcases 400
 microbricks wide and 240 tall is 3,877 bricks and is laid in about
@@ -3729,6 +3911,153 @@ drag out, 800 wide and 800 tall, is 25,819 bricks and is laid in
 about 2 ms. **Brick size** and the brick budget do not apply to
 furniture. Its boards are whole microbricks thick, and on a coarser grid a
 board 2 thick would become 3 thick or vanish.
+
+#### The other kinds, and what they share
+
+A bookcase was the first kind. There are twenty-six more: cupboards,
+tables, seating, lights, a bed, plants in pots and pictures.
+Each is a function from the box and the settings to bricks, in a file of
+its own under [core/src/furniture/](../core/src/furniture/), and each is
+laid out directly as the bookcase is. Only a plant growing in a pot is
+fitted (see below).
+
+<img src="images/furniture-set.png" width="700" alt="A farmhouse dining table with turned legs and an eight-sided top, three ladder-back chairs behind it, a bench in front, a sideboard with cream panelled doors and knobs, a floor lamp and a potted plant, all in the same pine">
+
+A table, its chairs, a bench, a sideboard and a lamp of one style and one seed.
+
+The kinds are built from a few shared parts
+([parts.rs](../core/src/furniture/parts.rs)). A round top is an octagon:
+three boxes and a sloped brick at each corner, seven bricks at any size.
+The outline fitter of section 7.2 would give a rounder edge. It was not
+used, because it is a fit to be run and measured for every top, and
+furniture is laid without one. A tapered leg keeps its outer corner upright and
+narrows on its two inner faces, by a ramp on each and a hip between them.
+A turned leg is square blocks of two widths: a foot, a ball, a shaft, a
+collar, a neck and a head. A lampshade or a tall planter is a ring of
+four ramps and four hips round a core. A door or a drawer front stands
+one microbrick in front of a cupboard's body with a microbrick left
+between it and the next, which is the dark line between two doors. The
+body itself is one solid block, because nothing inside a closed cupboard
+can be seen.
+
+No kind refuses a small size. Below the least size at which it has
+parts (three to six microbricks, by kind) a piece is one block, as a
+bookcase is.
+
+#### Styles and sets
+
+A piece has a style and a seed
+([style.rs](../core/src/furniture/style.rs)). A style is a set of choices
+that go together, and it is not a number added to every size. Modern has
+square sections, flush fronts and no mouldings. Farmhouse has turned
+legs, panelled doors with knobs and plank tops. Classical has tapered or
+turned legs, panelled doors, a cornice and a skirting, and upholstery.
+Rustic has heavy sections, trestles and stretchers. Industrial has thin
+metal frames carrying slabs of wood.
+
+The seed picks among what a style allows: which leg, which chair back,
+which handle, which lampshade. It picks without knowing the kind. The
+function that turns a style and a seed into choices, `Set::of`, is given
+no kind, so a dining table and a chair of one style and one seed are
+given the same legs, the same weight and the same wood. (A chair at its
+usual size has legs one microbrick thick, too thin to be turned or
+tapered, and there they are square.) Had each kind drawn its own
+numbers from the seed, a table and its chairs would have matched only by
+chance. A kind's own setting (a table's legs, a chair's back) overrules
+the style for that piece alone.
+
+Colour numbers follow the same idea. For every kind but the bookcase, the
+plants and the pictures, a number names what a thing is made of: 0 the
+wood, 1 a second wood or the paint of doors, 2 metal, 3 upholstery, 4 a
+second cloth, 5 the light of a lamp, 6 pale linen, 7 a top of another
+stuff. A table's top and a cupboard's door are therefore the same wood in
+the same number, and one set of colours paints a whole room.
+
+#### Lights and metal in the game
+
+A lamp's bulb and a candle's flame are bricks of colour 5. In the file
+the editor copies ([editor/src/brz.rs](../editor/src/brz.rs)) each is
+written in the game's glowing material, and the bricks a piece names as
+its lights also carry a point light, as the lights of a dressed pine do.
+A lamp names one brick, however many bricks of it glow, and a chandelier
+one for each candle, eight at most. Bricks of colour 2 are written in the
+game's metal. The piece is built again when the file is written, turned
+and flipped as it stands, and each brick is looked up by where it is, so
+a lamp laid on its side is still lit.
+
+#### Plants in pots
+
+A potted plant, a hanging basket and a window box are a container with a
+plant in it ([pots.rs](../core/src/furniture/pots.rs)). The container is
+laid by rule and is exact: a round pot is stacked octagons with a rim and
+a saucer. The plant is one of the Plant form's own (section 7.10),
+reached through the functions that form already offers, and it is fitted
+cell by cell as any plant is. It is the one part of any furniture with a
+discrepancy.
+
+The plant keeps its own proportions. It is grown at the height the box
+has room for above the soil, with its spread in the proportion its kind
+starts at, and grown again smaller if that is wider than the box.
+Stretched to fill the box instead, a tulip in a wide pot had a cup as
+wide as the pot. The plant gives way to the pot: its distance function is
+cut by the box of every brick of the pot, so no brick of the plant shares
+room with one of the pot's.
+
+<img src="images/furniture-pots.png" width="700" alt="Eleven potted plants in terracotta, glazed, square and tall pots (a yucca, a box ball, a hydrangea, peonies, tulips, daffodils, daisies, petunias, a cypress, a palm and a cherry tree), two hanging baskets and two window boxes">
+
+A potted plant is about 1,300 bricks at its usual size and takes
+about 90 ms (a window box of four plants takes about 1.2 s), where a table takes a few thousandths of a millisecond. A
+plant is grown no taller than 120 microbricks however tall the box is.
+
+#### A trellis
+
+A trellis in a planter is exact all through
+([trellis.rs](../core/src/furniture/trellis.rs)). The lattice is two
+layers, as a joiner nails one: uprights against the wall and rails across
+in front of them. A diamond lattice is laths at 45 degrees, each a ramp
+and its opposite in every cell it crosses, which is a lath's true width;
+stepped out of whole cells it was a stair. An arched top is a square
+lattice whose uprights shorten towards the sides.
+
+The climber is laid by rule too, and does not use the Plant form. That
+form has no climber, and its nearest thing, a hedge laid along lines, is a
+mass of leaf several microbricks thick: along slats one microbrick wide
+it buried them. Here a stem goes up an upright, now and then turns along
+a rail to the next upright, and stops at a height that **Coverage** sets.
+Leaves are single bricks one or two microbricks long, set beside a stem's
+cells or in front of them, thickly near the soil and thinly at the stem's
+end. A clematis has flowers of one colour among them, a rose of two, and
+wisteria has trusses hanging from its stems. Every cell is taken once,
+and every leaf is against a stem or another leaf.
+
+<img src="images/furniture-trellis.png" width="700" alt="Six trellises seen from the front: a bare square lattice, the same a quarter, six tenths and fully covered by a climber, a diamond lattice with wisteria, and an arched one overgrown; the lattice shows through every one">
+
+#### Pictures
+
+A framed painting or portrait is a frame and a mosaic one microbrick deep
+([pictures.rs](../core/src/furniture/pictures.rs)). The picture is drawn
+a microbrick to a pixel by a function of the seed, cut into runs of one
+colour row by row, and the runs are joined into the largest bricks by the
+code that joins a mosaic's tiles (`pattern::joined`). A sunset 46 by 34,
+which is 1,564 pixels, is about 150 bricks.
+
+Every shape in a picture is decided with additions, multiplications,
+comparisons and square roots, each of which gives the same answer to the
+last bit on any machine. A sine does not, so hills are triangle waves,
+and a sky grades by a square. The same seed is therefore the same picture
+everywhere.
+
+A painting is a sunset over water, a landscape of four ranges of hills
+with firs, or an abstract of divided rectangles, bands or arcs. A
+portrait is a cartoon head and shoulders. Everything in it is placed in
+whole microbricks by how far a cell is to either side of the middle line,
+so a face is its own mirror image exactly, which is most of what makes a
+few dozen pixels read as a face. The mouth always turns up at its ends:
+at this size a straight mouth reads as displeased. A picture uses up to
+29 colour numbers, and one set of colours holds four skins, five colours
+of hair and four of clothes, among which the seed picks.
+
+<img src="images/furniture-portraits.png" width="700" alt="Ten framed cartoon portraits in a row: heads and shoulders with different skin, hair, hats and glasses, each smiling"> <img src="images/furniture-paintings.png" width="700" alt="Framed paintings: four landscapes with mountains, lakes and firs, and four abstracts of rectangles, arcs and bands">
 
 ## 8. Changing a form: added points, mirror, turning, grids
 
