@@ -1489,10 +1489,18 @@ struct Habit {
     spray: f64,
     /// in blossom: clouds of small clusters along its branches, where another tree has masses of leaves at their ends (see [`CHERRY`])
     bloom: bool,
+    /// Over how many of the trunk's own thicknesses above its fork its
+    /// limbs leave it, one after another, the stem between them thinner
+    /// by each that has left (da Vinci's rule at every one). 0 for a
+    /// trunk that divides into all of its limbs at one place, as an old
+    /// oak's does. A beech, a willow and a cherry did that too, and with
+    /// six or seven limbs each was under two fifths of the trunk's width:
+    /// a thick post that ended, and thin wood beginning on top of it.
+    stagger: f64,
 }
 
 /// An oak: low fork, wide heavy limbs, leaves in separate masses.
-const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045), leader: false, polar: (0.78, 1.22), out: 0.36, sag: 0.1, up: 0.15, wander: 0.44, flat: 0.78, heart: 0.15, leafy: 1.5, roots: 1.0, fine: 0.0, weep: 0.0, spray: 0.5, bloom: false };
+const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045), leader: false, polar: (0.78, 1.22), out: 0.36, sag: 0.1, up: 0.15, wander: 0.44, flat: 0.78, heart: 0.15, leafy: 1.5, roots: 1.0, fine: 0.0, weep: 0.0, spray: 0.5, bloom: false, stagger: 0.0 };
 
 /// A Japanese flowering cherry in blossom, *Prunus serrulata* or the
 /// Yoshino cherry: a short dark trunk banded across with pale lenticels,
@@ -1505,7 +1513,7 @@ const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045
 /// turn up a little, and with blossom on every branch under five and a
 /// half cells thick and not only at the ends, which is what puts it along the
 /// branches.
-const CHERRY: Habit = Habit { girth: 0.042, bole: (0.15, 0.2), mass: (0.065, 0.04), leader: false, polar: (1.0, 1.4), out: 0.46, sag: 0.0, up: 0.1, wander: 0.3, flat: 0.6, heart: 0.18, leafy: 5.5, roots: 0.8, fine: 0.5, weep: 0.0, spray: 0.42, bloom: true };
+const CHERRY: Habit = Habit { girth: 0.042, bole: (0.15, 0.2), mass: (0.065, 0.04), leader: false, polar: (1.0, 1.4), out: 0.46, sag: 0.0, up: 0.1, wander: 0.3, flat: 0.6, heart: 0.18, leafy: 5.5, roots: 0.8, fine: 0.5, weep: 0.0, spray: 0.42, bloom: true, stagger: 3.6 };
 
 /// A beech, *Fagus sylvatica*: a smooth grey trunk that carries on up
 /// through a dense, oval crown about three quarters as wide as the tree
@@ -1516,19 +1524,19 @@ const CHERRY: Habit = Habit { girth: 0.042, bole: (0.15, 0.2), mass: (0.065, 0.0
 /// It is the oak's rule with other numbers, which is the reason the rule
 /// has numbers: a leading stem, limbs that wander less, flatter tufts of
 /// leaves on more of the branches (so the crown closes), and small roots.
-const BEECH: Habit = Habit { girth: 0.04, bole: (0.22, 0.28), mass: (0.09, 0.055), leader: true, polar: (0.75, 1.1), out: 0.24, sag: 0.0, up: 0.1, wander: 0.24, flat: 0.42, heart: 0.34, leafy: 3.0, roots: 0.55, fine: 1.0, weep: 0.0, spray: 0.12, bloom: false };
+const BEECH: Habit = Habit { girth: 0.04, bole: (0.22, 0.28), mass: (0.09, 0.055), leader: true, polar: (0.75, 1.1), out: 0.24, sag: 0.0, up: 0.1, wander: 0.24, flat: 0.42, heart: 0.34, leafy: 3.0, roots: 0.55, fine: 1.0, weep: 0.0, spray: 0.12, bloom: false, stagger: 5.5 };
 
 /// A silver birch, *Betula pendula*: a slender white trunk marked with
 /// black, carrying on to the top of a narrow, open crown of thin
 /// climbing limbs whose ends hang.
 /// https://en.wikipedia.org/wiki/Betula_pendula
-const BIRCH: Habit = Habit { girth: 0.019, bole: (0.26, 0.34), mass: (0.12, 0.06), leader: true, polar: (0.4, 0.75), out: 0.12, sag: 0.0, up: 0.18, wander: 0.22, flat: 0.8, heart: 0.4, leafy: 2.6, roots: 0.4, fine: 1.0, weep: 0.3, spray: 0.5, bloom: false };
+const BIRCH: Habit = Habit { girth: 0.019, bole: (0.26, 0.34), mass: (0.12, 0.06), leader: true, polar: (0.4, 0.75), out: 0.12, sag: 0.0, up: 0.18, wander: 0.22, flat: 0.8, heart: 0.4, leafy: 2.6, roots: 0.4, fine: 1.0, weep: 0.3, spray: 0.5, bloom: false, stagger: 0.0 };
 
 /// A weeping willow, *Salix babylonica*: a short stout trunk, limbs that
 /// climb and spread into a wide dome, and from every branch end a
 /// curtain of long thin shoots hanging straight down, some to the ground.
 /// https://en.wikipedia.org/wiki/Salix_babylonica
-const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035), leader: false, polar: (0.5, 0.95), out: 0.3, sag: 0.0, up: 0.16, wander: 0.36, flat: 0.7, heart: 0.45, leafy: 1.8, roots: 0.9, fine: 1.0, weep: 1.0, spray: 0.4, bloom: false };
+const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035), leader: false, polar: (0.5, 0.95), out: 0.3, sag: 0.0, up: 0.16, wander: 0.36, flat: 0.7, heart: 0.45, leafy: 1.8, roots: 0.9, fine: 1.0, weep: 1.0, spray: 0.4, bloom: false, stagger: 3.6 };
 
 /// A Scots pine, *Pinus sylvestris*, grown old: a tall bare trunk, its
 /// lower boughs long shed, and at the top a flat, broken crown of
@@ -1538,7 +1546,7 @@ const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035
 /// It is grown by the forking rule and not the pine's tiers: an old
 /// Scots pine has lost the tiers a young one had, and what is left is a
 /// few limbs that fork.
-const SCOTS: Habit = Habit { girth: 0.034, bole: (0.52, 0.6), mass: (0.12, 0.06), leader: true, polar: (1.0, 1.45), out: 0.3, sag: 0.04, up: 0.02, wander: 0.5, flat: 0.34, heart: 0.5, leafy: 1.3, roots: 0.5, fine: 0.0, weep: 0.0, spray: 0.1, bloom: false };
+const SCOTS: Habit = Habit { girth: 0.034, bole: (0.52, 0.6), mass: (0.12, 0.06), leader: true, polar: (1.0, 1.45), out: 0.3, sag: 0.04, up: 0.02, wander: 0.5, flat: 0.34, heart: 0.5, leafy: 1.3, roots: 0.5, fine: 0.0, weep: 0.0, spray: 0.1, bloom: false, stagger: 0.0 };
 
 /// The thinnest an oak's branch is followed to, in cells: thinner than
 /// this it would not survive the fit, and it ends in leaves.
@@ -1598,7 +1606,12 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     let limbs = tree.count.max(2) as usize;
     // (As thick as asked, and three cells through at the least. Its limbs share what it is at its fork, so they follow it: a stout trunk has stout limbs.)
     let usual = (height * habit.girth).max(2.4);
-    let girth = (usual * tree.stout()).max(1.6);
+    // The trunk of a birch is seven tenths of what its crown is grown
+    // from, and of a beech, a willow or a cherry five sixths: each was
+    // too wide for the limbs it carried. Their crowns are grown as they
+    // were, and their limbs are thinner with their trunks.
+    let slim = if habit.leader && habit.girth < 0.03 { 0.71 } else if habit.stagger > 0.0 { 0.83 } else { 1.0 };
+    let girth = (usual * slim * tree.stout()).max(1.6);
     // The crown is grown as the usual trunk's would be, and its limbs
     // then made thicker or thinner by what the trunk is. Grown from the
     // trunk asked for, which was tried, a thin trunk's limbs came to twigs
@@ -1628,8 +1641,8 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     // it, and is at its fork a little over three quarters of what it is
     // near the ground; one that divides there into limbs is a column to
     // its fork. What it is at the fork is what its limbs share.
-    // (a slender one, which has given limbs off all the way up, to half)
-    let neck = if slender { girth * 0.5 } else if habit.leader { girth * 0.78 } else { girth };
+    // (A slender one to three fifths. And one whose limbs leave it up a length of stem narrows by a seventh below them, where an oak, which divides at one place, is a column.)
+    let neck = if slender { girth * 0.62 } else if habit.leader { girth * 0.78 } else if habit.stagger > 0.0 { girth * 0.86 } else { girth };
     // (the flare of a trunk made fatter is no taller than the usual trunk's: twice as tall, it would reach the fork, and the trunk be a cone)
     let flare = girth * 2.2 / tree.stout().max(1.0);
     // A trunk made fatter draws in under its fork, by up to three
@@ -1710,6 +1723,27 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
             waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
         g.forks.push((neck, radii.iter().map(|r| r * fat).collect()));
+        if habit.stagger > 0.0 && top >= 3 {
+            // The limbs leave the stem one after another up a length of
+            // it, and the first of them (the leader, or the one nearest
+            // upright) is what is left of it at the top. The stem between
+            // is a limb of its own, as thick at each place as the limbs
+            // still to leave it make it.
+            let long = habit.stagger * usual;
+            let (mut path, mut thick, mut left) = (vec![fork], vec![neck / fat], (neck / fat).powi(2));
+            for k in 1..top {
+                let at = stem(bole + long * k as f64 / (top - 1) as f64);
+                left = (left - radii[k] * radii[k]).max(radii[0] * radii[0]);
+                path.push(at);
+                thick.push(left.sqrt());
+                waiting[k].from = at;
+            }
+            waiting[0].from = *path.last().unwrap();
+            let above = g.limb_record(path, thick, Some(trunk), 1);
+            for shoot in waiting.iter_mut().take(top) {
+                shoot.parent = above;
+            }
+        }
         if slender {
             // the limbs off the stem: one to each length of it, each round from the last by the golden angle, half as thick as the stem is there
             for k in 0..limbs {
@@ -4092,10 +4126,12 @@ mod tests {
             let tree = model(Kind::Beech, seed);
             let (height, spread) = Tree::usual_size(Kind::Beech);
             // the thickest limb is the stem carried on: it starts nearly upright and climbs most of the crown
-            let leader = tree.limbs[1..].iter().filter(|l| l.level == 1).max_by(|a, b| a.radius[0].total_cmp(&b.radius[0])).unwrap();
-            let first = (leader.path[1] - leader.path[0]).normalize();
-            assert!(first.z > 0.9, "the leader leaves the trunk at {first}");
-            assert!(leader.path.last().unwrap().z > height * 0.55, "the leader ends at {}", leader.path.last().unwrap().z);
+            // (the stem goes on above the trunk as a limb of its own, which its limbs leave one by one, and the leader is what is left of it)
+            let stem = tree.limbs[1..].iter().filter(|l| l.level == 1).max_by(|a, b| a.radius[0].total_cmp(&b.radius[0])).unwrap();
+            let first = (stem.path[1] - stem.path[0]).normalize();
+            assert!(first.z > 0.9, "the stem leaves the trunk at {first}");
+            let leader = tree.limbs[1..].iter().filter(|l| l.level == 1 && l.path[0].distance(*stem.path.last().unwrap()) < 1e-6).map(|l| l.path.last().unwrap().z).fold(f64::MIN, f64::max);
+            assert!(leader > height * 0.55, "the leader ends at {leader}");
             for (limb, into) in &tree.forks {
                 assert!((into.iter().map(|r| r * r).sum::<f64>() - limb * limb).abs() < 1e-9 * limb * limb);
             }
@@ -4643,7 +4679,7 @@ mod tests {
         let (birch, height) = (model(Kind::Birch, 1), Tree::usual_size(Kind::Birch).0);
         let fork = birch.limbs[0].path.last().unwrap().z;
         assert!(reach(&birch, 8.25).0 * 2.0 <= height / 22.0, "a birch {} through, {height} tall", reach(&birch, 8.25).0 * 2.0);
-        assert!(reach(&birch, (fork * 0.8).floor() + 0.25).0 < reach(&birch, 2.25).0);
+        assert!(reach(&birch, (fork * 0.8).floor() + 0.25).0 <= reach(&birch, 2.25).0);
     }
 
     #[test]
@@ -4828,5 +4864,38 @@ mod tests {
         assert!(bulbs.len() <= grown_bulbs + 4 && bulbs.len() * 10 >= grown_bulbs * 8 && bulbs.iter().filter(|b| b.ext == [2, 2, 2]).count() * 10 >= bulbs.len() * 8, "{} bricks for {grown_bulbs} bulbs: {:?}", bulbs.len(), bulbs.iter().map(|b| b.ext).collect::<Vec<_>>());
         // a pine with nothing on it has none of any of it
         assert!(grown(Tree::of(Kind::Pine)).parts.iter().all(|p| !matches!(p.shade, STAR | EXTRA | BAUBLE_GOLD | BAUBLE_PALE | TINSEL | FLAME | WAX)));
+    }
+
+    /// Going up a stem from the ground to past where its limbs leave, the
+    /// wood on its axis thins steadily: `None`, or where it does not.
+    fn stem_steps(kind: Kind, seed: u64, girth: i32, size: f64) -> Option<String> {
+        let (height, spread) = Tree::usual_size(kind);
+        let tree = Model::new(&Tree { seed, girth, ..Tree::of(kind) }, DVec3::splat(0.5), (height * size).round(), (spread * size).round());
+        let fork = tree.limbs[0].path.last().unwrap().z;
+        let stem = tree.forks[0].0;
+        // (a birch's stem is its trunk, to where the ends of its top limbs hang round it; another's is followed past its fork by twice its thickness there, in which its limbs leave it)
+        let top = if kind == Kind::Birch { fork * 0.85 } else { fork + 2.0 * stem };
+        let wide: Vec<f64> = (1..top as usize).map(|k| reach(&tree, k as f64 + 0.25).0).collect();
+        for (n, r) in wide.iter().enumerate() {
+            if n + 1 < wide.len() && wide[n + 1] < r - 0.8 {
+                return Some(format!("{kind:?} {seed} at {girth}% and {size}: {r} then {} at {} up (its fork is at {fork})", wide[n + 1], n + 2));
+            }
+            // (by a fifth in six cells, and the half cell by which a trunk's bricks may be wider than the round stem that carries on from them)
+            if n + 6 < wide.len() && wide[n + 6] < r * 0.8 - 0.6 {
+                return Some(format!("{kind:?} {seed} at {girth}% and {size}: {r} and six cells on {} at {} up (its fork is at {fork})", wide[n + 6], n + 7));
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_stem_thins_steadily_from_the_ground_to_past_where_its_limbs_leave() {
+        let mut faults = Vec::new();
+        for kind in [Kind::Beech, Kind::Birch, Kind::Willow, Kind::Cherry] {
+            for (seed, girth, size) in [(1, 100, 1.0), (2, 100, 1.0), (3, 100, 1.0), (1, 100, 0.6), (2, 100, 1.5), (1, 50, 1.0), (2, 200, 1.0)] {
+                faults.extend(stem_steps(kind, seed, girth, size));
+            }
+        }
+        assert!(faults.is_empty(), "{} stems with a step in them:\n{}", faults.len(), faults.join("\n"));
     }
 }
