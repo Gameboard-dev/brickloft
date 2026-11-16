@@ -260,6 +260,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if helped(ui, help("reset_form"), |ui| ui.button("Reset this form")).clicked() {
             state.reset();
         }
+        // Said here as well as with the figures further down, which are
+        // off the bottom of a short window: a form that cannot be built
+        // keeps showing the last one that could, and a slider that seems
+        // to do nothing is the only sign of it up here.
+        if let Some(problem) = &state.problem {
+            ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
+        }
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
             ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=brickloft_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(help("sliders_go_up_to"));
@@ -774,6 +781,15 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
         let own = state.paint.mode == Mode::Pattern && !crate::paint::palettes(named(before)).iter().any(|set| state.paint.colours == *set);
         if choice != 0 && !own {
             (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(named(choice)).to_vec());
+        }
+        // Back to none, the form goes back to the plain colouring it had
+        // before any texture, unless the colours are the player's own. It
+        // kept the texture's colouring, which with no texture to colour by
+        // paints every brick the texture's first colour (a brick wall's
+        // mortar, a rug's ground): the form looked as if the texture had
+        // been half taken off.
+        if choice == 0 && !own && state.paint.mode == Mode::Pattern {
+            state.paint = crate::paint::Paint::default();
         }
     }
     // another pattern, in the next of its sets of colours

@@ -429,8 +429,27 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     // sized to be walked down, so at a coarser size the walls are another
     // thickness and the corridors another width: a different maze. Fewer
     // bricks come from fewer rings.
+    //
+    // A maze of more hedge than may be built at single microbricks is the
+    // exception: it is built at the finest size that it can be. Refused,
+    // it stopped answering: with hedge walls the thickness and the ring
+    // gap moved their sliders past some point and the maze did not
+    // change, the last one that could be built standing there still. A
+    // hedge has no exact thickness to lose, and its corridors keep their
+    // width to within a brick of the larger size.
     if spec.form == Form::Maze {
-        return build_at(spec, 1, measured, threads);
+        let fine = build_at(spec, 1, measured, threads);
+        if spec.maze.hedge && fine.as_ref().is_err_and(|e| e.contains("too much hedge")) {
+            for &grain in &GRAINS[1..] {
+                match build_at(spec, grain, measured, threads) {
+                    Err(e) if e.contains("too much hedge") => {}
+                    // (anything else it cannot be at that size, and the first refusal is the one to tell)
+                    Err(_) => break,
+                    built => return built,
+                }
+            }
+        }
+        return fine;
     }
     // So is a tree, for the same reason: its boughs, twigs and leaflets
     // are a cell or two thick, and at a coarser size they are gone and

@@ -1348,6 +1348,11 @@ impl State {
         self.spec.depth = 3;
         // (from one kind that lies along a line to another, the line is kept)
         self.spec.stretch = DVec3::ONE;
+        // (A hedge's added points bend its line, and a bend that reaches
+        // only 8 along it, as a curve's starts out, is a kink in a hedge
+        // 12 thick: it starts at 40, a few thicknesses each way. The other
+        // kinds go back to what every form starts with.)
+        self.spec.pull_reach = if kind == brickloft_core::tree::Kind::Hedge { 40.0 } else { Spec::default().pull_reach };
         self.lay_tree();
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
@@ -1999,7 +2004,11 @@ impl State {
         if self.follow <= 0.0 || moved == DVec3::ZERO {
             return;
         }
-        let reach = FOLLOW_REACH * self.spec.pull_reach.max(1.0);
+        // (A plant's dots are the ends and bends of its line, set where they
+        // are wanted, and its reach of added points starts large for a
+        // hedge: scaled by that, a hedge's ends came along when its middle
+        // dot was dragged. They follow as far as any form's do at the start.)
+        let reach = FOLLOW_REACH * if self.form == TREE { Spec::default().pull_reach } else { self.spec.pull_reach.max(1.0) };
         let share = |at: DVec3| {
             let d = at.distance(before);
             if d < reach { self.follow * 0.5 * (1.0 + (std::f64::consts::PI * d / reach).cos()) } else { 0.0 }
@@ -3440,6 +3449,17 @@ mod tests {
         let before = places(&state);
         pull(&mut state, 0, 4.0);
         assert!(places(&state).iter().zip(&before).all(|(now, was)| now[0] - was[0] == 8));
+    }
+
+    #[test]
+    fn a_hedge_starts_with_added_points_that_reach_forty_and_other_plants_with_the_usual() {
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Hedge);
+        assert_eq!(state.spec.pull_reach, 40.0);
+        state.usual_tree(brickloft_core::tree::Kind::Oak);
+        assert_eq!(state.spec.pull_reach, Spec::default().pull_reach);
     }
 
     #[test]

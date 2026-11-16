@@ -425,3 +425,16 @@ fn the_spec_text_of_a_maze_reads_back_as_it_was() {
     assert_eq!(wild.maze, Maze { kind: Kind::Grid, rings: RINGS.1, divisions: 1, grow: MOST_GROW, seed: 5, entrance: 355, floor: MOST_FLOOR, solution: true, hedge: false });
     assert!(crate::report::parse_spec("maze = hexagons,3").is_err());
 }
+
+#[test]
+fn a_maze_of_too_much_hedge_for_single_microbricks_is_built_at_a_larger_size() {
+    // the usual maze, with hedges 14 thick: over the limit at single microbricks, as asking for that size by name says
+    let thick = Spec { thick: 14.0, rise: Some(30.0), ..spec(Maze { hedge: true, ..Maze::default() }, 120.0) };
+    assert!(build(&Spec { grain: 1, ..thick.clone() }).is_err_and(|e| e.contains("too much hedge")));
+    let built = build(&Spec { grain: 0, ..thick.clone() }).unwrap();
+    assert!(built.grain > 1 && built.bricks.len() > 1000, "grain {}, {} bricks", built.grain, built.bricks.len());
+    // and thicker than the same maze with hedges 8 thick
+    let cells = |built: &crate::spec::Built| built.bricks.iter().map(|b| b.ext.iter().map(|e| (*e * built.grain) as i64).product::<i64>()).sum::<i64>();
+    let thin = build(&Spec { grain: 0, thick: 8.0, ..thick }).unwrap();
+    assert!(cells(&built) > cells(&thin) * 5 / 4, "{} cells at 14 thick, {} at 8", cells(&built), cells(&thin));
+}
