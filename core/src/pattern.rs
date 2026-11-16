@@ -187,6 +187,51 @@ impl Stone {
     }
 }
 
+impl Stone {
+    /// The stone's ground as an outline whose corners are corners of the
+    /// grid: what is on its side of the line half way to every stone round
+    /// it, within cells `from..to` and a margin, each corner then moved
+    /// to the nearest corner of the grid. `None` for a stone moved down to
+    /// nothing. (See `lay_stones`, "With no gap", for what it is for.)
+    ///
+    /// The ground is cut out of a box by one line after another, which
+    /// is how any outline with no hollows is cut by a straight line:
+    /// <https://en.wikipedia.org/wiki/Sutherland%E2%80%93Hodgman_algorithm>
+    fn outline(&self, from: [i32; 2], to: [i32; 2]) -> Option<crate::sdf::Fill> {
+        let (lo, hi) = (DVec2::new(from[0] as f64 - 2.0, from[1] as f64 - 2.0), DVec2::new(to[0] as f64 + 2.0, to[1] as f64 + 2.0));
+        let mut ground = vec![lo, DVec2::new(hi.x, lo.y), hi, DVec2::new(lo.x, hi.y)];
+        for (towards, far) in &self.lines {
+            let inside = |p: DVec2| far - towards.dot(p);
+            let mut kept = Vec::with_capacity(ground.len() + 1);
+            for (n, a) in ground.iter().enumerate() {
+                let b = ground[(n + 1) % ground.len()];
+                let (da, db) = (inside(*a), inside(b));
+                if da >= 0.0 {
+                    kept.push(*a);
+                }
+                if (da >= 0.0) != (db >= 0.0) {
+                    kept.push(a.lerp(b, da / (da - db)));
+                }
+            }
+            ground = kept;
+            if ground.len() < 3 {
+                return None;
+            }
+        }
+        let mut corners: Vec<DVec2> = Vec::with_capacity(ground.len());
+        for p in ground {
+            let p = p.round();
+            if corners.last() != Some(&p) {
+                corners.push(p);
+            }
+        }
+        if corners.len() > 1 && corners.first() == corners.last() {
+            corners.pop();
+        }
+        (corners.len() >= 3).then(|| crate::sdf::Fill::new(corners))
+    }
+}
+
 /// The stones of a region: one for each scattered point, knowing the
 /// stones round it.
 pub fn stones(region: &dyn Fn(DVec2) -> f64, min: [i32; 2], max: [i32; 2], settings: &Stones) -> Vec<Stone> {
@@ -252,9 +297,44 @@ fn in_piece(mask: u8, u: f64, v: f64) -> bool {
 /// (each fit may stray half a cell from its stone, and the gap may be
 /// nothing) is the later stone fitted again a little smaller: drawn in by
 /// half a cell, and then by a whole one. A piece that meets a laid stone
-/// even then is left out. With the gap at 0 the stones are fitted
-/// together and every stone meets its neighbours, so this is what leaves
-/// the narrow seams between them.
+/// even then is left out.
+///
+/// ## With no gap
+///
+/// With the gap at 0 every stone meets its neighbours, and fitted to the
+/// lines between them they do not meet exactly. Each fit strays up to
+/// half a cell from its line, one stone's this way and its neighbour's
+/// that, so they overlapped in places, the later stone was drawn in, and
+/// seams were left up to a cell wide all round. Two stones meet exactly
+/// only if they are given the same edge, and an edge that bricks can lay
+/// exactly from both sides.
+///
+/// A straight line from one corner of the grid to another is such an
+/// edge: it is the sloped side of a right triangle, or of a few alike end
+/// to end, and the triangle on its other side fills the rest of the same
+/// box, as the two halves of a cut tile do. So with no gap each stone's
+/// outline is drawn with its corners moved to the nearest corners of the
+/// grid ([`Stone::outline`]). A corner is where three stones meet, and
+/// each of the three works it out from the same three points and moves it
+/// to the same place, so the two stones either side of an edge have the
+/// very same two ends for it. Each stone is then fitted to its outline
+/// by itself, as before, and the fitter lays an outline of grid corners
+/// exactly, with nothing to choose between.
+///
+/// A stone's corners are sharp this way, where with a gap they are
+/// rounded: a rounded corner would be a hole where three stones meet. A
+/// corner moves by up to seven tenths of a cell, which changes a stone's
+/// shape a little and not its size. Where an edge runs out at the rim of
+/// the region it ends on the rim and not on a corner of the grid, and
+/// the two stones may still differ there by a sliver.
+///
+/// Two other ways were tried. Fitting each stone to the bricks of those
+/// laid before it, in turn, asked the fitter to follow another fit's
+/// staircase, and it smoothed across it by design (a corner costs it
+/// something), overlapped the laid bricks, and whole pieces had to be
+/// left out: a floor with holes in it. Filling the seams afterwards
+/// cannot work, since a seam between two sloped edges that do not match
+/// is a sliver no brick fills.
 ///
 /// The stones are fitted on `opts.threads`, and laid on one. A stone's
 /// first fit is of the stone as it is and depends on no other stone, and
@@ -294,12 +374,14 @@ pub fn lay_stones(region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Stones, axi
         })
     };
     let stones = stones(region, min, max, settings);
+    let together = settings.gap.max(LEAST_GAP) <= 0.0;
     // the cells a stone is fitted over, if any of them are in the box
     let room = |stone: &Stone| {
         // No place is further from the nearest stone's point than the
         // points are kept apart, or a dart would have landed there: so a
         // stone reaches no further than that from its own.
-        let reach = size * 0.9 + 1.0;
+        // (and a cell more with no gap, where a corner may be moved outwards to the grid)
+        let reach = size * 0.9 + 1.0 + if together { 1.0 } else { 0.0 };
         let (lo, hi) = (stone.at - DVec2::splat(reach), stone.at + DVec2::splat(reach));
         let (from, to) = ([(lo.x.floor() as i32).max(min[0]), (lo.y.floor() as i32).max(min[1])], [(hi.x.ceil() as i32).min(max[0]), (hi.y.ceil() as i32).min(max[1])]);
         (to[0] > from[0] && to[1] > from[1]).then_some((from, to))
@@ -312,6 +394,61 @@ pub fn lay_stones(region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Stones, axi
     // worth a thread of its own from 6 cells across, and four of the
     // smallest are (see `par::Threads::map_ranges`).
     let stones_a_thread = (36.0 / (size * size)).ceil().max(1.0) as usize;
+    if together {
+        // Each stone to its outline of grid corners, on its own thread
+        // like any other stone's first fit; then laid in their order.
+        let outlines: Vec<Option<crate::sdf::Fill>> = stones.iter().map(|stone| room(stone).and_then(|(from, to)| stone.outline(from, to))).collect();
+        let fits = opts.threads.map(stones.len(), stones_a_thread, |n| outlines[n].as_ref().zip(room(&stones[n])).map(|(outline, (from, to))| fit_planar(&|x, y| outline.eval(DVec2::new(x, y)).max(region(DVec2::new(x, y))), from, to, &alone)));
+        for (nth, fit) in fits.into_iter().enumerate() {
+            let Some(fit) = fit else { continue };
+            whole.solid += fit.solid;
+            whole.error += fit.error;
+            // Two outlines share an edge and no ground, so no piece should
+            // meet one laid. One does where an edge runs out at the rim
+            // (see above). Left out whole, such a piece was a hole the
+            // size of a brick in the rim, so it is laid as whatever of
+            // its cells it fills entirely and nothing laid has in its
+            // box, in rows: the hole is then the sliver that was amiss.
+            let mut pieces: Vec<Piece> = Vec::new();
+            for piece in fit.pieces {
+                if !meets(&piece, &laid, &over) {
+                    pieces.push(piece);
+                    continue;
+                }
+                for y in piece.y..piece.y + piece.h {
+                    let mut row: Option<Piece> = None;
+                    for x in piece.x..piece.x + piece.w {
+                        let within = |dx: f64, dy: f64| in_piece(piece.mask, (x as f64 + dx - piece.x as f64) / piece.w as f64, (y as f64 + dy - piece.y as f64) / piece.h as f64);
+                        let free = !over.contains_key(&(x, y)) && [(0.01, 0.01), (0.99, 0.01), (0.01, 0.99), (0.99, 0.99)].iter().all(|(dx, dy)| within(*dx, *dy));
+                        match (&mut row, free) {
+                            (Some(row), true) => row.w += 1,
+                            (None, true) => row = Some(Piece { mask: 15, x, y, w: 1, h: 1 }),
+                            (_, false) => pieces.extend(row.take()),
+                        }
+                    }
+                    pieces.extend(row);
+                }
+            }
+            for piece in pieces {
+                for cell in cells(&piece) {
+                    over.entry(cell).or_default().push(laid.len());
+                }
+                laid.push(piece);
+                let mask = (0..8u8).fold(0u8, |m, c| m | (piece.mask >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
+                let mut at = 0;
+                while at < depth {
+                    let run = (depth - at).min(opts.max_ext.max(1));
+                    let (mut min, mut ext) = ([0; 3], [0; 3]);
+                    (min[ua], min[va], min[axis]) = (piece.x, piece.y, w0 + at);
+                    (ext[ua], ext[va], ext[axis]) = (piece.w, piece.h, run);
+                    bricks.push(CellBrick { mask, min, ext });
+                    shades.push((nth % 8) as u8);
+                    at += run;
+                }
+            }
+        }
+        return whole;
+    }
     let first = opts.threads.map(stones.len(), stones_a_thread, |n| room(&stones[n]).map(|(from, to)| fit_planar(&|x, y| stones[n].eval(DVec2::new(x, y), region), from, to, &alone)));
     // (each stone has a number, for its bricks to be coloured alike by: see `colour_of`)
     for (nth, (mut stone, first)) in stones.into_iter().zip(first).enumerate() {
@@ -360,8 +497,13 @@ pub struct Mosaic {
     /// are: 2 is the usual, 1 half that, 4 twice it (medallions and the
     /// rug take no notice of it)
     pub size: i32,
-    /// whether the top cell of each brick slopes down to its edge, all
-    /// round it (bricks only: see [`Masonry`])
+    /// Whether the pattern has depth, cut one cell into the form's top
+    /// face. What that is depends on the style, and there is one kind to
+    /// each: for bricks, the top cell of each slopes down to its edge all
+    /// round it (see [`Masonry`]); for planks, a groove between one row of
+    /// boards and the next; for cobblestone, the mortar lies a cell below
+    /// the stones (see [`lay_tiles`] for both). Medallions and a rug have
+    /// none.
     pub bevel: bool,
     /// whether bricks or cobbles have a tile of mortar between them
     pub mortar: bool,
@@ -1591,7 +1733,26 @@ fn lay_tiles(fit: Fit, region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic
     // stops a cell short of the wall's face. (A wall one cell deep has no
     // room for it.)
     let wall = (style.drawn == Drawn::Bricks && settings.bevel && depth >= 2).then(|| Masonry::new(settings, false));
-    let low = depth - wall.is_some() as i32;
+    // The depth the other two styles have. Planks: the last row of tiles
+    // of every row of boards is one long ramp down to the next row, so
+    // that each row stands a cell proud of the one beside it along a
+    // straight shadow line, as lapped boards do. (It needs boards three
+    // tiles broad or more. A board two tiles broad is then half ramp, and
+    // a floor of them looked ribbed like corrugated iron, not boarded:
+    // at the usual size, 2, there are no grooves.) Cobblestone: the mortar's
+    // tiles have no top cell, so the stones stand a cell proud of it with
+    // upright sides. (It needs mortar to sink.)
+    //
+    // Both are whole cells and ramps as long as a row, which is what a
+    // bevel had to be cut down to before it looked clean (see
+    // [`Masonry`]). Cobbles domed, or bevelled like bricks, were not
+    // brought back: a cobble's sides are at any angle, and a slope along
+    // them is a spray of single wedges. A groove of two ramps facing each
+    // other between boards was tried and takes a board two tiles broad
+    // down to a ridge with no level top.
+    let grooved = style.drawn == Drawn::Planks && settings.bevel && depth >= 2 && settings.size >= 3;
+    let sunk = style.drawn == Drawn::Cobbles && settings.bevel && depth >= 2 && settings.mortar;
+    let low = depth - (wall.is_some() || grooved || sunk) as i32;
     let plain_colour = 0;
     let mut tiles = drawn(style.drawn, [across, down], &unbroken, settings, opts.threads);
     // (the pattern as it was drawn, for the sloped bricks of the edge to be coloured by)
@@ -1615,16 +1776,22 @@ fn lay_tiles(fit: Fit, region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic
     // the tiles cut into two triangles: a sloped brick each, a tile in size
     // (a piece's mask has a bit for each corner it fills: 1 top left, 2 top
     // right, 4 bottom left, 8 bottom right, rows running the way y does)
+    // (the top cell of whatever has one laid apart from the rest: see the bevelled tops and the grooves, below)
+    let mut tops: Vec<(CellBrick, u8)> = Vec::new();
     for (k, tile) in tiles.iter().enumerate().filter(|(_, tile)| tile.contains(&ON_CUT)) {
         let (x, y) = (from[0] + (first[0] + (k % across) as i32) * wide, from[1] + (first[1] + (k / across) as i32) * tall);
-        if tile[1] == ON_CUT {
-            // cut from bottom left to top right
-            push(0b0111, x, y, wide, tall, tile[0]);
-            push(0b1110, x, y, wide, tall, tile[3]);
-        } else {
-            // cut from top left to bottom right
-            push(0b1101, x, y, wide, tall, tile[2]);
-            push(0b1011, x, y, wide, tall, tile[1]);
+        // cut from bottom left to top right, or from top left to bottom right
+        let halves = if tile[1] == ON_CUT { [(0b0111, tile[0]), (0b1110, tile[3])] } else { [(0b1101, tile[2]), (0b1011, tile[1])] };
+        for (mask4, shade) in halves {
+            push(mask4, x, y, wide, tall, shade);
+            // (sunk mortar: the half of the tile that is stone keeps its top cell, the same half tile one cell deep)
+            if sunk && shade != 0 {
+                let mask = (0..8u8).fold(0u8, |m, c| m | (mask4 >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
+                let (mut min, mut ext) = ([0; 3], [1; 3]);
+                (min[ua], min[va], min[axis]) = (x, y, w0 + low);
+                (ext[ua], ext[va]) = (wide, tall);
+                tops.push((CellBrick { mask, min, ext }, shade));
+            }
         }
     }
     // the whole cells of every other tile, each with its tile's colour
@@ -1669,7 +1836,6 @@ fn lay_tiles(fit: Fit, region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic
     // that fitter being made for one large one.) They are laid a cell at
     // a time and then joined, so that a brick's top is nine bricks: a
     // sloped one the length of each side, four corners and a block.
-    let mut tops: Vec<(CellBrick, u8)> = Vec::new();
     if let Some(wall) = &wall {
         // (a cell's place in the pattern: tiles are counted from the first, and a tile is a cell)
         let place = |x: f64, y: f64| DVec2::new(x - (from[0] + first[0] * wide) as f64, y - (from[1] + first[1] * tall) as f64);
@@ -1689,6 +1855,28 @@ fn lay_tiles(fit: Fit, region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic
         });
         for (&(y, x, colour), mask) in whole.iter().zip(shaped) {
             let Some(mask) = mask else { continue };
+            let (mut min, mut ext) = ([0; 3], [1; 3]);
+            (min[ua], min[va], min[axis]) = (x, y, w0 + low);
+            ext[axis] = 1;
+            tops.push((CellBrick { mask, min, ext }, colour));
+        }
+    }
+    if grooved || sunk {
+        let broad = settings.size.clamp(1, 16);
+        for &(y, x, colour) in &whole {
+            // (a corner is bit `across | down << 1 | up << 2`, as for the bevelled tops)
+            let corners: u8 = if sunk {
+                if colour == 0 {
+                    continue;
+                }
+                crate::shapes::CUBE
+            } else if ((y - from[1]).div_euclid(tall) - first[1]).rem_euclid(broad) == broad - 1 {
+                // the four below, and above them the two on the side of the row's own boards
+                0b0011_1111
+            } else {
+                crate::shapes::CUBE
+            };
+            let mask = (0..8u8).fold(0u8, |m, c| m | (corners >> ((c >> ua & 1) | (c >> va & 1) << 1 | (c >> axis & 1) << 2) & 1) << c);
             let (mut min, mut ext) = ([0; 3], [1; 3]);
             (min[ua], min[va], min[axis]) = (x, y, w0 + low);
             ext[axis] = 1;
@@ -2190,8 +2378,8 @@ mod tests {
         };
         use crate::shapes::Kind;
         let kind = |b: &CellBrick| crate::shapes::shape_info(b.mask).expect("a top that is no shape of brick").kind;
-        // with no bevel, and for cobbles and for a wall one cell deep whatever is asked, every brick is the wall's whole depth
-        for (name, deep, bevel) in [("bricks", 3, false), ("cobblestone", 3, true), ("bricks", 1, true)] {
+        // with no bevel, and for a wall one cell deep whatever is asked, every brick is the wall's whole depth
+        for (name, deep, bevel) in [("bricks", 3, false), ("cobblestone", 3, false), ("bricks", 1, true), ("cobblestone", 1, true), ("planks", 3, false)] {
             assert!(lay(name, deep, bevel, [60, 60]).0.iter().all(|b| b.min[2] == 0 && b.ext[2] == deep), "{name}, {deep} deep, bevel {bevel}: a brick stops short of the wall's face");
         }
         for uneven in [[0, 0], [100, 100]] {
@@ -2216,6 +2404,108 @@ mod tests {
             for (n, a) in bricks.iter().enumerate() {
                 assert!(bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
             }
+        }
+    }
+
+    #[test]
+    fn planks_are_grooved_and_cobblestones_mortar_sunk_with_long_ramps_and_whole_cells_only() {
+        // a floor 60 by 40 and 3 deep
+        let floor = |p: DVec2| (p.x.abs() - 30.0).max(p.y.abs() - 20.0);
+        let lay = |name: &str, size: i32, bevel: bool, mortar: bool| {
+            let style = STYLES.iter().position(|s| s.name == name).unwrap();
+            let (mut bricks, mut shades) = (Vec::new(), Vec::new());
+            lay_mosaic(&floor, &Mosaic { style, size, bevel, border: 0, seed: 3, mortar, stagger: 50, upright: false, uneven: [60, 60] }, 2, [-30, -20], [30, 20], 0, 3, &Opts::default(), &mut bricks, &mut shades);
+            (bricks, shades)
+        };
+        // (no two bricks share room, but the two halves of a tile cut in two, which share its box and fill half each)
+        let apart = |bricks: &[CellBrick]| {
+            for (n, a) in bricks.iter().enumerate() {
+                assert!(bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k]) || (a.min == b.min && a.ext == b.ext && matches!(a.mask & b.mask & 0x0f, 0b0110 | 0b1001))), "two bricks share room");
+            }
+        };
+        // Planks four tiles broad: under the top cell the floor is as it
+        // was, and the top cell is level for three rows of tiles and one
+        // ramp for the fourth, all the ramps sloping the same way.
+        let (bricks, _) = lay("planks", 4, true, true);
+        assert!(bricks.iter().all(|b| (b.min[2] == 0 && b.ext[2] == 2) || (b.min[2] == 2 && b.ext[2] == 1)));
+        let ramps: Vec<&CellBrick> = bricks.iter().filter(|b| b.mask != crate::shapes::CUBE).collect();
+        assert!(!ramps.is_empty() && ramps.iter().all(|b| b.min[2] == 2 && b.mask == ramps[0].mask && crate::shapes::shape_info(b.mask).unwrap().kind == crate::shapes::Kind::Ramp));
+        // a ramp is one tile across and as long as its board (but for the offcut a row begins with and the one the floor's edge leaves), and its row is every fourth
+        assert!(ramps.iter().all(|b| b.ext[1] == 1) && ramps.iter().filter(|b| b.ext[0] >= 16).count() * 2 > ramps.len(), "ramps are not as long as boards");
+        let rows: HashSet<i32> = ramps.iter().map(|b| b.min[1]).collect();
+        assert_eq!(rows.len(), 10, "ramps in rows {rows:?}");
+        assert!(rows.iter().all(|row| (row - rows.iter().min().unwrap()) % 4 == 0));
+        // (40 rows of tiles 60 long: 10 of ramps, 30 level)
+        assert_eq!(bricks.iter().filter(|b| b.min[2] == 2).map(|b| b.volume()).sum::<f64>(), 60.0 * 10.0 * 0.5 + 60.0 * 30.0);
+        apart(&bricks);
+        // at the usual size a board is two tiles broad and is left level: half of it would be ramp
+        assert!(lay("planks", 2, true, true).0.iter().all(|b| b.mask == crate::shapes::CUBE && b.ext[2] == 3));
+        // Cobblestone: no brick sloped across the floor's face (every one
+        // is the same from its foot to its top: a block, or the half of
+        // a tile a stone's slanting edge cuts), the stones the floor's
+        // whole depth between them and their tops, and the mortar a
+        // cell short of the face.
+        let (bricks, shades) = lay("cobblestone", 2, true, true);
+        assert!(bricks.iter().all(|b| b.mask & 0x0f == b.mask >> 4));
+        assert!(bricks.iter().zip(&shades).all(|(b, shade)| if *shade == 0 { b.min[2] == 0 && b.ext[2] == 2 } else { (b.min[2] == 0 && b.ext[2] == 2) || (b.min[2] == 2 && b.ext[2] == 1) }), "mortar reaches the face");
+        let (plain, plain_shades) = lay("cobblestone", 2, false, true);
+        let cells = |bricks: &[CellBrick], shades: &[u8], mortar: bool| bricks.iter().zip(shades).filter(|(_, shade)| (**shade == 0) == mortar).map(|(b, _)| b.volume()).sum::<f64>();
+        // (the stones are what they were, and the mortar has lost its top cell: a third of it)
+        assert_eq!(cells(&bricks, &shades, false), cells(&plain, &plain_shades, false));
+        assert_eq!(cells(&bricks, &shades, true) * 3.0, cells(&plain, &plain_shades, true) * 2.0);
+        apart(&bricks);
+        // with no mortar there is nothing to sink
+        assert!(lay("cobblestone", 2, true, false).0.iter().all(|b| b.ext[2] == 3));
+    }
+
+    #[test]
+    fn stones_with_no_gap_meet_with_no_seam_and_no_overlap() {
+        // discs and a band, stones small and large, even and uneven
+        let disc = |p: DVec2| p.length() - 40.0;
+        for (name, region, size, uneven, seed) in [("a disc", &disc as &(dyn Fn(DVec2) -> f64 + Sync), 8.0, 0.5, 1), ("a disc of small stones", &disc, 4.0, 1.0, 8), ("a disc of large even stones", &disc, 14.0, 0.0, 3), ("a band", &band, 6.0, 0.6, 5)] {
+            let (mut bricks, mut shades) = (Vec::new(), Vec::new());
+            lay_stones(region, &Stones { size, gap: 0.0, uneven, seed }, 2, [-62, -42], [62, 42], 0, 1, &Opts::default(), &mut bricks, &mut shades);
+            // every place inside the region, four to a cell each way: how many bricks fill it
+            let mut filled: HashMap<(i32, i32), u8> = HashMap::new();
+            for brick in &bricks {
+                let info = crate::shapes::shape_info(brick.mask).unwrap();
+                for j in 0..brick.ext[1] * 4 {
+                    for i in 0..brick.ext[0] * 4 {
+                        if crate::shapes::inside_shape(info, (i as f64 + 0.37) / (brick.ext[0] * 4) as f64, (j as f64 + 0.61) / (brick.ext[1] * 4) as f64, 0.5) {
+                            *filled.entry((brick.min[0] * 4 + i, brick.min[1] * 4 + j)).or_default() += 1;
+                        }
+                    }
+                }
+            }
+            // (counted apart: the places more than a stone and a half in from the rim, and all those a cell and a half in)
+            let (mut places, mut bare, mut twice) = ([0; 2], [0; 2], [0; 2]);
+            for j in -62 * 4..62 * 4 {
+                for i in -62 * 4..62 * 4 {
+                    let inside = -region(DVec2::new((i as f64 + 0.37) / 4.0, (j as f64 + 0.61) / 4.0));
+                    for (which, least) in [1.5 * size, 1.5].into_iter().enumerate() {
+                        if inside > least {
+                            places[which] += 1;
+                            bare[which] += !filled.contains_key(&(i, j)) as usize;
+                            twice[which] += (filled.get(&(i, j)).copied().unwrap_or(0) > 1) as usize;
+                        }
+                    }
+                }
+            }
+            // Away from the rim the stones meet: nothing filled twice, and
+            // under a place in a hundred bare (0.1% to 0.6% over these
+            // four). What is left is slivers: where corners moved to the
+            // grid have folded a small stone over, and along an edge that
+            // is nearly level (13 cells along for 1 across), which is
+            // still fitted as a slope from one side and a step from the
+            // other now and then.
+            let most = 100;
+            assert!(bare[0] * most <= places[0] && twice[0] * 10_000 <= places[0], "{name}: of {} places away from the rim, {} are bare and {} filled twice", places[0], bare[0], twice[0]);
+            // Up to the rim, where an edge ends on the rim and not on a
+            // corner of the grid, slivers are left: 0.4% to 4% of the
+            // floor, where fitted each to its own line it was 5% to 38%.
+            assert!(bare[1] * 100 < places[1] * 5 && twice[1] * 2000 <= places[1], "{name}: of {} places, {} are bare and {} filled twice", places[1], bare[1], twice[1]);
+            // and they are separate stones still, each with sloped edges
+            assert!(shades.iter().collect::<HashSet<_>>().len() == 8 && bricks.iter().filter(|b| b.mask != crate::shapes::CUBE).count() * 5 > bricks.len());
         }
     }
 
