@@ -264,6 +264,21 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[92, 124, 60], [62, 116, 60], [42, 88, 48], [100, 146, 72], [84, 110, 56], [250, 128, 100], [236, 96, 84], [248, 214, 100]],
             &[[92, 124, 60], [62, 116, 60], [42, 88, 48], [100, 146, 72], [84, 110, 56], [250, 220, 222], [244, 190, 202], [246, 214, 110]],
         ],
+        // A single flower head's colours are for its parts, in the order
+        // of `brickloft_core::tree::bloom`'s numbers: stem, sepals, the
+        // throat of a petal, its lip, the swelling under the bloom, the
+        // outer petals, the inner petals, and the stamens or disc. The
+        // four tones of petal run from dark in the throat to light on the
+        // lip in every set but the last, so that each petal's edge shows
+        // against the one behind it.
+        // red; pink; white; yellow; cream edged with red
+        "flower" => &[
+            &[[74, 110, 54], [70, 124, 60], [92, 6, 22], [228, 56, 70], [84, 118, 56], [178, 18, 38], [140, 10, 30], [244, 200, 80]],
+            &[[74, 110, 54], [70, 124, 60], [196, 84, 124], [250, 200, 214], [84, 118, 56], [240, 150, 178], [222, 112, 150], [246, 210, 90]],
+            &[[74, 110, 54], [70, 124, 60], [226, 214, 190], [255, 253, 248], [84, 118, 56], [246, 242, 232], [238, 228, 206], [244, 200, 70]],
+            &[[74, 110, 54], [70, 124, 60], [214, 150, 30], [252, 232, 130], [84, 118, 56], [246, 208, 60], [236, 180, 40], [176, 104, 30]],
+            &[[74, 110, 54], [70, 124, 60], [240, 214, 150], [206, 36, 60], [84, 118, 56], [250, 236, 200], [246, 226, 170], [244, 200, 80]],
+        ],
         // a yellow sunflower; a red-bronze one; a pale lemon one
         "sunflower" => &[
             &[[92, 132, 56], [70, 124, 52], [48, 96, 44], [112, 156, 66], [84, 118, 50], [246, 196, 30], [150, 100, 40], [70, 46, 28]],
@@ -345,6 +360,38 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[56, 58, 62], [110, 114, 120], [62, 48, 38], [104, 82, 58], [84, 134, 80], [54, 98, 60], [240, 236, 220], [230, 180, 60]],
             &[[168, 168, 164], [60, 62, 66], [62, 48, 38], [104, 82, 58], [92, 142, 76], [60, 104, 56], [236, 90, 60], [250, 214, 90]],
         ],
+        // A picture's colours: its frame, the liner inside a moulded
+        // frame, its mount, and then the picture's own, which each
+        // subject numbers its own way (`brickloft_core::furniture`'s
+        // `pictures`). A sunset: eight bands of sky from its top down to
+        // the horizon, the sun, its glow, water dark and light, and the
+        // far hills. A landscape: four bands of sky, cloud, four ranges of
+        // hills from the furthest, the firs and their trunks, water, snow.
+        // An abstract: its lines, six hues and the pale ground. A portrait:
+        // two of background, four skins and their four shades, five colours
+        // of hair, the white of an eye, a pupil, a mouth, four colours of
+        // clothes, a collar, glasses, a blush and a hat.
+        // a warm sunset in a dark frame with a gilt liner; a cool dawn in a pale one
+        "sunset painting" => &[
+            &[[70, 48, 36], [200, 164, 84], [236, 228, 206], [44, 36, 84], [84, 48, 110], [140, 60, 112], [196, 78, 96], [232, 110, 76], [244, 150, 70], [250, 190, 90], [252, 224, 140], [255, 244, 200], [255, 214, 120], [60, 50, 90], [150, 90, 100], [30, 24, 40]],
+            &[[230, 228, 222], [180, 184, 190], [244, 244, 240], [40, 60, 110], [60, 90, 140], [90, 124, 170], [130, 160, 196], [176, 190, 212], [214, 206, 214], [240, 214, 204], [250, 226, 200], [255, 250, 230], [252, 234, 206], [50, 80, 120], [150, 180, 206], [36, 48, 70]],
+        ],
+        // summer; autumn; winter
+        "landscape painting" => &[
+            &[[96, 66, 44], [204, 170, 90], [238, 232, 214], [90, 150, 214], [126, 176, 226], [166, 202, 236], [204, 226, 244], [250, 250, 248], [140, 170, 180], [110, 160, 120], [80, 140, 80], [56, 112, 60], [34, 84, 50], [84, 60, 40], [80, 140, 200], [244, 246, 250]],
+            &[[60, 44, 36], [190, 150, 80], [236, 228, 210], [120, 150, 190], [150, 174, 204], [186, 198, 214], [220, 220, 220], [246, 242, 236], [150, 150, 160], [176, 140, 90], [190, 110, 50], [150, 80, 40], [200, 70, 40], [70, 50, 36], [90, 120, 160], [240, 240, 244]],
+            &[[230, 230, 228], [150, 160, 170], [250, 250, 250], [150, 170, 200], [176, 192, 214], [204, 214, 228], [228, 232, 238], [250, 250, 252], [190, 200, 214], [214, 222, 232], [232, 236, 242], [246, 248, 250], [50, 80, 70], [70, 56, 46], [150, 180, 204], [255, 255, 255]],
+        ],
+        // warm hues on cream in a black frame; cool hues in a white one
+        "abstract painting" => &[
+            &[[30, 30, 34], [60, 60, 66], [244, 242, 236], [36, 34, 40], [200, 60, 50], [236, 130, 50], [244, 190, 70], [150, 60, 80], [90, 50, 90], [250, 230, 170], [240, 236, 226]],
+            &[[240, 240, 238], [200, 200, 204], [250, 250, 250], [30, 36, 50], [40, 90, 160], [60, 150, 190], [120, 200, 200], [60, 70, 130], [90, 60, 140], [220, 236, 230], [244, 244, 240]],
+        ],
+        // on slate blue in a wooden frame; on rose in a pale one
+        "portrait" => &[
+            &[[84, 58, 40], [204, 170, 90], [238, 232, 214], [120, 150, 170], [96, 124, 146], [250, 222, 196], [230, 184, 150], [190, 134, 96], [122, 80, 56], [232, 196, 170], [206, 156, 124], [160, 106, 74], [96, 60, 42], [34, 28, 26], [96, 62, 40], [226, 190, 110], [178, 74, 40], [190, 190, 194], [250, 250, 248], [40, 36, 40], [176, 60, 66], [60, 90, 150], [160, 60, 70], [70, 120, 90], [230, 226, 216], [246, 244, 238], [30, 30, 34], [240, 170, 160], [60, 60, 70]],
+            &[[236, 232, 224], [206, 170, 88], [250, 248, 240], [214, 170, 170], [196, 146, 150], [250, 222, 196], [230, 184, 150], [190, 134, 96], [122, 80, 56], [232, 196, 170], [206, 156, 124], [160, 106, 74], [96, 60, 42], [34, 28, 26], [96, 62, 40], [226, 190, 110], [178, 74, 40], [190, 190, 194], [250, 250, 248], [40, 36, 40], [176, 60, 66], [60, 90, 150], [160, 60, 70], [70, 120, 90], [230, 226, 216], [246, 244, 238], [30, 30, 34], [240, 170, 160], [60, 60, 70]],
+        ],
         // A bookcase's colours are for its parts, in the order of
         // `brickloft_core::furniture`'s numbers: the wood of the carcass,
         // a second tone of it for the back panel, and six the books and
@@ -401,8 +448,8 @@ pub fn maze_palettes(texture: &str) -> Vec<Vec<[u8; 3]>> {
     palettes(texture)
         .iter()
         .map(|set| {
-            let mut colours: Vec<[u8; 3]> = (0..MOST_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
-            colours[MOST_COLOURS - 1] = WAY;
+            let mut colours: Vec<[u8; 3]> = (0..USUAL_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
+            colours[USUAL_COLOURS - 1] = WAY;
             colours
         })
         .collect()
@@ -444,8 +491,20 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "petunia" => &["Purple", "Pink", "White", "Red", "Blue and white"],
         "reeds" => &["Summer", "Autumn straw", "Purple plumes"],
         "sunflower" => &["Yellow", "Red-bronze", "Lemon"],
+        "flower" => &["Red", "Pink", "White", "Yellow", "Cream edged with red"],
         "tulip" => &["Red", "Yellow", "Pink", "Purple", "White", "Orange flamed"],
         _ => &["Summer", "Early autumn", "Late autumn", "Spring"],
+    }
+}
+
+/// Which of the single flower's sets of colours a flower starts in: a red
+/// rose, a white water lily and a yellow gerbera.
+pub fn flower_set(flower: brickloft_core::tree::Flower) -> usize {
+    use brickloft_core::tree::Flower;
+    match flower {
+        Flower::Rose => 0,
+        Flower::WaterLily => 2,
+        Flower::Gerbera => 3,
     }
 }
 
@@ -458,6 +517,10 @@ pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
         "classical pots" => &["Terracotta and white", "Blue and white glaze"],
         "rustic pots" => &["Weathered wood and orange", "Stone and mauve"],
         "industrial pots" => &["Dark steel and cream", "Concrete and orange"],
+        "sunset painting" => &["Warm sunset", "Cool dawn"],
+        "landscape painting" => &["Summer", "Autumn", "Winter"],
+        "abstract painting" => &["Warm hues", "Cool hues"],
+        "portrait" => &["On slate blue", "On rose"],
         "modern furniture" => &["Pale oak, white and grey", "Walnut and teal", "White and black"],
         "farmhouse furniture" => &["Pine and cream", "Painted blue", "Sage and oak"],
         "classical furniture" => &["Mahogany and green", "Walnut and burgundy", "Ivory and gilt"],
@@ -472,9 +535,22 @@ pub fn palette(style: &str) -> &'static [[u8; 3]] {
     palettes(style)[0]
 }
 
-/// The most colours a paint may have: one for each number a pattern may
-/// give a brick.
-pub const MOST_COLOURS: usize = 8;
+/// The most colours a paint may have: one for each number a form may
+/// give a brick (`brickloft_core::spec::Built::shades`).
+///
+/// It was eight, which is as many as a rug has features, and every form
+/// since was made to fit: a dressed pine's tinsel, star and flames share
+/// one gold, and a model with a palette of its own (a mesh, a program of
+/// rules) had its colours merged down to eight. Nothing but this number
+/// held it there: a brick's colour number is a byte, and a paint with
+/// more colours than a form has numbers leaves the rest unused (see
+/// `brickloft_core::pattern::colour_of`). Thirty-two is as many as fit in
+/// the panel in a few rows and are still told apart by eye.
+pub const MOST_COLOURS: usize = 32;
+
+/// How many colour numbers the forms made before that limit was raised
+/// use: the sets of colours written for them have one colour for each.
+pub const USUAL_COLOURS: usize = 8;
 
 impl Paint {
     /// The colour of a brick whose pattern gives it colour number `shade`

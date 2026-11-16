@@ -207,7 +207,7 @@ impl Set {
                 }
             }
             // (a plant in a pot reads its settings itself: see `pots` and `trellis`)
-            Kind::Bookcase | Kind::Chandelier | Kind::Candlestick | Kind::Potted | Kind::Basket | Kind::WindowBox | Kind::Trellis => {}
+            Kind::Bookcase | Kind::Chandelier | Kind::Candlestick | Kind::Potted | Kind::Basket | Kind::WindowBox | Kind::Trellis | Kind::Painting | Kind::Portrait => {}
         }
         set
     }
@@ -290,6 +290,8 @@ pub fn settings(kind: Kind) -> &'static [Setting] {
         Kind::Basket => const { &[PLANT, WALKED] },
         Kind::WindowBox => const { &[PLANT, POT_HEIGHT, WALKED] },
         Kind::Trellis => const { &[choice(Field::Choice, "Lattice", &["The seed picks", "Square", "Diamond", "Arched"]), number("Microbricks between slats", 8), choice(Field::Second, "Climber", &["The seed picks", "Ivy", "Clematis", "Climbing rose", "Wisteria", "A bare trellis"]), Setting { field: Field::Cover, label: "Coverage", choices: &[], most: 100 }, WALKED] },
+        Kind::Painting => const { &[choice(Field::Choice, "Subject", &["The seed picks", "A sunset", "A landscape", "An abstract"]), tick(Field::Extra, "A mount inside the frame")] },
+        Kind::Portrait => const { &[choice(Field::Choice, "Wears", &["The seed picks", "Nothing", "Glasses", "A hat", "A beard"]), tick(Field::Extra, "A mount inside the frame")] },
         Kind::Bed => const { &[choice(Field::Choice, "Headboard", &[BY_STYLE, "Panel", "Slats", "Rails"]), choice(Field::Second, "Pillows", &["As its width has it", "One", "Two"]), tick(Field::Extra, "A footboard")] },
     }
 }

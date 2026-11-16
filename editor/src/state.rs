@@ -4315,7 +4315,7 @@ mod tests {
         assert!(!state.can_pull() && state.add_pull(DVec3::new(0.5, -5.0, 30.0)).is_none() && state.tunable(None).is_empty());
         // every set of colours has a colour for each of its eight numbers, and a name
         let sets = crate::paint::palettes("bookcase");
-        assert!(sets.len() == crate::paint::furniture_palette_names("bookcase").len() && sets.iter().all(|set| set.len() == crate::paint::MOST_COLOURS));
+        assert!(sets.len() == crate::paint::furniture_palette_names("bookcase").len() && sets.iter().all(|set| set.len() == crate::paint::USUAL_COLOURS));
         // put back to how it starts, it keeps its seed and the floor it stands on
         state.spec.furniture = Furniture { seed: 9, board: 5, books: 10, ..state.spec.furniture };
         state.spec.points[0].z += 20.0;

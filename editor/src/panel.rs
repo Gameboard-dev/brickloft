@@ -981,7 +981,7 @@ fn maze(ui: &mut Ui, state: &mut State, largest: f64) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers", "Cherry blossom tree"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers", "Cherry blossom tree", "Single flower"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -996,6 +996,29 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         state.usual_tree(kind);
     }
     let named = KINDS[kind as usize].1;
+    if kind == Kind::Flower {
+        // which flower, before its colours: a flower still in the colours the last one starts in takes those this one starts in
+        use brickloft_core::tree::FLOWERS;
+        let titled = |flower: brickloft_core::tree::Flower| ["Rose", "Water lily", "Gerbera"][flower as usize];
+        let was = state.spec.tree.bloom.flower;
+        let mut flower = was;
+        helped(ui, help("bloom_flower"), |ui| {
+            ComboBox::from_label("Flower").selected_text(titled(flower)).show_ui(ui, |ui| {
+                for (f, _) in FLOWERS {
+                    ui.selectable_value(&mut flower, f, titled(f));
+                }
+            })
+            .response
+        });
+        if flower != was {
+            state.spec.tree.bloom.flower = flower;
+            let sets = crate::paint::palettes(named);
+            if state.paint.mode == Mode::Pattern && state.paint.colours == sets[crate::paint::flower_set(was)] {
+                state.paint.colours = sets[crate::paint::flower_set(flower)].to_vec();
+                state.scene += 1;
+            }
+        }
+    }
     // which of the kind's sets of colours, if it is in one of them
     let (sets, names) = (crate::paint::palettes(named), crate::paint::tree_palette_names(named));
     let now = sets.iter().position(|set| state.paint.mode == Mode::Pattern && state.paint.colours == *set);
@@ -1028,7 +1051,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     let spread = match kind {
         Kind::Palm => "Frond length",
         Kind::Sunflower => "Half the head's width",
-        Kind::Peony => "Half the bloom's width",
+        Kind::Peony | Kind::Flower => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
         Kind::Grass => "Reach to each side",
         Kind::DatePalm => "Frond length",
@@ -1093,6 +1116,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Bed => ("Leaves", "Flowers", "Unevenness"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
+        Kind::Flower => ("Petals", "", "How open it is"),
     };
     let (least, most) = Tree::count_range(kind);
     // (grass has nothing to count)
@@ -1146,6 +1170,20 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         }
         Kind::Yucca => {
             helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+        }
+        Kind::Flower => {
+            use brickloft_core::tree::Flower;
+            let bloom = &mut s.tree.bloom;
+            // (grown into the bloom itself: the form's quarter turns cannot lay it at a slant, and turning its grid turns the grid's other forms)
+            helped(ui, help("bloom_tilt"), |ui| ui.add(Slider::new(&mut bloom.tilt, 0..=brickloft_core::tree::MOST_TILT).suffix("°").text("Tilt")));
+            helped(ui, help("bloom_turn"), |ui| ui.add(Slider::new(&mut bloom.turn, 0..=359).suffix("°").text("Turn")));
+            let cup = match bloom.flower {
+                Flower::Rose | Flower::WaterLily => "Sepals under it",
+                Flower::Gerbera => "Green bracts under it",
+            };
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, cup));
+            helped(ui, help("bloom_stem"), |ui| ui.checkbox(&mut bloom.stem, "A short length of stem"));
+            helped(ui, help("bloom_fallen"), |ui| ui.checkbox(&mut bloom.fallen, "Fallen petals beside it"));
         }
         Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass | Kind::Cypress | Kind::Daisy | Kind::Daffodil | Kind::Bed => {}
     }

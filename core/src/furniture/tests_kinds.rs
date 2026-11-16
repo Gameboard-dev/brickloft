@@ -64,7 +64,7 @@ fn no_two_bricks_of_any_piece_share_room_and_none_leaves_its_box() {
         for (n, i) in order.iter().enumerate() {
             let a = &model.bricks[*i];
             assert!((0..3).all(|k| a.ext[k] >= 1 && a.min[k] >= 0 && high(a)[k] <= size[k]), "{f:?} at {size:?}: {a:?} is outside the box");
-            assert!(shape_info(a.mask).is_some() && model.shades[*i] < 8, "{f:?} at {size:?}: {a:?} is no brick, or has no colour");
+            assert!(shape_info(a.mask).is_some() && model.shades[*i] < 32, "{f:?} at {size:?}: {a:?} is no brick, or has no colour");
             for j in order[n + 1..].iter().take_while(|j| model.bricks[**j].min[0] < high(a)[0]) {
                 let b = &model.bricks[*j];
                 assert!(!(0..3).all(|k| a.min[k] < high(b)[k] && b.min[k] < high(a)[k]), "{f:?} at {size:?}: {a:?} and {b:?} share room");
@@ -181,7 +181,7 @@ fn a_lamp_has_its_light_and_a_chandelier_one_to_a_candle() {
     for (f, size) in pieces() {
         let model = made(&f, size);
         // (a plant in a pot has other numbers: its fifth is a green)
-        if f.planted() {
+        if f.planted() || f.pictured() {
             assert!(model.lamps.is_empty());
             continue;
         }
@@ -298,6 +298,84 @@ fn a_plant_stands_in_its_pot_and_keeps_out_of_it_and_a_trellis_shows_through_its
     let flowers = |second: i32| trellis(90, 1, second).shades.iter().filter(|s| **s >= FLOWER).collect::<HashSet<_>>().len();
     assert_eq!([flowers(1), flowers(2), flowers(3), flowers(5)], [0, 1, 2, 0]);
     assert_eq!(trellis(90, 1, 5).bricks, trellis(0, 1, 1).bricks);
+}
+
+/// The picture of a framed piece as its pixels: the colour number of each cell of its canvas, row by row from the foot, and where the canvas begins.
+fn pixels(model: &Model, [w, d, h]: [i32; 3]) -> Vec<Vec<u8>> {
+    let mut grid = vec![vec![255u8; w as usize]; h as usize];
+    for (b, shade) in model.bricks.iter().zip(&model.shades).filter(|(b, s)| **s >= pictures::MOUNT && b.min[1] == d - 1 && b.ext[1] == 1) {
+        for x in b.min[0]..high(b)[0] {
+            for z in b.min[2]..high(b)[2] {
+                assert_eq!(grid[z as usize][x as usize], 255, "two bricks of the picture at {x}, {z}");
+                grid[z as usize][x as usize] = *shade;
+            }
+        }
+    }
+    // (cut down to the canvas: the rows and columns that have any of it)
+    grid.into_iter().filter(|row| row.iter().any(|s| *s != 255)).map(|row| row.into_iter().filter(|s| *s != 255).collect()).collect()
+}
+
+#[test]
+fn a_painting_has_its_subject_and_a_portrait_a_face() {
+    let size = [48, 3, 36];
+    let painting = |seed: u64, choice: i32, extra: bool, style: Style| made(&Furniture { seed, choice, extra, style, ..Furniture::of(Kind::Painting) }, size);
+    for seed in 0..40 {
+        // a sunset: sky at its top and water at its foot in every column, a sun, and a horizon that is one level line across the picture
+        let sunset = pixels(&painting(seed, 1, false, Style::Modern), size);
+        let (wide, tall) = (sunset[0].len(), sunset.len());
+        assert!(wide == 46 && tall == 34 && sunset.iter().all(|row| row.len() == wide), "seed {seed}: {wide} by {tall}");
+        assert!(sunset[tall - 1].iter().all(|s| (3..=10).contains(s)) && sunset[0].iter().all(|s| (12..=14).contains(s)), "seed {seed}");
+        let horizon = (0..tall).find(|j| sunset[*j].iter().any(|s| !(12..=14).contains(s))).unwrap();
+        assert!((8..20).contains(&horizon) && sunset[horizon..].iter().all(|row| row.iter().all(|s| *s != 13 && *s != 14)), "seed {seed}: the horizon at {horizon}");
+        assert!(sunset.iter().flatten().filter(|s| **s == 11).count() >= 12 && sunset[horizon].contains(&11), "seed {seed}: no sun on the horizon");
+        // a landscape: sky at its top, land or water at its foot, hills of all four ranges, and firs standing on the land
+        let land = pixels(&painting(seed, 2, false, Style::Modern), size);
+        assert!(land[tall - 1].iter().all(|s| (3..=7).contains(s)) && land[0].iter().all(|s| (8..=14).contains(s)), "seed {seed}");
+        assert!((8..=11).all(|range| land.iter().flatten().any(|s| *s == range)) && land.iter().flatten().any(|s| *s == 12) && land.iter().flatten().any(|s| *s == 13), "seed {seed}");
+        // an abstract: its hues and its ground and nothing else, and no one colour all over it
+        let hues = pixels(&painting(seed, 3, false, Style::Modern), size);
+        let used: HashSet<u8> = hues.iter().flatten().copied().collect();
+        assert!(used.len() >= 3 && used.iter().all(|s| (3..=10).contains(s)), "seed {seed}: {used:?}");
+        // the same seed is the same picture, the next another, and a subject left to the seed is one of the three
+        assert_eq!(pixels(&painting(seed, 1, false, Style::Modern), size), sunset);
+        assert!(pixels(&painting(seed + 1, 1, false, Style::Modern), size) != sunset && land != sunset && hues != land, "seed {seed}");
+        let left = pixels(&painting(seed, 0, false, Style::Modern), size);
+        assert!(left == [&sunset, &land, &hues][subject(&Furniture { seed, ..Furniture::of(Kind::Painting) })][..], "seed {seed}");
+    }
+    assert_eq!((0..40).map(|seed| subject(&Furniture { seed, ..Furniture::of(Kind::Painting) })).collect::<HashSet<_>>().len(), 3);
+    // a mount is a border of its own colour all round the picture, which is smaller by it; and a classical frame has a sloped liner, in the liner's colour
+    let mounted = pixels(&painting(3, 1, true, Style::Modern), size);
+    assert!(mounted[0].iter().all(|s| *s == pictures::MOUNT) && mounted.iter().all(|row| row[0] == pictures::MOUNT && row[45] == pictures::MOUNT) && mounted[17][23] != pictures::MOUNT);
+    let grand = painting(3, 1, true, Style::Classical);
+    assert!(grand.bricks.iter().zip(&grand.shades).filter(|(b, s)| b.mask != CUBE && **s == pictures::LINER).count() == 8 && grand.shades.iter().filter(|s| **s == pictures::FRAME).count() == 4);
+    // few bricks: a sunset 46 by 34 is 1,564 pixels
+    assert!(painting(3, 1, false, Style::Modern).bricks.len() < 260, "{} bricks", painting(3, 1, false, Style::Modern).bricks.len());
+
+    // A portrait: two pupils on one row, as far to each side of the middle as each other; a mouth under them, about the middle; skin round all three; and the whole face its own mirror image. At its usual size and at half of it.
+    let mut sitters = HashSet::new();
+    for size in [[34, 3, 44], [20, 3, 26]] {
+        for seed in 0..60 {
+            for wears in [0, 2, 4] {
+                let face = pixels(&made(&Furniture { seed, choice: wears, extra: false, style: Style::Modern, ..Furniture::of(Kind::Portrait) }, size), size);
+                let wide = face[0].len();
+                let what = format!("seed {seed}, wearing {wears}, {wide} wide");
+                assert!(face.iter().all(|row| row.iter().rev().eq(row.iter()) || row.iter().any(|s| (13..=17).contains(s))), "{what}: not its own mirror image where it has no parting");
+                let pupils: Vec<(usize, usize)> = (0..face.len()).flat_map(|j| (0..wide).map(move |i| (i, j))).filter(|(i, j)| face[*j][*i] == 19).collect();
+                assert!(pupils.len() == 2 && pupils[0].1 == pupils[1].1 && pupils[0].0 + pupils[1].0 == wide - 1 && pupils[1].0 - pupils[0].0 >= 2, "{what}: pupils at {pupils:?}");
+                let lips: Vec<(usize, usize)> = (0..face.len()).flat_map(|j| (0..wide).map(move |i| (i, j))).filter(|(i, j)| face[*j][*i] == 20).collect();
+                assert!(lips.len() >= 2 && lips.iter().all(|(i, j)| *j < pupils[0].1 && *i > pupils[0].0.saturating_sub(2) && *i < pupils[1].0 + 2), "{what}: a mouth at {lips:?}");
+                // (the ends of the mouth are its highest cells: it smiles)
+                let ends = (lips.iter().map(|l| l.0).min().unwrap(), lips.iter().map(|l| l.1).max().unwrap());
+                assert!(lips.contains(&ends), "{what}: the mouth does not turn up: {lips:?}");
+                let skin = |s: u8| (5..=12).contains(&s);
+                assert!(skin(face[pupils[0].1][wide / 2]) || face[pupils[0].1][wide / 2] == 26, "{what}: no face between the eyes");
+                assert!(face[0].iter().any(|s| (21..=25).contains(s)) && face[face.len() - 1].iter().all(|s| *s == 3 || (13..=17).contains(s) || *s == 28), "{what}: no shoulders at the foot, or no ground at the top");
+                sitters.insert(face);
+            }
+        }
+    }
+    // (sixty seeds, three ways of dressing, two sizes: nearly every one a different sitter)
+    assert!(sitters.len() > 300, "only {} different sitters", sitters.len());
 }
 
 /// Prints how many bricks each kind is at its usual size, style by

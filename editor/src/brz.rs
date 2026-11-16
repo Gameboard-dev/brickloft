@@ -213,7 +213,8 @@ fn furniture_stuff(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_c
     use brickloft_core::furniture::{Kind, Model, LEAF, LIGHT, METAL};
     let snapped = spec.snapped();
     let lone = brickloft_core::spec::Spec { blend: None, ..spec.clone() };
-    let (false, Ok(built), Some(middle)) = (spec.furniture.kind == Kind::Bookcase, brickloft_core::spec::build(&lone), snapped.points.first()) else { return Box::new(|_| Stuff::Solid) };
+    // (nor a picture, whose numbers are its picture's colours)
+    let (false, Ok(built), Some(middle)) = (spec.furniture.kind == Kind::Bookcase || spec.furniture.pictured(), brickloft_core::spec::build(&lone), snapped.points.first()) else { return Box::new(|_| Stuff::Solid) };
     // (the same bricks in the same order, before they were turned: which of them carry a light)
     let lamps = Model::new(&snapped.furniture, brickloft_core::spec::cube_sides(&snapped, *middle), snapped.max_ext, snapped.wedges).map(|model| model.lamps).unwrap_or_default();
     let shine = spec.furniture.shine;

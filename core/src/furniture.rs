@@ -35,6 +35,7 @@ use std::sync::OnceLock;
 mod bed;
 mod lights;
 mod parts;
+mod pictures;
 mod pots;
 mod seating;
 mod storage;
@@ -42,6 +43,7 @@ mod style;
 mod tables;
 mod trellis;
 pub use lights::MOST_LIGHTS;
+pub use pictures::{subject, SUBJECTS};
 pub use pots::{FLOWER, FLOWER_TOO, LEAF, LEAF_DARK, PLANTS};
 pub use trellis::CLIMBERS;
 pub use style::{settings, Field, Set, Setting, Style, STYLES};
@@ -74,11 +76,13 @@ pub enum Kind {
     Basket,
     WindowBox,
     Trellis,
+    Painting,
+    Portrait,
 }
 
 /// Every kind, in the order of [`Kind`], with the name a save or another
 /// program calls it by.
-pub const KINDS: [(Kind, &str); 25] = [
+pub const KINDS: [(Kind, &str); 27] = [
     (Kind::Bookcase, "bookcase"),
     (Kind::Cupboard, "cupboard"),
     (Kind::Drawers, "drawers"),
@@ -104,17 +108,20 @@ pub const KINDS: [(Kind, &str); 25] = [
     (Kind::Basket, "basket"),
     (Kind::WindowBox, "windowbox"),
     (Kind::Trellis, "trellis"),
+    (Kind::Painting, "painting"),
+    (Kind::Portrait, "portrait"),
 ];
 
 /// The kinds in the groups a list of them is shown in, each kind with
 /// what it is called there.
-pub const GROUPS: [(&str, &[(Kind, &str)]); 6] = [
+pub const GROUPS: [(&str, &[(Kind, &str)]); 7] = [
     ("Storage", &[(Kind::Bookcase, "Bookcase"), (Kind::Cupboard, "Cupboard"), (Kind::Drawers, "Chest of drawers"), (Kind::Sideboard, "Sideboard"), (Kind::Kitchen, "Kitchen cabinet")]),
     ("Tables", &[(Kind::Dining, "Dining table"), (Kind::Coffee, "Coffee table"), (Kind::Side, "Side table"), (Kind::Desk, "Desk")]),
     ("Seating", &[(Kind::Chair, "Chair"), (Kind::Armchair, "Armchair"), (Kind::Stool, "Stool"), (Kind::Bench, "Bench"), (Kind::Sofa, "Sofa")]),
     ("Lights", &[(Kind::TableLamp, "Table lamp"), (Kind::FloorLamp, "Floor lamp"), (Kind::Pendant, "Pendant"), (Kind::Chandelier, "Chandelier"), (Kind::Sconce, "Wall sconce"), (Kind::Candlestick, "Candlestick")]),
     ("Beds", &[(Kind::Bed, "Bed")]),
     ("Plants in pots", &[(Kind::Potted, "Potted plant"), (Kind::Basket, "Hanging basket"), (Kind::WindowBox, "Window box"), (Kind::Trellis, "Trellis with a climber")]),
+    ("Pictures", &[(Kind::Painting, "Framed painting"), (Kind::Portrait, "Framed portrait")]),
 ];
 
 /// The colour numbers of every kind but the bookcase, whose numbers
@@ -224,7 +231,8 @@ impl Furniture {
     /// A kind as it starts out.
     pub fn of(kind: Kind) -> Furniture {
         // (what a kind has unless it is taken off: a side table's drawer, the drawers of a sideboard and of a kitchen's units)
-        let extra = matches!(kind, Kind::Side | Kind::Sideboard | Kind::Kitchen);
+        // (and a picture's mount)
+        let extra = matches!(kind, Kind::Side | Kind::Sideboard | Kind::Kitchen | Kind::Painting | Kind::Portrait);
         // (a trellis's `books` is how much of it its climber covers: a plant a few years old, with lattice still to climb)
         let books = if kind == Kind::Trellis { 60 } else { 85 };
         Furniture { kind, seed: 1, board: 2, shelves: 0, spacing: 11, bay: 34, plinth: 3, back: true, moulding: true, books, style: Style::Classical, count: 0, choice: 0, second: 0, extra, shine: true }
@@ -235,11 +243,19 @@ impl Furniture {
         matches!(self.kind, Kind::Potted | Kind::Basket | Kind::WindowBox | Kind::Trellis)
     }
 
+    /// Whether it is a picture, whose colour numbers are its picture's and not what it is made of.
+    pub fn pictured(&self) -> bool {
+        matches!(self.kind, Kind::Painting | Kind::Portrait)
+    }
+
     /// The name its sets of colours go by: a bookcase's own, or its
     /// style's (the one its seed picks, for a random style).
     pub fn colours(&self) -> &'static str {
         match (self.kind, self.style.resolved(self.seed)) {
             (Kind::Bookcase, _) => "bookcase",
+            // (a picture's colours are its subject's: a sunset's sky is no landscape's)
+            (Kind::Painting, _) => ["sunset painting", "landscape painting", "abstract painting"][subject(self)],
+            (Kind::Portrait, _) => "portrait",
             // (a plant in a pot has a pot's colours and a plant's, which are other numbers than a table's: see `pots`)
             (_, Style::Modern) if self.planted() => "modern pots",
             (_, Style::Farmhouse) if self.planted() => "farmhouse pots",
@@ -291,6 +307,8 @@ impl Furniture {
             Kind::Basket => [28.0, 28.0, 44.0],
             Kind::WindowBox => [52.0, 14.0, 26.0],
             Kind::Trellis => [36.0, 10.0, 56.0],
+            Kind::Painting => [48.0, 3.0, 36.0],
+            Kind::Portrait => [34.0, 3.0, 44.0],
         }
     }
 
@@ -1019,6 +1037,7 @@ impl Model {
                 Kind::Basket => pots::basket(&mut room),
                 Kind::WindowBox => pots::window_box(&mut room),
                 Kind::Trellis => trellis::trellis(&mut room),
+                Kind::Painting | Kind::Portrait => pictures::picture(&mut room, f.kind),
                 Kind::Bookcase => {}
             }
             grown = room.grown;
