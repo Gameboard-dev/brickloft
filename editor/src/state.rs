@@ -2043,6 +2043,49 @@ mod tests {
     }
 
     #[test]
+    fn a_tree_starts_at_its_usual_size_with_dots_for_its_height_and_spread() {
+        use brickloft_core::tree::{Kind, Tree};
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        let (height, spread) = Tree::usual_size(Kind::Pine);
+        assert_eq!((state.spec.rise, state.spec.radius, state.floor_gap), (Some(height), spread, 0.0));
+        assert_eq!(state.paint.mode, crate::paint::Mode::Pattern);
+        assert_eq!(state.full_spec().form, Form::Tree);
+        // small, for the rest: a dot at the foot, one at the top and one at the side
+        (state.spec.rise, state.spec.radius) = (Some(30.0), 10.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Rise, Handle::Radius]);
+        let top = dots[1].1;
+        assert_eq!((top.x, top.y, top.z), (0.5, 0.5, 30.0), "the top dot is not at the top of the tree");
+        // the top dot dragged up six cells makes it six taller, and stops at the least a tree can be
+        let eye = DVec3::new(0.5, -200.0, 30.0);
+        state.drag(Handle::Rise, eye, (top + DVec3::Z * 6.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(36.0));
+        state.drag(Handle::Rise, eye, (top - DVec3::Z * 29.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(brickloft_core::tree::LEAST_HEIGHT));
+        // the side dot sets its spread
+        let side = state.handles()[2].1;
+        let eye = DVec3::new(side.x, -200.0, side.z);
+        state.drag(Handle::Radius, eye, (side + DVec3::X * 4.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.radius, 14.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // no points are added to a tree, and nothing about it is searched for
+        assert!(!state.can_pull() && state.tunable(None).is_empty());
+        // another kind comes at its own size and in its own colours, and is the same tree when come back to
+        state.spec.tree.seed = 9;
+        state.usual_tree(Kind::Oak);
+        assert_eq!((state.spec.tree, state.spec.rise), (Tree { seed: 9, ..Tree::of(Kind::Oak) }, Some(Tree::usual_size(Kind::Oak).0)));
+        assert_eq!(state.paint.colours, crate::paint::palette("oak"));
+        // every set of colours has a colour for each of a tree's eight parts, and a name
+        for kind in ["pine", "palm", "oak"] {
+            assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == 8), "{kind}");
+            assert_eq!(crate::paint::palettes(kind).len(), crate::paint::tree_palette_names(kind).len(), "{kind}");
+        }
+    }
+
+    #[test]
     fn opening_a_save_replaces_the_workspace_and_can_be_undone() {
         let mut state = State::new();
         state.add_grid();
