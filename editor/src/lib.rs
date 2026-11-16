@@ -572,6 +572,8 @@ pub fn run_form(form: usize, claude: bool) {
         let rebuilt = state.refresh_behind(now_ms);
         #[cfg(target_arch = "wasm32")]
         let rebuilt = state.refresh(now_ms);
+        // (and the forms set down without bricks, a landscape's plants, are built one at a time behind it: see `State::build_owed`)
+        let rebuilt = state.build_owed() || rebuilt;
         if rebuilt || first || shown_gap != state.floor_gap || shown_scene != state.scene {
             shown_gap = state.floor_gap;
             // the floor sits under the lowest brick of any form, less the gap asked for
@@ -739,6 +741,8 @@ pub fn run_form(form: usize, claude: bool) {
             // other sign that anything happened. A copy that worked is said
             // in passing; one that did not has to be read and closed.
             // what is picked: the form being edited, and any picked with it
+            // (every brick, those of plants still waiting to be built among them)
+            state.build_owed_now();
             let (bricks, forms) = state.copied();
             let said = brz::copy(&bricks, &forms);
             if said.starts_with("Copied") {

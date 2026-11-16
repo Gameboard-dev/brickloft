@@ -178,6 +178,8 @@ pub struct Item {
     pub bounds: Option<Bounds>,
     /// whether it is picked, with the form being edited, to be copied
     pub picked: bool,
+    /// whether its bricks are still to be built: it was set down with none, to be built behind the window (see [`State::build_owed`])
+    pub owed: bool,
 }
 
 impl Item {
@@ -281,6 +283,40 @@ struct Behind {
     started: f64,
     loaded: u64,
     answer: std::sync::mpsc::Receiver<Result<Built, String>>,
+}
+
+/// A build of one of the forms not being edited, under way on another
+/// thread: what it is of, and where its answer will come.
+struct Owed {
+    of: Spec,
+    answer: std::sync::mpsc::Receiver<Result<Built, String>>,
+}
+
+/// How many forms' bricks are set aside when a change takes the forms
+/// out of the workspace, and how many bricks between them (see
+/// `State::restore`): a landscape's plants at their most.
+const SPARE_FORMS: usize = 48;
+const SPARE_BRICKS: usize = 600_000;
+
+/// What the first of a plant's `weights` is if Randomize set the plant
+/// down (see [`State::randomize_lawn`]). A plant has no other use for
+/// its weights, which are a Bézier curve's.
+pub const MADE: f64 = 7_164_101.0;
+
+/// What was made by one Randomize, to be told (see [`State::randomize_lawn`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Made {
+    pub seed: u64,
+    pub touches: usize,
+    pub ponds: usize,
+    /// how far the water falls, in microbricks; `None` if the patch has no room for a fall
+    pub fall: Option<i32>,
+    /// which try at the fall this was, from 0
+    pub tries: u32,
+    /// each plant: its kind, where it stands in the workspace (units), its height and its spread
+    pub plants: Vec<(brickloft_core::tree::Kind, [i32; 3], f64, f64)>,
+    /// how many plants of the last Randomize were taken away
+    pub replaced: usize,
 }
 
 /// A build that took longer than this, in milliseconds, has the next one of
@@ -418,6 +454,15 @@ pub struct State {
     pub moving: bool,
     /// a build of the form being edited under way on another thread (see [`State::refresh_behind`])
     behind: Option<Behind>,
+    /// a build of one of the other forms under way on another thread (see [`State::build_owed`])
+    owed: Option<Owed>,
+    /// the bricks of forms the last change took out of the workspace, each with what it was built from (see `restore`)
+    spare: Vec<(Spec, Built, Option<Bounds>)>,
+    /// How thickly Randomize plants a lawn, 0 for no plants to 100; and
+    /// the seed of the landscape it made last. Settings of the editor, as
+    /// the brush's are: what they made is in the workspace.
+    pub foliage: i32,
+    pub landscape: u64,
     /// how many times another form has been made the one being edited: a
     /// build begun for one form is not an answer for the next
     loaded: u64,
@@ -624,6 +669,10 @@ impl State {
             joins: std::cell::RefCell::new(None),
             moving: false,
             behind: None,
+            owed: None,
+            spare: Vec::new(),
+            foliage: 50,
+            landscape: 0,
             loaded: 0,
             follow: 0.5,
             spin_from: None,
@@ -651,7 +700,7 @@ impl State {
 
     /// The form being edited, as an item to set aside.
     fn as_item(&self) -> Item {
-        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false }
+        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false, owed: false }
     }
 
     /// Make `item` the form being edited, with the bricks it already has.
@@ -663,7 +712,8 @@ impl State {
         self.bounds = item.bounds;
         self.problem = None;
         // its bricks are current: nothing to rebuild until it is changed
-        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() });
+        // (unless it has none yet, and was waiting its turn to be built: then it is built as the form being edited is)
+        self.built_from = (!item.owed).then(|| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() });
         self.scene += 1;
     }
 
@@ -810,6 +860,215 @@ impl State {
         }
     }
 
+    /// The mark Randomize puts on a plant it sets down, in the plant's
+    /// `weights`: [`MADE`], and two numbers worked out from everything
+    /// about the plant as it was set down (its settings, its colours, and
+    /// where it stands from the lawn's place).
+    ///
+    /// This is how the next Randomize knows which plants to take away:
+    /// those whose mark still agrees with what they are. A plant the user
+    /// has moved, resized, recoloured or changed in any way no longer
+    /// agrees and is the user's, as one added by hand is, which has no
+    /// mark at all. Moving the lawn and its plants together changes none
+    /// of them. The other way was a list of the plants made, kept by the
+    /// editor: a list is forgotten by a save, a copy and a paste, and has
+    /// to be kept in step with every undo, where a mark is part of the
+    /// form and goes wherever the form goes.
+    fn mark_of(spec: &Spec, paint: &Paint, from_lawn: [i32; 3]) -> Vec<f64> {
+        let plain = Spec { weights: Vec::new(), grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..spec.clone() };
+        let text = format!("{}|{:?}|{:?}|{:?}", brickloft_core::report::spec_text(&plain), paint.mode, paint.colours, from_lawn);
+        // (FNV-1a, 64 bits: http://www.isthe.com/chongo/tech/comp/fnv/ ; in two halves, each a whole number a save writes exactly)
+        let hash = text.bytes().fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ byte as u64).wrapping_mul(0x100000001b3));
+        vec![MADE, (hash >> 32) as f64, (hash & 0xffff_ffff) as f64]
+    }
+
+    /// Whether a form is a plant Randomize set down that has not been changed since (see [`State::mark_of`]).
+    fn is_made(spec: &Spec, paint: &Paint, place: [i32; 3], lawn: [i32; 3]) -> bool {
+        spec.form == Form::Tree && spec.weights.first() == Some(&MADE) && spec.weights == State::mark_of(spec, paint, [0, 1, 2].map(|k| place[k] - lawn[k]))
+    }
+
+    /// A plant as the editor starts one of its kind, at a size and seed
+    /// of its own, in the set of its kind's colours that goes with the
+    /// lawn's `season` (the number of the lawn's own set: Lawn, Meadow,
+    /// Dry, Autumn, Winter).
+    fn plant_form(kind: brickloft_core::tree::Kind, height: f64, spread: f64, seed: u64, season: usize) -> (Spec, Paint) {
+        use brickloft_core::tree::{Kind, KINDS};
+        let mut plant = State::new();
+        plant.form = TREE;
+        plant.preset();
+        plant.usual_tree(kind);
+        (plant.spec.tree.seed, plant.spec.rise, plant.spec.radius) = (seed, Some(height), spread);
+        let sets = crate::paint::palettes(KINDS[kind as usize].1);
+        // which of the kind's sets: by the season where it has one for it, and any of them (by its seed) where its sets are colours of flower
+        let any = seed as usize % sets.len();
+        let set = match (kind, season) {
+            (Kind::Pine | Kind::ScotsPine, 4) => 1,
+            (Kind::Pine | Kind::ScotsPine, _) => 0,
+            (Kind::Oak, 3) => 1 + seed as usize % 2,
+            (Kind::Beech | Kind::Birch, 3) => 1,
+            (Kind::Willow, 3) => 2,
+            (Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow, _) => 0,
+            // (A cherry in blossom, of any of its four, but in autumn; white under snow. In its summer leaf a cherry 45 tall is dark branches with a few leaves on them, which among birches read as a dead tree.)
+            (Kind::Cherry, 3) => 5,
+            (Kind::Cherry, 4) => 2,
+            (Kind::Cherry, _) => seed as usize % 4,
+            (Kind::Hydrangea, 4) => 2,
+            _ => any,
+        };
+        // (as full of leaf as they come: in scale with a lawn a tree is half its usual size or less, and its leaves are fewer for it)
+        if matches!(kind, Kind::Oak | Kind::Beech | Kind::Willow) {
+            plant.spec.tree.fullness = 100;
+        }
+        // (in winter the broadleaf trees are bare)
+        if season == 4 && matches!(kind, Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow) {
+            plant.spec.tree.extras = true;
+        }
+        plant.paint.colours = sets[set.min(sets.len() - 1)].to_vec();
+        (plant.full_spec(), plant.paint)
+    }
+
+    /// Make the lawn being edited a landscape, from `seed`: its ground
+    /// sculpted into hills, ponds, a river and a waterfall
+    /// (`brickloft_core::grass::land::compose`), and trees, bushes and
+    /// flowers set where each belongs on it (`land::planting`), `density`
+    /// of them from 0 to 100. Says what was made, or why nothing was.
+    ///
+    /// The touches replace the lawn's own. The plants are forms of their
+    /// own on the lawn's grid, joined into it so that the grass gives way
+    /// to them, each to be picked, moved, changed or taken away like any
+    /// form. The plants the last Randomize set down are taken away first,
+    /// unless they have been changed since ([`State::mark_of`]).
+    ///
+    /// All of it is one change, made between two notes of the workspace,
+    /// so one Ctrl + Z takes it back. The plants are set down without
+    /// bricks and built behind the window one at a time
+    /// ([`State::build_owed`]): built here, twenty trees stopped the
+    /// window for a second or two.
+    pub fn randomize_lawn(&mut self, seed: u64, density: i32) -> Result<Made, String> {
+        use brickloft_core::grass::land;
+        if !self.is_grass() {
+            return Err("Randomize makes a landscape of a patch of grass: choose one first".into());
+        }
+        if self.spec.turned != brickloft_core::shapes::UPRIGHT || self.spec.flip.contains(&true) {
+            return Err("A lawn that has been turned or flipped cannot be made a landscape: its ground is no longer under it".into());
+        }
+        self.catch_up();
+        self.record();
+        let fitted = |state: &State| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..state.full_spec() };
+        let composed = land::compose(&fitted(self), seed);
+        if composed.pulls.is_empty() {
+            return Err("The lawn is too small to make a landscape of".into());
+        }
+        let set = land::settings(&self.spec);
+        (self.spec.tube, self.spec.tree.baubles, self.spec.tree.count) = (set.tube, set.tree.baubles, set.tree.count);
+        self.spec.pulls = composed.pulls.clone();
+        self.touched = None;
+        self.rebuild(|| 0.0);
+        if let Some(problem) = &self.problem {
+            return Err(problem.clone());
+        }
+        // the plants the last Randomize made, and has not seen changed, go
+        let lawn = self.place;
+        let before = self.others.len();
+        self.others.retain(|other| !State::is_made(&other.spec, &other.paint, other.place, lawn));
+        let replaced = before - self.others.len();
+        // and those that belong on this ground are set down
+        let ground = brickloft_core::spec::lawn_ground(&fitted(self)).ok_or("the lawn has no ground")?;
+        let season = crate::paint::palettes("grass").iter().position(|colours| self.paint.mode == crate::paint::Mode::Pattern && self.paint.colours == *colours).unwrap_or(0);
+        let mut plants = Vec::new();
+        for planted in land::planting(&ground, seed, density) {
+            // (no flowers under snow)
+            let flower = !matches!(planted.kind, brickloft_core::tree::Kind::Pine | brickloft_core::tree::Kind::ScotsPine | brickloft_core::tree::Kind::Oak | brickloft_core::tree::Kind::Beech | brickloft_core::tree::Kind::Birch | brickloft_core::tree::Kind::Willow | brickloft_core::tree::Kind::Cherry | brickloft_core::tree::Kind::Boxwood | brickloft_core::tree::Kind::Hydrangea);
+            if season == 4 && flower {
+                continue;
+            }
+            let (mut spec, paint) = State::plant_form(planted.kind, planted.height, planted.spread, planted.seed, season);
+            // on the lawn's grid, joined into the lawn with a sharp crease, its foot a cell into the soil where it stands
+            (spec.grid, spec.grid_at, spec.on_grid, spec.blend) = (self.spec.grid, self.spec.grid_at, self.spec.on_grid, Some(0.0));
+            let from_lawn = [2 * planted.cell[0], 2 * planted.cell[1], 2 * (planted.top - 1)];
+            let place = [0, 1, 2].map(|k| lawn[k] + from_lawn[k]);
+            spec.weights = State::mark_of(&spec, &paint, from_lawn);
+            plants.push((planted.kind, place, planted.height, planted.spread));
+            self.others.push(Item { spec, paint, place, built: Built::default(), bounds: None, picked: false, owed: true });
+        }
+        (self.foliage, self.landscape) = (density.clamp(0, 100), seed);
+        self.scene += 1;
+        Ok(Made { seed, touches: composed.pulls.len(), ponds: composed.ponds, fall: composed.fall, tries: composed.tries, plants, replaced })
+    }
+
+    /// Build the forms that were set down without bricks, one at a time on
+    /// another thread, and put each one's bricks in place when they are
+    /// ready. Returns whether any were this time. Called once a frame.
+    ///
+    /// One at a time, because a plant's build already uses every core
+    /// (`brickloft_core::par`): two at once would each take twice as
+    /// long and the first would be seen no sooner.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn build_owed(&mut self) -> bool {
+        let fitted = |spec: &Spec| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..spec.clone() };
+        let mut arrived = false;
+        if let Some(owed) = self.owed.take() {
+            match owed.answer.try_recv() {
+                Ok(result) => {
+                    // (a plant that could not be built has no bricks, and says why when it is chosen and built as the form being edited)
+                    let built = result.unwrap_or_default();
+                    for item in self.others.iter_mut().filter(|item| item.owed && fitted(&item.spec) == owed.of) {
+                        (item.bounds, item.built, item.owed) = (bounds_of(&built), built.clone(), false);
+                    }
+                    self.scene += 1;
+                    arrived = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.owed = Some(owed);
+                    return false;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+        }
+        if let Some(next) = self.others.iter().find(|item| item.owed) {
+            let of = fitted(&next.spec);
+            let (answer_to, answer) = std::sync::mpsc::channel();
+            let spec = of.clone();
+            std::thread::spawn(move || {
+                let _ = answer_to.send(brickloft_core::spec::build_as(&spec, true));
+            });
+            self.owed = Some(Owed { of, answer });
+        }
+        arrived
+    }
+
+    /// [`State::build_owed`] where there are no threads: one form a frame, here.
+    #[cfg(target_arch = "wasm32")]
+    pub fn build_owed(&mut self) -> bool {
+        let Some(item) = self.others.iter_mut().find(|item| item.owed) else { return false };
+        let built = build(&item.spec).unwrap_or_default();
+        (item.bounds, item.built, item.owed) = (bounds_of(&built), built, false);
+        self.scene += 1;
+        true
+    }
+
+    /// Build every form that was set down without bricks, here and now:
+    /// before the workspace is saved, copied or told to Claude, which
+    /// need every brick. Returns whether any were built.
+    pub fn build_owed_now(&mut self) -> bool {
+        self.owed = None;
+        let mut any = false;
+        for item in self.others.iter_mut().filter(|item| item.owed) {
+            let built = build(&item.spec).unwrap_or_default();
+            (item.bounds, item.built, item.owed) = (bounds_of(&built), built, false);
+            any = true;
+        }
+        if any {
+            self.scene += 1;
+        }
+        any
+    }
+
+    /// How many forms are still waiting for their bricks.
+    pub fn owed(&self) -> usize {
+        self.others.iter().filter(|item| item.owed).count()
+    }
+
     /// Where the form being edited stands, in cells: what to add to a point
     /// of the form to find it in the workspace.
     pub fn standing(&self) -> DVec3 {
@@ -899,11 +1158,14 @@ impl State {
         // a large one, and so did every change Claude made through MCP,
         // which puts the workspace back whole each time.
         let fitted = |spec: &Spec| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..spec.clone() };
-        let mut kept: Vec<(Spec, Built, Option<Bounds>)> = std::mem::take(&mut self.others).into_iter().map(|o| (fitted(&o.spec), o.built, o.bounds)).collect();
+        // (but for a form still waiting for its bricks, which has none to keep)
+        let mut kept: Vec<(Spec, Built, Option<Bounds>)> = std::mem::take(&mut self.others).into_iter().filter(|o| !o.owed).map(|o| (fitted(&o.spec), o.built, o.bounds)).collect();
         let mine = fitted(&self.full_spec());
         if self.built_from.as_ref() == Some(&mine) && self.problem.is_none() && !self.built.unmeasured {
             kept.push((mine, std::mem::take(&mut self.built), self.bounds));
         }
+        // (and the bricks set aside the last time, for a form that comes back: see below)
+        kept.append(&mut self.spare);
         let mut again = |spec: &Spec| -> Option<(Built, Option<Bounds>)> {
             let wanted = fitted(spec);
             let at = kept.iter().position(|(from, ..)| *from == wanted)?;
@@ -915,12 +1177,17 @@ impl State {
         let own = again(&spec);
         self.others = forms
             .map(|(spec, paint, place)| {
-                let (built, bounds) = again(&spec).unwrap_or_else(|| {
+                let found = again(&spec);
+                // (a plant of a landscape that has no bricks to hand is set down without, and built behind the window with the rest: a landscape opened from a save, or made again after being taken back before its trees were built, is twenty of them)
+                if found.is_none() && spec.form == Form::Tree && spec.weights.first() == Some(&MADE) {
+                    return Item { bounds: None, spec, paint, place, built: Built::default(), picked: false, owed: true };
+                }
+                let (built, bounds) = found.unwrap_or_else(|| {
                     let built = crate::import::built(&spec).unwrap_or_default();
                     let bounds = bounds_of(&built);
                     (built, bounds)
                 });
-                Item { bounds, spec, paint, place, built, picked: false }
+                Item { bounds, spec, paint, place, built, picked: false, owed: false }
             })
             .collect();
         self.load_spec(spec);
@@ -934,6 +1201,19 @@ impl State {
             // (a mesh is built behind the window, and until it is, it is not drawn as the bricks of whatever was here before)
             (self.built, self.bounds) = (Built::default(), None);
         }
+        // The bricks of the forms this took away are set aside, and are
+        // theirs again if they come back: a change taken back and then
+        // made again builds nothing. Without it, making again a landscape
+        // that had been taken back built its twenty trees over. As many
+        // forms as a large landscape has, and no more.
+        kept.truncate(SPARE_FORMS);
+        let mut bricks = 0;
+        kept.retain(|(_, built, _)| {
+            bricks += built.bricks.len();
+            bricks <= SPARE_BRICKS
+        });
+        self.spare = kept;
+        self.owed = None;
         self.scene += 1;
         self.noted = snapshot;
     }
@@ -3987,6 +4267,109 @@ mod tests {
                 assert_eq!(wrong, 0, "{mode:?}, turned {turns:?}, flipped {flipped}: {wrong} of {} bricks are another colour than they were upright", bricks.len());
             }
         }
+    }
+
+    /// A lawn 180 by 120 with square corners, being edited.
+    fn a_lawn() -> State {
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        let lawn = Spec { points: vec![cell(-90.0, -60.0, 0.0), cell(90.0, -60.0, 0.0), cell(90.0, 60.0, 0.0), cell(-90.0, 60.0, 0.0)], closed: true, protrude: true, radius: 4.0, ..state.full_spec() };
+        state.load_spec(lawn);
+        state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette("grass").to_vec(), ..Paint::default() };
+        state.refresh(|| 0.0);
+        state
+    }
+
+    /// Wait for every form set down without bricks to be built behind the window, as the frames of a few seconds would.
+    fn wait_for_plants(state: &mut State) {
+        for _ in 0..6000 {
+            state.build_owed();
+            if state.owed() == 0 {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("{} plants were never built", state.owed());
+    }
+
+    #[test]
+    fn randomize_makes_a_lawn_a_landscape_in_one_step_with_plants_built_behind_the_window() {
+        use brickloft_core::tree::Kind;
+        let mut state = a_lawn();
+        state.record();
+        let (flat, before) = (state.built.bricks.len(), state.forms());
+        let at = std::time::Instant::now();
+        let made = state.randomize_lawn(3, 60).unwrap();
+        let took = at.elapsed();
+        // the lawn: sculpted, with raised ponds and cliffs, built here and now, and a fall in it
+        assert!(made.fall.is_some_and(|tall| tall >= 6) && made.ponds >= 2 && state.spec.pulls.len() == made.touches && state.spec.tube && state.spec.tree.baubles >= 2);
+        assert!(state.built.bricks.len() != flat && state.built.shades.contains(&brickloft_core::grass::FOAM));
+        // the plants: forms of their own on the lawn's grid, joined into it, with no bricks yet: nothing of theirs was built in the press
+        assert!(made.plants.len() >= 8 && state.others.len() == made.plants.len() && state.owed() == made.plants.len(), "{} plants, {} forms, {} waiting", made.plants.len(), state.others.len(), state.owed());
+        assert!(state.others.iter().all(|o| o.spec.form == Form::Tree && o.spec.blend == Some(0.0) && o.spec.on_grid == state.spec.on_grid && o.built.bricks.is_empty()));
+        // (the press itself is the lawn's work: well under what one tree takes. A loose bound, for a busy machine.)
+        assert!(took.as_millis() < 1500, "the press took {took:?}");
+        // of several kinds and sizes, each with its own seed, in colours of its kind's own
+        let kinds: std::collections::HashSet<u8> = state.others.iter().map(|o| o.spec.tree.kind as u8).collect();
+        let sizes: std::collections::HashSet<i64> = state.others.iter().map(|o| o.spec.rise.unwrap() as i64).collect();
+        let seeds: std::collections::HashSet<u64> = state.others.iter().map(|o| o.spec.tree.seed).collect();
+        assert!(kinds.len() >= 4 && sizes.len() >= 5 && seeds.len() == state.others.len());
+        for other in &state.others {
+            let name = brickloft_core::tree::KINDS[other.spec.tree.kind as usize].1;
+            assert!(crate::paint::palettes(name).iter().any(|set| other.paint.colours == *set), "a {name} in colours that are no set of its kind's");
+        }
+        // built behind the window, one after another, each standing in the lawn's soil where the ground is
+        wait_for_plants(&mut state);
+        assert!(state.others.iter().all(|o| !o.owed && o.built.bricks.len() > 50 && o.bounds.is_some()));
+        let ground = brickloft_core::spec::lawn_ground(&Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..state.full_spec() }).unwrap();
+        for other in &state.others {
+            let (x, y, z) = ((other.place[0] - state.place[0]) / 2, (other.place[1] - state.place[1]) / 2, (other.place[2] - state.place[2]) / 2);
+            let place = ground.at(x, y).unwrap();
+            assert!(place.covered && place.water.is_none() && place.cliff == 0 && z == place.top - 1, "a plant at {x}, {y}, {z} on {place:?}");
+        }
+        // drawn as one build with the lawn: the grass gives way under each plant, and no two bricks share a cell
+        state.refresh(|| 0.0);
+        let painted = state.painted();
+        let mut cells = std::collections::HashSet::new();
+        for (brick, _, _, place) in &painted {
+            for z in 0..brick.ext[2] { for y in 0..brick.ext[1] { for x in 0..brick.ext[0] {
+                assert!(cells.insert([2 * (brick.min[0] + x) + place[0], 2 * (brick.min[1] + y) + place[1], 2 * (brick.min[2] + z) + place[2]]), "two bricks in one cell at {:?}", brick.min);
+            } } }
+        }
+        // one step: Ctrl + Z puts back the flat lawn with no plants, and Ctrl + Y the landscape, with the bricks its plants had
+        state.record();
+        assert!(state.undo() && state.forms() == before && state.others.is_empty());
+        assert!(state.redo() && state.others.len() == made.plants.len() && state.owed() == 0 && state.others.iter().all(|o| o.built.bricks.len() > 50), "made again, {} plants are waiting to be built over", state.owed());
+        // The same seed is the same landscape; and the plants of the last are replaced: but for one the user moved, one the user changed, and one added by hand.
+        let again = state.randomize_lawn(3, 60).unwrap();
+        assert_eq!((again.plants.clone(), again.replaced, state.others.len()), (made.plants.clone(), made.plants.len(), made.plants.len()));
+        // (and none of them is built over: each is given the bricks its like had)
+        state.record();
+        state.others[0].place[0] += 4;
+        state.others[1].spec.rise = Some(state.others[1].spec.rise.unwrap() + 6.0);
+        let (moved, changed) = (state.others[0].place, state.others[1].spec.clone());
+        let by_hand = Spec { points: vec![cell(0.0, 0.0, 0.0)], radius: 8.0, rise: Some(30.0), tree: brickloft_core::tree::Tree::of(Kind::Boxwood), ..state.others[2].spec.clone() };
+        state.others.push(Item { spec: Spec { weights: Vec::new(), ..by_hand.clone() }, paint: Paint::default(), place: [state.place[0] + 300, state.place[1], state.place[2]], built: Built::default(), bounds: None, picked: false, owed: true });
+        let next = state.randomize_lawn(4, 60).unwrap();
+        assert_eq!(next.replaced, made.plants.len() - 2);
+        assert!(state.others.iter().any(|o| o.place == moved) && state.others.iter().any(|o| o.spec == changed) && state.others.iter().any(|o| o.spec.weights.is_empty() && o.spec.tree.kind == Kind::Boxwood));
+        assert_eq!(state.others.len(), next.plants.len() + 3);
+        // through a save: the marks are part of the forms, so a landscape opened again is still known for what Randomize made
+        let saved = crate::store::describe(&state.forms());
+        let mut opened = State::new();
+        opened.open(crate::store::forms_in(&saved).unwrap());
+        assert!(opened.is_grass() && opened.owed() >= next.plants.len(), "the plants of a landscape opened from a save are built behind the window");
+        opened.build_owed_now();
+        let last = opened.randomize_lawn(5, 0).unwrap();
+        assert_eq!((last.replaced, last.plants.len(), opened.others.len()), (next.plants.len(), 0, 3));
+        // not for a form that is no lawn, nor a lawn turned on its side
+        opened.activate(0);
+        assert!(opened.randomize_lawn(1, 50).is_err());
+        let mut turned = a_lawn();
+        turned.turn(0, false);
+        assert!(turned.randomize_lawn(1, 50).is_err());
     }
 
     /// Not a test: what a touch of the brush on a large lawn costs, and a tree joined into it.

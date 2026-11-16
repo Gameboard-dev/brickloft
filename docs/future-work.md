@@ -212,6 +212,15 @@ What remains:
 - **Grass.** Its blades are one cell thick, so a lawn is coarse tufts
   close up. A corner where two bare slopes meet is a step, since the
   sloped piece for it is a different shape for each way it can face.
+- **A landscape from a seed.** The waterfall is always there and is
+  seen from the side its cliff faces: from the other side the table
+  hides it, and the composer does not know where the camera is. The
+  table is round, so every landscape has the same landmark. Small oaks
+  and beeches are left out because they come out bare, which leaves
+  small lawns mostly birch and cherry. Flowers are a sixth to a quarter
+  of a tree's height, still large beside a real one. What the press and
+  the join of forty plants into a lawn cost was not measured beyond a
+  test's bound of a second and a half for the press.
 - **Cliffs and waterfalls.** A cliff of soil is a smooth slope in two
   tones, with no ledges as rock has. A waterfall is one sheet three
   cells wide: it has no strands, no spray and no pool cut deeper where

@@ -192,7 +192,7 @@ touch with a negative amount digs, and a hollow deeper than that is a
 pond. Its `depth` less 1 is how thickly reeds stand round the water, 0 to
 10. Grass takes 240 touches. `fill` true freezes a grass's pond (ice, with collision). `tube` true on grass gives it raised ponds, each at its own height, with a
 stream from each down to the nearest water that stands lower and a waterfall wherever that stream goes over a cliff, and `tube`
-true on any other plant writes its greenery to be walked through. The eighth number of grass's `tree` is how readily steep ground is a cliff, 0 (none, if not given) to 3. A touch's middle number is 0 to push, 16 to flatten, and 32 more for a sharp edge. `closed` true on a cherry scatters fallen petals under it. A grass's `extras` of 1
+true on any other plant writes its greenery to be walked through. The eighth number of grass's `tree` is how readily steep ground is a cliff, 0 (none, if not given) to 3. `randomize_lawn` with a lawn's `index`, and a `seed` and a `foliage` of 0 to 100 if wanted, makes the lawn a landscape and returns the workspace with `landscape`: the seed, the touches and ponds, `waterfall_height`, and each plant's kind, place, height and spread. The same seed on the same lawn gives the same landscape. A touch's middle number is 0 to push, 16 to flatten, and 32 more for a sharp edge. `closed` true on a cherry scatters fallen petals under it. A grass's `extras` of 1
 makes its blades solid in the game; at 0 they are written to be walked
 through. The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
 `"tree": ["palm", 3]` the third palm. A tree's height is `rise` and its

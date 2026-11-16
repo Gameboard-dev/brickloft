@@ -3045,6 +3045,72 @@ In the game's file the stream, the fall and the white water are the
 pond's water, and ice with it when frozen. Twelve streams are made at
 most, and a patch over 400,000 places of ground has no raised ponds.
 
+##### A landscape from a seed
+
+<img src="images/plant-landscape.png" width="640" alt="A lawn 180 by 120 made a landscape: a table of rock with a pond on it and a waterfall down its side, a river, birches, a cherry in blossom, a willow, bushes and flowers">
+
+**Randomize** composes a landscape for a lawn from a seed
+([core/src/grass/land.rs](../core/src/grass/land.rs)). The ground it
+makes is a list of touches, the touches a hand would make with the
+brush, so it can be changed afterwards one touch at a time. Noise, the
+usual way to make ground at random, was not used: it would need a grid
+of heights kept in the form, and it puts a pond above a cliff above a
+pond only by luck.
+
+Sizes go by $`u`$, the square root of the patch's area. The touches, in
+order:
+
+| What | How |
+|---|---|
+| A tilt | one push beyond the high edge, 1.2 times the patch's length in range and $`0.05u`$ high (3 to 8) |
+| The fall | a table with a sharp edge, $`0.2u`$ in range (11 to 40) and 0.7 of that high; a hollow on it by its rim; a hollow $`0.17u`$ in range in the low ground under that rim |
+| A river | hollows 9 in range every 5 cells along a winding line from the lower pond to the low edge |
+| A ridge | two or three hills on the high side, $`0.14u`$ to $`0.22u`$ in range and 0.3 to 0.5 of that high |
+| Ponds | one for every 9,000 cells and one more, from 2 to 6: after the fall's two, by turns a hill with a hollow in its top and a hollow in the low ground |
+| Mounds | one for every 6,000 cells, from 1 to 7 |
+
+Each hill, pond and mound is set at the place, of twelve tried, that is
+furthest from everything already there. The fall is placed first, and
+which way is uphill comes from the seed.
+
+The ground is then made, which takes a millisecond or two, and looked
+at. If no stream on it comes down six cells or more, the fall is
+composed again, up to ten times: with a higher table, then turned to
+face another way, then smaller. Each try uses the seed and the number of
+the try, so one seed always ends at one landscape. A patch under about
+28 cells across has no room, and is told so.
+
+Plants are set on the finished ground (`land::planting`). Nothing stands
+in water, on a cliff, on ground steeper than 0.45, within three cells of
+the edge or within ten of falling water. A tree within seven cells of
+water is a willow. On ground over half the lawn's greatest height it is
+a pine, a Scots pine or a birch. Elsewhere it is a birch or a cherry, an
+oak where the tree is 60 tall or more, and a beech from 85, because an
+oak or a beech smaller than that is a trunk with a few tufts of leaf. A
+tree is 0.3 to 0.5 of $`u`$ tall, between 40 and 130. Two trees stand at
+least 0.8 of their two spreads apart, so crowns overlap by a fifth at
+most. Bushes and flowers stand just outside a tree's crown, a third to a
+half and a sixth to a quarter of a middling tree's height. **Foliage
+density** at 100 tries a tree for every 1,400 cells. There are never
+more than 40 plants, nor more than 260,000 bricks as reckoned from each
+kind's usual count.
+
+Each plant is a form of its own in the workspace, on the lawn's grid
+and joined into the lawn, its foot one cell into the soil. It carries a
+mark in its `weights`, which a plant has no other use for: a fixed
+number and a hash of its settings, its colours and where it stands from
+the lawn. The next Randomize removes the plants whose mark still agrees
+with what they are. A plant that was moved, resized or recoloured no
+longer agrees, and a plant added by hand has no mark, so both are left.
+A list of the plants kept by the editor was the other design. A save, a
+copy and an undo would each have had to carry it, and a mark is part of
+the form.
+
+The plants are set down without bricks and built one at a time on
+another thread (`State::build_owed`), so the press costs the lawn's own
+build. Bricks of forms that an undo removes are set aside, and a redo
+gives them back without building.
+
 ##### Blades
 
 The blades are in tufts on a grid shaken so that no rows show, three to
