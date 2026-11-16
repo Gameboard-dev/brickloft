@@ -315,7 +315,7 @@ const CELLS_A_THREAD: usize = 8_000;
 /// of a pass, and the pass repeated, since taking one out can leave another
 /// without its second backing. Judging and removing in one sweep would make
 /// the outcome depend on the order of the sweep.
-fn drop_spikes(shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3]) -> i64 {
+pub(crate) fn drop_spikes(shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3]) -> i64 {
     let strides = [1, n[0], n[0] * n[1]];
     let mut unit = [0u64; 256];
     for &(mask, pattern) in patterns() {
@@ -435,7 +435,7 @@ fn stretches() -> &'static [Stretch] {
 /// Only ramps, and only stretched one way. Stretched corner pieces, and
 /// ramps at slopes like 2 in 3, would follow a curved surface more closely
 /// still, and are not done.
-fn stretch_ramps(
+pub(crate) fn stretch_ramps(
     shape: &mut [u8],
     sampled: &[(usize, u64)],
     n: [usize; 3],

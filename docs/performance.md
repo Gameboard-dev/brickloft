@@ -422,6 +422,13 @@ a map for a second measurement to reuse, and it is now kept only when a
 second measurement will follow, which is for a turned form. Together they
 were a third of a large sphere's measuring time on sixteen threads.
 
+A join of forms (see [algorithm.md](algorithm.md), "Forms joined on
+purpose") shares out the test of each block of cells for the zone and the
+sampling of each cell in it. Two spheres of radius 20 joined take 8.7 ms on
+one thread and 6.9 ms on sixteen: the zone is a few thousand cells, about
+3 ms of sampling, and growing it to whole bricks and running the fitter's
+passes over it stay on one thread.
+
 ### How the order is kept
 
 All sharing out goes through one function, `map_ranges` in

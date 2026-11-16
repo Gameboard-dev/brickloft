@@ -29,49 +29,31 @@ which the present tools deliberately do not.
 
 ## Blending forms into one
 
-Each form is fitted with bricks by itself today. Two forms that overlap on
-one grid are two sets of bricks, and the editor keeps forms on a grid clear
-of each other for that reason. Blending would fit several forms as one
-solid.
+Forms joined with Ctrl + drag are fitted as one solid where they meet, as a
+smooth union with a blend the player sets, and keep their own bricks
+everywhere else. How it is done, what it costs and where it falls short are
+in [algorithm.md](algorithm.md), "Forms joined on purpose". What remains:
 
-Forms can already be joined without blending. A form dragged with Ctrl
-held is moved into another, and its bricks are cut back where the two
-overlap (see [algorithm.md](algorithm.md), "Forms joined on purpose").
-That keeps each form its own bricks and its own settings, at the cost of a
-notch a cell or two deep where a sloped brick had to be left out. Blending
-would remove the notch by refitting the join.
-
-The description of a form already allows it. A form is a distance function
-(see [algorithm.md](algorithm.md)), and two distance functions join into
-one by taking the smaller of the two numbers at each place, which is the
-union of the two solids. The fitters and the measurement take any distance
-function.
-
-A **smooth union** joins two solids with a rounded fillet where they meet,
-where a plain union leaves a sharp crease. It replaces "the smaller of the
-two numbers" with a smooth version of the smaller, which dips below both
-where the two are nearly equal. The stepping stones already use the same
-device to round a stone's corners. One common form, for two distances $`a`$
-and $`b`$ and a blend width $`k`$, is
-
-```math
-h = \max\left(k - \lvert a - b\rvert,\ 0\right), \qquad \mathrm{smin}(a, b) = \min(a, b) - \frac{h^2}{4k}
-```
-
-Far from the join, $`h`$ is zero and the result is the plain union. Within
-$`k`$ of the join it is lowered by up to a quarter of $`k`$, which fills
-the crease in.
-
-What it needs:
-
-- **A way to say which forms blend:** a group of forms on one grid, with a
-  blend width.
-- **A fitter for the result.** A blended solid has no layout of its own, so
-  it would be fitted cell by cell, the roughest method. Keeping each
-  form's own smooth layout away from the join and refitting only near it,
-  as added points do today, is the route that would keep the quality.
-- **A distance function that stays an underestimate,** which the smooth
-  union above does, so that skipping empty space stays correct.
+- **A smoother fit at the seam.** The join is fitted cell by cell, with
+  single wedges and ramps stretched one way, and it shows as a rough band
+  against a sphere's own facets. Fitting the seam with the stretched corner
+  pieces the sphere fitter uses would need a layout for a surface that is
+  no sphere, which nothing here has yet.
+- **A narrower band.** A sloped brick the join touches is refitted whole,
+  so the band is as wide as the form's own bricks are large. Cutting a
+  stretched brick into shorter ones of the same slope, where the game has
+  such a brick, would let the band stop nearer the seam.
+- **Forms half a microbrick off one another.** They are joined by cutting
+  alone, with a notch at the seam, because their cells do not line up. The
+  editor could offer to move the joined form by half a microbrick.
+- **Brick size.** A join is fitted at single microbricks even between forms
+  built at a larger brick size.
+- **Taking material away.** A join only adds. A form subtracted from
+  another (a window cut through a wall) is the same method with the
+  distance of one form negated, and is not built.
+- **A blend above 6.** It needs the forms' distances to stay exact further
+  than 8 microbricks from their surfaces, which costs every curve's
+  distance search.
 
 ## Patterns
 

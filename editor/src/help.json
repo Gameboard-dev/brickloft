@@ -4,6 +4,7 @@
   "arch_kind": "The shape of the arch between its two feet.",
   "bezier_pull": "How strongly this point draws the curve towards itself. 1 is neutral.",
   "brick_budget": "The smallest brick size that keeps the build within this many bricks is used. A form laid as a pattern of tiles is not held to it: a pattern is always laid at single microbricks unless you set a Brick size.",
+  "blend": "How far the join between this form and the forms it stands in is rounded, in microbricks along each of them. At 0 the two meet in a sharp crease. The bricks are fitted afresh where the forms meet and are each form's own everywhere else. A form is joined by moving it into another with Ctrl held.",
   "brick_size": "Fits the form with bricks a multiple of this size. Automatic picks the finest size that keeps the build within the brick budget.",
   "claude_command": "Run this once in a terminal to tell Claude Code where the editor is. After that, start Claude Code, tick the box above, and ask it to build something.",
   "claude_on": "Lets Claude add, change, colour, turn and remove forms in this workspace while you watch, through the Model Context Protocol. Off until you tick it, and off again each time the program starts. While it is on, the editor listens on this computer only; every change Claude makes is named at the top of the view and can be taken back with Ctrl+Z.",

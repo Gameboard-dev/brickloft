@@ -3,6 +3,7 @@
 
 use crate::paint::Paint;
 use brickloft_core::curves::{ArchType, Circle};
+use brickloft_core::blend::{Member, Piece};
 use brickloft_core::shapes::CellBrick;
 use brickloft_core::spec::{build, snap, Built, Form, Spec};
 use brickloft_core::DVec3;
@@ -124,8 +125,6 @@ pub struct Item {
     pub bounds: Option<Bounds>,
     /// whether it is picked, with the form being edited, to be copied
     pub picked: bool,
-    /// whether it was moved into other forms on purpose (see `State::merge`)
-    pub joined: bool,
 }
 
 impl Item {
@@ -307,11 +306,12 @@ pub struct State {
     /// it is dragged, into other forms if that is where, and is not set
     /// down clear of them: the two are to be one build.
     pub merge: bool,
-    /// Whether the form being edited was moved into other forms on
-    /// purpose. A joined form is not pushed clear of the others when one
-    /// of them is reshaped, and gives up to them the room they share (see
-    /// `painted`). Moving it without Ctrl sets it clear again.
-    pub joined: bool,
+    /// the blend of the form being edited when the view was last told of
+    /// it: a change of blend builds nothing (see `refresh`)
+    blend_shown: Option<f64>,
+    /// The bricks of the workspace's joined forms as last put together,
+    /// with what they were put together from (see `pieces`).
+    joins: std::cell::RefCell<Option<(Vec<JoinKey>, std::rc::Rc<Vec<Piece>>)>>,
     /// how much of a dragged dot's movement the dots near it share, 0 to 1
     pub follow: f64,
     /// a ring being dragged: the angle round it where it was taken hold of,
@@ -329,6 +329,10 @@ pub struct State {
 /// is coloured, the one being edited first. Bricks are not kept; they are
 /// built again from the form, which keeps a long history small.
 type Snapshot = Vec<Placed>;
+
+/// What a join was put together from: each form, where it stands, and
+/// enough of its bricks to tell a build from the one before it.
+type JoinKey = (Spec, [i32; 3], usize, bool);
 
 /// How far along the line through `from` in direction `a` the ray from
 /// `origin` along `dir` comes nearest it; `None` if the ray runs along the
@@ -461,7 +465,8 @@ impl State {
             busy: false,
             lift: false,
             merge: false,
-            joined: false,
+            blend_shown: None,
+            joins: std::cell::RefCell::new(None),
             follow: 0.5,
             spin_from: None,
             undone: Vec::new(),
@@ -488,7 +493,7 @@ impl State {
 
     /// The form being edited, as an item to set aside.
     fn as_item(&self) -> Item {
-        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false, joined: self.joined }
+        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false }
     }
 
     /// Make `item` the form being edited, with the bricks it already has.
@@ -496,12 +501,11 @@ impl State {
         self.load_spec(item.spec);
         self.paint = item.paint;
         self.place = item.place;
-        self.joined = item.joined;
         self.built = item.built;
         self.bounds = item.bounds;
         self.problem = None;
         // its bricks are current: nothing to rebuild until it is changed
-        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..self.full_spec() });
+        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() });
         self.scene += 1;
     }
 
@@ -612,10 +616,10 @@ impl State {
     /// round them and not into them.
     fn push_others(&mut self) {
         // (a form joined to others on purpose pushes none of them, and none of them is pushed out of it)
-        if self.others.is_empty() || self.joined {
+        if self.others.is_empty() || self.joined() {
             return;
         }
-        let shares: Vec<bool> = self.others.iter().map(|o| !o.joined && self.in_my_way(&o.spec)).collect();
+        let shares: Vec<bool> = self.others.iter().map(|o| o.spec.blend.is_none() && self.in_my_way(&o.spec)).collect();
         let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
         // (most rebuilds touch nothing, and then there is nothing more to do)
         if !self.others.iter().zip(&shares).any(|(o, shares)| *shares && settled[0].meets(cells_of(&o.built.bricks), o.place)) {
@@ -721,7 +725,7 @@ impl State {
         self.others = forms
             .map(|(spec, paint, place)| {
                 let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false, joined: false }
+                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false }
             })
             .collect();
         self.load_spec(spec);
@@ -756,96 +760,111 @@ impl State {
         }
     }
 
+    /// Whether the form being edited was moved into other forms on
+    /// purpose (`Spec::blend`). A joined form is not pushed clear of the
+    /// others when one of them is reshaped, and is made one build with
+    /// them (see `painted`). Moving it without Ctrl sets it clear again.
+    pub fn joined(&self) -> bool {
+        self.spec.blend.is_some()
+    }
+
+    /// Why the form being edited, if it is joined, is cut where it meets
+    /// another form and not fitted afresh with it: said in the panel under
+    /// the blend, which would otherwise seem to do nothing. `None` if it is
+    /// not joined, or blends with every form on its grid.
+    ///
+    /// The reasons are `brickloft_core::blend`'s: a join is fitted on the
+    /// cells the two forms share, and a pattern's bricks are not its form.
+    pub fn unblended(&self) -> Option<&'static str> {
+        if !self.joined() {
+            return None;
+        }
+        if !self.built.shades.is_empty() {
+            return Some("A form laid as a pattern is joined by cutting alone: the blend does nothing to it.");
+        }
+        let half_off = |place: [i32; 3]| (0..3).any(|k| (place[k] - self.place[k]).rem_euclid(2) == 1);
+        let mut others = self.others.iter().filter(|o| self.in_my_way(&o.spec));
+        if others.clone().any(|o| half_off(o.place)) {
+            return Some("A form on this grid stands half a microbrick off this one, so their bricks do not line up and the two are joined by cutting alone. Move either by half a microbrick to blend them.");
+        }
+        others.any(|o| !o.built.shades.is_empty()).then_some("A form laid as a pattern is joined by cutting alone: the blend does nothing where this form meets one.")
+    }
+
+    /// The workspace's bricks before they are coloured: each form's own,
+    /// and where joined forms meet, the join fitted afresh
+    /// (`brickloft_core::blend`).
+    ///
+    /// Kept from one call to the next, and put together again only when a
+    /// form, its bricks, its place or its blend has changed. `painted` is
+    /// called whenever anything in view changes, a colour or a pick
+    /// included, and a join is a few milliseconds of fitting that none of
+    /// those alter.
+    fn pieces(&self, forms: &[(&Built, &Paint, Option<Bounds>, [i32; 3], &Spec)]) -> std::rc::Rc<Vec<Piece>> {
+        // (forms on level grids share the world's grid, whatever their numbers)
+        let grid = |spec: &Spec| if on_own_grid(spec) { spec.on_grid + 1 } else { 0 };
+        let key: Vec<JoinKey> = forms.iter().map(|(built, _, _, place, spec)| (Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: grid(spec), ..(*spec).clone() }, *place, built.bricks.len(), built.unmeasured)).collect();
+        if let Some((from, pieces)) = &*self.joins.borrow() {
+            if *from == key {
+                return pieces.clone();
+            }
+        }
+        let members: Vec<Member> = forms.iter().map(|(built, _, _, place, spec)| Member { spec, built, place: *place, grid: grid(spec) }).collect();
+        let pieces = std::rc::Rc::new(brickloft_core::blend::union(&members));
+        *self.joins.borrow_mut() = Some((key, pieces.clone()));
+        pieces
+    }
+
     /// Every brick in the workspace, with its colour and its form.
     ///
     /// Forms joined on purpose (see `merge`) overlap, and the game refuses
-    /// a brick whose box overlaps another's. So a joined form gives up the
-    /// room it shares: with every form on its grid that is not joined, and
-    /// with the joined ones before it in the list. A brick of its that
-    /// shares no room is kept whole. A whole (unsloped) brick that shares
-    /// some is cut down to the cells that share none, as rows of cells.
-    /// A sloped brick that shares any is left out, since a slope cannot be
-    /// cut down to cells: there the join has a notch a cell or two deep.
+    /// a brick whose box overlaps another's. They are made one build by
+    /// `brickloft_core::blend::union`: fitted afresh where their surfaces
+    /// meet, as a smooth union with the joined form's blend, and cut back
+    /// to whole cells where blocks of them overlap. That is done there and
+    /// not here because it needs the forms' distance functions, and tests
+    /// and tools want it with no editor. What is left to do here is colour.
     ///
-    /// Making the two forms one solid and fitting that afresh would leave
-    /// no notch (it is in docs/future-work.md as blending forms). It is a
-    /// different build, though, with different bricks everywhere near the
-    /// join, and it would make every form on a grid one form to edit.
+    /// A brick of a join takes the colour of the brick of its form that it
+    /// is, was cut from or stands in place of. One the form had no brick
+    /// for (the fillet itself) is coloured as a brick of the form standing
+    /// there would be.
     pub fn painted(&self) -> Vec<Painted> {
         let mut all = Vec::new();
-        let forms: Vec<(&Built, &Paint, Option<Bounds>, [i32; 3], bool, &Spec)> = std::iter::once((&self.built, &self.paint, self.bounds, self.place, self.joined, &self.spec)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place, i.joined, &i.spec))).collect();
-        let same_grid = |a: &Spec, b: &Spec| a.on_grid == b.on_grid || (!on_own_grid(a) && !on_own_grid(b));
-        for (form, (built, paint, bounds, place, joined, spec)) in forms.iter().copied().enumerate() {
-            let Some((lo, hi)) = bounds else { continue };
+        let spec = self.full_spec();
+        let forms: Vec<(&Built, &Paint, Option<Bounds>, [i32; 3], &Spec)> = std::iter::once((&self.built, &self.paint, self.bounds, self.place, &spec)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place, &i.spec))).collect();
+        let colour_of = |form: usize, from: Option<usize>, brick: &CellBrick| {
+            let (built, paint, bounds, ..) = forms[form];
             let patterned = paint.mode == crate::paint::Mode::Pattern && built.shades.len() == built.bricks.len();
-            let colour_of = |n: usize, brick: &CellBrick| if patterned { paint.shade(built.shades[n]) } else { paint.colour(brick, lo, hi) };
-            // The forms this one gives room up to, as the boxes of their
-            // bricks in units, each with the box of them all. A brick's
-            // room is its box, as the game judges it, so boxes are all
-            // that need be compared, and a brick nowhere near another
-            // form is passed in one comparison.
-            type Box3 = ([i32; 3], [i32; 3]);
-            let in_units = |min: [i32; 3], ext: [i32; 3], place: [i32; 3]| -> Box3 { ([0, 1, 2].map(|k| 2 * min[k] + place[k]), [0, 1, 2].map(|k| 2 * (min[k] + ext[k]) + place[k])) };
-            let meet = |a: &Box3, b: &Box3| (0..3).all(|k| a.0[k] < b.1[k] && b.0[k] < a.1[k]);
-            let before: Vec<(Box3, Vec<Box3>)> = if joined {
-                forms
-                    .iter()
-                    .enumerate()
-                    .filter(|(n, other)| *n != form && same_grid(spec, other.5) && (!other.4 || *n < form) && !other.0.bricks.is_empty())
-                    .map(|(_, other)| {
-                        let boxes: Vec<Box3> = other.0.bricks.iter().map(|b| in_units(b.min, b.ext, other.3)).collect();
-                        let all = boxes.iter().fold(boxes[0], |all, b| ([0, 1, 2].map(|k| all.0[k].min(b.0[k])), [0, 1, 2].map(|k| all.1[k].max(b.1[k]))));
-                        (all, boxes)
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            // the cells left of bricks that were cut, each with the number of its colour, to be joined up again
+            let (lo, hi) = bounds.unwrap_or(([0; 3], [1; 3]));
+            match from {
+                Some(n) if patterned => paint.shade(built.shades[n]),
+                Some(n) => paint.colour(&built.bricks[n], lo, hi),
+                None => paint.colour(brick, lo, hi),
+            }
+        };
+        // (nothing joined: every form's bricks are its own, and there is nothing to put together)
+        if forms.iter().all(|form| form.4.blend.is_none()) {
+            for (form, (built, .., place, _)) in forms.iter().enumerate() {
+                all.extend(built.bricks.iter().enumerate().map(|(n, brick)| (*brick, colour_of(form, Some(n), brick), form, *place)));
+            }
+            return all;
+        }
+        let pieces = self.pieces(&forms);
+        for (form, (.., place, spec)) in forms.iter().enumerate() {
+            // the single cells left of bricks that were cut, each with the number of its colour, to be joined up again
             let mut loose: Vec<(CellBrick, u8)> = Vec::new();
             let mut tones: Vec<Option<[u8; 3]>> = Vec::new();
-            for (n, brick) in built.bricks.iter().enumerate() {
-                let colour = colour_of(n, brick);
-                let whole = in_units(brick.min, brick.ext, place);
-                let hits: Vec<&Box3> = before.iter().filter(|(all, _)| meet(all, &whole)).flat_map(|(_, boxes)| boxes.iter().filter(|other| meet(other, &whole))).collect();
-                if hits.is_empty() {
-                    all.push((*brick, colour, form, place));
+            for piece in pieces.iter().filter(|piece| piece.member == form) {
+                let colour = colour_of(form, piece.from, &piece.brick);
+                if !piece.loose {
+                    all.push((piece.brick, colour, form, *place));
                     continue;
-                }
-                if brick.mask != 0xff {
-                    continue;
-                }
-                // The part of the brick the other forms' bricks reach, in
-                // its own cells. Outside it the brick is whole: it comes
-                // off as slabs, up to six, and only the part within is
-                // gone through cell by cell.
-                let (mut low, mut high) = (brick.min, [0, 1, 2].map(|k| brick.min[k] + brick.ext[k]));
-                for k in 0..3 {
-                    let from = hits.iter().map(|hit| (hit.0[k] - place[k]).div_euclid(2)).min().unwrap().max(low[k]);
-                    let to = hits.iter().map(|hit| (hit.1[k] - place[k] + 1).div_euclid(2)).max().unwrap().min(high[k]);
-                    for (start, end) in [(low[k], from), (to, high[k])] {
-                        if end > start {
-                            let (mut min, mut ext) = (low, [0, 1, 2].map(|j| high[j] - low[j]));
-                            (min[k], ext[k]) = (start, end - start);
-                            all.push((CellBrick { mask: 0xff, min, ext }, colour, form, place));
-                        }
-                    }
-                    (low[k], high[k]) = (from, to);
                 }
                 let tone = tones.iter().position(|known| *known == colour).unwrap_or_else(|| {
                     tones.push(colour);
                     tones.len() - 1
                 });
-                for z in low[2]..high[2] {
-                    for y in low[1]..high[1] {
-                        for x in low[0]..high[0] {
-                            let cell = in_units([x, y, z], [1; 3], place);
-                            if !hits.iter().any(|hit| meet(hit, &cell)) {
-                                loose.push((CellBrick { mask: 0xff, min: [x, y, z], ext: [1; 3] }, (tone % 256) as u8));
-                            }
-                        }
-                    }
-                }
+                loose.push((piece.brick, (tone % 256) as u8));
             }
             // What is left of the cut bricks, joined into the largest
             // blocks of one colour. (Left as the rows they were found
@@ -853,7 +872,7 @@ impl State {
             // A form of more colours than a byte can number is not
             // joined: two colours would share a number.)
             let loose = if tones.len() <= 256 { brickloft_core::pattern::joined(loose, spec.max_ext.max(1)) } else { loose };
-            all.extend(loose.into_iter().map(|(cell, tone)| (cell, tones[tone as usize], form, place)));
+            all.extend(loose.into_iter().map(|(cell, tone)| (cell, tones[tone as usize], form, *place)));
         }
         all
     }
@@ -1169,8 +1188,15 @@ impl State {
 
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
-        // (the angle of its grid changes nothing about how a form is fitted)
-        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..self.full_spec() };
+        // A change of blend changes no brick of the form itself, so nothing
+        // is built for it, but the join is other bricks and the view must
+        // draw them.
+        if self.blend_shown != self.spec.blend {
+            self.blend_shown = self.spec.blend;
+            self.scene += 1;
+        }
+        // (the angle of its grid changes nothing about how a form is fitted, nor does what it is joined to)
+        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
         // (see `brickloft_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
@@ -1512,7 +1538,8 @@ impl State {
         if by == [0; 3] {
             return;
         }
-        self.joined = self.merge;
+        // (joined with the blend it had if it was joined already, and a sharp crease if not)
+        self.spec.blend = self.merge.then(|| self.spec.blend.unwrap_or(0.0));
         let limit = (HANDLE_LIMIT * 2.0) as i32;
         self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
         self.scene += 1;
@@ -2358,17 +2385,23 @@ mod tests {
         let boxes_meet = |all: &[Painted]| all.iter().enumerate().any(|(n, a)| all[n + 1..].iter().any(|b| a.2 != b.2 && (0..3).all(|k| 2 * a.0.min[k] + a.3[k] < 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k] && 2 * b.0.min[k] + b.3[k] < 2 * (a.0.min[k] + a.0.ext[k]) + a.3[k])));
         // without Ctrl it stops against the other
         state.move_by(apart, DVec3::ZERO);
-        assert!(!overlap(&state) && !state.joined);
+        assert!(!overlap(&state) && !state.joined());
         let whole = state.painted().iter().filter(|b| b.2 == 0).count();
         // with Ctrl it goes all the way in, most of the way to the other's middle
         state.merge = true;
         let most = [0, 1, 2].map(|k| (state.others[0].place[k] - state.place[k]) * 2 / 3);
         state.move_by(most, DVec3::ZERO);
-        assert!(overlap(&state) && state.joined, "it did not go in");
-        // no brick's box overlaps a brick of the other form, the other form is whole, and the joined one has lost bricks but not all
+        assert!(overlap(&state) && state.joined(), "it did not go in");
+        // no brick's box overlaps a brick of the other form, and the joined one has lost bricks but not all
         let all = state.painted();
         assert!(!boxes_meet(&all), "two forms' bricks share room");
-        assert_eq!(all.iter().filter(|b| b.2 == 1).count(), state.others[0].built.bricks.len());
+        // The other form is its own bricks away from the seam, and fitted
+        // afresh at it: it was whole before the join was a refit, which
+        // left a notch all round the seam where the joined form's sloped
+        // bricks were left out.
+        let own = &state.others[0].built.bricks;
+        let kept = all.iter().filter(|b| b.2 == 1 && own.contains(&b.0)).count();
+        assert!(kept > own.len() / 4 && kept < own.len(), "{kept} of the other form's {} bricks are its own", own.len());
         let left: i32 = all.iter().filter(|b| b.2 == 0).map(|b| b.0.ext.iter().product::<i32>()).sum();
         let had: i32 = state.built.bricks.iter().map(|b| b.ext.iter().product::<i32>()).sum();
         assert!(left > had / 4 && left < had, "{left} of {had} cells left, from {whole} bricks");
@@ -2376,13 +2409,96 @@ mod tests {
         state.activate(0);
         state.spec.radius = 9.0;
         state.refresh(|| 0.0);
-        assert!(state.others[0].joined && Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place), "the joined form was pushed out");
+        assert!(state.others[0].spec.blend.is_some() && Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place), "the joined form was pushed out");
         // moved without Ctrl, it is set clear again
         state.activate(0);
         state.merge = false;
         state.move_by([2, 0, 0], DVec3::ZERO);
-        assert!(!overlap(&state) && !state.joined);
+        assert!(!overlap(&state) && !state.joined());
         assert!(!boxes_meet(&state.painted()));
+    }
+
+    /// A cube with a sphere moved into its corner with Ctrl held, the
+    /// sphere being edited, and the bricks of the two wherever they stand.
+    fn a_sphere_in_a_cube() -> State {
+        let mut state = a_cube();
+        state.add_form(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        state.record();
+        state.merge = true;
+        let to = [0, 1, 2].map(|k| state.others[0].place[k] + [20, 8, 30][k] - state.place[k]);
+        state.move_by(to, DVec3::ZERO);
+        state.merge = false;
+        state.record();
+        state
+    }
+
+    fn bricks_where_they_stand(state: &State) -> Vec<(CellBrick, [i32; 3], Option<[u8; 3]>)> {
+        let mut all: Vec<_> = state.painted().into_iter().map(|b| (b.0, b.3, b.1)).collect();
+        all.sort_by_key(|(b, place, _)| (*place, b.min, b.ext, b.mask));
+        all
+    }
+
+    #[test]
+    fn a_join_and_its_blend_come_back_with_undo_and_with_a_save() {
+        let mut state = a_sphere_in_a_cube();
+        assert_eq!(state.spec.blend, Some(0.0));
+        let sharp = bricks_where_they_stand(&state);
+        // a blend rounds the join: more room is filled, and the bricks differ
+        state.spec.blend = Some(4.0);
+        state.record();
+        let round = bricks_where_they_stand(&state);
+        let room = |all: &[(CellBrick, [i32; 3], Option<[u8; 3]>)]| all.iter().map(|b| b.0.volume()).sum::<f64>();
+        assert!(room(&round) > room(&sharp) + 20.0, "a blend of 4 added {} cells to the join", room(&round) - room(&sharp));
+        // undo takes the blend back and leaves the join; again, and the sphere is out of the cube
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.blend, Some(0.0));
+        assert!(bricks_where_they_stand(&state) == sharp, "undo did not bring the sharp join back");
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert!(!state.joined());
+        assert!(state.redo() && state.redo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.blend, Some(4.0));
+        assert!(bricks_where_they_stand(&state) == round, "redo did not bring the blend back");
+        // a save holds the join and its blend, and opening it builds the same bricks
+        let saved = crate::store::describe(&state.forms());
+        let mut opened = State::new();
+        opened.open(crate::store::forms_in(&saved).unwrap());
+        opened.refresh(|| 0.0);
+        assert_eq!(opened.spec.blend, Some(4.0));
+        assert!(bricks_where_they_stand(&opened) == round, "a save opened again is not the same bricks");
+    }
+
+    #[test]
+    fn a_join_is_the_same_bricks_whichever_of_its_forms_is_being_edited() {
+        let mut state = a_sphere_in_a_cube();
+        state.spec.blend = Some(2.0);
+        let before = bricks_where_they_stand(&state);
+        state.activate(0);
+        assert!(state.spec.form == Form::Cube && bricks_where_they_stand(&state) == before, "editing the cube changed the join");
+        // and both of them joined, as when the cube is then moved with Ctrl too
+        state.spec.blend = Some(0.0);
+        let both = bricks_where_they_stand(&state);
+        state.activate(0);
+        assert!(bricks_where_they_stand(&state) == both, "with both forms joined, choosing the other to edit changed the join");
+    }
+
+    #[test]
+    fn a_join_is_put_together_once_and_not_for_every_change_of_colour() {
+        let mut state = a_sphere_in_a_cube();
+        state.painted();
+        let first = state.joins.borrow().as_ref().map(|j| j.1.clone()).unwrap();
+        state.paint.colours = vec![[200, 30, 30]];
+        state.others[0].picked = true;
+        let recoloured = state.painted();
+        assert!(std::rc::Rc::ptr_eq(&first, &state.joins.borrow().as_ref().unwrap().1), "a change of colour put the join together again");
+        assert!(recoloured.iter().any(|b| b.1 == Some([200, 30, 30])));
+        // moving a form, or changing its blend, does
+        state.spec.blend = Some(1.0);
+        state.painted();
+        assert!(!std::rc::Rc::ptr_eq(&first, &state.joins.borrow().as_ref().unwrap().1));
     }
 
     #[test]
@@ -2416,7 +2532,7 @@ mod tests {
         let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
         state.merge = true;
         state.move_by([towards[0] * 2 / 3 + 1, towards[1] * 2 / 3 + 1, 11], DVec3::ZERO);
-        assert!(state.joined);
+        assert!(state.joined());
         let all = state.painted();
         let mine: Vec<&Painted> = all.iter().filter(|b| b.2 == 0).collect();
         // what is left of a cube with a corner taken out is a handful of blocks, and most of the cube
