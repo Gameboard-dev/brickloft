@@ -210,7 +210,7 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
 ///
 /// Not a bookcase, whose numbers above the two woods are its books.
 fn furniture_stuff(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
-    use brickloft_core::furniture::{Kind, Model, LIGHT, METAL};
+    use brickloft_core::furniture::{Kind, Model, LEAF, LIGHT, METAL};
     let snapped = spec.snapped();
     let lone = brickloft_core::spec::Spec { blend: None, ..spec.clone() };
     let (false, Ok(built), Some(middle)) = (spec.furniture.kind == Kind::Bookcase, brickloft_core::spec::build(&lone), snapped.points.first()) else { return Box::new(|_| Stuff::Solid) };
@@ -219,7 +219,9 @@ fn furniture_stuff(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_c
     let shine = spec.furniture.shine;
     let mut made: std::collections::HashMap<(u8, [i32; 3], [i32; 3]), Stuff> = std::collections::HashMap::new();
     for (n, (brick, shade)) in built.bricks.iter().zip(&built.shades).enumerate() {
+        // (A plant in a pot has other numbers, and nothing of metal or light: its greenery and flowers are walked through if the piece says so, as a plant's are, and its pot, soil and stems never.)
         let stuff = match *shade {
+            green if spec.furniture.planted() => if spec.furniture.extra && green >= LEAF { Stuff::Blade } else { continue },
             METAL => Stuff::Metal,
             LIGHT if shine && lamps.contains(&n) => Stuff::Lamp,
             LIGHT => Stuff::Glow,
@@ -637,6 +639,48 @@ mod tests {
         assert!(read(&bare.to_brz_vec().unwrap()).unwrap_err().contains("not copied from this editor"));
         assert!(read(b"not a brz").is_err());
         // a piece no single brick can be is refused, not written wrong
+        {
+        // Furniture: a chandelier's flames glow and each carries a light, eight of them; its arms and hub are metal; with its lights not to shine they glow and carry none; and turned on its side it is lit all the same.
+        use brickloft_core::furniture::{Furniture, Kind as Piece, LIGHT, METAL};
+        use brickloft_core::spec::{build, Form, Spec};
+        use brickloft_core::DVec3;
+        let piece = |furniture: Furniture, turned: u8| {
+            let [w, d, h] = Furniture::usual_size(furniture.kind);
+            let spec = Spec { form: Form::Furniture, points: vec![DVec3::new(0.5, 0.5, h / 2.0)], radius: d / 2.0, stretch: DVec3::new(w / d, 1.0, h / d), furniture, turned, ..Spec::default() };
+            let built = build(&spec).unwrap();
+            let bricks: Vec<Painted> = built.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+            (prefab(&bricks, &[(spec, Paint::default(), [0; 3])]).unwrap(), built.shades)
+        };
+        let chandelier = Furniture { second: 3, ..Furniture::of(Piece::Chandelier) };
+        for turned in [brickloft_core::shapes::UPRIGHT, 3] {
+            let (world, shades) = piece(chandelier, turned);
+            let of = |shade: u8| -> Vec<&Brick> { world.bricks.iter().zip(&shades).filter(|(_, s)| **s == shade).map(|(b, _)| b).collect() };
+            assert!(of(LIGHT).len() == 8 && of(LIGHT).iter().all(|b| b.material == brdb::assets::materials::GLOW && b.material_intensity == 10 && b.components.len() == 1), "turned {turned}: {} flames", of(LIGHT).len());
+            assert!(of(METAL).len() >= 6 && of(METAL).iter().all(|b| b.material == brdb::assets::materials::METALLIC && b.components.is_empty()), "turned {turned}");
+            assert!(world.bricks.iter().zip(&shades).filter(|(_, s)| **s != LIGHT && **s != METAL).all(|(b, _)| b.material == brdb::assets::materials::PLASTIC && b.components.is_empty()), "turned {turned}");
+        }
+        let (dark, shades) = piece(Furniture { shine: false, ..chandelier }, brickloft_core::shapes::UPRIGHT);
+        assert!(dark.bricks.iter().all(|b| b.components.is_empty()) && dark.bricks.iter().zip(&shades).filter(|(b, s)| **s == LIGHT && b.material == brdb::assets::materials::GLOW).count() == 8);
+        // every lamp has its one light, however many bricks of it glow: a globe is three glowing bricks and one light
+        for kind in [Piece::TableLamp, Piece::FloorLamp, Piece::Pendant, Piece::Sconce, Piece::Candlestick] {
+            for choice in 1..=3 {
+                let (world, shades) = piece(Furniture { choice, ..Furniture::of(kind) }, brickloft_core::shapes::UPRIGHT);
+                assert_eq!(world.bricks.iter().filter(|b| !b.components.is_empty()).count(), 1, "{kind:?}, shade {choice}");
+                assert!(world.bricks.iter().zip(&shades).all(|(b, s)| (b.material == brdb::assets::materials::GLOW) == (*s == LIGHT)), "{kind:?}, shade {choice}");
+            }
+        }
+        // a cupboard's handles are metal and nothing of it glows; a bookcase, whose numbers are its books, is plastic all through
+        let (cupboard, shades) = piece(Furniture { choice: 2, ..Furniture::of(Piece::Cupboard) }, brickloft_core::shapes::UPRIGHT);
+        assert!(shades.contains(&METAL) && cupboard.bricks.iter().zip(&shades).all(|(b, s)| (b.material == brdb::assets::materials::METALLIC) == (*s == METAL) && b.components.is_empty()));
+        let (bookcase, _) = piece(Furniture::of(Piece::Bookcase), brickloft_core::shapes::UPRIGHT);
+        assert!(bookcase.bricks.iter().all(|b| b.material == brdb::assets::materials::PLASTIC && b.components.is_empty()));
+        // a potted plant's leaves are walked through if it says so and its pot, soil and stems never; unticked, all of it is solid
+        let (soft, shades) = piece(Furniture { extra: true, ..Furniture::of(Piece::Potted) }, brickloft_core::shapes::UPRIGHT);
+        assert!(shades.iter().filter(|s| **s >= brickloft_core::furniture::LEAF).count() > 100);
+        assert!(soft.bricks.iter().zip(&shades).all(|(b, s)| b.collision.player == (*s < brickloft_core::furniture::LEAF) && b.material == brdb::assets::materials::PLASTIC));
+        let (firm, _) = piece(Furniture::of(Piece::Potted), brickloft_core::shapes::UPRIGHT);
+        assert!(firm.bricks.iter().all(|b| b.collision.player));
+        }
         let odd = (CellBrick { mask: 0b0000_1001, min: [0; 3], ext: [1; 3] }, None, 0, [0; 3]);
         assert!(prefab(&[odd], &[]).err().unwrap().contains("no brick fits"));
     }

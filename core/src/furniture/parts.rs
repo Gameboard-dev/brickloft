@@ -15,6 +15,8 @@ pub(super) struct Room<'a> {
     pub slopes: bool,
     /// the bricks that carry a light in the game (see `Model::lamps`), by their place in `lay`
     pub lamps: Vec<usize>,
+    /// for a plant fitted into the piece (see `pots::grow`): the volume of its shape, the volume where its bricks disagree with it, and the volume of its bricks
+    pub grown: (f64, f64, f64),
 }
 
 impl Room<'_> {

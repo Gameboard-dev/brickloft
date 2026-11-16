@@ -1287,6 +1287,9 @@ fn furniture(ui: &mut Ui, state: &mut State, largest: f64) {
             Field::Shine => {
                 helped(ui, help("furniture_shine"), |ui| ui.checkbox(&mut f.shine, setting.label));
             }
+            Field::Cover => {
+                helped(ui, help("furniture_cover"), |ui| ui.add(Slider::new(&mut f.books, 0..=setting.most).suffix("%").text(setting.label)));
+            }
         }
     }
     ui.horizontal(|ui| {

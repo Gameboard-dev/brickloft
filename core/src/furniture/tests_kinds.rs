@@ -19,6 +19,11 @@ fn kinds() -> impl Iterator<Item = Kind> {
     KINDS.into_iter().map(|k| k.0).filter(|k| *k != Kind::Bookcase)
 }
 
+/// Whether a kind has a plant fitted into it (see `pots`): the three that are not exact all through, and are slow.
+fn fitted(kind: Kind) -> bool {
+    matches!(kind, Kind::Potted | Kind::Basket | Kind::WindowBox)
+}
+
 /// A kind at its usual size, at two thirds of it, at twice it, and at a size out of proportion.
 fn sizes(kind: Kind) -> [[i32; 3]; 4] {
     let usual = Furniture::usual_size(kind).map(|v| v as i32);
@@ -31,8 +36,9 @@ fn pieces() -> Vec<(Furniture, [i32; 3])> {
     let mut all = Vec::new();
     for kind in kinds() {
         for style in STYLED {
-            for (n, size) in sizes(kind).into_iter().enumerate() {
-                for seed in 1..4 {
+            // (a fitted plant at two sizes and from one seed: each is half a second's work)
+            for (n, size) in sizes(kind).into_iter().enumerate().take(if fitted(kind) { 2 } else { 4 }) {
+                for seed in 1..if fitted(kind) { 2 } else { 4 } {
                     let f = Furniture { style, seed: seed + n as u64 * 10, ..Furniture::of(kind) };
                     all.push((f, size));
                     all.push((Furniture { extra: !f.extra, count: seed as i32, choice: (seed as i32 + n as i32) % 6, second: (seed as i32) % 4, ..f }, size));
@@ -73,11 +79,14 @@ fn nothing_floats_every_part_is_joined_to_what_the_piece_stands_on_or_hangs_from
         let model = made(&f, size);
         // what holds it: the floor, or for a pendant and a chandelier the ceiling, and for a sconce the wall behind it
         let held = |b: &CellBrick| match f.kind {
-            Kind::Pendant | Kind::Chandelier => high(b)[2] == size[2],
+            Kind::Pendant | Kind::Chandelier | Kind::Basket => high(b)[2] == size[2],
             Kind::Sconce => high(b)[1] == size[1],
             _ => b.min[2] == 0,
         };
         // from the bricks that are held, to every brick that touches one reached already
+        // (Of a fitted plant, its container alone: the pot, its rim and hanger, and the soil. The plant is a shape fitted as any plant is, and its leaves are not boards.)
+        let kept: Vec<CellBrick> = model.bricks.iter().zip(&model.shades).filter(|(_, shade)| !fitted(f.kind) || **shade <= super::pots::SOIL).map(|(b, _)| *b).collect();
+        let model = Model { bricks: kept, ..model };
         let mut reached: Vec<bool> = model.bricks.iter().map(held).collect();
         let mut front: Vec<usize> = (0..reached.len()).filter(|i| reached[*i]).collect();
         assert!(!front.is_empty(), "{f:?} at {size:?}: nothing of it is on the floor");
@@ -100,7 +109,7 @@ fn the_same_style_and_seed_are_the_same_piece_and_other_seeds_other_pieces() {
         let size = Furniture::usual_size(kind).map(|v| v as i32);
         let mut seen = HashSet::new();
         for style in STYLED {
-            for seed in 0..12 {
+            for seed in 0..if fitted(kind) { 2 } else { 12 } {
                 let f = Furniture { style, seed, ..Furniture::of(kind) };
                 let (a, b) = (made(&f, size), made(&f, size));
                 assert_eq!((&a.bricks, &a.shades, &a.lamps), (&b.bricks, &b.shades, &b.lamps), "{f:?}");
@@ -108,7 +117,7 @@ fn the_same_style_and_seed_are_the_same_piece_and_other_seeds_other_pieces() {
             }
         }
         // (five styles and twelve seeds: at least three different pieces of any kind, and of most many more)
-        assert!(seen.len() >= 3, "{kind:?}: only {} different pieces", seen.len());
+        assert!(seen.len() >= if fitted(kind) { 2 } else { 3 }, "{kind:?}: only {} different pieces", seen.len());
     }
     // a random style is one of the five, the same one for the same seed, and over a few seeds all five
     let picked: HashSet<&str> = (0..40).map(|seed| STYLES.iter().find(|s| s.0 == Style::Random.resolved(seed)).unwrap().1).collect();
@@ -142,11 +151,11 @@ fn pieces_of_one_style_and_seed_are_a_set() {
 #[test]
 fn every_setting_of_every_kind_changes_the_piece() {
     for kind in kinds() {
-        // (large, so that every part has room to be there)
-        let size = Furniture::usual_size(kind).map(|v| v as i32 * 2);
-        for setting in settings(kind).iter().filter(|s| s.field != Field::Shine) {
+        // (large, so that every part has room to be there; but a fitted plant at its usual size and in two styles, for the time it takes)
+        let size = Furniture::usual_size(kind).map(|v| v as i32 * if fitted(kind) { 1 } else { 2 });
+        for setting in settings(kind).iter().filter(|s| !matches!(s.field, Field::Shine | Field::Cover) && !(Furniture::of(kind).planted() && s.field == Field::Extra)) {
             let mut seen = HashSet::new();
-            for style in STYLED {
+            for style in STYLED.into_iter().take(if fitted(kind) { 2 } else { 5 }) {
                 for value in 0..=setting.most {
                     let mut f = Furniture { style, seed: 3, extra: false, ..Furniture::of(kind) };
                     // (a bench's back is what its other settings are settings of)
@@ -171,6 +180,11 @@ fn every_setting_of_every_kind_changes_the_piece() {
 fn a_lamp_has_its_light_and_a_chandelier_one_to_a_candle() {
     for (f, size) in pieces() {
         let model = made(&f, size);
+        // (a plant in a pot has other numbers: its fifth is a green)
+        if f.planted() {
+            assert!(model.lamps.is_empty());
+            continue;
+        }
         let lit = matches!(f.kind, Kind::TableLamp | Kind::FloorLamp | Kind::Pendant | Kind::Chandelier | Kind::Sconce | Kind::Candlestick);
         assert_eq!(model.shades.contains(&LIGHT), lit, "{f:?} at {size:?}");
         assert_eq!(!model.lamps.is_empty(), lit, "{f:?} at {size:?}");
@@ -195,6 +209,13 @@ fn a_build_of_each_kind_is_exact_turned_and_flipped_too() {
         let spec = Spec { form: Form::Furniture, points: vec![middle], radius: d as f64 / 2.0, stretch: DVec3::new(w as f64 / d as f64, 1.0, h as f64 / d as f64), furniture: f, ..Spec::default() };
         let built = build(&spec).unwrap_or_else(|e| panic!("{f:?}: {e}"));
         let what = format!("{f:?} at {w} by {d} by {h}");
+        if fitted(f.kind) {
+            // a plant in a pot is exact in its pot and fitted in its plant: it says how far off it is, as any plant does, and it is the same turned
+            assert!(built.error > 0.0 && built.error < 0.5 * built.solid && !built.unmeasured && built.shades.len() == built.bricks.len(), "{what}: {} of {}", built.error, built.solid);
+            let turned = build(&Spec { turned: 3, flip: [true, false, true], ..spec.clone() }).unwrap();
+            assert_eq!((turned.bricks.len(), turned.shades), (built.bricks.len(), built.shades), "{what}");
+            continue;
+        }
         assert_eq!((built.error, built.unmeasured, built.grain, built.shades.len()), (0.0, false, 1, built.bricks.len()), "{what}");
         assert_eq!(built.solid, built.bricks.iter().map(CellBrick::volume).sum::<f64>(), "{what}");
         for k in 0..3 {
@@ -217,7 +238,7 @@ fn a_build_of_each_kind_is_exact_turned_and_flipped_too() {
 fn hostile_sizes_and_settings_of_every_kind_are_built_or_refused_at_once() {
     let started = std::time::Instant::now();
     for kind in kinds() {
-        for extreme in [i32::MIN, -1, 0, 1, 5, i32::MAX] {
+        for extreme in if fitted(kind) { vec![-1, 5, i32::MAX] } else { vec![i32::MIN, -1, 0, 1, 5, i32::MAX] } {
             let f = Furniture { seed: u64::MAX, count: extreme, choice: extreme, second: extreme, board: extreme, extra: extreme > 0, style: STYLED[(extreme.unsigned_abs() % 5) as usize], ..Furniture::of(kind) };
             // every small size, and sizes far out of proportion: something is built, inside the box
             for size in (1..9).flat_map(|w| (1..7).flat_map(move |d| [1, 2, 3, 5, 8, 13].map(move |h| [w, d, h]))).chain([[3, 300, 4], [400, 3, 9], [5, 5, 600], [900, 700, 30]]) {
@@ -237,6 +258,46 @@ fn hostile_sizes_and_settings_of_every_kind_are_built_or_refused_at_once() {
         assert!(boxes.bricks.iter().all(|b| b.mask == CUBE), "{kind:?}");
     }
     assert!(started.elapsed().as_secs() < 60, "it took {:?}", started.elapsed());
+}
+
+#[test]
+fn a_plant_stands_in_its_pot_and_keeps_out_of_it_and_a_trellis_shows_through_its_climber() {
+    use super::pots::{PLANTS, SOIL, STEM};
+    for (n, (plant, name)) in PLANTS.into_iter().enumerate() {
+        let f = Furniture { second: n as i32 + 1, choice: n as i32 % 4 + 1, style: Style::Farmhouse, ..Furniture::of(Kind::Potted) };
+        let model = made(&f, [26, 26, 46]);
+        let (pot, grown): (Vec<_>, Vec<_>) = model.bricks.iter().zip(&model.shades).partition(|(_, shade)| **shade <= SOIL);
+        // a pot of a few bricks, every one a box or a sloped piece laid by rule, with soil on top; and a plant of hundreds, small enough to stay a pot plant
+        assert!((4..40).contains(&pot.len()) && pot.iter().any(|(_, s)| **s == SOIL), "{name}: a pot of {} bricks", pot.len());
+        assert!((150..4000).contains(&grown.len()), "{name}: a plant of {} bricks", grown.len());
+        // the plant is above the floor of the pot's soil, and reaches well up the box; it has green in it, and is not all one colour
+        let soil = pot.iter().filter(|(_, s)| **s == SOIL).map(|(b, _)| b.min[2]).min().unwrap();
+        let (low, top) = (grown.iter().map(|(b, _)| b.min[2]).min().unwrap(), grown.iter().map(|(b, _)| high(b)[2]).max().unwrap());
+        assert!(top >= soil + 8 && low <= soil + 2, "{name} ({plant:?}): from {low} to {top}, soil at {soil}");
+        let colours: HashSet<u8> = grown.iter().map(|(_, s)| **s).collect();
+        assert!(colours.len() >= 2 && colours.iter().all(|s| *s >= STEM) && (colours.contains(&LEAF) || colours.contains(&LEAF_DARK)), "{name}: {colours:?}");
+        // the same plant from the same seed, and another from another
+        assert_eq!(made(&f, [26, 26, 46]).bricks, model.bricks, "{name}");
+        assert!(made(&Furniture { seed: 9, ..f }, [26, 26, 46]).bricks != model.bricks, "{name}");
+    }
+    // a trellis: exact, its lattice the same whatever grows on it, and more of it covered the more coverage is asked for, but never all of it
+    let trellis = |books: i32, choice: i32, second: i32| made(&Furniture { books, choice, second, seed: 4, ..Furniture::of(Kind::Trellis) }, [36, 10, 56]);
+    for shape in 1..=3 {
+        let bare = trellis(0, shape, 2);
+        assert!(bare.shades.iter().all(|s| *s <= SOIL) && bare.error == 0.0, "lattice {shape}");
+        let covered: Vec<usize> = [20, 60, 100].iter().map(|books| {
+            let grown = trellis(*books, shape, 2);
+            assert_eq!(grown.bricks[..bare.bricks.len()], bare.bricks[..], "lattice {shape}: the climber moved a slat");
+            // (how many cells of the lattice's face have a leaf, a stem or a flower in front of them)
+            grown.bricks.iter().zip(&grown.shades).filter(|(_, s)| **s >= STEM).flat_map(|(b, _)| (b.min[0]..high(b)[0]).flat_map(move |x| (b.min[2]..high(b)[2]).map(move |z| (x, z)))).collect::<HashSet<_>>().len()
+        }).collect();
+        // (the face is 34 across and some 45 up: 1,500 cells)
+        assert!(covered[0] > 20 && covered[0] * 2 < covered[1] && covered[1] < covered[2] && covered[2] < 900, "lattice {shape}: {covered:?} cells covered");
+    }
+    // ivy has no flowers, a clematis one colour of them, a rose two; and a bare trellis is asked for by name
+    let flowers = |second: i32| trellis(90, 1, second).shades.iter().filter(|s| **s >= FLOWER).collect::<HashSet<_>>().len();
+    assert_eq!([flowers(1), flowers(2), flowers(3), flowers(5)], [0, 1, 2, 0]);
+    assert_eq!(trellis(90, 1, 5).bricks, trellis(0, 1, 1).bricks);
 }
 
 /// Prints how many bricks each kind is at its usual size, style by

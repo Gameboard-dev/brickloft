@@ -4375,4 +4375,48 @@ mod tests {
         assert!(state.undo() && state.refresh(|| 0.0));
         assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 60])));
     }
+
+    #[test]
+    fn a_piece_made_into_another_kind_keeps_its_style_and_seed_and_the_rest_are_made_to_match() {
+        use brickloft_core::furniture::{Furniture, Kind, Style};
+        let mut state = a_bookcase();
+        state.spec.furniture = Furniture { style: Style::Rustic, seed: 7, ..state.spec.furniture };
+        // made a dining table: its usual size, on the floor it stood on, in the rustic colours, and still the seventh rustic piece
+        state.usual_furniture(Kind::Dining);
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.furniture, Furniture { style: Style::Rustic, seed: 7, ..Furniture::of(Kind::Dining) });
+        assert_eq!(state.bounds, Some(([-22, -12, 0], [22, 12, 19])));
+        assert_eq!(state.paint.colours.as_slice(), crate::paint::palette("rustic furniture"));
+        assert!(state.problem.is_none() && state.built.error == 0.0 && !state.can_pull());
+        // its dots resize it as they do a cube, and it is a table at the new size
+        let top = state.handles().iter().find(|h| h.0 == Handle::Side(5)).unwrap().1;
+        state.drag(Handle::Side(5), top + DVec3::Z * 6.2 - DVec3::X * 80.0, DVec3::X, DVec3::X);
+        state.refresh(|| 0.0);
+        assert_eq!(state.bounds, Some(([-22, -12, 0], [22, 12, 25])));
+        // two chairs of other styles beside it, and a bookcase: matched, the chairs are the table's style, seed and colours, and the bookcase is left alone
+        for (kind, style) in [(Kind::Chair, Style::Modern), (Kind::Chair, Style::Classical), (Kind::Bookcase, Style::Modern)] {
+            state.record();
+            state.add_cube();
+            state.form = FURNITURE;
+            state.spec.furniture.style = style;
+            state.usual_furniture(kind);
+            state.refresh(|| 0.0);
+        }
+        let table = state.others.iter().position(|o| o.spec.furniture.kind == Kind::Dining).unwrap();
+        state.activate(table);
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.furniture.kind, Kind::Dining);
+        let before = state.forms();
+        assert_eq!(state.match_furniture(), 2);
+        let after = state.forms();
+        for (n, ((spec, paint, _), (was, ..))) in after.iter().zip(&before).enumerate() {
+            match spec.furniture.kind {
+                Kind::Bookcase => assert_eq!(spec, was, "form {n}"),
+                _ => assert_eq!((spec.furniture.style, spec.furniture.seed, paint.colours.as_slice()), (Style::Rustic, 7, crate::paint::palette("rustic furniture")), "form {n}"),
+            }
+        }
+        // one step to undo, and nothing to do a second time
+        assert_eq!(state.match_furniture(), 2);
+        assert!(state.undo());
+    }
 }

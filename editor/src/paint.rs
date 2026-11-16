@@ -316,6 +316,35 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[104, 74, 52], [88, 62, 44], [110, 114, 120], [60, 62, 66], [196, 120, 60], [255, 232, 160], [226, 220, 206], [120, 86, 60]],
             &[[140, 120, 100], [120, 104, 88], [44, 44, 48], [70, 80, 90], [200, 196, 188], [255, 232, 160], [226, 222, 212], [176, 176, 172]],
         ],
+        // A plant in a pot's colours, in the order of its own numbers
+        // (`brickloft_core::furniture`'s `pots`): the pot, its rim or the
+        // band of its glaze, the soil, stems, two greens, and two colours
+        // of flower. On a trellis the second is the lattice.
+        // white glaze with a dark band and pink flowers; a dark planter with white flowers
+        "modern pots" => &[
+            &[[236, 234, 228], [60, 62, 66], [70, 52, 40], [110, 84, 56], [78, 140, 70], [52, 104, 56], [236, 130, 170], [250, 214, 90]],
+            &[[52, 54, 58], [110, 114, 120], [66, 50, 38], [108, 84, 58], [92, 146, 84], [60, 108, 64], [246, 244, 236], [240, 200, 70]],
+        ],
+        // terracotta with red flowers; cream enamel with a blue band and yellow flowers
+        "farmhouse pots" => &[
+            &[[190, 104, 70], [170, 88, 58], [72, 54, 40], [112, 86, 58], [86, 146, 66], [56, 110, 54], [224, 60, 70], [250, 210, 80]],
+            &[[232, 224, 200], [120, 150, 170], [72, 54, 40], [112, 86, 58], [90, 150, 72], [58, 112, 58], [250, 220, 70], [244, 244, 236]],
+        ],
+        // terracotta with white flowers; blue and white glaze with crimson flowers
+        "classical pots" => &[
+            &[[184, 100, 68], [160, 84, 56], [66, 50, 38], [104, 80, 56], [70, 128, 66], [44, 94, 52], [246, 240, 230], [236, 150, 180]],
+            &[[236, 236, 232], [44, 74, 140], [66, 50, 38], [104, 80, 56], [76, 134, 70], [48, 98, 54], [200, 60, 90], [250, 214, 90]],
+        ],
+        // a weathered wooden planter with orange flowers; stone with mauve flowers
+        "rustic pots" => &[
+            &[[136, 104, 74], [104, 78, 56], [70, 54, 42], [110, 86, 60], [96, 140, 70], [64, 104, 54], [240, 170, 60], [200, 70, 60]],
+            &[[150, 146, 138], [120, 116, 108], [70, 54, 42], [110, 86, 60], [90, 138, 72], [60, 102, 56], [190, 120, 200], [250, 220, 90]],
+        ],
+        // dark steel with pale flowers; concrete with orange flowers
+        "industrial pots" => &[
+            &[[56, 58, 62], [110, 114, 120], [62, 48, 38], [104, 82, 58], [84, 134, 80], [54, 98, 60], [240, 236, 220], [230, 180, 60]],
+            &[[168, 168, 164], [60, 62, 66], [62, 48, 38], [104, 82, 58], [92, 142, 76], [60, 104, 56], [236, 90, 60], [250, 214, 90]],
+        ],
         // A bookcase's colours are for its parts, in the order of
         // `brickloft_core::furniture`'s numbers: the wood of the carcass,
         // a second tone of it for the back panel, and six the books and
@@ -424,6 +453,11 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
 /// order [`palettes`] has them.
 pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
     match kind {
+        "modern pots" => &["White glaze and pink", "Dark planter and white"],
+        "farmhouse pots" => &["Terracotta and red", "Cream enamel and yellow"],
+        "classical pots" => &["Terracotta and white", "Blue and white glaze"],
+        "rustic pots" => &["Weathered wood and orange", "Stone and mauve"],
+        "industrial pots" => &["Dark steel and cream", "Concrete and orange"],
         "modern furniture" => &["Pale oak, white and grey", "Walnut and teal", "White and black"],
         "farmhouse furniture" => &["Pine and cream", "Painted blue", "Sage and oak"],
         "classical furniture" => &["Mahogany and green", "Walnut and burgundy", "Ivory and gilt"],

@@ -206,7 +206,8 @@ impl Set {
                     set.back = [Back::Panel, Back::Slats, Back::Ladder][pick(f.choice).min(2)];
                 }
             }
-            Kind::Bookcase | Kind::Chandelier | Kind::Candlestick => {}
+            // (a plant in a pot reads its settings itself: see `pots` and `trellis`)
+            Kind::Bookcase | Kind::Chandelier | Kind::Candlestick | Kind::Potted | Kind::Basket | Kind::WindowBox | Kind::Trellis => {}
         }
         set
     }
@@ -220,6 +221,8 @@ pub enum Field {
     Second,
     Extra,
     Shine,
+    /// how much of a trellis its climber covers, 0 to 100 (kept in `books`, which only a bookcase has another use for)
+    Cover,
 }
 
 /// One setting of a kind, as the panel shows it: which field it is, what
@@ -257,6 +260,9 @@ const HANDLES: Setting = choice(Field::Choice, "Handles", &[BY_STYLE, "Knobs", "
 const STANDS: Setting = choice(Field::Second, "Stands on", &[BY_STYLE, "A plinth", "Feet"]);
 const SHADES: Setting = choice(Field::Choice, "Shade", &[BY_STYLE, "Drum", "Cone", "Globe"]);
 const SHINE: Setting = tick(Field::Shine, "Lights shine in the game");
+const PLANT: Setting = choice(Field::Second, "Plant", &["The seed picks", "Yucca", "Boxwood ball", "Hydrangea", "Peonies", "Tulips", "Daffodils", "Daisies", "Petunias", "Cypress", "Palm", "Cherry tree"]);
+const WALKED: Setting = tick(Field::Extra, "Leaves can be walked through in the game");
+const POT_HEIGHT: Setting = number("Pot height, in tenths of the whole", 8);
 
 /// The settings a kind has beyond its size, its style and its seed, in
 /// the order the panel shows them. A bookcase's are its own (see the
@@ -280,6 +286,10 @@ pub fn settings(kind: Kind) -> &'static [Setting] {
         Kind::TableLamp | Kind::FloorLamp | Kind::Pendant | Kind::Sconce => const { &[SHADES, SHINE] },
         Kind::Chandelier => const { &[choice(Field::Second, "Arms", &["As its size has it", "Two", "Four", "Eight candles on four"]), SHINE] },
         Kind::Candlestick => const { &[choice(Field::Second, "Candles", &["As its size has it", "One", "Three"]), SHINE] },
+        Kind::Potted => const { &[choice(Field::Choice, "Pot", &[BY_STYLE, "Terracotta", "Glazed", "Square planter", "Tall planter"]), PLANT, POT_HEIGHT, WALKED] },
+        Kind::Basket => const { &[PLANT, WALKED] },
+        Kind::WindowBox => const { &[PLANT, POT_HEIGHT, WALKED] },
+        Kind::Trellis => const { &[choice(Field::Choice, "Lattice", &["The seed picks", "Square", "Diamond", "Arched"]), number("Microbricks between slats", 8), choice(Field::Second, "Climber", &["The seed picks", "Ivy", "Clematis", "Climbing rose", "Wisteria", "A bare trellis"]), Setting { field: Field::Cover, label: "Coverage", choices: &[], most: 100 }, WALKED] },
         Kind::Bed => const { &[choice(Field::Choice, "Headboard", &[BY_STYLE, "Panel", "Slats", "Rails"]), choice(Field::Second, "Pillows", &["As its width has it", "One", "Two"]), tick(Field::Extra, "A footboard")] },
     }
 }

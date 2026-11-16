@@ -35,11 +35,15 @@ use std::sync::OnceLock;
 mod bed;
 mod lights;
 mod parts;
+mod pots;
 mod seating;
 mod storage;
 mod style;
 mod tables;
+mod trellis;
 pub use lights::MOST_LIGHTS;
+pub use pots::{FLOWER, FLOWER_TOO, LEAF, LEAF_DARK, PLANTS};
+pub use trellis::CLIMBERS;
 pub use style::{settings, Field, Set, Setting, Style, STYLES};
 
 /// The kinds of furniture there are.
@@ -66,11 +70,15 @@ pub enum Kind {
     Sconce,
     Candlestick,
     Bed,
+    Potted,
+    Basket,
+    WindowBox,
+    Trellis,
 }
 
 /// Every kind, in the order of [`Kind`], with the name a save or another
 /// program calls it by.
-pub const KINDS: [(Kind, &str); 21] = [
+pub const KINDS: [(Kind, &str); 25] = [
     (Kind::Bookcase, "bookcase"),
     (Kind::Cupboard, "cupboard"),
     (Kind::Drawers, "drawers"),
@@ -92,16 +100,21 @@ pub const KINDS: [(Kind, &str); 21] = [
     (Kind::Sconce, "sconce"),
     (Kind::Candlestick, "candlestick"),
     (Kind::Bed, "bed"),
+    (Kind::Potted, "potted"),
+    (Kind::Basket, "basket"),
+    (Kind::WindowBox, "windowbox"),
+    (Kind::Trellis, "trellis"),
 ];
 
 /// The kinds in the groups a list of them is shown in, each kind with
 /// what it is called there.
-pub const GROUPS: [(&str, &[(Kind, &str)]); 5] = [
+pub const GROUPS: [(&str, &[(Kind, &str)]); 6] = [
     ("Storage", &[(Kind::Bookcase, "Bookcase"), (Kind::Cupboard, "Cupboard"), (Kind::Drawers, "Chest of drawers"), (Kind::Sideboard, "Sideboard"), (Kind::Kitchen, "Kitchen cabinet")]),
     ("Tables", &[(Kind::Dining, "Dining table"), (Kind::Coffee, "Coffee table"), (Kind::Side, "Side table"), (Kind::Desk, "Desk")]),
     ("Seating", &[(Kind::Chair, "Chair"), (Kind::Armchair, "Armchair"), (Kind::Stool, "Stool"), (Kind::Bench, "Bench"), (Kind::Sofa, "Sofa")]),
     ("Lights", &[(Kind::TableLamp, "Table lamp"), (Kind::FloorLamp, "Floor lamp"), (Kind::Pendant, "Pendant"), (Kind::Chandelier, "Chandelier"), (Kind::Sconce, "Wall sconce"), (Kind::Candlestick, "Candlestick")]),
     ("Beds", &[(Kind::Bed, "Bed")]),
+    ("Plants in pots", &[(Kind::Potted, "Potted plant"), (Kind::Basket, "Hanging basket"), (Kind::WindowBox, "Window box"), (Kind::Trellis, "Trellis with a climber")]),
 ];
 
 /// The colour numbers of every kind but the bookcase, whose numbers
@@ -212,7 +225,14 @@ impl Furniture {
     pub fn of(kind: Kind) -> Furniture {
         // (what a kind has unless it is taken off: a side table's drawer, the drawers of a sideboard and of a kitchen's units)
         let extra = matches!(kind, Kind::Side | Kind::Sideboard | Kind::Kitchen);
-        Furniture { kind, seed: 1, board: 2, shelves: 0, spacing: 11, bay: 34, plinth: 3, back: true, moulding: true, books: 85, style: Style::Classical, count: 0, choice: 0, second: 0, extra, shine: true }
+        // (a trellis's `books` is how much of it its climber covers: a plant a few years old, with lattice still to climb)
+        let books = if kind == Kind::Trellis { 60 } else { 85 };
+        Furniture { kind, seed: 1, board: 2, shelves: 0, spacing: 11, bay: 34, plinth: 3, back: true, moulding: true, books, style: Style::Classical, count: 0, choice: 0, second: 0, extra, shine: true }
+    }
+
+    /// Whether it is a plant in a pot: a container with something growing in it.
+    pub fn planted(&self) -> bool {
+        matches!(self.kind, Kind::Potted | Kind::Basket | Kind::WindowBox | Kind::Trellis)
     }
 
     /// The name its sets of colours go by: a bookcase's own, or its
@@ -220,6 +240,12 @@ impl Furniture {
     pub fn colours(&self) -> &'static str {
         match (self.kind, self.style.resolved(self.seed)) {
             (Kind::Bookcase, _) => "bookcase",
+            // (a plant in a pot has a pot's colours and a plant's, which are other numbers than a table's: see `pots`)
+            (_, Style::Modern) if self.planted() => "modern pots",
+            (_, Style::Farmhouse) if self.planted() => "farmhouse pots",
+            (_, Style::Rustic) if self.planted() => "rustic pots",
+            (_, Style::Industrial) if self.planted() => "industrial pots",
+            _ if self.planted() => "classical pots",
             (_, Style::Modern) => "modern furniture",
             (_, Style::Farmhouse) => "farmhouse furniture",
             (_, Style::Rustic) => "rustic furniture",
@@ -261,6 +287,10 @@ impl Furniture {
             Kind::Sconce => [5.0, 5.0, 9.0],
             Kind::Candlestick => [5.0, 5.0, 11.0],
             Kind::Bed => [30.0, 52.0, 24.0],
+            Kind::Potted => [26.0, 26.0, 46.0],
+            Kind::Basket => [28.0, 28.0, 44.0],
+            Kind::WindowBox => [52.0, 14.0, 26.0],
+            Kind::Trellis => [36.0, 10.0, 56.0],
         }
     }
 
@@ -934,6 +964,8 @@ pub struct Model {
     pub shades: Vec<u8>,
     /// the volume of all its bricks, in cells cubed
     pub volume: f64,
+    /// The volume where its bricks and its shape disagree: none, but for a plant in a pot, which is fitted (see `pots::grow`).
+    pub error: f64,
     pub count: Count,
     /// Which bricks carry a light in the game, by their place in
     /// `bricks`: a lamp's bulb, each flame of a chandelier. No more than
@@ -966,11 +998,12 @@ impl Model {
         let mut lay = Lay { bricks: Vec::new(), shades: Vec::new(), longest: longest.max(1) };
         let mut count = Count::default();
         let mut lamps = Vec::new();
+        let mut grown = (0.0, 0.0, 0.0);
         if f.kind == Kind::Bookcase {
             count = bookcase(f, lo, hi, &mut lay, slopes)?;
         } else {
             let f = f.clamped();
-            let mut room = parts::Room { lay: &mut lay, lo, hi, set: Set::for_piece(&f), f, slopes, lamps: Vec::new() };
+            let mut room = parts::Room { lay: &mut lay, lo, hi, set: Set::for_piece(&f), f, slopes, lamps: Vec::new(), grown: (0.0, 0.0, 0.0) };
             match f.kind {
                 Kind::Cupboard | Kind::Drawers | Kind::Sideboard | Kind::Kitchen => storage::cupboard(&mut room, f.kind),
                 Kind::Dining | Kind::Coffee | Kind::Side | Kind::Desk => tables::table(&mut room, f.kind),
@@ -982,13 +1015,19 @@ impl Model {
                 Kind::Sconce => lights::sconce(&mut room),
                 Kind::Candlestick => lights::candlestick(&mut room),
                 Kind::Bed => bed::bed(&mut room),
+                Kind::Potted => pots::potted(&mut room),
+                Kind::Basket => pots::basket(&mut room),
+                Kind::WindowBox => pots::window_box(&mut room),
+                Kind::Trellis => trellis::trellis(&mut room),
                 Kind::Bookcase => {}
             }
+            grown = room.grown;
             lamps = room.lamps;
             lamps.truncate(MOST_LIGHTS);
         }
-        let volume = lay.bricks.iter().map(CellBrick::volume).sum();
-        Ok(Model { bricks: lay.bricks, shades: lay.shades, volume, count, lamps, lo, hi, index: OnceLock::new() })
+        // (a fitted plant's volume is its shape's, as any fitted form's is, and the rest is its bricks')
+        let volume = lay.bricks.iter().map(CellBrick::volume).sum::<f64>() - grown.2 + grown.0;
+        Ok(Model { bricks: lay.bricks, shades: lay.shades, volume, error: grown.1, count, lamps, lo, hi, index: OnceLock::new() })
     }
 
     /// The box it fills: its low corner and its high one.
