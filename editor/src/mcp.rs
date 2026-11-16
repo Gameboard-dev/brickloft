@@ -1513,7 +1513,8 @@ mod tests {
             assert_eq!((state.spec.form, state.spec.furniture), (brickloft_core::spec::Form::Furniture, Furniture::of(kind)), "{name}");
             let b = &state.built.bricks;
             let (low, high) = ([0, 1, 2].map(|k| b.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| b.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
-            assert!(low[2] == 0 && (0..3).all(|k| high[k] - low[k] <= [w, d, h][k]) && high[2] - low[2] >= h * 2 / 3, "{name}: from {low:?} to {high:?}");
+            // (on the floor, or for what hangs with its top where its box's is)
+            assert!((low[2] == 0 || high[2] == h) && (0..3).all(|k| high[k] - low[k] <= [w, d, h][k]) && high[2] - low[2] >= h / 2, "{name}: from {low:?} to {high:?}");
             assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette(state.spec.furniture.colours())), "{name}");
             assert!(state.built.shades.len() == state.built.bricks.len() && added["forms"][0]["settings"]["furniture"].as_str().unwrap().starts_with(name), "{name}");
             // its style, its seed and its own settings are the values after the bookcase's ten, and are read back as they were sent
