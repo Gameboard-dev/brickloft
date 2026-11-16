@@ -26,8 +26,7 @@ cargo install wasm-bindgen-cli --version 0.2.129
 
 The first command adds WebAssembly as a target the compiler can build for.
 The second installs `wasm-bindgen`, the tool that connects the compiled
-program to the page (both are explained under [How it
-works](#how-it-works)). Its version must match the version of the
+program to the page. Its version must match the version of the
 `wasm-bindgen` library pinned in [editor/Cargo.toml](../editor/Cargo.toml)
 exactly, or the tool refuses the build:
 

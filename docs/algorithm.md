@@ -1,12 +1,8 @@
 # How a form becomes bricks
 
 arcs takes a smooth form, such as an arch, a dome or a ring, and chooses the
-Brickadia microbricks that build it. This page explains how it chooses them:
-the problem, the ideas the program is built on, and the method used for each
-kind of form. It assumes you know what a brick and a grid are, and nothing
-more. Each idea from geometry or programming is explained where it is first
-needed, with a small example. Links name the source file and the function
-that does each part, for readers who want to see the code.
+Brickadia microbricks that build it. This page explains how, for a reader
+who knows what a brick and a grid are.
 
 - [1. The problem](#1-the-problem)
 - [2. The grid and the bricks](#2-the-grid-and-the-bricks)
@@ -24,12 +20,12 @@ that does each part, for readers who want to see the code.
 ## 1. The problem
 
 A form, such as an arch, a sphere or a torus, is a smooth solid. Bricks are
-boxes and wedges whose corners sit on a grid. The program has to choose a
-set of bricks that does four things at once. The bricks should come as close
-to the form as bricks can. They should show a slope wherever the form
-slopes, instead of the treads and risers of a staircase. They should be
-their own mirror image wherever the form is. And there should be few of
-them, because every brick costs the player time and the game memory.
+boxes and wedges whose corners sit on a grid. The program has to choose
+bricks that come as close to the form as bricks can, and that show a slope
+wherever the form slopes, instead of the treads and risers of a staircase.
+Where the form is its own mirror image, the bricks should be too. There
+should also be few of them, because every brick costs the player time and
+the game memory.
 
 These four aims pull against each other, and the clearest case is closeness
 against slopes. Picture the side of a hill drawn in bricks. One way is a
@@ -46,10 +42,9 @@ staircase of cubes; another is a row of wedges laid end to end.
 Both can hold the same amount of material, so a measure of volume alone
 cannot tell them apart. Worse, the fit that is closest by volume is usually
 a staircase, because many small bricks can follow a curve a little more
-tightly than a few long wedges. So the closest fit is not the goal on its
-own. Most of what follows is about getting slopes that meet end to end, at a
-small cost in closeness, and about measuring both things separately so that
-the trade can be seen.
+tightly than a few long wedges. arcs therefore gives up a little closeness
+to get slopes that meet end to end, and it measures closeness and slopes
+separately so that the trade can be seen.
 
 ## 2. The grid and the bricks
 
@@ -62,7 +57,7 @@ calls this cube a **cell**, and every length in arcs is counted in cells.
 A brick's position in the game must be a whole number of units, which is a
 half cell. So before anything is computed, every point, radius and
 thickness of a form is rounded to the nearest half cell (`Spec::snapped` in
-[core/src/spec.rs](../core/src/spec.rs)). The reason is practical. A form
+[core/src/spec.rs](../core/src/spec.rs)). A form
 placed between units could only be approximated by bricks that are all
 slightly off it, and the error would drift in and out along a curve. On the
 half-cell grid, a form's straight edges and its symmetries line up with the
@@ -141,17 +136,16 @@ These are the first lines of `Kind::canonical` in `shapes.rs`:
 The cube has every switch on (0xff). The ramp lacks corners 3 and 7, which
 are $`(1,1,0)`$ and $`(1,1,1)`$, the two ends of one edge.
 
-This choice of description pays off in four ways, and each one is used
-later. Stretching a box to any size stretches its shape with it, and the
-corner mask does not change, so one mask describes a ramp one cell long or
-twenty. Turning or mirroring a brick moves its corners to other corners, so
-it is just a reordering of the eight switches, with no geometry. The program
-can tell a shape from its mask with one table lookup (`shape_info` in
-`shapes.rs`), and a mask that is no shape at all is caught the same way.
-Finally, two bricks whose boxes share a face, and whose masks agree on that
-face's four corners, meet exactly, with no gap and no overlap. The fitters
-build on that last fact, because it means that if the corners are right,
-the faces between bricks follow.
+Stretching a box to any size stretches its shape with it, and the corner
+mask does not change, so one mask describes a ramp one cell long or twenty.
+Turning or mirroring a brick moves its corners to other corners, so the
+program turns or mirrors a brick by reordering the eight switches, without
+any geometry. The program can tell a shape from its mask with one table
+lookup (`shape_info` in `shapes.rs`), and a mask that is no shape at all is
+caught the same way. Two bricks whose boxes share a face, and whose masks
+agree on that face's four corners, meet exactly, with no gap and no
+overlap. The fitters therefore only have to get the corners right, and the
+faces between bricks follow.
 
 To test whether a point is inside a shape, the program measures the point's
 distance from a special corner of the shape (the tetrahedron's right-angle
@@ -172,8 +166,9 @@ three coordinates measured from that corner:
 ```
 
 The tests are strict (`<` and `>`), so a point lying exactly on a sloped
-face counts as outside. Section 10 explains why that detail matters when the
-result is measured.
+face counts as outside. A regular grid of samples puts many samples exactly
+on a 45° face, so this rule decides how much of a ramp the measurement of
+section 10 counts.
 
 ### The inner corner
 
@@ -191,8 +186,7 @@ corners are solid" has to check for this case first (`corners` in
 
 ### How the shapes fit together
 
-Several shapes pair up to fill a box exactly, and the fitters use this
-often. A tetrahedron and a cut cube fill a box between them, split by the
+Several pairs of shapes fill a box exactly between them. A tetrahedron and a cut cube fill a box between them, split by the
 plane $`x + y + z = \text{const}`$, a plane tilted equally towards all three
 axes. A plane tilted on all three axes therefore passes through the grid
 cutting alternate layers of cells into tetrahedra and cut cubes. A ramp and
@@ -246,14 +240,13 @@ flowchart TD
     P --> Q[Bricks, discrepancy, the curve to draw]
 ```
 
-Two things are computed for every form. The first is a **distance
-function**, a precise description of the solid that can be asked about any
-point (section 5). The second is a **layout**, which is whatever structure
-the right fitter needs: an outline in two dimensions, a list of cut
-positions, or a profile. The bricks are made from the layout. The distance
-function is used afterwards to measure them, so the measurement does not
-depend on which fitter made the bricks, and a fitter cannot mark its own
-work.
+For every form the program computes a **distance function**, a precise
+description of the solid that can be asked about any point (section 5). It
+also computes a **layout**, which is whatever structure the right fitter
+needs: an outline in two dimensions, a list of cut positions, or a profile.
+The bricks are made from the layout. The distance function is used
+afterwards to measure them, so the measurement does not depend on which
+fitter made the bricks, and no fitter measures its own work.
 
 Some forms cannot be laid out. A sphere whose centre is off the half-cell
 grid, or a hollow shell whose wall is too thin for its layout, are
@@ -359,7 +352,7 @@ the points. Each point's share is multiplied by its weight, and the bottom
 line divides by the total so that the shares still add up to one. A larger
 weight therefore pulls the curve closer to its point.
 
-The weights matter because they make the circle possible. With three
+With weights, a Bézier curve can draw an exact circular arc. With three
 points, the middle weight decides what kind of curve comes out. Below 1 it
 is part of an ellipse, exactly 1 is a parabola, above 1 a hyperbola, and
 $`\cos(\theta/2)`$ gives an exact circular arc of angle $`\theta`$. For
@@ -369,7 +362,7 @@ circle exactly, only approximately.
 
 ## 5. Solids as distance functions
 
-### The idea
+### What a distance function is
 
 A fitter needs to ask one question many millions of times: is this point
 inside the form? arcs answers it with a **distance function**
@@ -378,8 +371,8 @@ $`f(p)`$ that takes a point $`p`$ and gives one number. The number is
 negative inside the form and positive outside, and near the surface it
 equals the distance to the surface, in cells. At the surface it is zero.
 
-A contour map is a good picture. Treat the form's surface as sea level. A
-point under the sea has a negative height and a point on land a positive
+The numbers work like heights on a contour map that has the form's surface
+as sea level. A point under the sea has a negative height and a point on land a positive
 one, and the height tells you how far you are from the shore. For a sphere
 of radius 10 centred at the origin, $`f(p)`$ is the point's distance from
 the centre minus 10: a point 3 from the centre gives $`-7`$ (inside, 7 cells
@@ -388,7 +381,8 @@ cells away).
 
 ### The solids
 
-The forms are built from a few basic solids.
+The forms are built from five basic solids, each with a short rule for
+$`f`$.
 
 | Solid | $`f(p)`$ |
 |---|---|
@@ -398,7 +392,7 @@ The forms are built from a few basic solids.
 | Outline spun about an upright axis | the outline's 2D function at $`\big(\sqrt{x^2+y^2},\ z\big)`$ |
 | Pyramid | the largest of the distances out of its four slopes, its base and its top |
 
-Each row is the plain description written as a rule. A round tube is every
+A round tube is every
 point within $`r`$ of its curve, so the function is the distance to the
 curve less $`r`$. A point is inside a flat band of width $`t`$ and depth
 $`d`$ only if it is both within $`t/2`$ of the curve in its plane and within
@@ -426,8 +420,8 @@ Solids combine by taking the smaller or larger of two numbers.
 A point is in "both together" if it is in either, and the smaller number is
 negative when either is. A point is in "$`A`$ cut to $`B`$" only if it is in
 both, which is the larger number again. Taking $`B`$ out uses $`-f_B`$,
-which turns $`B`$ inside out: it is negative outside $`B`$. These lines of
-`Field::eval` in `sdf.rs` are the whole of it:
+which turns $`B`$ inside out, because it is negative outside $`B`$. In
+`Field::eval` in `sdf.rs` each combination is one line:
 
 ```rust
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
@@ -439,10 +433,10 @@ With these, a dome is an ellipsoid cut by a flat floor, a segment is an
 ellipsoid cut between two heights, and a hollow shell is an ellipsoid with
 a smaller one taken out. None of these needs its own case in the code.
 
-### The rule that makes it fast
+### Why whole regions can be skipped
 
-Every fitter relies on one property of $`f`$. It never claims the surface
-is further away than it is. If $`f(p) = 5`$, there is certainly no surface
+Every fitter relies on the fact that $`f`$ never claims the surface is
+further away than it is. If $`f(p) = 5`$, there is certainly no surface
 within 5 cells of $`p`$. That lets the fitters and the measurement test one
 point in the middle of a large region and skip the whole region when the
 number is large enough ([performance.md](performance.md) explains how much
@@ -495,7 +489,9 @@ surface separately (section 10).
 
 The cell-by-cell fitter ([core/src/fit_volume.rs](../core/src/fit_volume.rs),
 `fit_volume`) is the general method. It is used when no layout applies, and
-it works for any solid that has a distance function. It runs in five steps.
+it works for any solid that has a distance function. It classifies each
+cell, chooses a shape for it, removes spikes, stretches ramps and merges
+cubes, in that order.
 
 #### Classifying each cell
 
@@ -526,7 +522,7 @@ is negative there.
 Each candidate shape has its own 64-bit
 number, worked out once: which samples it covers. The disagreement between
 the cell and a candidate is the number of samples where the two rows of
-switches differ. Computers have an instruction for exactly this. The
+switches differ, which a processor finds in two instructions. The
 exclusive-or (written `^`) of two numbers has a switch on wherever the two
 differ, and `count_ones` counts the switches that are on.
 
@@ -574,15 +570,15 @@ underside of a dome's rim.
 
 #### Merging
 
-Finally, cubes next to each other are joined into larger boxes,
+Cubes next to each other are then joined into larger boxes,
 first along $`x`$, then the run along $`y`$, then the slab along $`z`$
 (`merge`). Ramps of the same pose are joined end to end along their length,
 up to the longest brick allowed. Merging changes the brick count and never
 the shape, because two cubes side by side are exactly one longer box.
 
 The result is the closest of all the methods by volume and the roughest to
-look at. The reason is that no cell knows what its neighbours hold, so
-nothing makes one cell's slope continue into the next.
+look at, because no cell knows what its neighbours hold, so nothing makes
+one cell's slope continue into the next.
 
 ### 7.2 Flat outlines
 
@@ -594,14 +590,14 @@ dimensions the bricks become flat **pieces**: rectangles, which become
 cubes, and right-angled triangles, which become ramps standing through the
 depth.
 
-The idea that makes this fitter smooth is to fit an outline first and fill
-it afterwards. The fitted outline is a polygon whose corners are lattice
+This fitter is smooth because it fits an outline first and fills it
+afterwards. The fitted outline is a polygon whose corners are lattice
 points. Each side of the polygon is level, upright or sloped. A sloped side
 is the long side of exactly one right-angled triangle whose other two sides
 lie along the grid, so each sloped side becomes one triangle piece.
 Neighbouring sides share a corner by construction, so slopes always meet
-end to end and there is no place for a stray step. The only question is
-which lattice points to use as corners.
+end to end and there is no place for a stray step. The fitter's work is
+therefore to choose which lattice points are the corners.
 
 ```mermaid
 flowchart LR
@@ -659,8 +655,9 @@ program it is how much the side's triangle gets wrong, less what the
 one-cell pieces it replaces got wrong. The second term, $`\lambda`$, is a fixed price
 for each corner of the polygon. The search finds the chain of sides with the
 least total cost. $`\lambda`$ is 0.1 of a cell plus the **Simplify**
-setting. Even at Simplify 0 the price matters. A step is two corners where a
-slope is one, so a slope wins whenever it fits as well as the step. The
+setting. Even at Simplify 0 the price favours slopes, because a step is two
+corners where a slope is one, so a slope wins whenever it fits as well as
+the step. The
 base price is kept small because a tenth of a cell is about the least
 disagreement that can be seen at all.
 
@@ -728,9 +725,9 @@ of repaired afterwards.
 
 A sphere is laid out whole, by one rule, with no cell-by-cell choosing
 ([core/src/fit_round.rs](../core/src/fit_round.rs), `fit_round`). The rule
-comes from one observation about the equation of a sphere.
+works because the equation of a sphere is a sum of one term for each axis.
 
-#### The idea
+#### Turning the sphere's equation into a count
 
 The sphere of radius $`r`$ is
 
@@ -829,8 +826,8 @@ centre has $`s = 1`$ and holds a tetrahedron. So one eighth of this sphere
 is four bricks: one cut cube and three tetrahedra. The corner at
 $`(4, 0, 0)`$ lies exactly on the sphere. The corner at $`(3, 3, 0)`$ is
 $`\sqrt{18} \approx 4.24`$ from the centre instead of 4, because the cut
-2.83 had to be rounded to 3. That rounding is the remaining error, and the
-next steps are about keeping it small.
+2.83 had to be rounded to 3. That rounding is the only error left, so the
+cuts are placed to keep it small.
 
 #### Putting the cuts on the lattice
 
@@ -859,7 +856,7 @@ About one ring per two to three cells of radius is typical.
 An ellipsoid uses the same method with a different radius on each axis. A
 dome or a segment is cut off flat at one of the cuts along $`z`$, so its
 flat face is a layer of whole boxes. A hollow shell is the same solid with
-a smaller one taken out: the corners with $`i + j + k \le K - m`$ are
+a smaller one taken out, so the corners with $`i + j + k \le K - m`$ are
 hollow. The wall is then $`m`$ numbered layers thick, and $`m`$ is at
 least 2. With $`m = 1`$, a box could have both the outer and the inner surface
 passing through it, and one box can hold only one brick. A shell needs a
@@ -893,8 +890,7 @@ says that each step up shrinks the allowed ring by one. In code:
 ```
 
 With this rule the boxes hold ramps on the four slopes and hips on the four
-ridges. The pyramid is exact: the bricks are its four slopes, with no
-approximation. For example, centre a pyramid on a lattice
+ridges. The bricks are exactly the pyramid's four slopes. For example, centre a pyramid on a lattice
 point with $`L = 1`$. Each quarter is one box from the middle to the edge
 and from the base to the apex. Its corners at the base have
 $`\max(i_x, i_y) + 0 \le 1`$, so all four are inside; at the top, only the
@@ -906,8 +902,8 @@ allowed.
 A pyramid that is not filled is hollow, a tent open underneath. It has a
 smaller pyramid, $`\max(i_x, i_y) + i_z \le L - 2`$, taken out of it. The
 inner one is two levels lower for the same reason a shell's wall is two
-layers thick: no box then has both the outer and the inner slope passing
-through it. The bricks on the inside are what the smaller pyramid's bricks
+layers thick, which is that no box then has both the outer and the inner
+slope passing through it. The bricks on the inside are what the smaller pyramid's bricks
 would leave of their boxes. A ramp leaves a ramp, and a hip leaves an inner
 corner, which runs up each inside ridge. $`L`$ is chosen to divide the
 height and both half-widths evenly, so that the slopes stay flat. The wall
@@ -951,7 +947,7 @@ just above the asked thickness, whichever makes an octagon nearer the
 circle in area. A tube 6.5 across is far closer to an octagon 6 across (28
 cells in section, against the circle's 33) than to one 7 across (41).
 
-The pipe is built in three steps.
+The pipe is built wall first, then the chamfers.
 
 1. The band of the tube's full width is fitted as an outline, as in 7.2.
 2. The chamfer is cut back from that outline towards the narrower top. Each
@@ -964,8 +960,8 @@ The pipe is built in three steps.
 These bricks share whole faces and start exactly on the wall, so the
 chamfer is one continuous surface. Internally the chamfer is worked out as
 the air above it growing inwards from the air around the wall (`grow`), and
-each block of air becomes the brick that fills the rest of its box. Growing
-the air has a useful property. Where bricks from two sides of a tight curve
+each block of air becomes the brick that fills the rest of its box. Because
+it is the air that grows, where bricks from two sides of a tight curve
 would cross and one must be left out, what remains is solid standing a
 little proud, not a hole.
 
@@ -1206,7 +1202,7 @@ The game keeps bricks on grids, and a grid other than the world's can stand
 at any angle. Each form carries a grid number, a rotation $`q`$ and a
 translation $`t`$, shared by every form on that grid. The rotation is
 stored as a quaternion, which is four numbers that together describe one
-turn in space; you do not need its mathematics to follow the idea. A point
+turn in space. A point
 $`p`$ of a form is shown at
 
 ```math
@@ -1264,9 +1260,8 @@ $`1/g^2`$ as many bricks, because each brick covers $`g \times g`$ times as
 much of it, and it is followed $`g`$ times as coarsely.
 
 **Automatic** tries sizes 8, 6, 4, 3, 2 and 1 in that order and keeps the
-finest that is within the brick budget. It has limits: a wall stays at
-least two bricks thick, and a round solid at least four bricks to its
-radius. Past those limits the brick count would fall only because the form
+finest that is within the brick budget. It keeps a wall at least two bricks
+thick and a round solid at least four bricks to its radius. Past those limits the brick count would fall only because the form
 was no longer being built. The search goes from coarse to fine because a fit
 $`g`$ times coarser has about $`g^3`$ fewer cells to look at, so every size
 tried on the way costs less than the one finally kept.
@@ -1371,9 +1366,8 @@ other candidate shares wins. If every score is shared, the choice falls back
 to the first `plain` candidates, which are nothing and the full cube, since
 those look the same from every side.
 
-A search that runs in one direction can also favour one side. The outline
-search of 7.2 runs along the outline, and a rule that does not read the same backwards
-favours one side. Its costs are therefore written to be the same in both
+The outline search of 7.2 runs along the outline in one direction, so any
+rule that does not read the same backwards would favour one side. Its costs are therefore written to be the same in both
 directions. Each stretch is also solved from both ends, and if the two
 answers differ, it is cut at its middle and each half is solved again.
 Midpoints are rounded to the nearer lattice point on either side.

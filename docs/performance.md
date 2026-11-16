@@ -2,10 +2,9 @@
 
 The editor refits a form every time a dot moves, so a fit has to take a few
 milliseconds for dragging to feel direct. A fit that takes half a second
-turns a drag into a slideshow. This page says what each part of the program
-costs, what was done to make it cheap, and what is still slow. The method
-itself is in [algorithm.md](algorithm.md), and the terms used here (cell,
-sample, corner mask, distance function) are defined there.
+turns a drag into a slideshow. The method, and the terms used here (cell,
+sample, corner mask, distance function), are explained in
+[algorithm.md](algorithm.md).
 
 ## Measurements
 
@@ -38,11 +37,11 @@ out a solid sphere of radius 80 takes about 7 ms, and measuring it takes
 about 290 ms. That is why the editor skips the measurement while a form is
 being dragged (see [the editor](#the-editor) below).
 
-## The representation does most of the work
+## How shapes, cells and forms are represented
 
-Three choices made early decide most of the speed. Each one turns a
-geometric question into a few operations on whole numbers, each of which a
-processor does in one instruction.
+Most of the speed comes from how shapes, cells and forms are represented.
+Each representation turns a geometric question into a few operations on
+whole numbers, each of which a processor does in one instruction.
 
 ### A shape is eight bits
 
@@ -82,10 +81,10 @@ inside the form and never claims the surface is further away than it is
 regions to be skipped. If $`\lvert f(c)\rvert`$ at the centre $`c`$ of a
 region is larger than the distance from $`c`$ to the region's furthest
 corner, the surface cannot pass through the region. The whole region is on
-one side of the surface, so nothing in it needs looking at. One evaluation
-replaces hundreds.
+one side of the surface, so one evaluation stands in for the hundreds of
+cells in the region.
 
-## What each part does
+## The savings in each part
 
 ### Skipping empty and solid space
 
@@ -145,8 +144,7 @@ four fifths of the time a large sphere took.
 
 The outline fitter ([core/src/fit_planar.rs](../core/src/fit_planar.rs))
 spends its time measuring candidate triangles: for every pair of candidate
-corners, how much does the triangle between them get wrong? Three things
-make that cheap.
+corners, how much does the triangle between them get wrong?
 
 Triangles are scored a row at a time. A triangle covers one unbroken run of
 samples in each row of samples. If you know, for each row, the running
@@ -223,7 +221,7 @@ the same radius keep the same cuts and are improved together. For a sphere,
 the improving step tries the moves of one axis instead of three, and the
 sphere stays the same along each axis.
 
-The torus is now a circle built as a round tube, so it costs what a pipe
+The torus is a circle built as a round tube, so it costs what a pipe
 costs: one outline fit, the chamfer, and the measurement against the tube's
 distance function, which the 130 ms in the table above includes.
 
@@ -297,12 +295,11 @@ drag ends. The difference is large for the laid-out forms:
 The flat arch gains nothing because its fitter measures as it goes; the
 sphere's drag is forty times quicker.
 
-The same code shows two more savings. A frame with nothing new costs
-nothing, because the form is rebuilt only when its settings differ from
-those of the last build (`self.built_from`). And moving or turning never
-refits. A form's place, its grid's angle and its quarter turns are kept
-apart from its shape, so dragging a form or a ring moves bricks that
-already exist.
+A frame with nothing new costs nothing, because `refresh` rebuilds the form
+only when its settings differ from those of the last build
+(`self.built_from`). Moving or turning does not refit either, because a
+form's place, its grid's angle and its quarter turns are kept apart from
+its shape, so dragging a form or a ring moves bricks that already exist.
 
 The best-fit search is spread over frames. It builds the form once for each
 value it tries, a few dozen builds in all, which for a large form would
