@@ -66,13 +66,13 @@ pub(super) fn centred(lo: i32, hi: i32, want: i32) -> (i32, i32) {
 }
 
 /// A flat piece with its four corners cut off at 45 degrees, filling
-/// `lo..hi`: the nearest a round top comes in bricks. It is an eight-sided
-/// outline, three boxes and a sloped piece at each corner, and not the
-/// stepped disc a circle fitted cell by cell would be: at the size of a
-/// table top (twenty cells across) a fitted disc is forty bricks with a
-/// sawn edge, and this is seven with a clean one. A corner is cut by
-/// three tenths of the shorter side, which makes the eight sides nearly
-/// equal on a square.
+/// `lo..hi`: the nearest a round top comes in bricks laid by rule. It is
+/// an eight-sided outline, three boxes and a sloped piece at each corner:
+/// seven bricks at any size. The outline fitter (`fit_planar`) would give
+/// a rounder edge. It is not used, because it is a fit to be run and
+/// measured for every top, and furniture is laid without one. A corner
+/// is cut by three tenths of the shorter side, which makes the eight
+/// sides nearly equal on a square.
 pub(super) fn octagon(r: &mut Room, lo: [i32; 3], hi: [i32; 3], shade: u8) {
     let (w, d) = (hi[0] - lo[0], hi[1] - lo[1]);
     let cut = ((w.min(d) as f64 * 0.3).round() as i32).min((w.min(d) - 1) / 2);

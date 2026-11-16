@@ -130,7 +130,9 @@ core/src/
   pattern.rs      stepping stones and the tile patterns
   wfc.rs          wave function collapse, kept with its tests and used by no pattern
   tree.rs         plants: trees, bushes, flowers and reeds
-  furniture.rs    furniture: a bookcase laid out board by board, with its books
+  furniture.rs    furniture: a bookcase laid out board by board, with its books; the kinds and their settings
+  furniture/      the other kinds: style.rs (styles and sets), parts.rs (legs, tops, backs), tables.rs, seating.rs,
+                  storage.rs, lights.rs, bed.rs, pots.rs, trellis.rs, pictures.rs
   maze.rs         mazes: the cells, the walls taken out, the way through
   maze/walls.rs   a maze's bricks: fitted walls, textures, hedge, floor
   blend.rs        joined forms fitted as one solid where they meet

@@ -69,7 +69,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Pyramid | a base and a height: solid, or a hollow tent |
 | Cube | a box with a length along each axis: a block, a floor, a wall, or a hollow room |
 | Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a single rose, water lily or gerbera, a birch, a willow, a cherry in blossom, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds and streams |
-| Furniture | a bookcase that rebuilds itself at any size: shelves and uprights follow from its height and width, and its shelves are filled with books from a seed |
+| Furniture | pieces that rebuild themselves at any size, in five styles, from a seed: a bookcase with its books, cupboards, tables, chairs and sofas, lamps that light in the game, a bed, plants in pots, a trellis with a climber, and framed paintings and portraits |
 | Maze | a maze to walk through, in rings or in squares, grown from a seed: one way in, a room in the middle, walls plain, of brick, stone or planks, or of hedge |
 
 Curves are built as a flat band or as a round tube. Every form can be

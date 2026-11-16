@@ -47,7 +47,7 @@ until you tick it.
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a single flower (a rose, a water lily or a gerbera); a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
-| **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase. Width, depth and height in whole microbricks; board thickness, shelves, uprights, a plinth, a back panel, mouldings, how full of books it is, and a seed (see [Furniture](#furniture)). |
+| **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase, cupboards, tables, seating, lights, a bed, plants in pots and pictures. Width, depth and height in whole microbricks; a style and a seed; and a few settings of each kind's own (see [Furniture](#furniture)). |
 | **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
 
 ### The cube
@@ -646,8 +646,9 @@ added points.
 
 ## Furniture
 
-**Furniture** builds a piece of furniture from boards and boxes. A
-bookcase is the one kind so far. It is laid out from its size and not
+**Furniture** builds a piece of furniture from boards and boxes: a
+bookcase, described first, and twenty-six other kinds, described under
+[The other kinds](#the-other-kinds). A bookcase is laid out from its size and not
 fitted to a shape, so it has no discrepancy at any size and is built at
 once. How it is made is in [algorithm.md](algorithm.md), section 7.12.
 
@@ -697,6 +698,87 @@ and the panel says what to change. **Brick size**, the brick budget,
 **Mirror** and added points do not apply to furniture. It can be turned,
 flipped, moved and put on a grid of its own like any form, and it is joined
 to another form by cutting alone.
+
+### The other kinds
+
+**Kind** lists every piece in groups. Each is laid out afresh at every
+size, by the same dots and sliders as the bookcase, and each has two or
+three settings of its own under its own names.
+
+| Group | Kinds | Their own settings |
+|---|---|---|
+| Storage | bookcase, cupboard, chest of drawers, sideboard, kitchen cabinet | how many doors, drawers or units; knobs, bars or no handles; a plinth or feet; a drawer row |
+| Tables | dining table, coffee table, side table, desk | square, tapered or turned legs, a trestle or a pedestal; a rectangular or round top; stretchers, a shelf or a drawer; a desk's drawers |
+| Seating | chair, armchair, stool, bench, sofa | a back of slats, a ladder, a panel or spindles; a cushion; arms; a sofa's seats; square or rolled arms; legs or a skirt |
+| Lights | table lamp, floor lamp, pendant, chandelier, wall sconce, candlestick | a drum, cone or globe shade; two, four or eight lights on a chandelier; one or three candles; **Lights shine in the game** |
+| Beds | bed | a panel, slatted or railed headboard; one or two pillows; a footboard |
+| Plants in pots | potted plant, hanging basket, window box, trellis with a climber | the pot; which plant or climber; the pot's height; the lattice and how open it is; **Coverage** |
+| Pictures | framed painting, framed portrait | the subject; what the sitter wears; a mount |
+
+<img src="images/furniture-tables.png" width="700" alt="Four tables (dining, coffee, side and desk) in each of five styles: thin modern ones with round tops, farmhouse ones with turned legs and plank tops, dark classical ones with tapered legs, heavy rustic ones and industrial ones on black metal frames">
+
+<img src="images/furniture-seating.png" width="700" alt="Chairs, armed chairs, stools, benches, armchairs and sofas in five styles, with slatted, ladder, panel and spindle backs, and sofas with loose cushions of another colour">
+
+<img src="images/furniture-storage.png" width="700" alt="Cupboards, chests of drawers, sideboards and kitchen cabinets in five styles, with doors, drawer fronts and handles standing proud of their bodies"> <img src="images/furniture-lights.png" width="700" alt="Table lamps with drum, cone and globe shades, pendants, chandeliers with candles, wall sconces and candlesticks, in three styles">
+
+**Style** is modern, farmhouse, classical, rustic or industrial, or
+**Random**, which lets the seed pick one. A style is a set of choices
+that go together: a farmhouse piece has turned legs, panelled doors and a
+plank top, and an industrial one a thin metal frame carrying a slab of
+wood. **Seed** picks among what the style allows, and **Another** takes
+the next seed. The seed picks the same way for every kind, so pieces of
+one style and one seed are a set, in the same wood and of the same
+weight. A leg is turned or tapered only where it is thick enough to be (three
+microbricks and two), so beside a table with turned legs a chair at its
+usual size, whose legs are one microbrick, has square ones. Changing a piece's kind keeps its style and
+seed. **Make all the furniture match this** gives every other piece in
+the workspace this one's style, seed and colours in one step.
+
+<img src="images/furniture-set.png" width="700" alt="A farmhouse dining table with turned legs and an eight-sided top, three ladder-back chairs behind it, a bench in front, a sideboard with cream panelled doors and knobs, a floor lamp and a potted plant, all in the same pine">
+
+Each style brings three sets of **Colours**. They are colours for what
+things are made of: the wood, a second wood or the paint of doors, metal,
+upholstery, a second cloth, the light of a lamp, pale linen, and a top of
+another stuff. One set therefore paints every piece of a room.
+
+A lamp's bulb or flame is written to the game as a glowing brick, and
+with **Lights shine in the game** ticked it also carries a real light: one
+to a lamp and one to each candle, eight at most. Handles, a lamp's stem
+and an industrial frame are written in the game's metal.
+
+A plant in a pot is a pot laid out like the rest with one of the Plant
+form's plants growing in it: a yucca, a box ball, a hydrangea, peonies,
+tulips, daffodils, daisies, petunias, a cypress, a palm or a cherry tree.
+The plant is fitted as plants are, so these three kinds are slower and
+heavier than the others: a potted plant is about 1,300 bricks and
+takes about 90 ms (a window box of four plants takes about 1.2 s). **Leaves can be walked through in the game** writes
+the leaves and flowers with their collision off.
+
+<img src="images/furniture-pots.png" width="700" alt="Eleven potted plants in terracotta, glazed, square and tall pots, two hanging baskets and two window boxes">
+
+A trellis stands in a planter against the back of its box, so it can be
+set flat against a wall. Its lattice is square, diamond or arched, and a
+climber grows up it from the soil: ivy, a clematis, a climbing rose or
+wisteria. **Coverage** runs from a young plant with a few short stems to
+one that has nearly reached the top. The lattice always shows through.
+
+<img src="images/furniture-trellis.png" width="700" alt="Six trellises seen from the front, from bare to overgrown, with square, diamond and arched lattices">
+
+A picture hangs flat against the back of its box. A painting is a sunset
+over water, a landscape or an abstract, and a portrait is a cartoon head
+and shoulders whose skin, hair, clothes and smile the seed picks. Each
+subject has its own sets of colours (a warm sunset and a cool dawn;
+summer, autumn and winter). A picture is drawn a microbrick to a pixel,
+so a larger frame holds a finer picture. A face reads from about 18
+microbricks of picture width, and below that it is a head with two eyes
+and a mouth.
+
+<img src="images/furniture-portraits.png" width="700" alt="Ten framed cartoon portraits in a row, each a different smiling sitter"> <img src="images/furniture-paintings.png" width="700" alt="Framed landscapes and abstracts">
+
+Every kind but the three with fitted plants has no discrepancy. A dining
+table is 8 to 37 bricks, a chair 9 to 16, a cupboard
+10 to 28 and a sofa 10 to 16, depending on the style, and each
+is laid in under a hundredth of a millisecond.
 
 ## Mazes
 
