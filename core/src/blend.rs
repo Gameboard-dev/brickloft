@@ -313,11 +313,25 @@ pub fn union_with(members: &[Member], threads: Threads) -> Vec<Piece> {
 /// The order in the list was used before, and the list is reordered
 /// whenever another form is chosen to edit, so two joined forms changed
 /// which of them was cut.
+///
+/// Grass comes last of all, joined or not: it gives way to whatever is
+/// stood in it. A tree moved into a lawn was the joined form, so it was the
+/// tree that gave up the room the two shared, and a tree's foot is sloped
+/// bricks, which cannot be cut down and were left out whole wherever a
+/// blade of grass reached their boxes: the grass ate the foot of the trunk
+/// and left a gap round it. Blades give way to a trunk as they do on a
+/// real lawn, and what is lost of them is under the thing that stands
+/// there.
 fn order(members: &[Member], boxes: &[Option<Box3>]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..members.len()).collect();
     // (a form that is taken away gives way to nobody, joined or not: see `give_up_room`)
-    order.sort_by_key(|&i| (!carves(members[i].spec), members[i].spec.blend.is_some(), members[i].place, boxes[i], members[i].built.bricks.len(), i));
+    order.sort_by_key(|&i| (!carves(members[i].spec), is_grass(members[i].spec), members[i].spec.blend.is_some(), members[i].place, boxes[i], members[i].built.bricks.len(), i));
     order
+}
+
+/// Whether a form is a patch of grass, which gives way to every other form (see [`order`]).
+fn is_grass(spec: &Spec) -> bool {
+    spec.form == crate::spec::Form::Tree && spec.tree.kind == crate::tree::Kind::Grass
 }
 
 /// How far from its bricks a form can matter to a join with blend `k`, in
@@ -1255,7 +1269,8 @@ fn give_up_room(members: &[Member], order: &[usize], pieces: &mut [Vec<Piece>]) 
         let Some(mine) = all_of(&pieces[i], me.place) else { continue };
         let before: Vec<Box3> = order[..rank]
             .iter()
-            .filter(|&&j| (joined || carves(members[j].spec)) && members[j].grid == me.grid && all_of(&pieces[j], members[j].place).is_some_and(|theirs| meet(&theirs, &mine)))
+            // (grass gives way to a form joined into it, though the grass is not the one that was joined)
+            .filter(|&&j| (joined || carves(members[j].spec) || (is_grass(me.spec) && members[j].spec.blend.is_some())) && members[j].grid == me.grid && all_of(&pieces[j], members[j].place).is_some_and(|theirs| meet(&theirs, &mine)))
             .flat_map(|&j| pieces[j].iter().map(move |p| in_units(&p.brick, members[j].place)).filter(|b| meet(b, &mine)))
             .collect();
         if before.is_empty() {

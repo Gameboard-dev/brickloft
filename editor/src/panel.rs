@@ -621,6 +621,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if let Some(problem) = &state.problem {
             ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
         }
+        // (a form slow to build is built behind the window: what is on screen is a moment old)
+        if state.fitting() {
+            ui.label("Fitting the change...");
+        }
 
         ui.separator();
         ui.separator();

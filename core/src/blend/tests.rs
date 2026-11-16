@@ -686,3 +686,25 @@ fn a_plant_or_a_pattern_is_joined_by_cutting_alone() {
         assert!(pieces.iter().filter(|p| p.member == 1).count() > 20, "{name}: next to nothing is left of it");
     }
 }
+
+#[test]
+fn a_tree_stood_in_grass_is_whole_and_the_grass_gives_way_to_it() {
+    use crate::tree::{Kind, Tree};
+    let grass = Spec { form: Form::Tree, tree: Tree::of(Kind::Grass), points: vec![DVec3::new(-20.0, 0.0, 0.0), DVec3::ZERO, DVec3::new(20.0, 0.0, 0.0)], radius: 20.0, rise: Some(5.0), ..Spec::default() };
+    let oak = Spec { form: Form::Tree, tree: Tree::of(Kind::Oak), points: vec![DVec3::ZERO], radius: 30.0, rise: Some(60.0), ..Spec::default() };
+    // the oak moved into the lawn, its foot a little way into the soil; and the same with the lawn the one moved
+    for (name, forms) in [("the oak joined", vec![(grass.clone(), [0.0; 3]), (oak.clone(), [0.0, 0.0, 1.0])]), ("the grass joined", vec![(oak.clone(), [0.0, 0.0, 1.0]), (grass.clone(), [0.0; 3])])] {
+        let scene = Scene::new(&forms, 0.0);
+        let tree = scene.specs.iter().position(|s| s.tree.kind == Kind::Oak).unwrap();
+        let pieces = scene.pieces();
+        assert!(shares_room(&scene, &pieces).is_none(), "{name}: two bricks share room");
+        // every brick of the tree as it was built, the sloped ones of its foot among them
+        let of_tree: Vec<&Piece> = pieces.iter().filter(|p| p.member == tree).collect();
+        assert_eq!(of_tree.len(), scene.built[tree].bricks.len(), "{name}: the tree was cut");
+        assert!(of_tree.iter().all(|p| p.from.is_some_and(|n| scene.built[tree].bricks[n] == p.brick)), "{name}: a brick of the tree is not its own");
+        assert!(scene.built[tree].bricks.iter().any(|b| b.mask != crate::shapes::CUBE && b.min[2] < 6), "the tree has no sloped brick near its foot to lose");
+        // and the grass less than it was, by what stood where the trunk is
+        let lawn = pieces.iter().filter(|p| p.member != tree).count();
+        assert!(lawn > 100 && pieces.iter().filter(|p| p.member != tree && p.from.is_some()).count() < scene.built[1 - tree].bricks.len(), "{name}: the grass gave up nothing");
+    }
+}
