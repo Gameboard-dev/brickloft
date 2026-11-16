@@ -165,7 +165,7 @@ forms that can still be reshaped.
 workspace back. **Add** adds the save's forms beside the form being edited
 and on its grid, as a paste does. Dragging a save from the list onto the
 view adds it too. **Delete** removes a save from disk after asking you to
-confirm, since Ctrl+Z cannot bring a deleted file back. Saves made by earlier versions, which were text files of
+confirm (Enter deletes, Escape cancels), since Ctrl+Z cannot bring a deleted file back. Saves made by earlier versions, which were text files of
 one form's settings, are still listed and opened.
 
 ## Colour

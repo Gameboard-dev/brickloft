@@ -158,15 +158,14 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
     }
     // A saved form about to be deleted. A file once deleted is not brought
-    // back by Ctrl+Z, so it is asked about first, and only the button says
-    // yes: Enter does not, so that a key pressed out of habit to close a
-    // notice cannot delete anything. Escape says no.
+    // back by Ctrl+Z, so it is asked about first. Enter says yes and Escape
+    // says no, as the two buttons do.
     if let Some((folder, name)) = state.deleting.clone() {
         egui::Window::new("Delete saved form").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ui.ctx(), |ui| {
             ui.set_max_width(420.0);
             ui.label(format!("Delete \"{name}\" from the folder \"{folder}\"? It cannot be brought back."));
             ui.horizontal(|ui| {
-                if ui.button("Delete").clicked() {
+                if ui.button("Delete").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     state.store_note = match crate::store::delete(&folder, &name) {
                         Ok(()) => format!("Deleted {name}"),
                         Err(e) => format!("Not deleted: {e}"),
