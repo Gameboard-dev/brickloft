@@ -170,6 +170,7 @@ colours, saved forms, the camera and every key.
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
+| [docs/generate.md](docs/generate.md) | The generator, a separate program not yet used by the editor: a mesh from a picture or a prompt, with models run on this computer |
 | [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns, the plants, the furniture and rule programs |
 
 ## Layout
@@ -178,6 +179,7 @@ colours, saved forms, the camera and every key.
 |---|---|
 | `core/` | The geometry: curves, solids as distance functions, the fitters, the measurements. No game or interface code, and one dependency (`glam`). |
 | `editor/` | The program: the 3D view, the panel, the workspace, and the `.brz` file it copies. |
+| `generate/` | The generator: a program of its own, built apart from the other two (see [docs/generate.md](docs/generate.md)). |
 
 The project began as omegga-arcs, an omegga plugin that placed arcs of
 bricks on a running server. The plugin was removed, because copy and paste

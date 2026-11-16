@@ -494,51 +494,59 @@ The computer this was planned on has an RTX 4060 Ti with 8 GB and 32 GB of
 memory, which is enough for both steps one after the other and not for
 TRELLIS (16 GB).
 
-What is not yet known, and is to be found out by trying before anything is
-built into Brickloft:
+**What trying it showed.** The four things that were not known when this
+was planned have been tried, first in a trial and then in the generator
+itself, which is built and described in [generate.md](generate.md).
 
-- whether Lux3D builds and runs here. It is a young project (3 stars, no
-  release, 135 commits) and depends on its author's own fork of Candle;
-- whether the pictures Stable Diffusion makes from a short prompt give
-  TripoSR a clean single object, with the ground removed (Candle has
-  Segment Anything, and no model made for removing a ground);
-- whether the meshes are good enough to be worth fitting: TripoSR sees
-  one side of the object and guesses the rest;
-- the licences of the Stable Diffusion weights as their model cards give
-  them. Versions 1.5 and 2.1 are under OpenRAIL licences that restrict
-  uses and not who may use them; the Turbo versions are under terms that
-  sources disagree about, and are left out until read.
+- Lux3D builds and runs here, on CUDA and on Vulkan. It is still one
+  author's project with no release, and it depends on that author's fork
+  of Candle, so the generator pins both by commit.
+- Stable Diffusion's pictures give TripoSR a clean single object less
+  than half the time. The ground is removed without a model, by its
+  colour, because the ground removers that were found are licensed for
+  non-commercial use or state no licence. Several pictures are therefore
+  made for a prompt and ranked, and the player chooses.
+- The meshes are good enough to fit when the picture is good: one whole
+  object, on a plain ground, seen from near level. generate.md has what
+  the five prompts tried gave.
+- Stable Diffusion 1.5 is under CreativeML OpenRAIL-M, which restricts
+  uses and not who may use the model. Its list of restricted uses is
+  shown before the weights are downloaded. Versions 2.1, SDXL and Turbo
+  were not needed and their licences were not read further.
 
-**How it would sit in Brickloft.** The machine-learning libraries are
-large and slow to compile, and the editor's rule is few dependencies. The
-generator is therefore a second program in the same workspace,
-`brickloft-generate`, in Rust, built only when asked for. The editor
-starts it as a program and a list of arguments, never through a shell.
+**How it sits in Brickloft.** The machine-learning libraries are large
+and slow to compile, and the editor's rule is few dependencies. The
+generator is therefore a second program, `brickloft-generate`, in Rust,
+in a workspace of its own beside the editor's, built only when asked
+for. The editor is to start it as a program and a list of arguments,
+never through a shell. That part is not built; generate.md lists what
+it needs. The plan for it:
 
 1. **Settings.** The panel's Imported form has a "Generative prompt" box
    and a Generate button.
 2. **Asking whether it can run.** The editor starts the generator with
-   `--check`. It answers in one line of JSON: which device it would use,
-   how much memory that device has, and whether the weights are in the
-   editor's own folder. The panel shows the answer in plain words, such as
-   "this needs 6 GB of graphics memory and this computer has 4", and
-   offers Generate only when the check passes. The weights are several
-   gigabytes; they are downloaded once, when the player asks, after the
-   panel has shown each model's licence.
+   `check`. It answers in one line of JSON: which device it would use,
+   how much memory that device has free, and whether the weights are in
+   the editor's own folder. For each of the two steps it says whether the
+   step can run, and why not in a sentence the panel can show, such as
+   "making a mesh needs about 3.6 GB of free graphics memory and there is
+   2.1 GB". The weights are 3.8 GB; they are downloaded once, when the
+   player asks, after the panel has shown each model's licence.
 3. **Generating.** The prompt is one argument, 500 characters at most.
-   The generator prints a line of progress now and then, which the panel
-   shows as plain text cut to a fixed length. Cancel stops the process.
-   Generation takes from seconds to minutes, so it runs beside the editor
-   and never holds the window.
-4. **Reading the mesh.** The generator writes one mesh file with a colour
-   for each vertex. The editor reads it with a reader of its own, refusing
-   more than a set number of vertices and triangles, any number that is
-   not finite, and any index out of range. The mesh is scaled to the size
-   asked for and fitted as described above.
-5. **Keeping it.** A generated mesh cannot be relied on to come out the
-   same from its prompt on another computer. The mesh is therefore saved
-   beside the form in the editor's own folder, and a save names it. A
-   form whose mesh is missing opens empty with a message.
+   The generator prints a line of progress for each step. It makes
+   several pictures and returns them ranked; the panel shows them and
+   the player picks one, which is then made into a mesh. Cancel closes
+   the generator's input, which stops it. Generation takes from ten
+   seconds to a few minutes, so it runs beside the editor and never
+   holds the window.
+4. **Reading the mesh.** The generator writes a `.glb` file with a
+   colour for each vertex, Y up and standing on the ground. The Imported
+   form opens it with the editor's own reader, which refuses what is too
+   large or malformed, and fits it as described above.
+5. **Keeping it.** The same prompt and seed give the same picture on one
+   computer, and nearly the same on another. The mesh is still saved in
+   the editor's own folder like any opened mesh, and a save names it, so
+   a form does not depend on the generator being there.
 
 Nothing leaves the computer but the one download of the weights.
 
@@ -560,7 +568,7 @@ Nothing leaves the computer but the one download of the weights.
 | 2 | Calling MarkovJunior: dropped, since its language is now run in Rust (see MarkovJunior above) | |
 | 3 | The Smoothed fitter for grids, with repeats fitted once | step 1 |
 | 4 | The OBJ reader, a mesh's distance function, the Smoothed fitter for meshes | step 3 |
-| 5 | `brickloft-generate` and the panel's prompt box | step 4, and the trial above |
+| 5 | `brickloft-generate` (built: [generate.md](generate.md)) and the panel's prompt box (not built) | the Imported form, which is built |
 | 6 | Planes snapped to the grid, thin features kept | step 4, and a reading of the paper |
 | 7 | MarkovJunior read in Rust: built, as the Rule program form | |
 
@@ -570,11 +578,12 @@ fitter left out, and MarkovJunior (steps 2, 3 and 7) afterwards.
 
 ### What is to be decided first
 
-- Whether the trial's meshes are good enough to go on. This is decided by
-  looking at them.
-- Whether Brickloft may start a second program of its own, and download
-  weights when asked. It starts none today except the file manager, and
-  downloads nothing.
+- Two questions that stood here are settled. The player looked at the
+  trial's meshes and said to go on (2026-11-16), and chose the local
+  route knowing that it means a second program and several gigabytes of
+  weights downloaded when asked for.
+- Whether to ship the generator built for Vulkan or for CUDA.
+  [generate.md](generate.md#measurements) has what each costs.
 - Whether to ask Roblox about Cube's licence, or to leave Cube out.
 
 ### What could go wrong

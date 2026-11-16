@@ -1,0 +1,119 @@
+[package]
+name = "brickloft-generate"
+description = "Makes a mesh from a picture, and a picture from a prompt, with models that run on this computer. Driven by the Brickloft editor, or from the command line."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# A workspace of its own, and so a lock file of its own (generate/Cargo.lock).
+# The other way was to list this crate under `members` in ../Cargo.toml and
+# leave it out of `default-members`. Cargo would then still resolve it for
+# every command run on the editor: its four hundred packages would be written
+# into the editor's Cargo.lock, a fresh clone would have to fetch two git
+# repositories before `cargo build` of the editor could start, and a revision
+# gone from either would stop the editor building at all. The editor's
+# [profile] tables would also apply here, where the dependencies want other
+# settings. Kept apart, `cargo build` and `cargo test` at the root never read
+# this folder (../Cargo.toml lists it under `exclude`).
+# https://doc.rust-lang.org/cargo/reference/workspaces.html#the-exclude-field
+[workspace]
+
+# The library holds everything, so that the tests and the picture-making
+# example (examples/look.rs) reach it. Named apart from the program for the
+# reason the editor's is: on Windows a program brickloft-generate and a
+# library brickloft_generate both want the debug file brickloft_generate.pdb.
+[lib]
+name = "generate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brickloft-generate"
+path = "src/main.rs"
+
+[features]
+# Which graphics interface the models run on. Vulkan is the default: it runs
+# on any maker's card and the program then needs nothing beside it. CUDA is
+# about twice as fast on an NVIDIA card and needs NVIDIA's runtime libraries
+# shipped beside the program (see docs/generate.md for both, measured).
+# Build with `--no-default-features --features cuda` for a CUDA-only program;
+# with both, CUDA is tried first.
+default = ["vulkan"]
+vulkan = ["lux3d-core/vulkan", "candle-core/vulkan", "candle-nn/vulkan", "candle-transformers/vulkan"]
+cuda = ["lux3d-core/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+
+[dependencies]
+# TripoSR, the model that turns one picture into a mesh, written in Rust on
+# Candle. The only port of it to Rust that was found (2026-11-16); the model's
+# own code is Python, which the project does not ship. One author's project
+# with no release, so it is pinned to the revision that was built and run in
+# the trial, by commit and not by branch: what is built is then what was
+# tried, whatever is pushed there afterwards. Apache 2.0.
+# https://github.com/FerrisMind/Lux3D (the repository was called candle-3d)
+lux3d-core = { git = "https://github.com/FerrisMind/candle-3d", rev = "886b4ad7dd67da66beae392851658f0d18278835", default-features = false }
+# Candle, Hugging Face's machine-learning library in Rust: tensors, the
+# graphics backends and Stable Diffusion's network. This is Lux3D's author's
+# fork and not upstream (https://github.com/huggingface/candle) because the
+# Vulkan backend exists only in the fork, and because Lux3D is written against
+# it: with upstream beside it the program would hold two Candles whose tensors
+# cannot be passed between them. The revision is the one Lux3D itself pins
+# (its Cargo.toml, `workspace.dependencies`); the two must be changed
+# together. MIT or Apache 2.0.
+# https://github.com/FerrisMind/candle
+candle-core = { git = "https://github.com/FerrisMind/candle", rev = "bde164da9269619aeb16d5b18f8267e25d188fa4" }
+candle-nn = { git = "https://github.com/FerrisMind/candle", rev = "bde164da9269619aeb16d5b18f8267e25d188fa4" }
+candle-transformers = { git = "https://github.com/FerrisMind/candle", rev = "bde164da9269619aeb16d5b18f8267e25d188fa4" }
+# Turns a prompt into the numbered word-pieces Stable Diffusion's text encoder
+# reads. Candle already builds this version with these features, so it adds
+# nothing to compile. The splitting rules (byte-pair encoding over a 49 408
+# entry vocabulary) are what a hand-written reader would have to match piece
+# for piece.
+# https://docs.rs/tokenizers
+tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
+# Reads the picture given to `mesh` and writes the pictures `picture` makes.
+# The version Lux3D builds, with the three formats a player's picture is
+# likely to be in; Lux3D's own use of it switches on the rest.
+# https://docs.rs/image
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+# The lines this program answers in, and the small JSON files the weights
+# come with. Already built by both libraries above.
+# https://docs.rs/serde_json
+serde_json = "1"
+# SHA-256 of each downloaded file, checked against the value written in
+# src/models.rs. Already built by Lux3D. A hash is not something to write by
+# hand: a wrong one would pass its own tests and still accept a changed file.
+# https://docs.rs/sha2
+sha2 = "0.10.9"
+# The one download, over HTTPS. The version and TLS library (rustls) Lux3D
+# already builds for its own downloader, which this program never calls: that
+# one takes whatever is at the head of a repository, sends a token from the
+# environment if there is one, and cannot resume. Blocking and without an
+# async runtime, which a program that does one thing at a time has no use for.
+#
+# `platform-verifier` has the server's certificate checked by the operating
+# system, as a browser's is, and not against the list of authorities compiled
+# into the program (which is what `rustls` alone does). On Windows it adds two
+# crates to the build: itself, and the version of windows-sys it asks for.
+# Without it the download fails on any computer whose antivirus reads HTTPS
+# traffic, which it does by installing an authority of its own in the system:
+# the computer this was written on has one (Norton), and the first download
+# tried failed with "invalid peer certificate: UnknownIssuer". What arrives
+# is trusted for its SHA-256 and not for who sent it, so whom the system
+# trusts decides only whether the download can happen.
+# https://docs.rs/ureq
+# https://docs.rs/rustls-platform-verifier
+ureq = { version = "3.4", default-features = false, features = ["rustls", "platform-verifier"] }
+
+# Optimised, and without link-time optimisation: Lux3D's own profile has it,
+# with one codegen unit, and its program took 22 minutes to build here against
+# about half that without, for a few percent of speed in code whose time is
+# spent on the graphics card.
+[profile.release]
+opt-level = 3
+strip = true
+
+# No settings for the unoptimised profile: the tests are run with
+# `cargo test --release`, which uses the dependencies already built for the
+# program. Built unoptimised, the dependencies are ten minutes more to
+# compile, for tests that then run slowly (they go over whole pictures and
+# meshes).
