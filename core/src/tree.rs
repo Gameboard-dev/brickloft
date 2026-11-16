@@ -303,7 +303,8 @@ enum Shape {
     /// distances out along x and y at which they lie: for a regular
     /// octagon the size times the root of 2, and for a trunk on the
     /// lattice the whole number nearest that (see [`Grown::trunk`]). 0
-    /// for regular.
+    /// for regular, and under 0 for a length that slopes from one size
+    /// on the lattice to another.
     Column { a: DVec3, b: DVec3, ra: f64, rb: f64, slack: f64, cut: f64 },
 }
 
@@ -348,7 +349,15 @@ impl Shape {
                 let t = ((p.z - a.z) / (b.z - a.z)).clamp(0.0, 1.0);
                 let q = (p.truncate() - a.truncate().lerp(b.truncate(), t)).abs();
                 let size = ra + (rb - ra) * t;
-                let slant = if cut > 0.0 { (q.x + q.y - cut) * FRAC_1_SQRT_2 } else { (q.x + q.y) * FRAC_1_SQRT_2 - size };
+                let slant = if cut > 0.0 {
+                    (q.x + q.y - cut) * FRAC_1_SQRT_2
+                } else if cut < 0.0 {
+                    // (a trunk's slope from one size to the next: from the one's slanting faces to the other's)
+                    let on = |r: f64| (r * std::f64::consts::SQRT_2).round();
+                    (q.x + q.y - (on(ra) + (on(rb) - on(ra)) * t)) * FRAC_1_SQRT_2
+                } else {
+                    (q.x + q.y) * FRAC_1_SQRT_2 - size
+                };
                 let out = (q.x.max(q.y) - size).max(slant);
                 (out * slack).max(a.z - p.z).max(p.z - b.z)
             }
@@ -2808,7 +2817,7 @@ impl Grown {
                     self.parts.push(Part { shape: Shape::Column { a, b: m, ra: now, rb: now, slack: 1.0, cut: (now * std::f64::consts::SQRT_2).round() }, shade });
                 }
                 if slope > 0.0 {
-                    self.parts.push(Part { shape: Shape::Column { a: m, b, ra: now, rb: next, slack: 1.0 / (1.0 + ((now - next) / slope).powi(2)).sqrt(), cut: 0.0 }, shade });
+                    self.parts.push(Part { shape: Shape::Column { a: m, b, ra: now, rb: next, slack: 1.0 / (1.0 + ((now - next) / slope).powi(2)).sqrt(), cut: -1.0 }, shade });
                 }
             } else {
                 self.cone(a, b, thick(from).max(0.7), thick(to).max(0.7), shade);
