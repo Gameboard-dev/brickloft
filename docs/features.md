@@ -46,7 +46,7 @@ until you tick it.
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
-| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip or petunias; reeds. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip or petunias; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 
 ### The cube
 
@@ -407,7 +407,7 @@ own, from the facts of how that plant grows: how they are made is in
 | **Oak** | an oak grown in the open: a short thick trunk, flared at the foot, dividing into heavy crooked limbs that spread wide and fork again and again, with leaves in separate masses at the ends of the branches |
 | **Boxwood bush** | a dense rounded evergreen: a closed, lumpy mound of leaves on several short stems |
 | **Beech tree** | a smooth grey trunk carrying on up through a tall, dense, oval crown of flat layers of leaves |
-| **Hedge** | the boxwood clipped to a wall of any length, a little narrower at the top, with stems showing at its foot |
+| **Hedge** | the boxwood clipped to a wall that follows a line you shape, a little narrower at the top, with stems showing at its foot |
 | **Hydrangea** | a rounded bush of broad leaves carrying domed heads of small four-parted florets |
 | **Peony** | a clump of leafy stems each with one bloom of many layered petals, which opens from a round bud to a full bowl |
 | **Petunias** | a low mound of leaves covered in funnel-shaped flowers with darker throats, which can trail along the ground |
@@ -433,16 +433,40 @@ more settings mean something different for each kind.
 | Peony | **Stems in the clump**, 1 to 9 | **Petals and leaves** | **How open the bloom is**: bud to full blown | none |
 | Petunias | **Flowers**, 3 to 80 | **Leaves** | **How far it trails** | none |
 | Reeds | **Stems**, 1 to 120 | **Leaves** | **Sway** | **Feathery plumes** |
+| Grass | none | **How thick it grows** | **Lean** of the blades | none |
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
 A flower's **Spread** is half the width of its head, cup or bloom, and a
 clump is as many flowers as you ask for, each its own height.
 
-A hedge and a stand of reeds have a **Length** as well, along X, from
-their own thickness upwards. The hedge keeps its clipped texture and its
-stems at intervals however long it is. A quarter turn about Z runs it the
-other way. There is no dot for the length yet: the slider sets it.
+A hedge, a stand of reeds and a patch of grass lie along a line. They
+start with three yellow dots in a row: drag an end to lengthen it and the
+middle one aside to bend it. Alt + click on a hedge or reeds adds a point
+that bends it further, and **Closed loop** joins a line of three or more
+points into a ring. The thickness is its own setting, with a dot out to
+one side of the line, and changing it leaves the length alone.
+
+<img src="images/plant-hedge-bent.png" width="330" alt="A hedge that follows a winding line through four points, with a level top all the way"> <img src="images/plant-grass.png" width="330" alt="A lawn with two hills raised in it">
+
+**Grass** is a thin surface: blades over a skin of soil. Open, it is a
+strip **Reach to each side** wide along its line; closed, it fills its
+outline. Its **Height** is the length of its blades. Its ground is shaped
+with a brush:
+
+- Choose **Push up**, **Push down** or **Flatten**, a **Range** and an
+  **Intensity**, then Alt + click on the grass. Each click is one touch.
+- A touch leaves an orange dot. Drag it up or down to change how far it
+  pushes, or the level it flattens to. Alt + right-click takes it off.
+- The panel's sliders change the touch made or dragged last. **Next**
+  steps through the touches, and **New touches only** leaves them alone.
+- Flatten brings the ground to the height it has where you click.
+- A patch takes at most twelve touches. Use a wide range for a hill.
+
+**Blades can be walked through in the game** writes the blades with their
+collision off, so a player walks through the grass and stands on the
+soil. Untick it for solid blades. Grass that has been turned or flipped is
+written solid.
 
 **Bare** shows an oak or a beech without its leaves, with twigs carried
 on from every branch end. It is the same tree as in leaf. **Berries** on

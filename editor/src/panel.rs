@@ -554,7 +554,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
             }
         }
-        if !s.pulls.is_empty() {
+        // (grass's added points are touches of a brush, each with a range of its own: see `tree`)
+        let brushed = state.form == TREE && s.tree.kind == brickloft_core::tree::Kind::Grass;
+        if !s.pulls.is_empty() && brushed {
+            if ui.button(format!("Undo the last touch ({})", s.pulls.len())).clicked() {
+                s.pulls.pop();
+                state.touched = None;
+            }
+            if ui.button("Smooth it all away").clicked() {
+                s.pulls.clear();
+                state.touched = None;
+            }
+        }
+        if !s.pulls.is_empty() && !brushed {
             helped(ui, help("reach_of_added_points"), |ui| ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")));
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
@@ -763,7 +775,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -800,7 +812,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     let s = &mut state.spec;
     let mut height = s.rise.unwrap_or(Tree::usual_size(kind).0);
-    if helped(ui, help("tree_height"), |ui| ui.add(Slider::new(&mut height, LEAST_HEIGHT..=largest.max(LEAST_HEIGHT)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Height"))).changed() {
+    if helped(ui, help("tree_height"), |ui| ui.add(Slider::new(&mut height, Tree::least_height(kind)..=largest.max(LEAST_HEIGHT)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Height"))).changed() {
         s.rise = Some(height);
     }
     let spread = match kind {
@@ -808,15 +820,24 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Sunflower => "Half the head's width",
         Kind::Peony => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
+        Kind::Grass => "Reach to each side",
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
-    if matches!(kind, Kind::Hedge | Kind::Reeds) {
-        // its length, end to end: kept as how many times its thickness it is, so that a thicker hedge is a longer one
-        let mut length = 2.0 * s.radius * s.stretch.x.max(1.0);
-        if helped(ui, help("hedge_length"), |ui| ui.add(Slider::new(&mut length, 2.0 * s.radius..=largest.max(2.0 * s.radius)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Length"))).changed() {
-            s.stretch.x = (length / (2.0 * s.radius)).max(1.0);
+    if kind == Kind::Grass {
+        brush(ui, &mut state.brush, &mut state.touched, s, largest);
+        // (see `brz::walked_through`)
+        let mut passable = !s.tree.extras;
+        if helped(ui, help("grass_passable"), |ui| ui.checkbox(&mut passable, "Blades can be walked through in the game")).changed() {
+            s.tree.extras = !passable;
+        }
+    }
+    if Tree::lies_along(kind) {
+        // (its length is its line's: there is no slider for it, which once tied it to the thickness)
+        ui.label(if kind == Kind::Grass { "Drag its yellow dots to lay it out." } else { "Drag its dots to lengthen or bend it. Alt + click on it adds a point to bend it further." });
+        if s.points.len() > 2 {
+            helped(ui, help("closed_loop"), |ui| ui.checkbox(&mut s.closed, if kind == Kind::Grass { "Closed outline, filled" } else { "Closed loop" }));
         }
     }
     let (fullness, count, bend) = match kind {
@@ -830,11 +851,15 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Hydrangea => ("Leaves", "Flower heads", "Looseness"),
         Kind::Petunia => ("Leaves", "Flowers", "How far it trails"),
         Kind::Reeds => ("Leaves", "Stems", "Sway"),
+        Kind::Grass => ("How thick it grows", "", "Lean"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
     };
     let (least, most) = Tree::count_range(kind);
-    helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+    // (grass has nothing to count)
+    if least < most {
+        helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+    }
     helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
     helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
     match kind {
@@ -853,7 +878,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Reeds => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
         }
-        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia => {}
+        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass => {}
     }
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
@@ -863,6 +888,71 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         }
         hint(ui, help("tree_seed"));
     });
+}
+
+/// The brush grass's ground is shaped with, and the touch last made with it.
+///
+/// A touch is a point added to the form, so it is undone, saved and
+/// copied as any added point is. A brush dragged over the ground, as in
+/// a game with terrain, was the other way to do it, and was not taken:
+/// the ground it leaves would have to be kept as a grid of heights in
+/// the form, where everything a form keeps now is a few numbers a person
+/// can read and change, and a stroke would be hundreds of them. Touches
+/// with a wide range do what strokes do, one at a time.
+fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
+    use crate::state::{Action, FLATTENS};
+    use brickloft_core::DVec3;
+    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
+    let named = |action: Action| match action {
+        Action::Up => "Push up",
+        Action::Down => "Push down",
+        Action::Flatten => "Flatten",
+    };
+    // the touch being changed, if there is one: the sliders show it, and change it and the brush together
+    let touch = touched.filter(|i| *i < s.pulls.len());
+    if let Some(i) = touch {
+        let by = s.pulls[i].1;
+        (brush.range, brush.action) = (if by.x > 0.0 { by.x } else { brush.range }, if by.y != 0.0 { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up });
+        if by.y == 0.0 {
+            brush.amount = by.z.abs();
+        }
+    }
+    let was = *brush;
+    helped(ui, help("grass_action"), |ui| {
+        ComboBox::from_label("Brush").selected_text(named(brush.action)).show_ui(ui, |ui| {
+            for action in [Action::Up, Action::Down, Action::Flatten] {
+                ui.selectable_value(&mut brush.action, action, named(action));
+            }
+        })
+        .response
+    });
+    helped(ui, help("grass_range"), |ui| ui.add(Slider::new(&mut brush.range, brickloft_core::tree::LEAST_RANGE..=largest.min(200.0)).logarithmic(true).step_by(1.0).text("Range")));
+    let mut level = touch.map_or(0.0, |i| s.pulls[i].1.z);
+    if brush.action == Action::Flatten && touch.is_some() {
+        helped(ui, help("grass_level"), |ui| ui.add(Slider::new(&mut level, 0.0..=largest.min(100.0)).step_by(0.5).text("Level")));
+    } else if brush.action != Action::Flatten {
+        helped(ui, help("grass_intensity"), |ui| ui.add(Slider::new(&mut brush.amount, 0.5..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Intensity")));
+    }
+    if let Some(i) = touch {
+        let was_level = s.pulls[i].1.z;
+        if *brush != was || level != was_level {
+            // (made a flattening touch, it flattens to the height it had pushed to)
+            s.pulls[i].1 = match brush.action {
+                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
+                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
+                Action::Flatten => DVec3::new(brush.range, FLATTENS, level.max(0.0)),
+            };
+        }
+        ui.horizontal(|ui| {
+            ui.label(format!("Changing touch {} of {}.", i + 1, s.pulls.len()));
+            if ui.button("Next").clicked() {
+                *touched = Some((i + 1) % s.pulls.len());
+            }
+            if ui.button("New touches only").clicked() {
+                *touched = None;
+            }
+        });
+    }
 }
 
 fn colours(ui: &mut Ui, state: &mut State) {

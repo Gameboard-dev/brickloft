@@ -161,6 +161,12 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[70, 56, 46], [36, 80, 50], [24, 58, 40], [60, 108, 62], [84, 68, 54], [60, 108, 62], [206, 44, 40], [240, 210, 90]],
             &[[100, 80, 56], [150, 164, 60], [108, 130, 50], [198, 196, 84], [112, 92, 66], [198, 196, 84], [232, 128, 36], [240, 210, 90]],
         ],
+        // grass: its soil first, then three greens (the rest are not used): a lawn; a meadow; dry
+        "grass" => &[
+            &[[92, 70, 46], [76, 150, 58], [54, 122, 48], [112, 176, 72], [92, 70, 46], [112, 176, 72], [200, 80, 90], [240, 210, 90]],
+            &[[100, 78, 50], [96, 148, 62], [70, 118, 54], [150, 176, 86], [100, 78, 50], [150, 176, 86], [200, 80, 90], [240, 210, 90]],
+            &[[132, 106, 70], [176, 164, 96], [146, 132, 78], [204, 192, 124], [132, 106, 70], [204, 192, 124], [200, 80, 90], [240, 210, 90]],
+        ],
         // hydrangeas: blue; pink; white; blue running to pink, as on middling ground
         "hydrangea" => &[
             &[[96, 78, 56], [58, 112, 56], [38, 82, 44], [98, 146, 66], [106, 88, 64], [92, 130, 214], [120, 110, 206], [236, 236, 246]],
@@ -237,6 +243,7 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "hedge" => &["Box with red berries", "Dark yew", "Golden privet"],
         "peony" => &["Pink", "Deep red", "White", "Coral", "Blush"],
         "hydrangea" => &["Blue", "Pink", "White", "Blue to pink"],
+        "grass" => &["Lawn", "Meadow", "Dry"],
         "petunia" => &["Purple", "Pink", "White", "Red", "Blue and white"],
         "reeds" => &["Summer", "Autumn straw", "Purple plumes"],
         "sunflower" => &["Yellow", "Red-bronze", "Lemon"],

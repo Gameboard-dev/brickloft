@@ -59,6 +59,27 @@ pub enum Cut {
     Segment,
 }
 
+/// What a brush does to grass's ground.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Action {
+    Up,
+    Down,
+    Flatten,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Brush {
+    pub range: f64,
+    pub amount: f64,
+    pub action: Action,
+}
+
+/// What an added point of grass says of a flattening touch in the place
+/// its range and amount are kept in: any number but 0 would do, and this
+/// one is still not 0 after a form is shrunk for the coarsest brick size
+/// and snapped to half cells (see `brickloft_core::spec::tree_lay`).
+pub const FLATTENS: f64 = 16.0;
+
 /// A best-fit search under way (see [`State::snap_best`]).
 struct Search {
     /// the numbers it may change, and how many times over it goes through them
@@ -282,6 +303,12 @@ pub struct State {
     pub floor_gap: f64,
     /// after each drag, move what was dragged to the best fit nearby
     pub auto_best: bool,
+    /// The brush grass's ground is shaped with (see
+    /// `brickloft_core::tree::Sculpt`): how far it reaches, how much it
+    /// pushes, and what it does. Alt + click touches the ground with it.
+    pub brush: Brush,
+    /// which touch of the brush the panel's sliders are changing, if any: the one last made or dragged
+    pub touched: Option<usize>,
     /// what the last best-fit search did
     pub best_note: String,
     /// a best-fit search not yet finished
@@ -453,6 +480,8 @@ impl State {
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
+            brush: Brush { range: 24.0, amount: 8.0, action: Action::Up },
+            touched: None,
             best_note: String::new(),
             search: None,
             folder: crate::store::STARTER_FOLDERS[0].to_string(),
@@ -898,6 +927,8 @@ impl State {
             Some(ends) => (Cut::Segment, ends),
         };
         self.spec = spec;
+        // (a hedge saved before it had a line is given the line it was)
+        self.lay_tree();
     }
 
     /// A number the best-fit search may change: one coordinate of a point,
@@ -1077,6 +1108,49 @@ impl State {
         self.preset_settings();
         let (points, weights) = usual_points(self.form, self.spec.radius);
         (self.spec.points, self.spec.weights) = (points, weights);
+        self.lay_tree();
+    }
+
+    /// Give a plant that lies along a line (a hedge, reeds, grass) the
+    /// points of the line it starts on, three in a row along x, and any
+    /// other plant its one point. The point in the middle is there to be
+    /// dragged aside, which bends it.
+    ///
+    /// A hedge had one point and a length worked out from its thickness,
+    /// so that making it thicker made it longer (see
+    /// `brickloft_core::spec::tree_lay`). Its ends are dots now, and its
+    /// length is where they are.
+    fn lay_tree(&mut self) {
+        use brickloft_core::tree::{Kind, Tree};
+        if self.form != TREE {
+            return;
+        }
+        let kind = self.spec.tree.kind;
+        let at = self.spec.points.first().copied().unwrap_or(cell(0.0, 0.0, 0.0));
+        if Tree::lies_along(kind) {
+            if self.spec.points.len() < 2 {
+                // (as long as it was, if it was stretched; else three times its thickness, or for grass a patch a little longer than wide)
+                let long = if self.spec.stretch.x > 1.0 { self.spec.radius * self.spec.stretch.x } else if kind == Kind::Grass { 30.0 } else { (self.spec.radius * brickloft_core::tree::HEDGE_LENGTH).round() };
+                self.spec.points = vec![at - DVec3::X * long.round(), at, at + DVec3::X * long.round()];
+            }
+            // its dots stay on the ground
+            self.lock = Lock::Axis(2);
+        } else {
+            self.spec.points.truncate(1);
+            self.spec.closed = false;
+            self.spec.pulls.clear();
+        }
+        self.spec.stretch = DVec3::ONE;
+    }
+
+    /// The point a plant's height and spread dots stand at: the middle one
+    /// of a line's, or its only one. And the way across it there, level.
+    fn tree_middle(&self) -> (DVec3, DVec3) {
+        let p = &self.spec.points;
+        let n = p.len() / 2;
+        let along = if p.len() >= 2 { (p[(n + 1).min(p.len() - 1)] - p[n.saturating_sub(1)]).truncate().normalize_or_zero() } else { brickloft_core::DVec2::ZERO };
+        let across = if along == brickloft_core::DVec2::ZERO { DVec3::X } else { DVec3::new(-along.y, along.x, 0.0) };
+        (DVec3::new(p[n].x, p[n].y, p[0].z.floor()), across)
     }
 
     /// The part of [`State::preset`] that is not the form's points.
@@ -1134,8 +1208,9 @@ impl State {
         let (height, spread) = Tree::usual_size(kind);
         self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
         (self.spec.radius, self.spec.rise) = (spread, Some(height));
-        // (a hedge or a stand of reeds starts three times as long as it is thick; nothing else is stretched)
-        self.spec.stretch = DVec3::new(if matches!(kind, brickloft_core::tree::Kind::Hedge | brickloft_core::tree::Kind::Reeds) { brickloft_core::tree::HEDGE_LENGTH } else { 1.0 }, 1.0, 1.0);
+        // (from one kind that lies along a line to another, the line is kept)
+        self.spec.stretch = DVec3::ONE;
+        self.lay_tree();
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
 
@@ -1362,7 +1437,9 @@ impl State {
         let p = &self.spec.points;
         let mut all: Vec<(Handle, DVec3)> = p.iter().enumerate().map(|(i, q)| (Handle::Point(i), *q)).collect();
         // an added point is shown where it has pulled the curve to
-        all.extend(self.spec.pulls.iter().enumerate().map(|(i, (at, by))| (Handle::Pull(i), *at + *by)));
+        // (a touch on grass's ground is shown on the ground as that touch left it at its middle: for a push, as high as it pushed)
+        let grass = self.is_grass();
+        all.extend(self.spec.pulls.iter().enumerate().map(|(i, (at, by))| (Handle::Pull(i), if grass { *at + DVec3::Z * by.z } else { *at + *by })));
         let standing = self.standing();
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
@@ -1384,9 +1461,10 @@ impl State {
             // a tree: one dot at its top for its height, and one at its
             // side, half way up, for its spread
             TREE if !p.is_empty() => {
-                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                // (of a hedge, at the middle of its line, the spread dot out to one side of it: along the line it was inside the hedge)
+                let (foot, across) = self.tree_middle();
                 all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
-                all.push((Handle::Radius, foot + self.radius_dir() * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
+                all.push((Handle::Radius, foot + across * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
             }
             _ => {}
         }
@@ -1619,7 +1697,7 @@ impl State {
     pub fn drag(&mut self, handle: Handle, origin: DVec3, dir: DVec3, view: DVec3) {
         let place = |state: &State| match handle {
             Handle::Point(i) => state.spec.points.get(i).copied(),
-            Handle::Pull(i) => state.spec.pulls.get(i).map(|(at, by)| *at + *by),
+            Handle::Pull(i) => state.spec.pulls.get(i).map(|(at, by)| if state.is_grass() { *at + DVec3::Z * by.z } else { *at + *by }),
             _ => None,
         };
         if let Handle::Spin(axis) = handle {
@@ -1688,7 +1766,9 @@ impl State {
         };
         let on_grid = |v: f64| if self.fine_snap { snap(v) } else { v.floor() + 0.5 };
         let points: Vec<DVec3> = self.spec.points.iter().enumerate().map(|(j, p)| if handle == Handle::Point(j) || matches!(handle, Handle::Pull(_)) { *p } else { (*p + moved * share(*p)).map(on_grid) }).collect();
-        let pulls: Vec<(DVec3, DVec3)> = self.spec.pulls.iter().enumerate().map(|(j, (at, by))| if handle == Handle::Pull(j) { (*at, *by) } else { (*at, (*by + moved * share(*at + *by)).map(snap)) }).collect();
+        // (grass's are touches of a brush, each its own: none follows another)
+        let grass = self.is_grass();
+        let pulls: Vec<(DVec3, DVec3)> = self.spec.pulls.iter().enumerate().map(|(j, (at, by))| if handle == Handle::Pull(j) || grass { (*at, *by) } else { (*at, (*by + moved * share(*at + *by)).map(snap)) }).collect();
         (self.spec.points, self.spec.pulls) = (points, pulls);
     }
 
@@ -1723,6 +1803,18 @@ impl State {
             self.drag_alone(handle, origin, dir, view);
             self.lock = was;
             self.spec.pulls[i].1[axis] = kept;
+            return;
+        }
+        // A touch on grass's ground is dragged straight up and down, which
+        // changes how much it pushes, or the height it flattens to. Where
+        // it is and how far it reaches stay as they are.
+        if let (Handle::Pull(i), true) = (handle, self.is_grass()) {
+            let Some(&(from, by)) = self.spec.pulls.get(i) else { return };
+            let Some(up) = along_line(from + self.standing(), DVec3::Z, origin, dir) else { return };
+            let floor = from.z.floor() - from.z;
+            let amount = snap(up).clamp(-HANDLE_LIMIT, HANDLE_LIMIT);
+            self.spec.pulls[i].1.z = if by.y != 0.0 { amount.max(floor.min(0.0)).max(0.0) } else { amount };
+            self.touched = Some(i);
             return;
         }
         let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
@@ -1831,13 +1923,17 @@ impl State {
                 }
                 self.spec.pulls[i].1 = by;
             }
+            Handle::Radius if self.form == TREE => {
+                let (foot, across) = self.tree_middle();
+                self.spec.radius = snap((hit - foot).dot(across).abs()).clamp(brickloft_core::tree::LEAST_SPREAD, HANDLE_LIMIT);
+            }
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
             Handle::Rise if self.form == TREE => {
                 let height = snap(hit.z - self.spec.points[0].z.floor()).round();
-                self.spec.rise = Some(height.clamp(brickloft_core::tree::LEAST_HEIGHT, HANDLE_LIMIT));
+                self.spec.rise = Some(height.clamp(brickloft_core::tree::Tree::least_height(self.spec.tree.kind), HANDLE_LIMIT));
             }
             Handle::Rise => {
                 let mid = (self.spec.points[0] + self.spec.points[1]) / 2.0;
@@ -1856,8 +1952,8 @@ impl State {
     /// Whether points can be added to the form to pull it out of shape.
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
-        // (but a tree, which is grown and not drawn)
-        self.form != TREE
+        // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
+        self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind)
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -1882,11 +1978,34 @@ impl State {
         // is in the form before any turn, as all the form's points are.
         let on = match self.form {
             SPHERE | PYRAMID => at,
+            // grass: where it was clicked, on the ground
+            TREE if self.spec.tree.kind == brickloft_core::tree::Kind::Grass => DVec3::new(at.x.round(), at.y.round(), self.spec.points.first().map_or(0.0, |p| p.z)),
             _ => self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?,
         };
         let on = brickloft_core::spec::Turn::of(&self.spec.snapped()).back(on);
+        if self.is_grass() {
+            // A touch of the brush as the panel has it. Flattening is to
+            // the height the ground has where it was touched, as it is
+            // in the games that have such a tool: touch a hilltop to make
+            // a terrace at its height, or the flat beside a hill to level
+            // the hill's foot.
+            let brush = self.brush;
+            let by = match brush.action {
+                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
+                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
+                Action::Flatten => DVec3::new(brush.range, FLATTENS, snap(brickloft_core::spec::grass_ground(&self.spec.snapped(), on))),
+            };
+            self.spec.pulls.push((on, by));
+            self.touched = Some(self.spec.pulls.len() - 1);
+            return Some(Handle::Pull(self.spec.pulls.len() - 1));
+        }
         self.spec.pulls.push((on, DVec3::ZERO));
         Some(Handle::Pull(self.spec.pulls.len() - 1))
+    }
+
+    /// Whether the form being edited is a patch of grass.
+    pub fn is_grass(&self) -> bool {
+        self.form == TREE && self.spec.tree.kind == brickloft_core::tree::Kind::Grass
     }
 
     /// Take off the point added last.
@@ -2358,6 +2477,87 @@ mod tests {
             assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == 8), "{kind}");
             assert_eq!(crate::paint::palettes(kind).len(), crate::paint::tree_palette_names(kind).len(), "{kind}");
         }
+    }
+
+    #[test]
+    fn a_hedge_is_bent_by_its_dots_and_narrowed_without_changing_its_length() {
+        use brickloft_core::tree::Kind;
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(Kind::Hedge);
+        // three dots along its line, then its height and its thickness; the thickness dot out to one side of the line
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Point(1), Handle::Point(2), Handle::Rise, Handle::Radius]);
+        let (middle, side) = (dots[1].1, dots[4].1);
+        assert!((side.y - middle.y).abs() == state.spec.radius && side.x == middle.x, "the thickness dot is at {side}, the middle of the line at {middle}");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let long = |state: &State| { let b = state.bounds.unwrap(); ((b.1[0] - b.0[0]) as f64, (b.1[1] - b.0[1]) as f64) };
+        let before = long(&state);
+        assert!((before.0 - 72.0).abs() < 6.0 && (before.1 - 24.0).abs() < 4.0, "{before:?}");
+        // widened, it is wider and no longer: the fault was that it grew longer with every step wider
+        let eye = DVec3::new(side.x, side.y, 300.0);
+        state.drag(Handle::Radius, eye, (side + DVec3::Y * 28.0 * (side.y - middle.y).signum() - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.radius, 40.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        let wide = long(&state);
+        assert!((wide.0 - before.0).abs() <= 2.0 * 30.0 && wide.0 < 140.0 && wide.1 > 70.0, "wide it is {wide:?}, from {before:?}");
+        // and narrowed again it is as it was
+        let side = state.handles()[4].1;
+        let eye = DVec3::new(side.x, side.y, 300.0);
+        state.drag(Handle::Radius, eye, (side - DVec3::Y * 28.0 * (side.y - middle.y).signum() - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.radius, 12.0);
+        assert!(state.refresh(|| 0.0));
+        assert_eq!(long(&state), before);
+        // its middle dot dragged aside bends it: it now reaches where a straight hedge does not
+        let eye = DVec3::new(middle.x, middle.y, 300.0);
+        state.drag(Handle::Point(1), eye, (middle + DVec3::Y * 30.0 - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.points[1].y - state.spec.points[0].y, 30.0);
+        assert_eq!(state.spec.points[1].z, state.spec.points[0].z, "the dot left the ground");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        assert!(long(&state).1 > before.1 + 20.0, "{:?}", long(&state));
+        // a point added to it bends it further, as it does a curve
+        let on = state.built.path[state.built.path.len() / 4];
+        let added = state.add_pull(on + state.standing()).expect("no point could be added to a hedge");
+        assert_eq!(added, Handle::Pull(0));
+        // a hedge saved before it had a line: one point and a stretch. It opens as long as it was, with its ends as dots.
+        let old = Spec { form: Form::Tree, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, rise: Some(30.0), stretch: DVec3::new(6.0, 1.0, 1.0), tree: brickloft_core::tree::Tree::of(Kind::Hedge), ..Spec::default() };
+        state.load_spec(old);
+        assert_eq!((state.spec.points.len(), state.spec.points[2].x - state.spec.points[0].x, state.spec.stretch), (3, 120.0, DVec3::ONE));
+        // grass: a point added where it is clicked, and lifted, raises the ground there
+        state.usual_tree(Kind::Grass);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let flat = state.bounds.unwrap().1[2];
+        // a touch of the brush where it is clicked: as wide and as strong as the brush is, and the ground is a hill there
+        state.brush = Brush { range: 20.0, amount: 6.0, action: Action::Up };
+        let handle = state.add_pull(DVec3::new(10.5, 3.5, 2.0) + state.standing()).expect("grass could not be touched");
+        assert_eq!((state.spec.pulls[0].1, state.touched), (DVec3::new(20.0, 0.0, 6.0), Some(0)));
+        // its dot is on the hilltop, and dragged up it pushes harder: where it is and how wide stay as they were
+        let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
+        assert_eq!(at.z - state.spec.points[0].z, 6.0);
+        let eye = DVec3::new(at.x, -300.0, at.z);
+        state.drag(handle, eye, (at + DVec3::Z * 8.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.pulls[0], (DVec3::new(11.0, 4.0, 0.5), DVec3::new(20.0, 0.0, 14.0)));
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        assert!(state.bounds.unwrap().1[2] >= flat + 10, "{} high raised, {flat} flat", state.bounds.unwrap().1[2]);
+        // pushed down beside it, a hollow in the hill; and flattened on its flank, a terrace at the height the flank had there
+        state.brush = Brush { range: 10.0, amount: 4.0, action: Action::Down };
+        state.add_pull(DVec3::new(16.5, 3.5, 2.0) + state.standing()).unwrap();
+        assert_eq!(state.spec.pulls[1].1, DVec3::new(10.0, 0.0, -4.0));
+        state.brush.action = Action::Flatten;
+        let flank = brickloft_core::spec::grass_ground(&state.spec, DVec3::new(2.0, 4.0, 0.5));
+        state.add_pull(DVec3::new(1.5, 3.5, 2.0) + state.standing()).unwrap();
+        assert!(flank > 2.0 && state.spec.pulls[2].1.y != 0.0 && (state.spec.pulls[2].1.z - flank).abs() <= 0.25, "{:?}, flank {flank}", state.spec.pulls[2]);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        // the line's dots moved, the touches stay as they are
+        let before = state.spec.pulls.clone();
+        let end = state.handles()[2].1;
+        let eye = DVec3::new(end.x, end.y, 300.0);
+        state.drag(Handle::Point(2), eye, (end + DVec3::X * 6.0 - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.pulls, before);
+        // a kind that does not lie along a line has one dot again, and no added points
+        state.usual_tree(Kind::Oak);
+        assert_eq!((state.spec.points.len(), state.spec.pulls.len()), (1, 0));
     }
 
     #[test]
