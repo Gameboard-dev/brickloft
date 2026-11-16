@@ -1259,12 +1259,16 @@ the two halves of a cell folded along its diagonal.
 
 ### 7.8 Stepping stones
 
-A flat band or a filled outline can be laid as separate stones with gaps
-between them, in place of solid brick ([core/src/pattern.rs](../core/src/pattern.rs)).
-The stones follow whatever region the form gives: the band along a curved
-path, a ring, a disc.
+A flat band or a filled outline can be laid as separate stones in place of
+solid brick ([core/src/pattern.rs](../core/src/pattern.rs)). The stones
+follow whatever region the form gives: the band along a curved path, a
+ring, a disc. With a gap between them they are a path of stepping stones.
+With the gap at 0 they are fitted together, as in a stone wall or a paved
+floor.
 
 <img src="images/stepping-stones.png" width="640" alt="A curved path laid as stepping stones">
+
+<img src="images/pattern-stones-fitted.png" width="420" alt="A square floor of stones of many shapes fitted together with the gap at 0, each stone one colour, with narrow seams between them">
 
 #### Scattering the stones
 
@@ -1308,6 +1312,9 @@ is
 \min_t\, e_t(p) \ge \tfrac{g}{2}
 ```
 
+With the gap at 0 the test is $`\min_t e_t(p) \ge 0`$, and two neighbouring
+stones meet along the line between them.
+
 That gives a polygon with sharp corners. A stone's corners are rounded, so
 the smallest of the distances is replaced by a smooth version of the
 smallest,
@@ -1324,55 +1331,484 @@ $`k`$ sets how tight the rounding is, and is 2.5 per cell, which rounds a
 corner over about half a cell. A rounder setting was tried first. It fell
 short of the true smallest along the whole of every edge, since a small
 stone has several lines within a cell or two of any place on its edge, and
-the stones came out a cell and a half short all round. This is `Stone::eval`:
+the stones came out a cell and a half short all round.
+
+The smooth smallest differs from the plain smallest only near a corner,
+where two distances are within a cell or so of each other. `Stone::eval`
+therefore finds the plain smallest first. Where that puts a place well
+inside the stone or well outside, the answer is taken from it, and the
+exponentials are worked out only for the places that are left. Taking the
+exponential of every distance at every place was most of the time a path of
+stones took: 170 ms for a path that takes 20 ms as solid brick.
 
 ```rust
-        let to_me = p.distance_squared(self.at);
-        // (a distance far past the nearest adds nothing, and is left out before it can overflow)
-        let mut sum = (-self.sharp * -region(p)).exp();
-        for other in &self.near {
-            // how far p is on this stone's side of the line half way to the other
-            let inside = (p.distance_squared(*other) - to_me) / (2.0 * other.distance(self.at));
-            sum += (-self.sharp * inside).exp();
+        // how far the smooth least can fall below the plain least, with room to spare
+        let near = 2.0 / self.sharp;
+        let mut least = f64::INFINITY;
+        for (towards, far) in &self.lines {
+            least = least.min(far - towards.dot(p));
         }
-        let least = -sum.ln() / self.sharp;
-        self.half_gap - least
+        if least < self.half_gap - near {
+            return self.half_gap - least; // well past a neighbour's line: outside
+        }
+        let edge = -region(p);
+        let least = least.min(edge);
+        if least < self.half_gap - near || least > self.half_gap + near {
+            return self.half_gap - least;
+        }
+        let mut sum = (-self.sharp * edge).exp();
+        for (towards, far) in &self.lines {
+            sum += (-self.sharp * (far - towards.dot(p))).exp();
+        }
+        self.half_gap + sum.ln() / self.sharp
 ```
+
+Each line is kept as a direction towards the neighbour and the line's
+distance along it, so `far - towards.dot(p)` is $`e_t(p)`$.
 
 #### Fitting the stones
 
-The stones together are one solid of many separate parts, and it is fitted
-by the outline fitter of 7.2 in one pass, so every stone gets the sloped
-edges a flat form has. They were first fitted one at a time. Two fits know
-nothing of each other, and across a narrow gap the triangle that finished
-one stone's sloped edge and the triangle that finished its neighbour's
-wanted cells of the same box. One had to be given up, and its stone was
-left with a notch. Fitted together, the fitter settles the two as it
-settles the two faces of a thin wall.
+Each stone is fitted by itself with the outline fitter of 7.2, so every
+edge of every stone gets the sloped bricks an outline of its own gets. The
+stones were first fitted all at once, as one solid of many parts. Two
+stones either side of a narrow gap then wanted cells of the same box for
+the triangles of their facing edges. The fitter gave the box to one stone,
+and the other's edge was finished in steps, which left it with a corner
+missing its wedge.
+
+Fitted apart, the sloped bricks of two facing edges may lie in boxes that
+share cells. Both bricks are kept when their solid halves do not meet,
+because the gap then runs between them. Whether they meet is tested at nine
+places in every cell the two boxes share.
+
+A fit may stray half a cell from its stone, so two fits can meet where the
+stones themselves do not. A stone whose bricks would meet a stone already
+laid is fitted again drawn in by half a cell, and then by a whole cell if
+they still meet. A brick that meets one even then is left out.
+
+With the gap at 0, neighbouring stones share their edges, so a stone is
+drawn in wherever its bricks would overlap a stone laid before it. Fitted
+stones therefore keep seams between them. Most are hairline and some are
+up to about a cell wide, as the second picture above shows. They are the
+cost of fitting each stone by itself (see
+[future-work.md](future-work.md)).
+
+#### A number for each stone
+
+Every stone has a number, counted from 0 in the order the stones are laid
+and starting again after 7, and each brick of a stone carries its stone's
+number. The colouring **As the pattern has it** turns the numbers into
+colours by the rule in
+[Colours by feature](#colours-by-feature), so the bricks of one stone are
+always one colour and up to eight colours are shared among the stones.
+
+The number is given when the stone is laid. An earlier colouring worked the
+stones out afterwards from the finished bricks alone (`pieces` in
+`pattern.rs`), by sampling each brick's solid part and joining samples that
+lie side by side. That function remains, and the tests use it to check
+that a path's bricks fall into separate stones.
 
 #### Why not wave function collapse
 
 The patterns were asked for under the name of
 [wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse),
-which fills a grid with tiles that agree with their neighbours. It suits a
-pattern made of repeated motifs, and the mosaic floor and the rug planned
-in [future-work.md](future-work.md) will use it. It does not suit stones,
-for two reasons. Its rules reach only a few cells, and nothing that local
-says how large a stone has grown, since the tiles that make a stone's
-inside can be laid without end. Its output is also the grid's own squares,
-where a stone wants an outline at any angle. Scattered points give stones
-of a chosen size by construction and outlines the fitter can follow.
+which fills a grid with tiles that agree with their neighbours. It does not
+suit stones, for two reasons. Its rules reach only a few cells, and nothing
+that local says how large a stone has grown, since the tiles that make a
+stone's inside can be laid without end. Its output is also the grid's own
+squares, where a stone wants an outline at any angle. Scattered points give
+stones of a chosen size by construction and outlines the fitter can follow.
+The tile patterns of 7.9 do not use it either, for the reasons given
+[there](#why-not-wave-function-collapse-for-the-tile-patterns).
 
-#### Telling the stones apart
+### 7.9 Tile patterns
 
-The colouring **Each piece its own** gives every stone one of the form's
-colours. Which bricks make one stone is found from the finished bricks
-alone (`pieces` in `pattern.rs`): each brick is sampled, four samples to a
-cell each way, and samples side by side are one stone. The bricks'
-solid parts are compared and not their boxes, because across a narrow gap
-the empty half of one stone's sloped brick shares cells with its
-neighbour's. Working from the bricks means a path can be flipped, turned,
-scaled or read back from a file and still be told apart into its stones.
+A flat band or a filled outline can also be laid as a pattern of coloured
+tiles: medallions, a rug, a snowflake, planks, bricks or slabs
+(`lay_mosaic` in [core/src/pattern.rs](../core/src/pattern.rs)). A tile is
+one cell. It is one colour, or it is cut along a diagonal into two
+triangles of two colours.
+
+Every style is drawn by a rule. The rule is a function that gives a number
+for any place on the floor: 0 for the ground, and 1 to 7 for the parts of
+the pattern. The tiles are decided from that function, and the numbers are
+turned into colours afterwards (see
+[Colours by feature](#colours-by-feature)). A rule can be asked about any
+place at any size, so one rule draws a floor ten tiles across and a floor
+two hundred across.
+
+#### From a region to coloured bricks
+
+The region is first fitted as the one solid it is, by the outline fitter of
+7.2, so a patterned floor has the same smooth edge as a plain one. The
+pattern then only colours the result, in four steps.
+
+1. The region is cut into tiles of one cell. A tile is decided by the
+   pattern only if the fit made its cell a whole cell. Where the edge cuts
+   into a cell there is a sloped brick, which is one colour and is dealt
+   with last (see [The edge](#the-edge-bricks-of-five-cells-at-most)). A
+   tile within the **Border** setting of the edge is plain ground.
+2. The style's rule decides every tile (see the next section).
+3. A tile cut into two triangles becomes two sloped bricks of one cell
+   each. The two fill one box between them, as the two halves of a sloped
+   pair do anywhere else.
+4. The remaining whole cells are sorted by colour and joined into bricks.
+   Cells of one colour side by side in a row become one run, and a run is
+   joined onto the brick above it when that brick is the same run in the
+   same colour. Tiles of one colour side by side are therefore one brick
+   and not a brick each.
+
+Step 4 gives rectangles that are not always the largest possible. Finding
+the largest would give fewer bricks still, and is a harder problem than a
+floor's worth of bricks is worth.
+
+The colours were first fitted one at a time, each colour's tiles as a
+solid of its own. The outline fitter prefers a slope to a staircase, so it
+turned the stepped edge between two colours of small tiles into a slope,
+and it did so on both sides, which put bricks of two colours in one place.
+Sorting whole cells cannot do that.
+
+A tile could once be set larger than one cell, and wider than it was deep.
+That drew the same pattern coarser or stretched and did nothing else a
+player wanted, so a tile is now always one cell.
+
+The medallions, the rug and the snowflake are their own mirror images, and
+their tiles are set out from the middle of the floor. Set out on the
+grid's own lines, a floor that did not lie evenly on them had a part row of
+tiles down one side and none down the other, and the pattern sat to one
+side. The middle is placed on a corner of the grid and not in the middle of
+a tile, because a figure about a corner is made of whole and half tiles. A
+floor an odd number of tiles across therefore has one row left over, which
+stays plain. Planks, bricks and slabs have no middle and are set out on the
+grid's lines.
+
+#### How a tile is decided from four samples
+
+A tile's two diagonals cut it into four quarters, towards its top, right,
+bottom and left sides. The rule is asked for the number at one place in
+each quarter, and the four answers decide the tile (`tile_at`):
+
+| The four samples | The tile |
+|---|---|
+| all four alike | one colour |
+| top and left alike, bottom and right alike, the two pairs different | cut from bottom left to top right, one colour each side |
+| top and right alike, bottom and left alike, the two pairs different | cut from top left to bottom right, one colour each side |
+| anything else | one colour, the colour at the tile's middle |
+
+```rust
+    // the quarters towards the tile's top, right, bottom and left sides
+    let [top, right, bottom, left] = [(0.5, 1.0 / 6.0), (5.0 / 6.0, 0.5), (0.5, 5.0 / 6.0), (1.0 / 6.0, 0.5)].map(|(dx, dy)| colour(x + dx, y + dy));
+    if top == left && bottom == right && top != bottom {
+        [top, ON_CUT, ON_CUT, bottom] // cut from bottom left to top right
+    } else if top == right && bottom == left && top != bottom {
+        [ON_CUT, top, bottom, ON_CUT] // cut from top left to bottom right
+    } else if top == right && right == bottom && bottom == left {
+        [top; 4]
+    } else {
+        [colour(x + 0.5, y + 0.5); 4]
+    }
+```
+
+A tile is kept as the colour at each of its four corners. The two corners
+a cut runs through belong to neither triangle and are marked `ON_CUT`.
+
+An edge between two colours that runs along the grid or along its
+diagonals is therefore drawn exactly, and an edge at any other angle is
+drawn as the nearest run of whole and cut tiles. The diagonals are the only
+slopes on offer because a tile is one cell, and one cell is cut in two only
+corner to corner. This is why the rules below are built from lines along
+the grid and at 45 degrees wherever they can be.
+
+#### Medallions: bands of a distance measure
+
+<img src="images/pattern-medallions.png" width="420" alt="A square floor of medallions: ringed squares, lozenges and octagons repeated in rows, their outlines joined where they meet, in cream, terracotta, blue and ochre">
+
+Medallions repeats a few ringed figures over the whole floor. Each figure
+is a lozenge, a square or an octagon, and each is described by a measure of
+how far a place is from it. For a figure with its middle at
+$`(c_x, c_y)`$, write $`a = \lvert u - c_x\rvert`$ and
+$`b = \lvert v - c_y\rvert`$ for how far the place $`(u, v)`$ is from the
+middle across and along. The measure is
+
+```math
+f(u, v) = \max\left(a - w,\ \ b - h,\ \ a + b - s\right)
+```
+
+The three limits are half the figure's width $`w`$, half its height $`h`$,
+and the most that $`a + b`$ may be, $`s`$. A limit that is left out is no
+limit. The third alone gives a lozenge, the first two a rectangle, and all
+three an octagon. The measure is 0 on the figure's outline, negative
+inside it, and grows steadily with distance outside it. For example, a
+lozenge with $`s = 3`$ at the origin gives the place $`(4, 1)`$ the measure
+$`4 + 1 - 3 = 2`$, two tiles outside it.
+
+One number is worked out for every place, the least of all the figures'
+measures there, and the floor is cut into bands one tile wide by its whole
+part:
+
+```math
+d(p) = \min_i f_i(p), \qquad n(p) = \lfloor d(p) \rfloor
+```
+
+The seed draws a short run of bands that are on and off by turns: one to
+three pairs of on and off, one or two bands wide each, starting with a band
+that is on. Band $`n`$ is on when entry $`n \bmod m`$ of the run is on, where $`m`$
+is the run's length, and the run repeats inwards as well as outwards. A
+place in a band that is on takes the number of the figure nearest it. A
+place in a band that is off is ground.
+
+Because the first band is on, every figure has its outline. Because the run
+repeats, every figure is ringed inside and out by bands of its own shape.
+Taking the least of the measures is how two distance functions are joined
+into one solid in section 5, so where the bands of two figures meet they
+join into one outline round both. That joining gives the pattern its
+crowded, interlocked look without any rule about which figure may sit
+beside which.
+
+The measures are made of $`a`$, $`b`$ and $`a + b`$, which change by whole
+tiles along the grid's lines and along its diagonals. A band's edge
+therefore runs along the grid or at 45 degrees, the two directions a tile
+shows exactly, and nearly every tile is a whole tile or a cut one. The few
+tiles where several figures' bands meet take the colour at their middle.
+
+The repeat is $`P`$ tiles each way, with $`P`$ an even number from 8 to 16
+as the seed has it, or less on a floor too small for that. A place is folded onto one eighth of a repeat before it is
+measured: each coordinate is taken as its distance from the nearest
+multiple of $`P`$, and the larger of the two is put first. Four figures are
+placed in that eighth, at the middle of the repeat, at its corner, at the
+middle of its side and at one place between. Folding makes every repeat its
+own mirror image eight ways from four figures.
+
+#### The snowflake: a branching rule
+
+<img src="images/pattern-snowflake.png" width="420" alt="An eight-armed snowflake of bricks alone, its arms branching and the branches branching again, with no bricks between the arms">
+
+The snowflake is one flake at the middle of the floor. Its rule is the one
+a real flake grows by: an arm puts out side branches at a fixed angle,
+shorter towards its tip, and each branch puts out branches of its own.
+Such crystals are Nakaya's dendrites, which Libbrecht describes in "The
+physics of snow crystals" (*Reports on Progress in Physics* 68, 2005).
+
+The flake is made of these lines.
+
+1. A heart at the middle: a lozenge, a square or an octagon.
+2. An arm along the grid, reaching to two tiles short of the nearer edge
+   of the floor, and a shorter arm along the diagonal. Each is two tiles
+   thick. Folding the floor onto one eighth repeats the pair as eight
+   arms.
+3. Branches off each arm, to both sides at 45 degrees. On a line of length
+   $`L`$, the branch that leaves it $`t`$ tiles from its start has the
+   length
+
+   ```math
+   \ell(t) = c\,(L - t)
+   ```
+
+   rounded to whole tiles, where $`c`$ is a share the seed draws between
+   0.40 and 0.60. A branch near the tip is therefore shorter than one near
+   the heart, which gives each arm its tapering outline.
+4. Branches off each branch, by the same formula with a share between 0.35
+   and 0.55, and no longer than keeps them clear of the branch beside
+   them. The branching stops there.
+5. A small filled lozenge at the tip of each arm and branch, and one or two
+   outlines about the heart that the arms pass through, like the ridges of
+   a flake's plate.
+
+The branches of an arm are spaced by the arm's length: a fifth to an eighth
+of it apart, and never under four tiles. A large flake therefore has as
+many branches as a small one. Set a fixed three tiles apart, the branches
+of a flake sixty tiles across filled it solid.
+
+The flake has eight arms where ice has six. A tile is cut only corner to
+corner, so the only lines that tiles draw cleanly run along the grid and
+along its diagonals, which are eight directions 45 degrees apart. Six arms
+60 degrees apart would have four of them drawn as staircases.
+
+A growth automaton was the alternative. Reiter's cellular model (2005) and
+Gravner and Griffeath's (2008) grow a flake cell by cell. Both work on a
+lattice of hexagons and give a shape of thousands of cells, which bricks on
+a square grid would show only as steps. The branching rule is therefore
+kept and the growing is left out. The branches are drawn directly as
+lines, in the directions the tiles have.
+
+A snowflake is laid as the flake alone. Where its pattern is bare ground no
+brick is laid, so it can be stood upright, or laid on a floor made from
+another form, with nothing round it or in the gaps between its arms.
+
+#### The rug
+
+The rug is being reworked to carry more ornament, so the list of its parts
+below describes the present version.
+
+<img src="images/pattern-rug.png" width="420" alt="A square rug: a border of small lozenges between two lines, a layered flower as the medallion at the middle with a smaller flower at each side, a piece in each corner, and small flowers joined by stems over the field">
+
+A rug in the Persian manner is made of a few large parts. From the edge
+inwards it has a border between two lines, with one small motif repeated
+along it, and then the field. At the middle of the field is the medallion,
+a flower of several layers one inside the next, with a smaller flower hung
+from it at each end. A quarter of another medallion fills each corner.
+Over the rest of the field small flowers are scattered, each with a leaf or
+two, and joined to their neighbours by stems. One quarter of the rug is
+drawn and the other three are its mirror images (`rug_garden`).
+
+A flower is one outline round a middle, further out where a petal is and
+nearer between two petals. Going round the middle by the angle
+$`\theta`$, a flower of size $`R`$ with $`n`$ petals, each standing proud
+by the share $`q`$ of the size, has its outline at the distance
+
+```math
+r(\theta) = R\left(1 - q + q\,\left\lvert \cos\frac{n\theta}{2} \right\rvert^{0.6}\right)
+```
+
+A place is in the flower when it is nearer the middle than $`r`$ at its
+angle. The outline is $`R`$ from the middle at the tip of a petal and
+$`R(1 - q)`$ at the notch between two. For example, with $`R = 10`$ and
+$`q = 0.3`$ the tips are 10 tiles out and the notches 7. This is the
+[rose curve](https://en.wikipedia.org/wiki/Rose_(mathematics)) of Guido
+Grandi with a constant added, so that the petals do not reach the middle.
+The power 0.6 makes a petal round at its tip and the notch between two
+petals sharp, as a drawn flower's are. Without it the outline is a wavy
+circle.
+
+The medallion is several such outlines on one middle, each smaller than
+the last, with every other one turned by half a petal so that the petals
+of one layer show between those of the next. A leaf is two bows meeting in
+a point at each end. The seed chooses the number of layers and petals, the
+sizes, and where the field's flowers are. The flowers are placed by
+throwing darts and keeping those that land clear of the medallion, the
+corners and one another, as the stepping stones' points are found in 7.8.
+
+The flowers could have been small pictures, drawn by hand and stamped over
+the field. A picture is one size, and a flower drawn in tiles for a rug
+forty tiles across is a blot on a rug two hundred across. An outline given
+as a formula is drawn afresh at whatever size the rug is, and every seed
+gives another flower.
+
+#### Planks, bricks and slabs
+
+<img src="images/pattern-planks.png" width="270" alt="A floor of boards laid end to end in rows, with the joins of one row falling anywhere against the next"> <img src="images/pattern-bricks.png" width="270" alt="A wall of bricks of one size in level courses with mortar between, each course shifted along by its own amount"> <img src="images/pattern-slabs.png" width="270" alt="A wall of squared stones of many sizes in courses of several depths, with mortar between and the corners of each stone cut off">
+
+These three are floors and walls of rectangles, and the **Size** setting
+scales them. The sizes below are for the usual setting of 2.
+
+| Style | What is laid | Size of a piece, in tiles | Numbers |
+|---|---|---|---|
+| Planks | boards end to end in rows, with no gap | 2 broad, 8 to 24 long | one of eight for each board, never the number of the board before it in its row |
+| Bricks | bricks of one size in level courses, with one tile of mortar between courses and between bricks | 8 long, 3 deep | 0 for the mortar, one of seven for each brick |
+| Slabs | squared stones in courses of several depths, with one tile of mortar between | 7 to 17 long, 4 to 9 deep | 0 for the mortar, one of seven for each stone |
+
+In all three the joins of one row fall where they will against the next.
+The first board of a row of planks is an offcut of any length, as a
+carpenter starts a row with what was left of the last. Each course of
+bricks is moved along by an amount of its own, so the upright joints fall
+anywhere against the course below, as in a wall laid without a bond in
+mind. Each course of slabs has its own depth and stones of many lengths.
+
+A slab may have its four corners cut off by the **Bevel** setting, in
+tiles. The cut runs at 45 degrees, so it is drawn with tiles cut in two,
+and it is the only part of these three styles that uses them.
+
+A wall of stones of any shape at all, as opposed to squared ones, is the
+stepping stones of 7.8 with the gap at 0.
+
+Wave function collapse can lay a floor of planks too, from a sample of
+boards. A board's length is then whatever the sample's windows allow, which
+is a few fixed lengths, and the lengths are the whole look of a floor of
+planks. Drawing each length from the seed gives any length in the range.
+
+#### Colours by feature
+
+<img src="images/pattern-snowflake-two-colours.png" width="320" alt="A snowflake with two colours chosen: the first is the ground, which a snowflake does not lay, so the whole flake is in the second colour"> <img src="images/pattern-snowflake-eight-colours.png" width="320" alt="The same snowflake with eight colours chosen: the arms, the diagonal arms, the branches, their own branches, the tips, the heart and the plates each have a colour of their own">
+
+A pattern numbers its parts and not its colours. 0 is the ground, and each
+number from 1 to 7 is one feature of the pattern: a snowflake's arms, its
+branches or its tips, a rug's border lines or its leaves. The player
+chooses how many colours there are, from one to eight, and `colour_of`
+decides which colour a number takes. With $`s`$ for a brick's number and
+$`N`$ for the number of colours, counting the colours from 0,
+
+```math
+c(s, N) = \begin{cases} 0 & \text{if } s = 0 \text{ or } N \le 1 \\ 1 + \big((s - 1) \bmod (N - 1)\big) & \text{otherwise} \end{cases}
+```
+
+The ground has the first colour to itself. The features share the other
+colours out in turn, and go round again when there are more features than
+colours. For example, with $`N = 4`$ the features 1 to 7 take the colours
+1, 2, 3, 1, 2, 3, 1.
+
+Two colours therefore give the whole pattern in one colour on the other,
+and every colour added picks one more feature out, until with eight each
+has its own. The two pictures above are one snowflake with two colours and
+with eight.
+
+The first rule went round all the colours, the ground's among them. With
+fewer colours than features it painted some feature the colour of the
+ground, and that feature vanished from the pattern. Keeping the first
+colour for the ground prevents that at any number of colours.
+
+Planks and stepping stones have no ground. A board or a stone numbered 0
+takes the first colour by the same formula, and the other numbers share the
+rest. The colour sets these two start in are shades of one material, so the
+first colour is one more shade among them.
+
+#### The edge: bricks of five cells at most
+
+Along a slanting edge the outline fitter lays sloped bricks twenty cells
+long. A sloped brick is one colour, so on a patterned floor those bricks
+stood in the pattern as bare triangles the size of a medallion.
+
+The floor is therefore fitted with no brick longer than five cells
+(`EDGE_BRICK`). Only the sloped bricks of the edge are more numerous for it, since the
+whole cells are joined into long bricks again by colour. The price is paid
+at the edge, because a slant drawn in bricks of five cells follows the form
+a little less closely than one drawn in bricks of twenty. On a band 20
+cells wide curving through a third of a turn, 1.5% of its area is amiss
+with bricks of five cells against 0.6% with bricks of twenty. Shorter and
+longer limits were both worse. At three cells the edge was plainly ragged,
+and at eight the bare triangles were still plain to see.
+
+A sloped brick whose two sides share a divisor is also taken apart into
+that many smaller sloped bricks of the same slope, over a staircase of
+whole cells. A triangle 4 cells by 2 becomes two of 2 by 1 and two whole
+cells, and one of 5 by 3 has no smaller and stays as it is. The surface is
+the same either way, since the small bricks' sloped sides are the large
+one's laid end to end, and the whole cells take the pattern like any
+others.
+
+Each sloped brick that remains is then coloured by the pattern. It takes
+the number the pattern has at the middle of its solid half, a third of the
+way in from its square corner, unless that place is within the border.
+Left plain, the edge of a pattern with no border was a row of bare
+triangles.
+
+#### Why not wave function collapse for the tile patterns
+
+Wave function collapse was built and used for the first tile patterns, and
+then replaced. The solver is in
+[core/src/wfc.rs](../core/src/wfc.rs). It learns which tiles may sit side by
+side from a small sample picture, whose every small window becomes a tile,
+and fills the floor so that neighbouring tiles agree. The first styles were
+small samples of chevrons, stars, a weave and other motifs, and the solver
+strewed each sample's motifs over the floor.
+
+The method knows only what may sit beside what, a few tiles across, and the
+faults of its floors follow from that.
+
+- The floors were even and aimless. A sampled floor looks the same
+  everywhere, where a drawn one has a middle and is its own mirror image.
+- A rug could not be made. Tried for a rug's field, the method gave the
+  rug its scattered small motifs, which is a plain rug. What makes a rug
+  or a snowflake look like one is a few large figures that govern the
+  whole of it, and a rule a few tiles across places no such figure.
+- Lengths cannot vary freely. A board in a floor of planks has one of the
+  few lengths the sample's windows allow.
+
+The drawn rules work the other way. They start from the large figures and
+work down to the tile, so the middle, the symmetry and the sizes are
+decided first. The sampled styles and their samples were removed. `wfc.rs` is kept, with its tests, and no pattern calls it at
+present. A pattern made only of small repeated motifs, with no figure
+larger than a few tiles, is the case it still suits (see
+[future-work.md](future-work.md)).
 
 ## 8. Changing a form: added points, mirror, turning, grids
 
@@ -1521,6 +1957,43 @@ frozen grid of its own holding all its forms
 Turning a grid with one of its rings combines $`q`$ with a turn about that
 ring's axis, in whole degrees, and adjusts $`t`$ so that the middle of
 everything on the grid stays where it is.
+
+### Forms joined on purpose
+
+Forms on one grid are normally kept clear of each other. A form dragged
+with Shift held is moved into the others instead and marked as joined
+(`merge` and `joined` in [editor/src/state.rs](../editor/src/state.rs)).
+The two forms then overlap, and the game refuses a brick whose box overlaps
+another's, so the joined form gives up the room they share. This is done
+when the bricks are gathered for drawing, copying and saving
+(`State::painted`),
+and the forms' own fits are left as they are.
+
+Each brick of the joined form is treated one of three ways.
+
+| The brick | What becomes of it |
+|---|---|
+| shares no room with another form | kept whole |
+| a plain block that shares some room | cut down to the cells that share none, as rows of cells |
+| a sloped brick that shares any room | left out |
+
+A sloped brick is left out because a slope cannot be cut down to cells.
+The join therefore has a notch a cell or two deep wherever the joined
+form's sloped surface meets the other form. A joined form gives room up to
+every form on its grid that is not joined, and to the joined forms before
+it in the list, so of any two overlapping forms exactly one is cut.
+
+Fitting the two forms afresh as one solid would leave no notch, and is the
+blending described in [future-work.md](future-work.md). It was not used
+here for two reasons. It is a different build, with different bricks
+everywhere near the join and not only where the forms overlap. It would
+also make every form on a grid one form to edit, where cutting bricks
+leaves each form its own dots and settings.
+
+A joined form is not pushed clear when a form it sits in is reshaped, and
+moving it without Shift sets it clear again. The mark is held by the
+workspace alone. Undo rebuilds the forms from their settings, and a save
+holds only settings, colours and places, so neither brings the mark back.
 
 ## 9. Fit against brick count
 
@@ -1730,6 +2203,11 @@ is nearly all surface, and the disagreement is all at the surface.
 
 Tilted flat curves cannot be filled. Only a curve lying flat across the
 grid has an outline the two-dimensional fitter can fill.
+
+A pattern needs a flat band or a filled outline. Stones fitted together
+with the gap at 0 keep seams between them, because each stone is fitted by
+itself (7.8). A snowflake has eight arms and not six, because a tile is cut
+only at 45 degrees (7.9).
 
 ### Why no machine learning
 

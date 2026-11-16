@@ -111,11 +111,33 @@ Several forms can be worked on together.
 - **Click a form** in the view, or its line in the list, to edit it.
 - **Drag a form by its bricks** to move it. It moves one unit at a time and
   stays the same bricks wherever it stands.
-- Forms on the same grid never share a cell: one dragged into another stops
-  beside it or comes to rest on top of it, and one reshaped until it reaches
-  another pushes that one away.
+- Forms on the same grid are kept clear of each other: one dragged into
+  another stops beside it or comes to rest on top of it, and one reshaped
+  until it reaches another pushes that one away.
+- **Shift + drag a form** to move it into another form on its grid and
+  join the two into one build (see [Joining forms](#joining-forms)).
 - **Delete** removes the form being edited. **Ctrl+Z** and **Ctrl+Y** undo
   and redo.
+
+### Joining forms
+
+A form dragged with **Shift** held goes where it is dragged, into other
+forms if that is where, so a tower can be sunk into a wall or a dome set
+into a roof. The moved form is then joined to the others on its grid. It
+gives up the room it shares with them, so that no two bricks overlap, which
+the game would refuse. The other forms keep all their bricks.
+
+Where the moved form's plain blocks reach into another form they are cut
+back to the cells that are free. A sloped brick that shares any room is
+left out whole, since a slope cannot be cut down to cells, so the join can
+show a notch a cell or two deep where the moved form's sloped surface meets
+the other form.
+
+A joined form stays where it is when a form it sits in is reshaped, where
+an unjoined one would be pushed clear. Dragging it again without Shift
+sets it clear of the others. Being joined is not remembered by undo or by a
+save. After Ctrl+Z, or when a save is opened again, drag the form with
+Shift once more to join it.
 
 ### Grids
 
@@ -185,30 +207,97 @@ manager, where each save is a `.brz` file. **Delete** removes a save from disk a
 confirm (Enter deletes, Escape cancels), since Ctrl+Z cannot bring a deleted file back. Saves made by earlier versions, which were text files of
 one form's settings, are still listed and opened.
 
-## Stepping stones
+## Patterns
 
-**Stepping stones**, on any curve built as a flat band, lays the band as
-separate stones with gaps between them in place of solid brick. The stones
-follow the curve, so a spline drawn across the ground becomes a winding
-stone path as wide as the band's **Thickness**. On a filled outline they
-make a cobbled floor.
+**Pattern**, on any curve built as a flat band, lays the band or the filled
+outline as a pattern in place of solid brick. The list starts at **none**,
+and a form has one pattern at most. A straight spline with a large
+**Thickness** gives a rectangular floor or wall, a filled circle a round
+one, and a curved band a path. How each pattern is made, and why that way,
+is in [algorithm.md](algorithm.md), sections 7.8 and 7.9.
 
-| Setting | What it does |
+| Pattern | What it lays |
 |---|---|
-| **Stone size** | about how far apart the middles of neighbouring stones are |
-| **Gap** | how wide the space between stones is |
-| **Uneven** | 0 for stones as alike as scattered stones can be, 1 for small ones crowded among large |
-| **Seed** | which scattering: each number is a different path, and **Another** moves to the next |
+| **stepping stones** | separate stones of any shape with gaps between them. With **Gap** at 0 the stones are fitted together, as in a stone wall or a paved floor. |
+| **medallions** | a few ringed figures repeated over the whole floor |
+| **rug** | a Persian rug: a medallion of petals, flowers and leaves on stems, corner pieces and a border |
+| **snowflake** | one flake at the middle whose arms branch and branch again. No bricks are laid where there is no flake, so it can stand by itself or lie on another floor. |
+| **planks** | a floor of boards |
+| **bricks** | level courses of bricks with mortar between |
+| **slabs** | squared stones of many sizes with mortar between |
 
-Ticking the box also sets the colouring to **Each piece its own** in four
-stone colours, unless you had already chosen a colouring.
+<img src="images/stepping-stones.png" width="340" alt="A curved path laid as stepping stones"> <img src="images/pattern-stones-fitted.png" width="340" alt="A square floor of stones fitted together with the gap at 0">
+
+<img src="images/pattern-medallions.png" width="225" alt="A floor of medallions: ringed squares, lozenges and octagons repeated in rows"> <img src="images/pattern-rug.png" width="225" alt="A rug with a flower medallion at its middle, corner pieces, small flowers on stems and a border"> <img src="images/pattern-snowflake.png" width="225" alt="An eight-armed snowflake of bricks alone, its arms branching twice">
+
+<img src="images/pattern-planks.png" width="225" alt="A floor of boards of many lengths laid in rows"> <img src="images/pattern-bricks.png" width="225" alt="A wall of bricks in level courses with mortar between"> <img src="images/pattern-slabs.png" width="225" alt="A wall of squared stones of many sizes with bevelled corners and mortar between">
+
+Stepping stones follow the curve, so a spline drawn across the ground
+becomes a winding stone path as wide as the band's **Thickness**. Stones
+fitted together with the gap at 0 still show narrow seams, because each
+stone is fitted with bricks by itself.
+
+The other six patterns are made of tiles one microbrick across. A tile is
+one colour, or it is cut along a diagonal into two triangles of two
+colours. Medallions, the rug and the snowflake are their own mirror images
+and are set out from the middle of the floor. The floor's edge keeps the
+sloped bricks any flat form has, at most five microbricks long, and they
+take the pattern's colours.
+
+Each pattern shows the settings it has a use for.
+
+| Setting | Patterns | What it does |
+|---|---|---|
+| **Stone size** | stepping stones | about how far apart the middles of neighbouring stones are. A stone is a little under this across. |
+| **Gap** | stepping stones | how wide the space between stones is. 0 fits them together. |
+| **Uneven** | stepping stones | 0 for stones as alike as scattered stones can be, 1 for small ones crowded among large |
+| **Size** | planks, bricks, slabs | how large the boards, bricks or slabs are. 2 is the usual size, 1 half of it and 4 twice. |
+| **Bevel** | slabs | how many microbricks are cut off each corner of a slab. 0 leaves the corners square. |
+| **Border** | medallions, rug, snowflake | how many microbricks of plain ground are left round the edge |
+| **Seed** | all | which one of the pattern: each whole number is a different one. **Another** takes the next number and the next of the pattern's sets of colours. |
+
+### The colours of a pattern
+
+Choosing a pattern sets the form's colouring to **As the pattern has it**
+and brings in colours the pattern starts with: a rug's reds and golds, a
+floor of planks' browns. Colours you have set yourself for a pattern are
+kept when you change to another pattern. **Another** always moves to the
+pattern's next set of colours.
+
+A pattern numbers its parts, and the colours are shared among the parts.
+The first colour is the ground, or the mortar of bricks and slabs, and it
+is used for nothing else. The other colours go to the pattern's parts in
+turn: a snowflake's arms, its branches and its tips, a rug's border lines,
+its flowers and its leaves. With two colours the whole pattern is one
+colour on the other. Each colour you add with **+** picks one more part
+out, up to eight colours.
+
+<img src="images/pattern-snowflake-two-colours.png" width="300" alt="A snowflake with two colours chosen, the whole flake in one colour"> <img src="images/pattern-snowflake-eight-colours.png" width="300" alt="The same snowflake with eight colours chosen, its arms, branches, tips, heart and plates each in a colour of their own">
+
+Planks and stepping stones have no ground. Each board or stone takes one of
+the colours, and the sets they start with are shades of one wood or one
+stone.
 
 ## Colour
 
-Each form has its own colouring: one colour, or up to four as a **blend**,
-**stripes** or a **speckle** along a chosen axis, or **each piece its own**,
-which gives every separate stone of a path one of the colours. Each brick
-is one colour.
+Each form has its own colouring.
+
+| Colouring | What it does | Colours |
+|---|---|---|
+| **One colour** | the whole form in one colour | 1 |
+| **Blend** | a gradual change from the first colour to the last along a chosen axis | up to 4 |
+| **Stripes** | bands of each colour in turn along a chosen axis | up to 4 |
+| **As the pattern has it** | each brick the colour its pattern gives it (see [The colours of a pattern](#the-colours-of-a-pattern)) | up to 8 |
+
+Click a colour to change it. **+** adds a colour and **-** takes the last
+one away. Right-click a colour and choose **Copy colour**, then right-click
+another and choose **Paste colour**, to make the two the same. The copied
+colour is kept inside the editor, so a form copied with Ctrl+C stays on the
+clipboard. Each brick is one colour.
+
+Earlier versions had two more colourings, a speckled blend and a colour for
+each separate piece. A save that used them opens as a blend and as the
+pattern's colours.
 
 ## Fit and brick count
 
@@ -265,6 +354,7 @@ before and after a change.
 |---|---|
 | Click a form | edit it |
 | Drag a form by its bricks | move it within its grid |
+| Shift + drag a form | move it into another form and join the two |
 | Drag a dot | reshape the form |
 | Drag an arrow, a ring | move, turn the whole grid |
 | Shift + click a form | add a point to it |

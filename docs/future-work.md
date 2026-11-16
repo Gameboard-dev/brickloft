@@ -1,7 +1,8 @@
 # Future work
 
-Two additions are planned. Neither changes how forms are fitted today (see
-[algorithm.md](algorithm.md)).
+What is planned and not yet built: more for Claude to do, blending forms
+into one, what remains for the patterns, and trees. None of it changes how
+forms are fitted today (see [algorithm.md](algorithm.md)).
 
 ## More for Claude to do through MCP
 
@@ -32,6 +33,13 @@ Each form is fitted with bricks by itself today. Two forms that overlap on
 one grid are two sets of bricks, and the editor keeps forms on a grid clear
 of each other for that reason. Blending would fit several forms as one
 solid.
+
+Forms can already be joined without blending. A form dragged with Shift
+held is moved into another, and its bricks are cut back where the two
+overlap (see [algorithm.md](algorithm.md), "Forms joined on purpose").
+That keeps each form its own bricks and its own settings, at the cost of a
+notch a cell or two deep where a sloped brick had to be left out. Blending
+would remove the notch by refitting the join.
 
 The description of a form already allows it. A form is a distance function
 (see [algorithm.md](algorithm.md)), and two distance functions join into
@@ -65,44 +73,83 @@ What it needs:
 - **A distance function that stays an underestimate,** which the smooth
   union above does, so that skipping empty space stays correct.
 
-## Patterns by wave function collapse
+## Patterns
 
-[Wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse)
-fills a grid with tiles so that every tile agrees with its neighbours. It
-starts with every cell able to hold any tile. It then repeatedly picks the
-cell with the fewest tiles left to choose from, fixes one of them, and
-removes from the neighbouring cells every tile that no longer fits, which
-is the propagation. The editor would use it to complete a pattern from a
-small start, in two dimensions for a floor or a wall and in three for a
-pattern with depth.
+Seven patterns are built: stepping stones, medallions, a rug, a snowflake,
+planks, bricks and slabs. They were first planned as uses of
+[wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse),
+which fills a grid with tiles so that every tile agrees with its
+neighbours. None of them uses it now.
+[algorithm.md](algorithm.md), sections 7.8 and 7.9, describes each method
+and gives the reasons.
 
-The stepping stone path is built (see [algorithm.md](algorithm.md), section
-7.8). It scatters points and divides the ground among them, since wave
-function collapse turned out not to suit stones. The patterns still planned:
-
-| Pattern | What it is | How it starts |
+| Planned as | Built as | How |
 |---|---|---|
-| Mosaic floor | small coloured tiles forming motifs and borders | a random seed and rules for which tiles may meet |
-| Persian rug | a central medallion, a field and nested borders, symmetric in both directions | a random seed and the rug's rules of symmetry |
-| Stone slab wall | slabs of varied size in courses, with joints that do not line up | the wall's size and the range of slab sizes |
+| Stepping stone path | **stepping stones** | points scattered by dart throwing, the ground divided among them as a Voronoi diagram, each stone fitted by itself |
+| Stone slab wall | **slabs**, **bricks**, and stepping stones with the gap at 0 | courses and lengths drawn from the seed; stones of any shape are the stepping stones fitted together |
+| Mosaic floor | **medallions**, **planks** | a few figures repeated, with bands of a distance measure switched on and off; boards of lengths drawn from the seed |
+| Persian rug | **rug** | a border, a layered flower as the medallion, corner pieces and scattered flowers, each flower an outline given by a formula |
+| (not planned) | **snowflake** | arms that branch twice by a fixed rule, drawn as lines along the grid and its diagonals |
 
-For the mosaic floor and the Persian rug, a random seed chooses the first
-few tiles and the rules decide everything else, so the same seed always
-gives the same pattern. A Persian rug's rules resemble a snowflake's. The
-whole is fixed by one part repeated under mirror images, so only a quarter
-(or an eighth) is generated, and the rest is its reflection. The rules for
-the rug would also set where borders may run and which motifs may sit
-inside which.
+Wave function collapse was written and tried, and the solver remains in
+[core/src/wfc.rs](../core/src/wfc.rs) with its tests. Its rules reach a
+few tiles, so it could not give a stone a size, a rug a medallion at its
+middle, or a floor its symmetry, and the floors it made from small samples
+were even and aimless. A pattern made only of small repeated motifs is
+the case it still suits, and no such pattern is planned yet.
 
-Open questions:
+What remains:
 
-- **Tiles as bricks.** A tile here is a small group of bricks with a
-  colour, so the pattern's output is bricks directly, without the fitting
-  step a curved form needs.
-- **Dead ends.** Wave function collapse can reach a cell with no tile left
-  that fits. The usual answers are to step back and try another tile, or
-  to start again with the next seed. Which one keeps the editor responsive
-  on a large floor has to be measured.
+- **Seams between fitted stones.** Stepping stones with the gap at 0 keep
+  seams, most of them hairline and some up to a cell wide. Each stone is
+  fitted by itself, and a stone whose bricks would overlap a neighbour's is
+  drawn in. Closing the seams needs the two stones either side of an edge
+  to be given the same edge, which fitting each stone by itself does not
+  do.
+- **A six-armed snowflake.** The snowflake has eight arms because a tile is
+  cut only at 45 degrees. Six arms need lines at 60 degrees, which tiles of
+  one cell draw as staircases.
+- **The rug.** It is being reworked to carry more ornament.
+- **A pattern with depth.** Every pattern is flat: one layer of tiles
+  pushed through the band's depth. A pattern in three dimensions, such as
+  a wall whose stones stand proud of the mortar, is not started.
 - **Patterns on forms.** A pattern might later be laid over a fitted form
   (a mosaic on a dome) by choosing colours for the form's bricks. That
   needs the pattern mapped onto a curved surface and is a separate step.
+- **Eight colours through MCP.** The panel gives a pattern up to eight
+  colours and the MCP tools accept four (see [mcp.md](mcp.md)).
+
+## Trees and flora
+
+Trees, shrubs and flowers are not started. A survey of existing generators
+found no dependency worth taking, so the generator would be written fresh
+in the core, in Rust, like the rest.
+
+The planned method has three parts.
+
+- **The skeleton.** A tree is a trunk that puts out branches, each of
+  which puts out its own, with every level described by a few numbers: how
+  many branches, at what angle, how long, how much they bend.
+  [ez-tree](https://github.com/dgreenheck/ez-tree) (MIT) is a readable
+  reference for such a recursive, parametric skeleton.
+- **Branch thickness.** Leonardo da Vinci's rule sets the radii: where a
+  branch of radius $`r_0`$ divides into branches of radii $`r_1`$ and
+  $`r_2`$, the cross-sections add up,
+
+  ```math
+  r_0^2 = r_1^2 + r_2^2
+  ```
+
+  so a tree thins towards its twigs without a thickness chosen by hand for
+  each branch.
+- **Foliage and flowers.** A crown is a union of rounded blobs about the
+  ends of the branches, which the fitters already take as one distance
+  function (see [algorithm.md](algorithm.md), section 5). A flower head
+  places its seeds or petals by Vogel's model of phyllotaxis, which puts
+  the $`k`$-th at the angle $`k \cdot 137.5^\circ`$ and the distance
+  $`c\sqrt{k}`$ from the middle and gives the spirals of a sunflower.
+
+Code under a licence the project cannot take is not to be ported. That
+rules out the GPL generators (Veloren's `tree.rs`, friggog/tree-gen,
+Blender's Sapling add-on and Arbaro) and proctree.js, which carries no
+licence.

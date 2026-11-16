@@ -67,11 +67,18 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Sphere | a centre and a radius: solid or a hollow shell, stretched to an ellipsoid, cut to a dome or a segment |
 | Revolve | a profile spun about an upright axis: vases, bells, bowls |
 | Pyramid | a base and a height: solid, or a hollow tent |
-| Stepping stones | any flat curve or filled outline, laid as separate stones with gaps: a winding stone path, a cobbled floor |
 
 Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and
 combined with others in one workspace.
+
+A flat band or a filled outline can be laid as a pattern in place of solid
+brick: stepping stones, stones fitted together, medallions, a rug, a
+snowflake, planks, bricks or slabs. Each pattern is generated from a seed
+and takes up to eight colours (see
+[docs/features.md](docs/features.md#patterns)).
+
+<img src="docs/images/stepping-stones.png" width="230" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-rug.png" width="230" alt="A square floor laid as a rug, with a flower medallion at its middle, corner pieces and a border"> <img src="docs/images/pattern-slabs.png" width="230" alt="A wall laid as squared stones of many sizes with mortar between">
 
 ## How good the result is
 
@@ -114,8 +121,8 @@ by hand.
 3. In Brickadia, paste.
 
 [docs/features.md](docs/features.md) covers everything else: the workspace,
-grids at an angle, added points, mirroring, colours, saved forms, the camera
-and every key.
+grids at an angle, joining forms, added points, mirroring, patterns,
+colours, saved forms, the camera and every key.
 
 ## Documentation
 
@@ -127,7 +134,7 @@ and every key.
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
-| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and generated patterns |
+| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, blending forms, what remains for the patterns, and trees |
 
 ## Layout
 

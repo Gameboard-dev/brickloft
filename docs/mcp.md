@@ -88,7 +88,7 @@ file, the entry is a server of type `http` with the URL above.
 | `get_camera` | Gives the camera's position and the direction it looks in. |
 | `move_camera` | Sends the camera to a place, or along a path of places, looking at a chosen point at each. |
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
-| `set_view` | Switches the rulers, rings, arrows and dots on and off, lowers the floor, and sizes the rings and arrows. |
+| `set_view` | Switches the rulers, rings, arrows and dots on and off, and lowers the floor. |
 | `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
 | `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Shift + click and a drag do. |
 | `move_pull_point` | Changes how far an added point pulls the form. |
@@ -126,13 +126,45 @@ The settings Claude can give:
 | `stretch`, `cut`, `plane`, `weights` | Stretch per axis, the part of a sphere to keep, the axis a circle faces, a Bézier curve's pulls |
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
-| `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; `none` for solid brick |
+| `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
+| `mosaic` | `[style, size, bevel, border, seed]` lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
-A colour has a `mode` (`one`, `blend`, `stripes`, `speckle`, or `patches` for each stone its own colour), one to four
+A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to four
 `colours` written `#rrggbb`, the axis it `runs_along`, and a
-`stripe_width`.
+`stripe_width`. The mode `pattern` gives each brick the colour its pattern
+gives it: the first colour is the ground or the mortar, and the others are
+shared among the pattern's parts.
+
+The five values of `mosaic` are these. A form has `mosaic` or `stones`,
+and if both are given the stones are laid.
+
+| Value | Meaning |
+|---|---|
+| `style` | `medallions`, `rug`, `snowflake`, `planks`, `bricks` or `slabs` (see [features.md](features.md#patterns)) |
+| `size` | how large the boards, bricks or slabs are: 2 is usual, and 1 to 16 is accepted |
+| `bevel` | how many microbricks are cut off each corner of a slab, 0 to 8 |
+| `border` | how many microbricks of plain ground are left round the edge, 0 to 8 |
+| `seed` | any whole number, each a different pattern |
+
+For example, this call lays a rug 80 microbricks square. A straight spline
+lying flat is a rectangle as wide as its `thick`.
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "spline", "points": [[-40.5, 0.5, 0.5], [39.5, 0.5, 0.5]], "thick": 80, "depth": 1, "mosaic": ["rug", 2, 1, 0, 3] },
+    "colour": { "mode": "pattern", "colours": ["#70161e", "#d4a546", "#18325c", "#ecdcb4"] }
+  }
+}
+```
+
+A pattern shows its colours only in the mode `pattern`, and a form added
+with no `colour` is in one colour. The panel lets a player give a pattern
+up to eight colours. The tools accept four at most, although the
+description of `mosaic` that the editor sends to Claude says eight.
 
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to
