@@ -498,7 +498,9 @@ more settings mean something different for each kind.
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
 A pine is dressed as a Christmas tree with **Star**, **Baubles** (how
-many, 0 for none), **Tinsel** (a garland wound round it) and **Lights**
+many, 0 for none), **Tinsel** (a garland wound round it, as tight to
+the stem or as far out among the boughs as **How far out the tinsel
+hangs** says) and **Lights**
 (none, a string of lights, or candles on the ends of its boughs; 40 at
 most). In the game the star, baubles and tinsel are the metallic
 material and each light is a glowing brick with a small warm point light

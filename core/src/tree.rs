@@ -125,6 +125,10 @@ pub struct Tree {
     pub baubles: i32,
     /// A pine: whether a garland of tinsel is wound round it.
     pub tinsel: bool,
+    /// A pine: how far out its tinsel hangs, as a percentage of the way
+    /// from the stem to the ends of the boughs at each height:
+    /// [`HANG`]'s least to its most.
+    pub hang: i32,
     /// A pine: 0 for no lights, 1 for a string of them, 2 for candles on its boughs.
     pub lights: u8,
     /// A pine: whether its lights are written with a light on each in the game, or as glowing bricks alone.
@@ -168,7 +172,7 @@ impl Tree {
             Kind::Bed => (50, 14, 40),
             Kind::Cherry => (60, 7, 40),
         };
-        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, lights: 0, shine: true }
+        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, hang: HANG.2, lights: 0, shine: true }
     }
 
     /// The fewest and most of whatever `count` counts, for a kind.
@@ -200,7 +204,7 @@ impl Tree {
     /// file or sent by another program may say anything.
     pub fn clamped(self) -> Tree {
         let (least, most) = Tree::count_range(self.kind);
-        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), lights: self.lights.min(2), ..self }
+        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), hang: self.hang.clamp(HANG.0, HANG.1), lights: self.lights.min(2), ..self }
     }
 
     /// Whether a kind has a trunk whose thickness [`Tree::girth`] sets: the
@@ -316,6 +320,12 @@ pub const BAUBLE_GOLD: u8 = 14;
 pub const BAUBLE_PALE: u8 = 12;
 /// a pine's tinsel
 pub const TINSEL: u8 = 21;
+
+/// How far out a pine's tinsel may hang, as a percentage of the way from
+/// its stem to its outline: the least, the most, and where it starts. At
+/// the least it is wound close round the stem inside the boughs, and at
+/// the most a little beyond their ends, hanging free between the tiers.
+pub const HANG: (i32, i32, i32) = (40, 110, 80);
 /// a pine's lights and its candles' flames
 pub const FLAME: u8 = 28;
 /// a pine's candles
@@ -1170,7 +1180,13 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             let t = n as f64 / steps as f64;
             let (angle, z) = (lean_way + t * turns * TAU, high + 2.0 - (high + 2.0 - low) * t);
             let sag = 2.5 * (angle * 3.0).sin().powi(2);
-            stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * 0.94 + 1.0) - DVec3::Z * sag
+            // (As far out as `Tree::hang` says, which starts at four fifths
+            // of the way to the tree's outline, among the ends of the
+            // boughs. Hung always at the outline itself and a cell beyond,
+            // it stood off the tree like a hoop wherever it crossed the gap
+            // between two tiers, the outline being the reach of the longest
+            // bough at each height and most boughs shorter.)
+            stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * tree.hang as f64 / 100.0) - DVec3::Z * sag
         };
         for n in 0..steps {
             let (a, b) = (at(n), at(n + 1));
@@ -4864,6 +4880,15 @@ mod tests {
         assert!(bulbs.len() <= grown_bulbs + 4 && bulbs.len() * 10 >= grown_bulbs * 8 && bulbs.iter().filter(|b| b.ext == [2, 2, 2]).count() * 10 >= bulbs.len() * 8, "{} bricks for {grown_bulbs} bulbs: {:?}", bulbs.len(), bulbs.iter().map(|b| b.ext).collect::<Vec<_>>());
         // a pine with nothing on it has none of any of it
         assert!(grown(Tree::of(Kind::Pine)).parts.iter().all(|p| !matches!(p.shade, STAR | EXTRA | BAUBLE_GOLD | BAUBLE_PALE | TINSEL | FLAME | WAX)));
+
+        // the garland hangs as far out as it is told to: close round the stem, or out at the ends of the boughs
+        let reach = |hang: i32| {
+            let tree = grown(Tree { hang, ..dressed(0, true, 0) });
+            let out: Vec<f64> = tree.parts.iter().filter(|p| p.shade == TINSEL).filter_map(|p| match p.shape { Shape::Cone { a, .. } => Some(a.truncate().length()), _ => None }).collect();
+            out.iter().sum::<f64>() / out.len() as f64
+        };
+        let (tight, usual, loose) = (reach(HANG.0), reach(HANG.2), reach(HANG.1));
+        assert!(tight < usual * 0.6 && usual < loose * 0.8, "{tight}, {usual}, {loose}");
     }
 
     /// Going up a stem from the ground to past where its limbs leave, the

@@ -1109,6 +1109,9 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
             helped(ui, help("pine_star"), |ui| ui.checkbox(&mut s.tree.extras, "Star"));
             helped(ui, help("pine_baubles"), |ui| ui.add(Slider::new(&mut s.tree.baubles, 0..=100).suffix("%").text("Baubles")));
             helped(ui, help("pine_tinsel"), |ui| ui.checkbox(&mut s.tree.tinsel, "Tinsel"));
+            if s.tree.tinsel {
+                helped(ui, help("pine_hang"), |ui| ui.add(Slider::new(&mut s.tree.hang, brickloft_core::tree::HANG.0..=brickloft_core::tree::HANG.1).suffix("%").text("How far out the tinsel hangs")));
+            }
             ui.horizontal(|ui| {
                 ui.label("Lights").on_hover_text(help("pine_lights"));
                 for (n, name) in ["None", "Lights", "Candles"].into_iter().enumerate() {

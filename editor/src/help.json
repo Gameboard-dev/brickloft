@@ -83,6 +83,7 @@
   "pattern_uneven_along": "How unlike one another the pieces are along the courses. For bricks it moves the joints, so that the bricks differ in length and stay rectangles. For cobbles it moves each stone's point from side to side.",
   "pattern_upright": "Runs the courses up the floor instead of across it, so that the bricks stand on end and the stagger is from side to side.",
   "pine_baubles": "How many baubles hang on the tree, from none to one under the end and the middle of nearly every bough. They are of three sizes and three of the tree's colours, none touching another, and metal in the game.",
+  "pine_hang": "How far from the stem the tinsel is wound, as a share of the way out to the ends of the boughs. Low, it is tight round the tree among the boughs; at 100% it lies on their ends; above that it hangs clear of them.",
   "pine_lights": "None; a string of lights wound round the tree; or candles standing on the ends of its boughs. A tree has 40 at most. Each is a glowing brick.",
   "pine_shine": "Ticked, every light or candle flame is written with a small warm light on it, so the tree lights what is round it in the game. Each light costs the game a little to draw: untick this to keep the glowing bricks without the lights.",
   "pine_star": "A five-pointed star on the top of the tree. In the game it is metal.",

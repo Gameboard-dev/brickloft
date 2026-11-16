@@ -1228,7 +1228,7 @@ mod tests {
         // in the palm's colours, as the pattern has them, and told so
         assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("palm")));
         assert_eq!(added["forms"][0]["colour"]["mode"], "pattern");
-        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0,100,0,0,0,1");
+        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0,100,0,0,0,1,80");
         // every brick is painted the colour of its part: trunk and leaves both
         let painted = state.painted();
         let of = |n: usize| painted.iter().filter(|b| b.2 == 0 && b.1 == Some(crate::paint::palette("palm")[n])).count();
