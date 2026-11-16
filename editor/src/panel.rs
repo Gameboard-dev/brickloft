@@ -1107,10 +1107,12 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         if helped(ui, help("grass_reeds"), |ui| ui.add(Slider::new(&mut reeds, 0..=10).text("Reeds round the water"))).changed() {
             s.depth = reeds + 1;
         }
-        // (two levels are kept in `tube`, which grass has no other use for: see `brickloft_core::tree::Waters`)
-        let mut levels = if s.tube { 2 } else { 1 };
-        if helped(ui, help("grass_levels"), |ui| ui.add(Slider::new(&mut levels, 1..=2).text("Pond levels"))).changed() {
-            s.tube = levels == 2;
+        // (kept in `tube`, which grass has no other use for: see `brickloft_core::grass`, `Waters`)
+        helped(ui, help("grass_levels"), |ui| ui.checkbox(&mut s.tube, "Raised ponds, with streams and waterfalls"));
+        // (and how readily steep ground is a cliff, in the number a pine keeps its baubles in)
+        let mut cliffs = s.tree.baubles.clamp(0, brickloft_core::grass::MOST_CLIFFS);
+        if helped(ui, help("grass_cliffs"), |ui| ui.add(Slider::new(&mut cliffs, 0..=brickloft_core::grass::MOST_CLIFFS).text("Cliffs"))).changed() {
+            s.tree.baubles = cliffs;
         }
         brush(ui, &mut state.brush, &mut state.touched, s, largest);
         // (see `brz::walked_through`)
@@ -1402,8 +1404,7 @@ fn furniture(ui: &mut Ui, state: &mut State, largest: f64) {
 /// can read and change, and a stroke would be hundreds of them. Touches
 /// with a wide range do what strokes do, one at a time.
 fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
-    use crate::state::{Action, FLATTENS};
-    use brickloft_core::DVec3;
+    use crate::state::{Action, Brush, SHARP};
     ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. The settings here are for touches still to be made. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
     let named = |action: Action| match action {
         Action::Up => "Push up",
@@ -1414,8 +1415,8 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     let touch = touched.filter(|i| *i < s.pulls.len());
     if let Some(i) = touch {
         let by = s.pulls[i].1;
-        (brush.range, brush.action) = (if by.x > 0.0 { by.x } else { brush.range }, if by.y != 0.0 { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up });
-        if by.y == 0.0 {
+        (brush.range, brush.action, brush.sharp) = (if by.x > 0.0 { by.x } else { brush.range }, if Brush::flattens(by) { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up }, by.y >= SHARP);
+        if !Brush::flattens(by) {
             brush.amount = by.z.abs();
         }
     }
@@ -1435,15 +1436,15 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     } else if brush.action != Action::Flatten {
         helped(ui, help("grass_intensity"), |ui| ui.add(Slider::new(&mut brush.amount, 0.5..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Intensity")));
     }
+    // (A sharp edge is what makes a cliff under a level top: the easing
+    // brush is steepest half way out, `pi * intensity / (2 * range)`, which
+    // passes 45 degrees only where the intensity is two thirds of the range.)
+    helped(ui, help("grass_sharp"), |ui| ui.checkbox(&mut brush.sharp, "Sharp edge (a table or a pit with steep sides)"));
     if let Some(i) = touch {
         let was_level = s.pulls[i].1.z;
         if *brush != was || level != was_level {
             // (made a flattening touch, it flattens to the height it had pushed to)
-            s.pulls[i].1 = match brush.action {
-                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
-                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
-                Action::Flatten => DVec3::new(brush.range, FLATTENS, level.max(0.0)),
-            };
+            s.pulls[i].1 = brush.touch(level.max(0.0));
         }
         ui.horizontal(|ui| {
             ui.label(format!("Changing touch {} of {}.", i + 1, s.pulls.len()));

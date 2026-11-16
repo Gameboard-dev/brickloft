@@ -581,6 +581,9 @@ with a brush:
 
 - Choose **Push up**, **Push down** or **Flatten**, a **Range** and an
   **Intensity**, then Alt + click on the grass. Each click is one touch.
+- **Sharp edge** makes the touch a table, a pit or a terrace with steep
+  sides: it does all it does out to a narrow band at the edge of its
+  range. It is a setting of the brush, for touches still to be made.
 - A touch leaves an orange dot. Drag it up or down to change how far it
   pushes, or the level it flattens to. Alt + right-click takes it off.
 - The panel's sliders change the touch made or dragged last. **Next**
@@ -596,23 +599,41 @@ with a brush:
   its margin. Set the water to 0 for a dry hollow. A patch with a pond
   reaches below the floor it was laid on by the pond's depth, so raise it
   or set it on ground that deep.
-- **Pond levels** at 2 lets water stand at two heights. Push up a hill,
-  push a hollow down into its top, and dig another hollow beside the
-  hill: the hollow on the hill holds a pond of its own, as far below its
-  rim as the lower pond is below the lawn, and a stream steps down from
-  it to the lower pond in flat reaches. Which pond is the high one
-  follows the ground, and no height is typed. All high ponds share the
-  height of the lowest of them. A high pond with no lower water it can
-  run down to has no stream. A stream is frozen with the ponds.
+- **Raised ponds, with streams and waterfalls** lets a hollow on raised
+  ground hold water of its own. Push up a hill, push a hollow down into
+  its top, and dig another hollow beside the hill: the hollow on the
+  hill holds a pond as far below its rim as the lower pond is below the
+  lawn, and a stream three cells wide steps down from it to the nearest
+  water that stands lower. Each raised pond stands at its own height,
+  which follows the ground, and no height is typed. A raised pond with
+  no lower water it can run down to has no stream.
+- Where the stream's way is a cliff it goes over as a waterfall: a notch
+  in the lip, a sheet of water down the rock, and white water where it
+  lands. A table made with **Sharp edge**, a hollow near its rim and a
+  hollow in the low ground beside it make one. Streams and falls are
+  frozen with the ponds.
+- **Cliffs**, 0 to 3, sets how readily steep ground is a cliff. Past a
+  first steepness the ground is bare soil in two browns, and past a
+  second it is grey rock in level beds with ledges: 52 and 68 degrees at
+  1, 45 and 61 at 2, 36 and 53 at 3. The grass thins as the ground
+  steepens. A new lawn starts at 2, a lawn saved before there were
+  cliffs has 0, and at 0 grass grows on any slope.
 - The view draws water see-through, so the basin shows under it.
 
 <img src="images/plant-stream.png" width="420" alt="A lawn with a small pond in a hollow on a hill and a larger pond below it, joined by a narrow stream of water that steps down the slope in a sandy channel">
+
+<img src="images/plant-waterfall.png" width="420" alt="A pond on a table of raised ground and a waterfall from a notch in its edge down a rock face to a pond below"> <img src="images/plant-cliffs.png" width="420" alt="Three hills of three heights: grass, bare soil, and rock in ledges">
+
+<img src="images/plant-waterfall-frozen.png" width="420" alt="The same waterfall in the Winter colours: frosted grass, snow on the ledges of the rock, and the fall and both ponds ice">
 
 <img src="images/plant-pond.png" width="420" alt="A lawn with a pond dug in it: blue water with a flat top, a rim of sand, and bulrushes standing round the margin">
 
 **Frozen pond** writes the water as ice: collision on, and less
 see-through. Choosing the **Winter** colours ticks it and any other set
-unticks it; grass also has an **Autumn** set. On every other plant,
+unticks it; grass also has an **Autumn** set. Each of grass's sets has
+fourteen colours: the soil, three greens, the bed of a pond, water, sand
+and stones, then the darker soil of a cliff, three greys of rock, the
+ledges on the rock (snow in Winter) and the white water under a fall. On every other plant,
 **Leaves can be walked through in the game** writes its greenery (leaves,
 needles, fronds, petals, berries, baubles) with collision off and leaves
 its wood solid; it is unticked to begin with.
