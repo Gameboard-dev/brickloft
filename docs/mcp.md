@@ -298,7 +298,7 @@ A rug wants a rectangle 100 microbricks or more across to show its detail.
 
 A pattern shows its colours only in the mode `pattern`. A form added with
 a pattern and no `colour` comes in that pattern's own colours, as it does
-from the panel. A pattern takes up to eight colours.
+from the panel. A paint takes up to 32 colours; a pattern has eight numbered parts at most and shares them among the colours given.
 
 A maze is the form `maze`, and its own settings are one line of text,
 `maze`, as a plant's are `tree`: `kind,rings,divisions,grow,seed,entrance,floor,solution,hedge`,

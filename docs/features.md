@@ -276,7 +276,7 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 ### Saved forms
 
 **Save** under **Saved forms** keeps the whole workspace: every form, with
-its colours (up to eight), where it stands and the grid it is on. Saves are kept in
+its colours (up to 32), where it stands and the grid it is on. Saves are kept in
 folders (`arches`, `domes`, or your own) under `Documents/brickloft/forms`
 in your home folder, the same on Windows, macOS and Linux.
 

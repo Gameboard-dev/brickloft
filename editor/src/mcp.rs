@@ -547,7 +547,7 @@ fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
         match key.as_str() {
             "mode" => paint.mode = MODES.iter().find(|m| Some(m.1) == value.as_str()).ok_or("mode is one, blend, stripes or pattern")?.0,
             "colours" => {
-                let colours = value.as_array().filter(|c| (1..=crate::paint::MOST_COLOURS).contains(&c.len())).ok_or("colours is a list of one to eight colours")?;
+                let colours = value.as_array().filter(|c| (1..=crate::paint::MOST_COLOURS).contains(&c.len())).ok_or("colours is a list of one to 32 colours")?;
                 paint.colours = colours
                     .iter()
                     .map(|c| {

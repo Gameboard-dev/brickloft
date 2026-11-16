@@ -350,8 +350,8 @@ pub fn maze_palettes(texture: &str) -> Vec<Vec<[u8; 3]>> {
     palettes(texture)
         .iter()
         .map(|set| {
-            let mut colours: Vec<[u8; 3]> = (0..MOST_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
-            colours[MOST_COLOURS - 1] = WAY;
+            let mut colours: Vec<[u8; 3]> = (0..USUAL_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
+            colours[USUAL_COLOURS - 1] = WAY;
             colours
         })
         .collect()
@@ -423,9 +423,22 @@ pub fn palette(style: &str) -> &'static [[u8; 3]] {
     palettes(style)[0]
 }
 
-/// The most colours a paint may have: one for each number a pattern may
-/// give a brick.
-pub const MOST_COLOURS: usize = 8;
+/// The most colours a paint may have: one for each number a form may
+/// give a brick (`brickloft_core::spec::Built::shades`).
+///
+/// It was eight, which is as many as a rug has features, and every form
+/// since was made to fit: a dressed pine's tinsel, star and flames share
+/// one gold, and a model with a palette of its own (a mesh, a program of
+/// rules) had its colours merged down to eight. Nothing but this number
+/// held it there: a brick's colour number is a byte, and a paint with
+/// more colours than a form has numbers leaves the rest unused (see
+/// `brickloft_core::pattern::colour_of`). Thirty-two is as many as fit in
+/// the panel in a few rows and are still told apart by eye.
+pub const MOST_COLOURS: usize = 32;
+
+/// How many colour numbers the forms made before that limit was raised
+/// use: the sets of colours written for them have one colour for each.
+pub const USUAL_COLOURS: usize = 8;
 
 impl Paint {
     /// The colour of a brick whose pattern gives it colour number `shade`

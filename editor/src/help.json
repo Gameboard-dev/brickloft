@@ -21,7 +21,7 @@
   "colour_mode": "How the form is coloured: one colour, a blend from one colour to another, stripes, or as its pattern has it. Each brick is one colour.",
   "colour_more": "Another colour",
   "colour_runs_along": "The direction a blend or stripes run in across the form.",
-  "colours": "The colours used. Click one to change it. A blend or stripes take up to four and a pattern up to eight, added with + and taken away with -. Right-click a colour to copy it, and right-click another to paste it there.",
+  "colours": "The colours used. Click one to change it. A blend or stripes take up to four and a pattern or a form with parts of its own up to 32, added with + and taken away with -. Right-click a colour to copy it, and right-click another to paste it there.",
   "copy_to_clipboard": "Writes the form being edited, and any others marked +, to brickloft-build.brz, a Brickadia prefab file, and puts that file on the clipboard. Ctrl+C does the same, and Ctrl+V adds the forms of a copied file back to the workspace.",
   "cube_size": "How long the cube is along this axis, in whole microbricks. Its middle stays where it is. To move one side alone, drag the dot on it. A pattern is laid through the shortest of the three lengths, so it shows on the largest face.",
   "depth": "How deep a flat band is, measured across the plane its curve lies in.",
