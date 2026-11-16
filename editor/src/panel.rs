@@ -411,7 +411,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if !(state.form == PYRAMID && s.fill) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
-        if is_curve && !s.tube {
+        // (a round tube too: a pattern is laid on whatever of a form is flat, see `brickloft_core::spec::pattern_flat_faces`)
+        if is_curve {
             // One pattern in place of solid brick, or none: see
             // `brickloft_core::pattern`. One list and not a tickbox for
             // each, since a form has one pattern at most. 0 is none, 1

@@ -1386,7 +1386,7 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
 /// `border` of the edge. A floor mosaic has a border, and it keeps the
 /// pattern clear of the part of the floor the edge has cut up.
 #[allow(clippy::too_many_arguments)]
-pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
+fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
     let (ua, va) = match axis {
         0 => (1, 2),
         1 => (0, 2),
@@ -1399,18 +1399,6 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
     // changing this one line.)
     let (wide, tall): (i32, i32) = (1, 1);
     let style = &STYLES[settings.style.min(STYLES.len() - 1)];
-    // The floor is fitted with no brick longer than a few cells. A sloped
-    // brick is one colour, and along a slanting edge the fit otherwise
-    // lays sloped bricks twenty cells long, which stood in the pattern as
-    // bare triangles the size of a medallion. The whole cells are joined
-    // again into long bricks below, by colour, so only the sloped bricks
-    // of the edge are the more for it. The price is the edge: a slant
-    // drawn in bricks of five cells follows the form a little less
-    // closely than one drawn in bricks of twenty (on a band 20 wide
-    // curving through a third of a turn, 1.5% of its area amiss against
-    // 0.6%). At three cells the edge was plainly ragged, and at eight
-    // the triangles were still plain to see.
-    let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, &Opts { max_ext: opts.max_ext.min(EDGE_BRICK), ..*opts });
     // the tiles that cover the box, set on multiples of a tile's size so
     // that moving the form does not slide the pattern under it
     // A style that is its own mirror image has its tiles set out from the
@@ -1655,6 +1643,41 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
         shades.push(colour);
     }
     fit
+}
+
+/// Fit a mosaic over a region (a flat band, a filled outline) and push it
+/// through cells `w0..w0 + depth` across `axis`: see [`lay_tiles`], which
+/// colours the fit this makes.
+#[allow(clippy::too_many_arguments)]
+pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
+    // The floor is fitted with no brick longer than a few cells. A sloped
+    // brick is one colour, and along a slanting edge the fit otherwise
+    // lays sloped bricks twenty cells long, which stood in the pattern as
+    // bare triangles the size of a medallion. The whole cells are joined
+    // again into long bricks below, by colour, so only the sloped bricks
+    // of the edge are the more for it. The price is the edge: a slant
+    // drawn in bricks of five cells follows the form a little less
+    // closely than one drawn in bricks of twenty (on a band 20 wide
+    // curving through a third of a turn, 1.5% of its area amiss against
+    // 0.6%). At three cells the edge was plainly ragged, and at eight
+    // the triangles were still plain to see.
+    let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, &Opts { max_ext: opts.max_ext.min(EDGE_BRICK), ..*opts });
+    lay_tiles(fit, region, settings, axis, min, max, w0, depth, opts, bricks, shades)
+}
+
+/// Lay a mosaic on a given set of whole cells and push it through cells
+/// `w0..w0 + depth` across `axis`: the flat part of a form that is not
+/// flat all over (see `spec::pattern_flat_faces`). Nothing is fitted: the
+/// cells are the floor as they stand, with no sloped edge of their own,
+/// since what lies round them is the rest of the form's bricks.
+pub fn lay_mosaic_on(cells: &[(i32, i32)], settings: &Mosaic, axis: usize, w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) {
+    let Some(first) = cells.first() else { return };
+    let (min, max) = cells.iter().fold(([first.0, first.1], [first.0 + 1, first.1 + 1]), |(min, max), (x, y)| ([min[0].min(*x), min[1].min(*y)], [max[0].max(x + 1), max[1].max(y + 1)]));
+    let within: std::collections::HashSet<(i32, i32)> = cells.iter().copied().collect();
+    let fit = Fit { pieces: cells.iter().map(|(x, y)| crate::fit_planar::Piece { mask: 15, x: *x, y: *y, w: 1, h: 1 }).collect(), solid: cells.len() as f64, error: 0.0 };
+    // (how deep inside the floor a place is, for the plain border: a cell of the set is taken as far inside, there being no outline to measure from)
+    let region = |p: DVec2| if within.contains(&(p.x.floor() as i32, p.y.floor() as i32)) { -1.0e6 } else { 1.0 };
+    lay_tiles(fit, &region, settings, axis, min, max, w0, depth, opts, bricks, shades);
 }
 
 /// Which separate piece of a flat build each brick belongs to: bricks that
