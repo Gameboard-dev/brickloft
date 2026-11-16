@@ -2861,6 +2861,332 @@ instead, the plant stopped growing: past some height the slider moved
 and the last plant that could be built stood there unchanged. A plant
 that large has parts thick enough to come through at the coarser size.
 
+### 7.11 Mazes
+
+<img src="images/maze-theta.png" width="340" alt="A theta maze of six rings seen from above: ring walls and spokes round a middle room, a gap in the rim, and a yellow strip from the gap along the corridors to the room"> <img src="images/maze-grid.png" width="340" alt="A grid maze seen from above: square cells about a middle room, with a yellow strip from a gap in its edge to the room">
+
+**Maze** builds a maze to be walked through: one way in on the rim, a
+room in the middle, and one way between them
+([core/src/maze.rs](../core/src/maze.rs) lays it out and
+[core/src/maze/walls.rs](../core/src/maze/walls.rs) builds it). There are
+two kinds. A theta maze is rings of corridors about a round room, and its
+walls are arcs of circles and straight spokes. A grid maze is square
+cells about a square room. Both are cells with wall slots between them,
+so one routine takes the walls out of both, and the two kinds differ
+only in where a wall stands.
+
+The form replaces an earlier maze generator of the author's, brickmaze.
+That tool drew the walls into a picture, one pixel to a stud, walked the
+picture's black pixels, and cut what it found into rectangles and
+triangles. Here the walls are never a picture. A ring wall is the band
+between two circles and a spoke is a rectangle, each as a formula, and
+the outline fitter of 7.2 lays them, so a ring wall is long sloped bricks
+all the way round with an exact outline.
+
+#### Rings and cells
+
+Write $`R`$ for the form's radius, to the middle of the outside wall,
+$`N`$ for the number of rings and $`t`$ for the walls' thickness. The
+gap from one ring wall to the next, corridor and wall together, is
+
+```math
+g = \frac{R}{N}
+```
+
+Ring wall $`j`$ is the circle of radius $`j\,g`$, for $`j`$ from 1 to
+$`N`$, and the last of them is the rim. Ring 0 is the room inside the
+first wall. Ring $`k`$ lies between walls $`k`$ and $`k + 1`$ and is cut
+by spokes into $`n_k`$ cells of equal angle. A corridor is $`g - t`$ wide
+between its walls, and the maze is refused if that is under 3 cells.
+
+One number of cells for every ring would give slivers by the room and
+halls at the rim, because a cell of ring $`k`$ is $`2\pi k g / n_k`$ long
+at its inner wall. So the number grows outwards, and it grows only by
+doubling. Every spoke of a ring then lines up with a spoke of the ring
+outside it, and a cell has one cell inside it and one or two outside.
+The first ring has the number asked for, **Cells in the first ring**, or
+as many as leave 3 cells between spokes if that is fewer. From there
+**Cells double** sets the rule:
+
+```math
+n_k = \begin{cases} 2\,n_{k-1} & \text{if the rule asks for it and } \dfrac{2\pi k g}{2\,n_{k-1}} - t \ge 3 \\ n_{k-1} & \text{otherwise} \end{cases}
+```
+
+Left **to keep cells square**, the rule asks for a doubling wherever
+the doubled cells are still at least as long as the corridor is wide:
+
+```math
+\frac{2\pi k g}{2\,n_{k-1}} \ge g
+```
+
+Every cell from the second ring out is then between one and two
+corridor widths long at its inner wall. For example, with 6 cells in the
+first ring, twelve rings have 1, 6, 12, 12, 24, 24, 24, 24, 48, 48, 48
+and 48 cells. This is the adaptive rule for a polar grid in Buck,
+*Mazes for Programmers* (2015), chapter 7, kept to doublings. The other
+setting doubles **every so many rings**, at each ring whose number is a
+multiple of the setting. At 2 it is brickmaze's own rule: 4, 4, 8, 8, 16,
+16. The second condition of the first formula applies to either setting,
+so a ring is never divided so finely that a player could not pass
+between its spokes.
+
+A grid maze of $`N`$ rings is $`2N - 1`$ cells each way, the room being
+the cell in the middle. Its cells are $`\text{round}(R / (N - \tfrac{1}{2}))`$
+apart, a whole number, so that every wall lies on the lattice.
+
+#### Taking the walls out
+
+Every wall starts standing. A walk begins in the cell inside the way in.
+At each step it moves into a cell it has not visited, chosen at random
+among those beside it, and takes out the wall it passes through. When no
+such cell is beside it, it goes back one step along the way it came. It
+ends when it is back at the start with nothing left to visit
+(`carve` in `maze.rs`). This is the randomised depth-first search, often
+called the recursive backtracker, kept on a list and not on the call
+stack so that a large maze cannot overrun the stack.
+
+Every cell is entered once, through one wall, so the gaps are a spanning
+tree of the cells. A tree gives the two properties a maze needs: every
+cell can be reached, and between any two cells there is exactly one way,
+so the maze has one solution and no loops. Any spanning tree gives those.
+The walk was chosen for the shape of its tree. It goes on as far as it
+can before it turns back, so corridors are long and winding and few
+branches leave them.
+
+The alternative weighed was a tree grown from anywhere on its edge, which
+is Prim's method with random weights, and is close to what Kruskal's
+method and Wilson's uniform tree give. Those have many short dead ends
+(Buck, "Maze Generation: Algorithm Recap", 2011). The test
+`corridors_are_long_and_dead_ends_few` measures both on the same cells,
+over twelve mazes of nine rings of each kind:
+
+| | Dead ends, the walk | Dead ends, grown from anywhere | Way through, the walk | Way through, grown from anywhere |
+|---|---|---|---|---|
+| Theta, 157 cells | 11.4% of cells | 33.2% | 84 cells | 12 |
+| Grid, 289 cells | 11.0% | 32.1% | 120 cells | 13 |
+
+The way through the walk's maze visits about half its cells, so it
+cannot be found by heading for the middle.
+
+The room is left out of the walk and given one door afterwards. Walked
+into like any other cell, the room of a theta maze has every cell of the
+first ring beside it, and the walk would leave it by several of them, so
+corridors would run through the goal. Its door is put in the cell beside
+it that is furthest from the way in along the corridors, which makes the
+way through as long as that maze allows.
+
+The numbers come from the seed by the generator the patterns use
+(SplitMix64), so one seed and one set of settings is always one maze.
+
+#### The walls as one outline
+
+The outline fitter asks one thing of a form: how far a place is from its
+surface, negative inside. For a maze that is the distance to the nearest
+wall (`Layout::wall`), and each wall near a place is found by
+arithmetic. With $`r`$ the place's distance from the middle and
+$`\theta`$ its angle, the nearest ring wall is wall
+$`j = \text{round}(r / g)`$, and its arc there is the one numbered
+$`\lfloor \theta\, n / 2\pi \rfloor`$ of that wall's $`n`$. Inside a
+standing arc the distance is
+
+```math
+d = \left| r - j g \right| - \tfrac{t}{2}
+```
+
+and an arc whose neighbour has been taken out also ends there, on the
+line from the middle through the spoke's place. The nearest spoke is at
+the angle $`\text{round}(\theta\, n_k / 2\pi) \cdot 2\pi / n_k`$, and is a
+rectangle $`t`$ wide from $`k g - t/2`$ to $`(k + 1) g + t/2`$ out from
+the middle. It runs half a thickness past each ring wall so that it
+closes against the wall's far face. The distance to the maze is the least
+of these, so a spoke and the ring wall it meets are one solid and are
+fitted with no seam.
+
+The alternative was each wall as a polyline in a search grid, as a
+spline's band is. That would have made every circle a chain of chords
+and every wall a solid of its own, rounded where it met the next.
+
+The middle of a wall is put on a lattice line if the wall is an even
+number of cells thick and down the middle of a row of cells if it is
+odd, as a band's is (7.2). The spokes that lie along the axes, and every
+wall of a grid maze, are then whole cells. A grid maze has no
+discrepancy at all.
+
+#### Fitting a square at a time
+
+The walls are fitted in squares of ground 96 cells each way, every square
+as an outline of its own, and the pieces are put together in the squares'
+order (`Walls::fitted`).
+
+Fitted as one outline they took too long. The fitter searches each
+stretch of an outline for its corners, and a maze's walls are one outline
+or a few, a hundred times as long as a ring's and joined at every spoke.
+Its time rose faster than the length: a maze of 12 rings took 1.3
+seconds and one of 13 took 10.8. In squares no outline is longer than a
+square holds, so the time goes by the area. A maze of 16 rings took 17.7
+seconds as one outline and takes 1.4 in squares, on one thread.
+
+The squares are also the work shared out over threads (see
+[Threads](performance.md#threads) in performance.md). A square does not depend on
+any other, each is given to whichever thread is free, and the results are
+taken in the squares' order, so a maze is the same bricks in the same
+order on one thread or sixteen. The test
+`a_maze_is_the_same_bricks_on_any_number_of_threads` holds it to that.
+
+A cut between two squares is along lattice lines, so it is exact: the
+pieces either side are whole cells there, with no gap and no overlap. It
+costs bricks, because a sloped brick cannot cross a cut. Measured on the
+maze of 16 rings, the squares lay 4% more pieces than one outline and
+leave 3.5% of the walls' area amiss against 3.4%. Squares of 64 and 192
+cells were slower (2.1 and 2.5 seconds).
+
+The squares are set out from the middle of the maze, half a square to
+each side of it, so no cut runs along the spokes on the axes. For a grid
+maze a square is an even number of the maze's cells across, which puts
+every cut down the middle of a row of cells and never along a wall.
+
+#### Textures on the walls
+
+<img src="images/maze-bricks.png" width="340" alt="A theta maze with brick walls seen from a low angle: courses of red brick with pale mortar run level round every ring wall, with upright joints on the straight spokes and the wall tops"> <img src="images/maze-hedge.png" width="340" alt="A theta maze whose walls are clipped green hedge, on a brown floor, with a yellow strip along the corridors">
+
+**Texture** sets what the walls are made of. Plain walls are the fit as
+it stands. Planks, bricks, cobblestone and medallions are the tile
+patterns of 7.9, and on a maze they are wrapped along each wall and not
+pushed down through the whole maze from above, which would show a
+brick's face on the wall tops and stripes on every wall
+(`Walls::patterned`).
+
+The pattern is drawn once, flat, by the code that draws it on a floor
+(`lay_mosaic_on`), on a sheet as long as all the walls unrolled end to
+end and as tall as they stand. Each ring wall is unrolled from the x axis
+round, one cell of the sheet to one cell of the wall's middle circle. A
+place in a wall at angle $`\theta`$ in ring wall $`j`$ is at
+$`\lfloor \theta\, j g \rfloor`$ along that wall's part of the sheet, so
+every place on one line through the wall towards the middle has the same
+column of the sheet behind it. A spoke is unrolled outwards from its
+inner end. Each wall has a part of the sheet to itself, so no two walls
+show the same bricks.
+
+Every piece of the fit is then a column from the ground up, and each
+cell of its height takes the sheet's colour at that height. A block is
+taken one cell of ground at a time, so a joint between two bricks is one
+cell wide and goes through the wall. Cells of one colour are joined into
+bricks again. Because every piece is cut at the same heights, the line
+between two courses of bricks is level and unbroken round a whole ring.
+
+A texture colours the walls and never moves them, as on any form (see
+[The edge](#the-edge-the-forms-own)). The fit is not changed: each piece
+keeps its outline and is only cut across its height. The curved face of
+a ring wall is long sloped bricks, and a sloped brick is one colour to a
+course, the colour where the middle of its solid half lies. So on a
+curved face the upright joints fall where one sloped brick ends and the
+next begins, and cobblestones there are blocks as long as the sloped
+bricks. A sloped brick whose middle lies on a joint takes the colour of
+the brick beside the joint; without that, one in nine was a slab of
+mortar a dozen cells long. The straight spokes along the axes, the wall
+tops and all of a grid maze are whole cells and carry the pattern
+exactly. Shortening the sloped bricks to a brick's length would carry it
+everywhere and would fit the curve less closely, which is the choice
+7.9 made the same way for a floor's edge.
+
+A rug is not wrapped. It is one figure with a middle and a border, and
+cut into the strips of a hundred walls it is none, so a maze given a rug
+has plain walls. Bevel and border do nothing on a wall. The pass that
+patterns the sides of a box (7.9) is not run on a maze: it takes a form's
+outermost layer of whole cells, and it patterned over the outside of a
+grid maze before it was kept off.
+
+**Hedge** is not a pattern. The walls are not fitted at all. The hedge
+of the Plant form (7.10) is grown along the line of every wall: each run
+of arcs standing side by side is one line, and each spoke is one. All of
+them are one plant (`Model::laid_all` in
+[core/src/tree.rs](../core/src/tree.rs)), so where two walls meet the
+hedges run into each other and no brick is laid twice. That function is
+the only thing the maze asks of the plants' code. A hedge wall is at
+least 6 cells thick and 12 tall, the least a hedge can be.
+
+#### The floor, the way through and the colours
+
+A floor, if asked for, is the disc or the square out to the outside face
+of the rim, fitted as an outline and laid under the walls, which then
+stand on it. The way through is a strip one cell high on the ground, a
+quarter as wide as the narrowest gap it passes. It runs along the middle
+of each corridor and crosses from one ring to the next along a line
+towards the middle of the maze, through the middle of the outer of the
+two cells, which is inside the gap the two share.
+
+A maze's bricks carry colour numbers, as a pattern's do. With plain
+walls there are three: the floor, the walls and the strip. With a
+texture or hedge there are eight: the first is the floor and also the
+mortar or the hedge's stems, the last is the strip, and the texture's
+own numbers are between. A pattern's seventh feature shares the first
+feature's colour, which leaves the last number free for the strip.
+
+#### What is refused
+
+Every setting is brought within its range before anything is laid out:
+2 to 40 rings, 1 to 64 cells in the first ring. Three sizes are then
+refused with a message that says what to change, each before the work it
+would cost:
+
+| Limit | Why |
+|---|---|
+| walls 40,000 cells long in all | four or five seconds of fitting on one thread |
+| a textured maze whose walls unroll to 1,500,000 tiles | each tile is drawn by the pattern's rule, up to 4 microseconds for cobblestone |
+| hedge of 1,000,000 cells cubed (length by thickness by height) | a hedge is 0.1 to 0.25 bricks to each cell of that volume, so this is 100,000 to 250,000 bricks and about eight seconds on one thread |
+
+#### What is measured
+
+Walls 30 tall and 4 thick (hedge 6), on a desktop with 16 logical cores,
+the least of three builds
+(`cargo run --release -p brickloft-core --example timing -- maze`):
+
+| Maze | Walls | Bricks | One thread | 16 threads |
+|---|---|---|---|---|
+| Theta, 4 rings, radius 80 | plain | 514 | 81 ms | 26 ms |
+| Theta, 4 rings, radius 80 | bricks | 11,997 | 0.11 s | 42 ms |
+| Theta, 4 rings, radius 80 | cobblestone | 8,675 | 0.26 s | 62 ms |
+| Theta, 4 rings, radius 80 | hedge | 27,125 | 1.1 s | 0.23 s |
+| Theta, 6 rings, radius 120 | plain | 1,122 | 0.18 s | 40 ms |
+| Theta, 6 rings, radius 120 | bricks | 25,045 | 0.25 s | 75 ms |
+| Theta, 6 rings, radius 120 | cobblestone | 18,898 | 0.59 s | 0.13 s |
+| Theta, 6 rings, radius 120 | hedge | 54,903 | 2.5 s | 1.0 s |
+| Theta, 9 rings, radius 180 | plain | 2,415 | 0.73 s | 0.15 s |
+| Theta, 9 rings, radius 180 | bricks | 52,694 | 0.77 s | 0.19 s |
+| Theta, 9 rings, radius 180 | cobblestone | 37,155 | 2.2 s | 0.33 s |
+| Theta, 9 rings, radius 180 | hedge | 118,989 | 5.7 s | 1.9 s |
+| Theta, 16 rings, radius 320 | plain | 6,870 | 2.3 s | 0.34 s |
+| Theta, 16 rings, radius 320 | bricks | 149,553 | 2.6 s | 0.85 s |
+| Theta, 16 rings, radius 320 | cobblestone | 104,728 | 6.4 s | 1.6 s |
+| Theta, 16 rings, radius 320 | hedge | refused: too much hedge | | |
+| Grid, 6 rings, radius 120 | plain | 97 | 0.13 s | 74 ms |
+| Grid, 6 rings, radius 120 | bricks | 10,582 | 0.46 s | 0.56 s |
+| Grid, 6 rings, radius 120 | cobblestone | 16,827 | 0.84 s | 0.17 s |
+| Grid, 6 rings, radius 120 | hedge | 60,009 | 3.1 s | 0.71 s |
+
+The desktop was running other builds when these were taken, so the
+figures for sixteen threads are higher than an idle machine gives, by
+an amount that differs from row to row.
+
+A maze is built at brick size 1 whatever the brick budget, as a pattern
+and a plant are. Its walls are a few cells thick and its corridors are
+sized to be walked, so at a coarser size it would be a different maze.
+Fewer bricks come from fewer rings.
+
+#### Where it falls short
+
+- A texture on a curved face is as coarse as the sloped bricks there, as
+  described above. A grid maze has none of this.
+- A textured maze is tens of thousands of bricks, because every course
+  and every line of mortar is its own layer of bricks.
+- The hedge keeps the Plant form's foot: the lowest tenth of its height
+  is stems with air between, and a hedge has 40 plants at most, shared
+  among the walls by length, so a long wall has few stems under it.
+- A cut between two squares can fall along a ring wall where the wall is
+  tangent to it, which lays that stretch as two thinner runs of bricks.
+- The room is one ring across and cannot be made larger, and there is
+  one way in. A maze takes no added points and cannot be mirrored.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points

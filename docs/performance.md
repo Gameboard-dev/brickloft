@@ -37,6 +37,9 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
+| Maze of 6 rings, radius 120, plain walls | 0.18 s (40 ms) | 1,122 | 3.4% |
+| The same with brick walls | 0.25 s (75 ms) | 25,045 | 3.4% |
+| The same with hedge walls 6 thick | 2.5 s (1.0 s) | 54,903 | 8.0% |
 
 The ordinary forms fit in tens of milliseconds and a large solid sphere in
 about a fifth of a second. The two thin shells are the exceptions. A wall
@@ -44,6 +47,11 @@ of 2 at that radius is too thin for the sphere layout, so they are fitted
 cell by cell, and their brick counts show what that method costs. For
 comparison, a shell of radius 70 with a wall 4 thick, which the layout can
 handle, takes a tenth as many bricks laid out as it did cell by cell.
+
+The mazes are timed by the same example with `-- maze`. Their walls are
+fitted in squares of ground, each square on a thread of its own
+([algorithm.md](algorithm.md), section 7.11), and a hedge maze is the
+slowest form after the trees.
 
 The plants are not in the timing example, and the trees among them are
 the slowest forms. Their
@@ -410,6 +418,8 @@ Each of these is work whose items do not depend on one another.
 | Stepping stones | stones | `lay_stones` in [core/src/pattern.rs](../core/src/pattern.rs) |
 | The tiles of bricks, cobblestone, rugs and medallions | tiles | `drawn` in `pattern.rs` |
 | The bevelled tops of bricks | cells | `lay_tiles` in `pattern.rs` |
+| The walls of a maze | squares of ground, 96 cells each way | `fitted` in [core/src/maze/walls.rs](../core/src/maze/walls.rs) |
+| The courses of a patterned maze's walls | pieces of the fit | `patterned` in `maze/walls.rs` |
 
 Two of these needed their work put in a different order first. A turned
 form used to fit each circle when a ring first asked for it, part way

@@ -227,6 +227,34 @@ A pattern shows its colours only in the mode `pattern`. A form added with
 a pattern and no `colour` comes in that pattern's own colours, as it does
 from the panel. A pattern takes up to eight colours.
 
+A maze is the form `maze`, and its own settings are one line of text,
+`maze`, as a plant's are `tree`: `kind,rings,divisions,grow,seed,entrance,floor,solution,hedge`,
+of which only the kind (`theta` or `grid`) is needed. The form's `radius`
+is from its middle to the middle of its outside wall, `thick` is the
+walls' thickness and `rise` their height; left out they are 120, 4 and
+30. A corridor with one wall is `radius` divided by `rings`. For example,
+this call adds a maze of eight rings with a floor 2 thick, its way
+through marked, and walls of brick in level courses:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "maze", "maze": "theta,8,4,0,3,270,2,1,0", "radius": 160, "mosaic": ["bricks", 2, 0, 0, 1, 1, 50, 0, 0, 0] }
+  }
+}
+```
+
+The last number of `maze` set to 1 makes the walls hedge, grown with the
+`tree` setting's fullness, bend and berries. A `mosaic` of `bricks`,
+`cobblestone`, `planks` or `medallions` is wrapped along every wall; a
+`rug` and `stones` are not laid on a maze. A maze added with no `colour`
+comes in its walls' own colours: three for plain walls (floor, walls,
+way through) and eight otherwise, the first being the floor and the last
+the way through. A maze whose corridors would be under 3 microbricks
+wide, or whose walls or hedge are more than may be built, is refused
+with the reason and what to change.
+
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to
 build") and can correct the request.

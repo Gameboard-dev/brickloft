@@ -32,6 +32,7 @@ fn form_name(form: Form) -> String {
         Form::Pyramid => "pyramid".into(),
         Form::Cube => "cube".into(),
         Form::Tree => "tree".into(),
+        Form::Maze => "maze".into(),
     }
 }
 
@@ -95,6 +96,9 @@ pub fn spec_text(spec: &Spec) -> String {
     line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},0", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1])));
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
     line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
+    // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
+    let m = &spec.maze;
+    line("maze", format!("{},{},{},{},{},{},{},{},{}", crate::maze::KINDS[m.kind as usize].1, m.rings, m.divisions, m.grow, m.seed, m.entrance, m.floor, m.solution as u8, m.hedge as u8));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -160,6 +164,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("cube", _) => Form::Cube,
                     // (a bush or a flower is a tree of another kind)
                     ("tree" | "plant", _) => Form::Tree,
+                    ("maze", _) => Form::Maze,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -325,6 +330,30 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     tree.extras = whole(extras)? != 0;
                 }
                 spec.tree = tree.clamped();
+            }
+            "maze" => {
+                let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                // The kind, and then as many of the rest as are given, in order, as a tree's are.
+                if parts.len() > 9 {
+                    return Err(bad("expected `kind,rings,divisions,grow,seed,entrance,floor,solution,hedge`, or the first few of them"));
+                }
+                let kind = crate::maze::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of maze: theta or grid"))?.0;
+                let mut maze = crate::maze::Maze { kind, ..crate::maze::Maze::default() };
+                // (numbers from a file, which may be anyone's: brought within what a maze may be by `clamped`)
+                let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(-100_000, 100_000) as i32) };
+                for (n, part) in parts.iter().enumerate().skip(1) {
+                    match n {
+                        1 => maze.rings = within(part)?,
+                        2 => maze.divisions = within(part)?,
+                        3 => maze.grow = within(part)?,
+                        4 => maze.seed = part.parse().map_err(|_| bad("the seed is a whole number, not negative"))?,
+                        5 => maze.entrance = within(part)?,
+                        6 => maze.floor = within(part)?,
+                        7 => maze.solution = whole(part)? != 0,
+                        _ => maze.hedge = whole(part)? != 0,
+                    }
+                }
+                spec.maze = maze.clamped();
             }
             "stones" => {
                 spec.stones = if value == "none" {
@@ -1134,6 +1163,7 @@ mosaic = {values}
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true },
+                maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
         ];
