@@ -113,6 +113,9 @@ pub fn prepared(picture: &image::RgbaImage, path: &Path, asked: bool) -> Result<
 /// What is to be done with a mesh once the model has drawn it.
 pub struct Tidy {
     pub level: bool,
+    /// How far above level the picture looks to have been taken from, in degrees, if it looks taken from high up
+    /// (see `cutout::rise`): what `level::flattest` goes by when the mesh has no flat base.
+    pub seen_from: Option<f32>,
 }
 
 /// What tidying did, for the result.
@@ -122,6 +125,8 @@ pub struct Tidied {
     pub tilt: Tilt,
     /// Whether the mesh was turned to stand level.
     pub levelled: bool,
+    /// The tip that was undone by laying the mesh flattest, when it had no flat base to go by.
+    pub laid_flat: Option<f32>,
 }
 
 /// Drops crumbs, stands the mesh level if it can be told how, sets it on the
@@ -129,16 +134,24 @@ pub struct Tidied {
 pub fn tidy(mesh: &mut Mesh, how: &Tidy) -> Tidied {
     let pieces_dropped = mesh.drop_loose_pieces();
     let tilt = level::tilt(mesh);
+    let mut laid_flat = None;
     let levelled = match tilt {
         Tilt::Tipped(degrees) if how.level => {
-            mesh.tip_back(degrees);
+            mesh.tip(-degrees);
             true
+        }
+        Tilt::Unknown if how.level => {
+            laid_flat = how.seen_from.and_then(|seen_from| level::flattest(mesh, seen_from));
+            if let Some(degrees) = laid_flat {
+                mesh.tip(-degrees);
+            }
+            laid_flat.is_some()
         }
         _ => false,
     };
     mesh.set_on_ground();
     mesh.to_y_up();
-    Tidied { pieces_dropped, tilt, levelled }
+    Tidied { pieces_dropped, tilt, levelled, laid_flat }
 }
 
 /// What the result says about the tilt, and a sentence when there is something a person should know.
@@ -147,6 +160,10 @@ fn tilt_json(tidied: &Tidied, view: rank::View) -> (Value, Option<String>) {
         Tilt::Level => (json!({ "state": "level", "degrees": 0.0 }), None),
         Tilt::Tipped(degrees) if tidied.levelled => (json!({ "state": "levelled", "degrees": (degrees as f64 * 10.0).round() / 10.0 }), Some(format!("the mesh came out tipped by {:.0} degrees, as from a picture taken from above, and was stood level", degrees.abs()))),
         Tilt::Tipped(degrees) => (json!({ "state": "tilted", "degrees": (degrees as f64 * 10.0).round() / 10.0 }), Some(format!("the mesh is tipped by {:.0} degrees and was left so, as asked", degrees.abs()))),
+        Tilt::Unknown if tidied.laid_flat.is_some() => {
+            let degrees = tidied.laid_flat.unwrap_or(0.0);
+            (json!({ "state": "levelled", "degrees": (degrees as f64 * 10.0).round() / 10.0, "by": "lying flattest" }), Some(format!("the picture looks taken from high above and the mesh came out standing on end; it has no flat base, so it was laid the way it lies lowest ({degrees:.0} degrees), which may not be exactly level")))
+        }
         Tilt::Unknown => {
             let note = (view == rank::View::High).then(|| "the picture looks taken from too high, and the mesh has no flat base to level it by: it may be tilted".to_string());
             (json!({ "state": "unknown", "degrees": null }), note)
@@ -205,7 +222,9 @@ impl Sculptor {
         let judged = rank::judge(Some(&cut.report));
 
         let (mut mesh, scraps) = self.sculpted(&cut, to, resolution, out)?;
-        let tidied = tidy(&mut mesh, how);
+        // the sine of the camera's height is what the lower outline's rise estimates
+        let seen_from = (rank::View::of(cut.report.rise) == rank::View::High).then(|| cut.report.rise.min(1.0).asin().to_degrees());
+        let tidied = tidy(&mut mesh, &Tidy { level: how.level, seen_from });
         if mesh.triangles.is_empty() {
             return Err(Error::EmptyMesh);
         }
@@ -251,7 +270,7 @@ mod tests {
     #[test]
     fn a_tipped_mesh_is_stood_level_set_down_and_turned_y_up() {
         let mut mesh = tipped(box_mesh([1.0, 0.8, 0.6], 0.02), 25.0);
-        let tidied = tidy(&mut mesh, &Tidy { level: true });
+        let tidied = tidy(&mut mesh, &Tidy { level: true, seen_from: None });
         assert!(tidied.levelled && matches!(tidied.tilt, Tilt::Tipped(d) if (d - 25.0).abs() <= 1.0), "{tidied:?}");
         let (lo, hi) = mesh.bounds();
         assert!(lo[1].abs() < 1e-4, "it stands on the ground: Y is up and its lowest point is at 0");
@@ -263,7 +282,7 @@ mod tests {
 
         // asked not to level: found and reported, and left tipped
         let mut mesh = tipped(box_mesh([1.0, 0.8, 0.6], 0.02), 25.0);
-        let tidied = tidy(&mut mesh, &Tidy { level: false });
+        let tidied = tidy(&mut mesh, &Tidy { level: false, seen_from: Some(25.0) });
         assert!(!tidied.levelled);
         let (lo, hi) = mesh.bounds();
         assert!(hi[1] - lo[1] > 0.8, "still tipped: taller than the box is");
@@ -272,12 +291,18 @@ mod tests {
 
     #[test]
     fn a_mesh_with_no_base_from_a_high_picture_is_said_to_be_perhaps_tilted() {
-        let tidied = Tidied { pieces_dropped: 0, tilt: Tilt::Unknown, levelled: false };
+        let tidied = Tidied { pieces_dropped: 0, tilt: Tilt::Unknown, levelled: false, laid_flat: None };
         let (tilt, note) = tilt_json(&tidied, rank::View::High);
         assert_eq!(tilt, json!({ "state": "unknown", "degrees": null }));
         assert_eq!(note.unwrap(), "the picture looks taken from too high, and the mesh has no flat base to level it by: it may be tilted");
         assert_eq!(tilt_json(&tidied, rank::View::Level).1, None);
-        assert_eq!(tilt_json(&Tidied { pieces_dropped: 0, tilt: Tilt::Level, levelled: false }, rank::View::High), (json!({ "state": "level", "degrees": 0.0 }), None));
+
+        // no flat base, but laid the way it lies lowest (`level::flattest`): said as levelled, and how
+        let laid = Tidied { pieces_dropped: 0, tilt: Tilt::Unknown, levelled: true, laid_flat: Some(50.0) };
+        let (tilt, note) = tilt_json(&laid, rank::View::High);
+        assert_eq!(tilt, json!({ "state": "levelled", "degrees": 50.0, "by": "lying flattest" }));
+        assert!(note.unwrap().ends_with("it was laid the way it lies lowest (50 degrees), which may not be exactly level"));
+        assert_eq!(tilt_json(&Tidied { pieces_dropped: 0, tilt: Tilt::Level, levelled: false, laid_flat: None }, rank::View::High), (json!({ "state": "level", "degrees": 0.0 }), None));
     }
 
     #[test]

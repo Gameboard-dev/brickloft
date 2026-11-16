@@ -8,6 +8,12 @@
 //!       the mid grey TripoSR puts behind it. Prints what the cut-out found.
 //!   look sheet <out.png> <columns> <tile> <in.png>...
 //!       The pictures side by side, each scaled to `tile` pixels.
+//!   look birefnet <model.safetensors> <picture> <out.png>
+//!       The picture cut out by BiRefNet (https://huggingface.co/ZhengPeng7/BiRefNet,
+//!       MIT), a model made for telling an object from its ground, run by
+//!       the code Lux3D has for a model of the same design. The generator
+//!       does not use it; this is how it was tried (docs/generate.md says
+//!       what came of it). The weights are not fetched by anything here.
 //!
 //! Whether a mesh is good is decided by looking at it, and from the back,
 //! which the picture never showed. These are the views that decision was
@@ -160,7 +166,17 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             sheet.save(&args[1]).map_err(|e| wrong(&e))?;
         }
-        _ => return Err("usage: look views <mesh.glb> <out.png> | look cut <picture> <out.png> | look sheet <out.png> <columns> <tile> <in.png>...".into()),
+        Some("birefnet") if args.len() == 4 => {
+            let chosen = generate::device::choose(generate::args::Want::Auto).map_err(|e| wrong(&e))?;
+            let started = std::time::Instant::now();
+            let model = lux3d_core::runtime::Rmbg2Model::load_from_path(Path::new(&args[1]), &chosen.device).map_err(|e| wrong(&e))?;
+            let loaded = started.elapsed();
+            let picture = image::DynamicImage::ImageRgba8(mesh::read_picture(Path::new(&args[2])).map_err(|e| wrong(&e))?).into_rgb8();
+            let cut = model.alpha_mask(&picture).map_err(|e| wrong(&e))?;
+            tile_of(&cut, cutout::SIDE).save(&args[3]).map_err(|e| wrong(&e))?;
+            println!("{}: loaded in {:.1} s, cut in {:.1} s on {}", args[2], loaded.as_secs_f32(), (started.elapsed() - loaded).as_secs_f32(), chosen.kind.name());
+        }
+        _ => return Err("usage: look views <mesh.glb> <out.png> | look cut <picture> <out.png> | look sheet <out.png> <columns> <tile> <in.png>... | look birefnet <model.safetensors> <picture> <out.png>".into()),
     }
     Ok(())
 }

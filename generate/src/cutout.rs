@@ -65,6 +65,9 @@ const NEAR: f32 = 18.0;
 const GENTLE: f32 = 4.0;
 /// A corner is followed along the frame across steps no larger than this.
 const ALONG_FRAME: f32 = 6.0;
+/// unless the frame's next `STRETCH` pixels are, taken together, within `GRAIN` of the last `STRETCH`.
+const STRETCH: usize = 8;
+const GRAIN: f32 = 10.0;
 /// Two corners within this of each other are the same ground.
 const SAME_GROUND: f32 = 45.0;
 /// The gentle rule may take the flood no further than this from every palette colour.
@@ -98,6 +101,9 @@ pub struct Report {
     pub shadow_removed: bool,
     /// See-through pieces found inside the object.
     pub holes: u32,
+    /// The share of the object that is something like the ground's colour: high when ground was left standing
+    /// around it, or when the object is the ground's colour and the cut could not have been clean.
+    pub ground_like: f32,
     /// How much the object's lower outline rises to either side of its
     /// lowest point, as a share of its width: near 0 for an object seen
     /// level, and near the sine of the camera's height for one seen from
@@ -271,8 +277,24 @@ fn ground_on_frame(colours: &[Colour], w: usize, h: usize) -> Vec<usize> {
             let mut k = corners[c];
             for _ in 0..n {
                 let next = if forwards { (k + 1) % n } else { (k + n - 1) % n };
-                if ground[next] || apart(colour_at(k), colour_at(next)) > ALONG_FRAME {
+                if ground[next] {
                     break;
+                }
+                // A step that is not gentle ends the walk only if the stretch of frame beyond it is another colour
+                // than the stretch behind. A ground with a grain to it (a table's wood, a cloth) is all steps, and
+                // its stretches are all one colour; where an object runs off the picture they are not.
+                if apart(colour_at(k), colour_at(next)) > ALONG_FRAME {
+                    let stretch = |from: usize, onwards: bool| {
+                        let mut sum = [0f32; 3];
+                        for d in 0..STRETCH {
+                            let c = colour_at(if onwards == forwards { from + d } else { from + n - d });
+                            sum = [sum[0] + c[0], sum[1] + c[1], sum[2] + c[2]];
+                        }
+                        sum.map(|v| v / STRETCH as f32)
+                    };
+                    if apart(stretch(k, false), stretch(next, true)) > GRAIN {
+                        break;
+                    }
                 }
                 ground[next] = true;
                 k = next;
@@ -473,14 +495,15 @@ pub fn object_in(picture: &RgbaImage) -> Option<(Mask, Report)> {
         plain_frame,
         shadow_removed,
         holes,
+        ground_like: (0..kept.on.len()).filter(|&i| kept.on[i] && palette.within_drift(colours[i])).count() as f32 / area as f32,
         rise: rise(&kept),
         bounds: [x0 as u32, y0 as u32, (x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32],
     };
     Some((kept, report))
 }
 
-/// How much an object's lower outline rises to either side of its lowest
-/// point, as a share of the width it is measured over.
+/// How steeply an object's lower outline rises to either side of its
+/// lowest point: the two slopes' geometric mean.
 ///
 /// A box standing on the ground, seen from a corner, shows its base as a V
 /// whose arms rise at the sine of the camera's height above level; a round
@@ -523,10 +546,11 @@ pub fn rise(mask: &Mask) -> f32 {
     let low = hull.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(*first);
     let reach = 0.35 * width;
     let (left, right) = ((low.0 - reach).max(first.0), (low.0 + reach).min(last.0));
-    if right - left < 4.0 {
-        return 0.0;
-    }
-    ((low.1 - height_at(left)) + (low.1 - height_at(right))) / (right - left)
+    // Each arm's rise over its own run. The two are multiplied and not added: a box turned so that one side faces the
+    // camera has one arm steep and the other flat, the first as many times steeper as the second is flatter, and
+    // their product is the same whichever way the box is turned (the sine of the camera's height, squared).
+    let arm = |to: f32| if (to - low.0).abs() < 2.0 { 0.0 } else { ((low.1 - height_at(to)) / (to - low.0).abs()).max(0.0) };
+    (arm(left) * arm(right)).sqrt()
 }
 
 /// A picture no larger than `SIDE` a side, made smaller if it was larger.
@@ -605,6 +629,7 @@ pub fn already_cut(picture: &RgbaImage) -> Option<Cut> {
         plain_frame: 1.0 - on_frame as f32 / frame_pixels as f32,
         shadow_removed: false,
         holes: 0,
+        ground_like: 0.0,
         rise: rise(&mask),
         bounds: [x0 as u32, y0 as u32, (x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32],
     };
@@ -663,20 +688,37 @@ pub mod tests {
     #[test]
     fn a_soft_shadow_and_its_edge_are_taken_off() {
         let mut picture = boxed();
-        // a shadow to the right of the box's foot: the ground darkened by up to 30%, fading out to the right, above and below
-        for y in 144..192u32 {
-            for x in 178..230u32 {
-                let fade = 1.0 - (x - 178) as f32 / 52.0;
-                let depth = 0.30 * fade * (1.0 - ((y as f32 - 168.0).abs() / 24.0).powi(2)).max(0.0);
+        // a shadow to the right of the box's foot: the ground darkened to half at its deepest, which is further from
+        // the ground's colour than the flood may stray by gentleness alone, fading out to the right, above and below
+        for y in 100..220u32 {
+            for x in 178..250u32 {
+                let fade = 1.0 - (x - 178) as f32 / 72.0;
+                let depth = 0.5 * fade * (std::f32::consts::FRAC_PI_2 * (y as f32 - 160.0) / 60.0).cos().max(0.0);
                 let p = picture.get_pixel(x, y).0;
                 picture.put_pixel(x, y, Rgba([(p[0] as f32 * (1.0 - depth)) as u8, (p[1] as f32 * (1.0 - depth)) as u8, (p[2] as f32 * (1.0 - depth)) as u8, 255]));
             }
         }
         let (mask, report) = object_in(&picture).unwrap();
-        let shadow_left = (144..192).flat_map(|y| (182..230).map(move |x| (x, y))).filter(|&(x, y)| mask.on[y * 256 + x]).count();
+        assert!(report.shadow_removed);
+        let shadow_left = (100..220).flat_map(|y| (182..250).map(move |x| (x, y))).filter(|&(x, y)| mask.on[y * 256 + x]).count();
         assert_eq!(shadow_left, 0, "none of the shadow is object");
         let [_, _, w, _] = report.bounds;
         assert!(w.abs_diff(100) <= 5, "the object is as wide as the box and no wider: {w}");
+    }
+
+    #[test]
+    fn a_ground_with_a_grain_is_still_ground() {
+        // a cloth's weave: streaks two pixels wide running slantwise, forty levels apart with hard edges, so that
+        // every side of the picture crosses them; and the box on it
+        let mut picture = RgbaImage::from_fn(256, 256, |x, y| {
+            let v = (150 + if ((x + y) / 2) % 2 == 0 { 40 } else { 0 }) as u8;
+            Rgba([v, v, v, 255])
+        });
+        fill(&mut picture, 78..178, 60..180, |x, y| [180 + ((x + y) % 7) as u8, 40, 30]);
+        let (mask, report) = object_in(&picture).unwrap();
+        let agree = share_agreeing(&mask, |x, y| (78..178).contains(&x) && (60..180).contains(&y));
+        assert!(agree > 0.98, "the mask is the box, and the cloth is not: {agree}");
+        assert!(report.plain_frame > 0.95, "{}", report.plain_frame);
     }
 
     #[test]

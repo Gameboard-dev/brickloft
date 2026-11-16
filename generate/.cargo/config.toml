@@ -1,0 +1,20 @@
+# Settings cargo reads when it is run inside generate/.
+#
+# On Windows the whole program is built against the static C runtime. Two
+# reasons. The CUDA kernels (Candle's `libmoe`) are compiled that way by
+# nvcc, and the C++ that the `cc` crate compiles (meshopt, xatlas) is not
+# unless told to be; the linker refuses to join the two (LNK2038,
+# "mismatch detected for 'RuntimeLibrary'"). And a program built this way
+# runs on a computer that does not have Microsoft's Visual C++ runtime
+# installed, so nothing has to be shipped beside it for that. Lux3D sets the
+# same in its own repository, which is where this was found; a dependency's
+# cargo settings do not carry over to what depends on it, so they are
+# repeated here.
+# https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# xatlas's build script chooses its C runtime by this variable and not by the
+# flag above.
+[env]
+XATLAS_MSVC_CRT = "static"

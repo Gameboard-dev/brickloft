@@ -130,11 +130,18 @@ fn serve_answers_each_line_and_ends_when_its_input_does() {
     for request in &requests {
         writeln!(stdin, "{request}").unwrap();
     }
+    // Read until every request has had its answer, and only then close the input: closing it while a request is
+    // being done is how a run is cancelled, which is another test's business.
+    let mut lines: Vec<Value> = Vec::new();
+    let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+    while lines.iter().filter(|l| l["event"] == "result" || l["event"] == "error").count() < requests.len() + 1 {
+        let mut line = String::new();
+        assert!(std::io::BufRead::read_line(&mut output, &mut line).unwrap() > 0, "the program ended before it had answered: {lines:?}");
+        lines.push(serde_json::from_str(&line).unwrap());
+    }
     // the end of input, with nothing being done, is the end of the program
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let lines: Vec<Value> = String::from_utf8(output.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
     let said: Vec<String> = lines.iter().filter(|l| l["event"] != "licence").map(|l| format!("{}:{}", l["event"].as_str().unwrap(), l.get("command").or(l.get("code")).and_then(Value::as_str).unwrap())).collect();
     assert_eq!(said, ["result:serve", "result:help", "error:bad_request", "error:licence_not_accepted", "error:prompt_too_long", "error:bad_request", "error:bad_request", "result:help"]);
     assert_eq!(std::fs::read_dir(&weights).unwrap().count(), 0);

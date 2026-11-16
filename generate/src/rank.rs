@@ -24,6 +24,8 @@ const ON_FRAME: f32 = 0.004;
 const COVERAGE: std::ops::RangeInclusive<f32> = 0.05..=0.75;
 /// Less than this share of the frame is plain ground: the picture is a scene.
 const PLAIN_FRAME: f32 = 0.6;
+/// More than this share of the object is the ground's colour: the cut is doubtful.
+const GROUND_LIKE: f32 = 0.35;
 /// The lower outline's rise (see `cutout::rise`) below which the view is level, and above which it is from high up.
 const RISE_LEVEL: f32 = 0.3;
 const RISE_HIGH: f32 = 0.5;
@@ -97,6 +99,11 @@ pub fn judge(report: Option<&Report>) -> Judged {
         usable = false;
         problems.push("the object fills nearly the whole picture");
     }
+    if report.ground_like > GROUND_LIKE {
+        // the more of it, the less the cut-out can be trusted
+        score -= 0.15 + 0.25 * ((report.ground_like - GROUND_LIKE) / (1.0 - GROUND_LIKE));
+        problems.push("the object and the ground are alike in colour, so some ground may be left around it");
+    }
     match View::of(report.rise) {
         View::Level => {}
         View::Raised => score -= 0.08,
@@ -122,6 +129,7 @@ pub fn report_json(report: &Report) -> Value {
         "plain_frame": rounded(report.plain_frame),
         "shadow_removed": report.shadow_removed,
         "holes": report.holes,
+        "ground_like": rounded(report.ground_like),
         "rise": rounded(report.rise),
         "view": View::of(report.rise).name(),
     })
@@ -151,7 +159,7 @@ mod tests {
     use image::Rgba;
 
     fn good() -> Report {
-        Report { coverage: 0.3, on_frame: 0.0, pieces: 1, plain_frame: 1.0, shadow_removed: false, holes: 0, rise: 0.2, bounds: [0, 0, 10, 10] }
+        Report { coverage: 0.3, on_frame: 0.0, pieces: 1, plain_frame: 1.0, shadow_removed: false, holes: 0, ground_like: 0.05, rise: 0.2, bounds: [0, 0, 10, 10] }
     }
 
     #[test]
@@ -165,6 +173,7 @@ mod tests {
             Report { plain_frame: 0.2, ..good() },
             Report { coverage: 0.01, ..good() },
             Report { coverage: 0.9, ..good() },
+            Report { ground_like: 0.7, ..good() },
             Report { rise: 0.7, ..good() },
         ];
         for report in &worse {
@@ -173,8 +182,8 @@ mod tests {
             assert_eq!(judged.problems.len(), 1, "{report:?}");
         }
         // cut off is worse than seen from above, and nothing found is worst
-        assert!(judge(Some(&worse[0])).score < judge(Some(&worse[5])).score);
-        assert!(!judge(Some(&worse[0])).usable && judge(Some(&worse[5])).usable);
+        assert!(judge(Some(&worse[0])).score < judge(Some(&worse[6])).score);
+        assert!(!judge(Some(&worse[0])).usable && judge(Some(&worse[6])).usable);
         let none = judge(None);
         assert_eq!((none.score, none.usable), (0.0, false));
     }

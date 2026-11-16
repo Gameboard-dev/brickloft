@@ -109,7 +109,7 @@ impl Session {
                     self.sculptor = Some(mesh::Sculptor::load(&self.weights, chosen, out)?);
                 }
                 let sculptor = self.sculptor.as_ref().ok_or(Error::Model { step: "loading the model", why: "it is not loaded".into() })?;
-                Ok(("mesh", sculptor.mesh(picture, to, *cutout, &mesh::Tidy { level: *level }, *resolution, out)?))
+                Ok(("mesh", sculptor.mesh(picture, to, *cutout, &mesh::Tidy { level: *level, seen_from: None }, *resolution, out)?))
             }
             Command::Serve => Err(Error::Usage { why: "serve cannot be asked of a program that is already serving".into() }),
         }

@@ -8,9 +8,10 @@
 //! builds what a level camera would have had to be looking at: the object
 //! tipped towards the camera by the angle the camera was raised. The tip is
 //! therefore always about the one axis that runs across the picture, which
-//! in the model's frame (Z up, the camera out along +X) is Y. That makes
-//! levelling a search over one angle and not over all the ways a mesh can
-//! be turned.
+//! in the model's frame (Z up, the camera out along +X) is Y, and always
+//! towards the camera, since no picture is taken from under the ground.
+//! That makes levelling a search over one angle, one way, and not over all
+//! the ways a mesh can be turned.
 //!
 //! **How the angle is found.** Most things stand on something flat: a
 //! plinth, a floor slab, four wheels. For each angle the mesh could be
@@ -124,9 +125,10 @@ impl Mesh {
         dropped
     }
 
-    /// Turns the mesh about the Y axis so that what was tipped up by
-    /// `degrees` (measured from +X towards +Z) lies level.
-    pub fn tip_back(&mut self, degrees: f32) {
+    /// Tips the mesh towards the camera (+X) by `degrees`, turning it about
+    /// the Y axis: what a picture taken from that far above level does to
+    /// it. A negative angle tips it back.
+    pub fn tip(&mut self, degrees: f32) {
         let (s, c) = degrees.to_radians().sin_cos();
         for p in &mut self.points {
             *p = [p[0] * c + p[2] * s, p[1], p[2] * c - p[0] * s];
@@ -237,8 +239,13 @@ pub fn clear_scraps(density: &mut [f32], side: usize, surface: f32) -> usize {
 
 /// A piece with fewer than this share of the largest piece's triangles is a crumb.
 const LOOSE: f32 = 0.02;
-/// The furthest a mesh is tipped back, in degrees. A picture taken from higher than this shows mostly the top.
-const MOST_TILT: f32 = 40.0;
+/// The furthest tip towards the camera that is looked for, in degrees. A picture taken from higher than this shows
+/// mostly the object's top, and little that a mesh could be made from.
+const MOST_TILT: f32 = 65.0;
+/// And the furthest the other way. A camera is not below the ground, so a mesh tipped away from it is the model's
+/// own error, which is small. Looking no further this way is what makes the answer single: a box tipped by 30
+/// degrees has a second flat face at 60 degrees the other way, which is not its base.
+const MOST_BACK: f32 = 10.0;
 /// A tilt smaller than this is level: the search's own error is about a degree.
 const LEVEL_WITHIN: f32 = 2.5;
 /// "Within a hair of the lowest point": this share of the mesh's size.
@@ -254,16 +261,16 @@ const BASE_CLEAR: f32 = 1.6;
 pub enum Tilt {
     /// The mesh stands on a flat base that is level already.
     Level,
-    /// It stands on a flat base tipped up by this many degrees.
+    /// It stands on a flat base tipped towards the camera by this many degrees (away from it, if negative).
     Tipped(f32),
     /// No flat base was found, so there is nothing to tell by.
     Unknown,
 }
 
-/// The vertices within a hair of the bottom when the mesh is tipped back by
-/// `degrees`: how many, and how far they span across.
+/// The vertices within a hair of the bottom once a tip of `degrees` towards
+/// the camera has been undone: how many, and how far they span across.
 fn bottom(points: &[[f32; 3]], degrees: f32, hair: f32) -> (usize, f32) {
-    let (s, c) = degrees.to_radians().sin_cos();
+    let (s, c) = (-degrees).to_radians().sin_cos();
     let height = |p: &[f32; 3]| p[2] * c - p[0] * s;
     let lowest = points.iter().map(height).fold(f32::MAX, f32::min);
     let (mut count, mut left, mut right) = (0, f32::MAX, f32::MIN);
@@ -286,7 +293,7 @@ pub fn tilt(mesh: &Mesh) -> Tilt {
     let size = mesh.size();
     let hair = size * HAIR;
     // every half degree; a base of a hundred vertices across is level to within about that
-    let angles: Vec<f32> = (0..=(4.0 * MOST_TILT) as i32).map(|i| i as f32 * 0.5 - MOST_TILT).collect();
+    let angles: Vec<f32> = (0..=(2.0 * (MOST_TILT + MOST_BACK)) as i32).map(|i| i as f32 * 0.5 - MOST_BACK).collect();
     let found: Vec<(usize, f32)> = angles.iter().map(|&a| bottom(&mesh.points, a, hair)).collect();
     let fullest = (0..angles.len()).max_by_key(|&i| found[i].0).unwrap_or(0);
     // The count is near its most over a degree or so around the true angle; the middle of that stretch is a better
@@ -297,19 +304,59 @@ pub fn tilt(mesh: &Mesh) -> Tilt {
     let best = (first + last) / 2;
     let (count, span) = found[best];
     // the width of the mesh across the picture's depth, at that angle
-    let (s, c) = angles[best].to_radians().sin_cos();
+    let (s, c) = (-angles[best]).to_radians().sin_cos();
     let across: Vec<f32> = mesh.points.iter().map(|p| p[0] * c + p[2] * s).collect();
     let width = across.iter().copied().fold(f32::MIN, f32::max) - across.iter().copied().fold(f32::MAX, f32::min);
     let elsewhere = (0..angles.len()).filter(|&i| (angles[i] - angles[best]).abs() >= 8.0).map(|i| found[i].0).max().unwrap_or(0);
     let clear = count as f32 >= BASE_LEAST * mesh.points.len() as f32 && span >= BASE_SPAN * width && count as f32 >= BASE_CLEAR * elsewhere as f32;
     // a base found at the very end of the search is the search's limit and not a base
-    if !clear || angles[best].abs() >= MOST_TILT - 0.25 {
+    if !clear || best == 0 || best + 1 == angles.len() {
         Tilt::Unknown
     } else if angles[best].abs() < LEVEL_WITHIN {
         Tilt::Level
     } else {
         Tilt::Tipped(angles[best])
     }
+}
+
+/// How far either side of the picture's own estimate `flattest` looks, in degrees, and the furthest it looks at all.
+const FLATTEST_WITHIN: f32 = 25.0;
+const MOST_LAID: f32 = 80.0;
+
+/// For a mesh with no flat base, from a picture that looks taken from about
+/// `seen_from` degrees above level: the tip towards the camera that, undone,
+/// leaves the mesh lying lowest. `None` if there is no such angle near the
+/// estimate.
+///
+/// A car or a boat seen from above comes out standing on its nose. Its
+/// underside is the model's guess and is not flat, so `tilt` finds nothing;
+/// but such a thing is long and low, and it lies lowest when it is level.
+/// That is not true of things in general (a statue lies lowest on its
+/// side), so this is used only when the picture itself says it was taken
+/// from high up, only within `FLATTEST_WITHIN` of the height the picture
+/// suggests, and only if the lowest lie is found inside that range and not
+/// at its end, where the mesh would still be getting lower as it is laid
+/// further over.
+pub fn flattest(mesh: &Mesh, seen_from: f32) -> Option<f32> {
+    if mesh.points.len() < 100 {
+        return None;
+    }
+    let height = |degrees: f32| {
+        let (s, c) = (-degrees).to_radians().sin_cos();
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for p in &mesh.points {
+            let h = p[2] * c - p[0] * s;
+            lo = lo.min(h);
+            hi = hi.max(h);
+        }
+        hi - lo
+    };
+    let (from, to) = ((seen_from - FLATTEST_WITHIN).max(0.0), (seen_from + FLATTEST_WITHIN).min(MOST_LAID));
+    let angles: Vec<f32> = (0..=((to - from) * 2.0).max(0.0) as i32).map(|i| from + i as f32 * 0.5).collect();
+    let heights: Vec<f32> = angles.iter().map(|&a| height(a)).collect();
+    let lowest = (0..angles.len()).min_by(|&a, &b| heights[a].total_cmp(&heights[b]))?;
+    // inside the range, and a real gain on how it stands now
+    (lowest > 0 && lowest + 1 < angles.len() && angles[lowest] >= LEVEL_WITHIN && heights[lowest] <= 0.9 * height(0.0)).then(|| angles[lowest])
 }
 
 #[cfg(test)]
@@ -349,7 +396,7 @@ pub mod tests {
 
     /// The mesh as the model would give it for a picture taken from `degrees` above level: tipped towards +X.
     pub fn tipped(mut mesh: Mesh, degrees: f32) -> Mesh {
-        mesh.tip_back(-degrees);
+        mesh.tip(degrees);
         mesh
     }
 
@@ -367,12 +414,12 @@ pub mod tests {
 
     #[test]
     fn a_tipped_box_is_found_and_stood_level() {
-        for degrees in [-30.0f32, -12.0, 8.0, 20.0, 35.0] {
+        for degrees in [-6.0f32, 8.0, 20.0, 35.0, 55.0] {
             let mut mesh = tipped(box_mesh([1.0, 0.8, 0.6], 0.02), degrees);
             match tilt(&mesh) {
                 Tilt::Tipped(found) => {
                     assert!((found - degrees).abs() <= 1.0, "tipped by {degrees}, found {found}");
-                    mesh.tip_back(found);
+                    mesh.tip(-found);
                 }
                 other => panic!("tipped by {degrees}, found {other:?}"),
             }
@@ -389,6 +436,32 @@ pub mod tests {
         assert_eq!(tilt(&tipped(box_mesh([1.0, 0.8, 0.6], 0.02), 1.0)), Tilt::Level, "a degree is within the search's error");
         assert_eq!(tilt(&ball(60)), Tilt::Unknown);
         assert_eq!(tilt(&Mesh::default()), Tilt::Unknown);
+    }
+
+    /// A ball squashed to the given half-widths along X, Y and Z. (Its points are turned first so that the two
+    /// places where a ball's points crowd together are at its ends and not underneath it.)
+    fn pebble(half: [f32; 3]) -> Mesh {
+        let mut mesh = ball(60);
+        for p in &mut mesh.points {
+            *p = [p[2] * half[0], p[1] * half[1], p[0] * half[2]];
+        }
+        mesh
+    }
+
+    #[test]
+    fn a_long_low_thing_with_no_base_is_laid_flat_and_a_tall_one_is_not_laid_down() {
+        // long and low, like a car's body, tipped as from a picture taken from 50 degrees up
+        let car = tipped(pebble([1.0, 0.45, 0.3]), 50.0);
+        let found = flattest(&car, 45.0).expect("it lies lowest when level");
+        assert!((found - 50.0).abs() <= 1.0, "{found}");
+        // the picture's estimate may be off by a good deal
+        assert!((flattest(&car, 62.0).unwrap() - 50.0).abs() <= 1.0);
+        // but an estimate nowhere near finds nothing, and does not make something up
+        assert_eq!(flattest(&car, 10.0), None);
+        // tall, like a statue: laid further over it only gets lower, which is not standing level
+        assert_eq!(flattest(&tipped(pebble([0.3, 0.3, 1.0]), 40.0), 40.0), None);
+        // already level: nothing to do
+        assert_eq!(flattest(&pebble([1.0, 0.45, 0.3]), 15.0), None);
     }
 
     #[test]
