@@ -378,59 +378,84 @@ the one to go by. Cube would also be a poor fit on other grounds: it asks
 for a graphics card with 16 GB of memory, or 24 GB for its fast mode, and
 its meshes have no colour.
 
-The alternatives, best first. Only the facts marked as read were checked
-on the projects' own pages; the others are to be confirmed before any is
-relied on.
+**The route chosen: Rust from the prompt to the bricks.** The player asked
+for no Python, and a second search (2026-11-16) found the parts in Rust.
+No model that turns text straight into a mesh has been ported to Rust, so
+the prompt goes by way of a picture:
 
-| Rank | Model | Licence | Input | Output | Needs | Verdict |
-|---|---|---|---|---|---|---|
-| 1 | [TRELLIS](https://github.com/microsoft/TRELLIS) (Microsoft) | MIT for models and most code (read); two submodules have licences of their own, not yet read | text, or a picture | a textured mesh | an NVIDIA card with 16 GB; tested on Linux only | the best licence with the best result, for the few who can run it |
-| 2 | [Shap-E](https://github.com/openai/shap-e) (OpenAI) | MIT for the code (read); the weights' licence is to be confirmed | text, or a picture | a coloured mesh | far less than the others; to be measured | the one most players could run; coarser shapes |
-| 3 | TripoSR, Stable Fast 3D | to be confirmed | a picture only | a textured mesh | a mid-range card | needs a second model to turn the prompt into a picture first |
-| 4 | Hunyuan3D-2 (Tencent) | its community licence excludes the European Union, the United Kingdom and South Korea (as copies of it read; the original was not opened) | text, or a picture | a textured mesh | 16 GB or more | not usable where the licence does not reach |
-| 5 | Cube (Roblox) | research only (read) | text | a mesh without colour | 16 to 24 GB | not usable |
+1. **Prompt to picture.** [Candle](https://github.com/huggingface/candle),
+   Hugging Face's machine-learning library in Rust (MIT or Apache 2.0),
+   runs Stable Diffusion 1.5, 2.1 and SDXL. The picture asked for is one
+   object, whole, on a plain ground.
+2. **Picture to mesh.** [Lux3D](https://github.com/FerrisMind/candle-3d)
+   (Apache 2.0) runs TripoSR in Rust on Candle and writes the mesh as OBJ,
+   GLB or PLY. TripoSR's code and weights are MIT, and it asks for about
+   6 GB of graphics memory. Lux3D's page gives 1.2 s for the neural pass
+   on an RTX 3060 with CUDA and 3 to 5 s on its Vulkan and WGPU backends,
+   which it calls experimental.
+3. **Mesh to bricks**, as described above.
 
-The bridge is the same whichever model is chosen, so the plan does not
-depend on the ranking.
+The computer this was planned on has an RTX 4060 Ti with 8 GB and 32 GB of
+memory, which is enough for both steps one after the other and not for
+TRELLIS (16 GB).
 
-**The bridge.** These models are Python programs with gigabytes of
-weights. Brickloft does not bundle Python, a model or its weights, and
-does not download them: the player installs a model and accepts its
-licence. What Brickloft ships is, for each model it supports, one short
-adapter script in a file of its own under `bridges/<model>/`, and the Rust
-code that starts it. The adapter is the only code in the project not in
-Rust, which the project's rule against other languages would have to allow
-for this one purpose.
+What is not yet known, and is to be found out by trying before anything is
+built into Brickloft:
 
-1. **Settings.** The panel's Imported form has a "Generative prompt" box,
-   a list of the models set up, and for each the path of its Python and of
-   its weights, kept with the editor's other settings.
-2. **Asking whether it can run.** Before anything is offered the editor
-   starts the adapter with `--check`. The adapter answers in one line of
-   JSON: whether its libraries load, which device it would use, how much
-   memory that device has, and whether the weights are where they should
-   be. The panel shows the answer in plain words, such as "TRELLIS needs
-   16 GB of graphics memory and this computer has 8", and offers Generate
-   only when the check passes.
-3. **Generating.** The editor starts the adapter as a program and a list
-   of arguments, the prompt being one of them, with the folder to write
-   into. A prompt is at most 500 characters and is never made part of a
-   command line that a shell reads. The adapter prints a line of progress
-   now and then, which the panel shows as plain text, cut to a fixed
-   length. Cancel stops the process. Generation takes from seconds to
-   minutes, so it runs beside the editor and never holds the window.
-4. **Reading the mesh.** The adapter writes one Wavefront OBJ file with a
-   colour for each vertex. The editor reads it with a reader of its own,
-   refusing more than a set number of vertices and triangles, any number
-   that is not finite, and any index out of range. The mesh is scaled to
-   the size asked for and fitted as described above.
-5. **Keeping it.** A generated mesh cannot be made again from its prompt,
-   since the models are not repeatable across computers. The mesh is
-   therefore saved beside the form in the editor's own folder, and a save
-   names it. A form whose mesh is missing opens empty with a message.
+- whether Lux3D builds and runs here. It is a young project (3 stars, no
+  release, 135 commits) and depends on its author's own fork of Candle;
+- whether the pictures Stable Diffusion makes from a short prompt give
+  TripoSR a clean single object, with the ground removed (Candle has
+  Segment Anything, and no model made for removing a ground);
+- whether the meshes are good enough to be worth fitting: TripoSR sees
+  one side of the object and guesses the rest;
+- the licences of the Stable Diffusion weights as their model cards give
+  them. Versions 1.5 and 2.1 are under OpenRAIL licences that restrict
+  uses and not who may use them; the Turbo versions are under terms that
+  sources disagree about, and are left out until read.
 
-Nothing leaves the computer: the prompt goes to a local process and the
-editor makes no request to any service.
+**How it would sit in Brickloft.** The machine-learning libraries are
+large and slow to compile, and the editor's rule is few dependencies. The
+generator is therefore a second program in the same workspace,
+`brickloft-generate`, in Rust, built only when asked for. The editor
+starts it as a program and a list of arguments, never through a shell.
+
+1. **Settings.** The panel's Imported form has a "Generative prompt" box
+   and a Generate button.
+2. **Asking whether it can run.** The editor starts the generator with
+   `--check`. It answers in one line of JSON: which device it would use,
+   how much memory that device has, and whether the weights are in the
+   editor's own folder. The panel shows the answer in plain words, such as
+   "this needs 6 GB of graphics memory and this computer has 4", and
+   offers Generate only when the check passes. The weights are several
+   gigabytes; they are downloaded once, when the player asks, after the
+   panel has shown each model's licence.
+3. **Generating.** The prompt is one argument, 500 characters at most.
+   The generator prints a line of progress now and then, which the panel
+   shows as plain text cut to a fixed length. Cancel stops the process.
+   Generation takes from seconds to minutes, so it runs beside the editor
+   and never holds the window.
+4. **Reading the mesh.** The generator writes one mesh file with a colour
+   for each vertex. The editor reads it with a reader of its own, refusing
+   more than a set number of vertices and triangles, any number that is
+   not finite, and any index out of range. The mesh is scaled to the size
+   asked for and fitted as described above.
+5. **Keeping it.** A generated mesh cannot be relied on to come out the
+   same from its prompt on another computer. The mesh is therefore saved
+   beside the form in the editor's own folder, and a save names it. A
+   form whose mesh is missing opens empty with a message.
+
+Nothing leaves the computer but the one download of the weights.
+
+**Models set aside.** Each would need Python, which is why none is used.
+
+| Model | Licence | Why not |
+|---|---|---|
+| [TRELLIS](https://github.com/microsoft/TRELLIS) (Microsoft) | MIT for models and most code | Python; 16 GB NVIDIA card; Lux3D lists a TRELLIS.2 family in Rust, not yet looked at |
+| [Shap-E](https://github.com/openai/shap-e) (OpenAI) | MIT for the code | Python; no port to Rust was found |
+| LLaMA-Mesh (NVIDIA) | its page says non-commercial (NSCLv1) | a language model that writes a mesh as text; licence and coarse results |
+| Hunyuan3D-2 (Tencent) | excludes the European Union, the United Kingdom and South Korea, as copies of its licence read | Python; not usable where the licence does not reach |
+| Cube (Roblox) | research only | see above |
 
 ### Order of work
 
@@ -440,22 +465,21 @@ editor makes no request to any service.
 | 2 | Calling MarkovJunior (stage 1 above) | step 1 |
 | 3 | The Smoothed fitter for grids, with repeats fitted once | step 1 |
 | 4 | The OBJ reader, a mesh's distance function, the Smoothed fitter for meshes | step 3 |
-| 5 | The bridge and one adapter, for the model chosen | step 4, and a decision |
+| 5 | `brickloft-generate` and the panel's prompt box | step 4, and the trial above |
 | 6 | Planes snapped to the grid, thin features kept | step 4, and a reading of the paper |
 | 7 | MarkovJunior read in Rust (stage 2) | step 2 having been used |
 
-Steps 1 and 2 are the least work for something that can be used. Step 5 is
-the one that cannot be tested on every computer: whoever builds it needs a
-card that can run the model.
+The player asked for the prompt first (2026-11-16), so the order worked
+in is the trial of Candle and Lux3D, then steps 1, 4 and 5 with the Blocks
+fitter left out, and MarkovJunior (steps 2, 3 and 7) afterwards.
 
 ### What is to be decided first
 
-- Whether an adapter script in Python may live in the repository.
-- Which model to support first: TRELLIS for its results, or Shap-E because
-  more computers can run it. Which graphics card the player's own computer
-  has settles much of this.
-- Whether Brickloft may start a program the player has installed at all.
-  It starts none today except the file manager.
+- Whether the trial's meshes are good enough to go on. This is decided by
+  looking at them.
+- Whether Brickloft may start a second program of its own, and download
+  weights when asked. It starts none today except the file manager, and
+  downloads nothing.
 - Whether to ask Roblox about Cube's licence, or to leave Cube out.
 
 ### What could go wrong
@@ -470,6 +494,9 @@ card that can run the model.
   and no flat faces. The winding number handles the first two; a mesh may
   still fit badly, and the panel should show the mesh beside its bricks so
   the player can judge.
-- **Licences change.** Each adapter records the licence it was written
-  against, and the check in step 2 of the bridge says which licence the
-  player is accepting.
+- **Licences change.** The generator records the licence each model's
+  weights were under when it was written, and shows it before the
+  download.
+- **A young dependency.** Lux3D may stop being kept up. The generator is
+  a program of its own so that it can be replaced without touching the
+  editor.
