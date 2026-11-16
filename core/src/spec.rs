@@ -2336,17 +2336,31 @@ mod tests {
         let built = &build(spec).unwrap_or_else(|e| panic!("{spec:?}: {e}"));
         assert!(!built.bricks.is_empty());
         let solver = Solver::new(&Models::default());
-        let mut seen = HashSet::new();
+        // No room in two bricks. Two may share a cell and no room: the two
+        // halves of a box cut along its diagonal, as along the crease of a
+        // spun profile. So a cell two bricks share is sampled, at 27 points
+        // clear of its faces and of the diagonals, and none may be in both.
+        let holds = |b: &CellBrick, p: [f64; 3]| {
+            let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+            crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+        };
+        let mut seen: std::collections::HashMap<[i32; 3], Vec<&CellBrick>> = std::collections::HashMap::new();
         for b in &built.bricks {
             assert!(b.ext.iter().all(|&e| (1..=80).contains(&e)), "{b:?}");
             assert!(solver.place(b).is_some(), "{b:?} has no orientation");
             for z in 0..b.ext[2] {
                 for y in 0..b.ext[1] {
                     for x in 0..b.ext[0] {
-                        assert!(
-                            seen.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z]),
-                            "{b:?} overlaps another brick"
-                        );
+                        let cell = [b.min[0] + x, b.min[1] + y, b.min[2] + z];
+                        let there = seen.entry(cell).or_default();
+                        for other in there.iter() {
+                            let shared = (0..27).any(|k| {
+                                let p = [cell[0] as f64 + (k % 3) as f64 / 3.0 + 0.17, cell[1] as f64 + (k / 3 % 3) as f64 / 3.0 + 0.15, cell[2] as f64 + (k / 9) as f64 / 3.0 + 0.19];
+                                holds(b, p) && holds(other, p)
+                            });
+                            assert!(!shared, "{b:?} overlaps {other:?}");
+                        }
+                        there.push(b);
                     }
                 }
             }
