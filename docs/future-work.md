@@ -75,8 +75,8 @@ What it needs:
 
 ## Patterns
 
-Seven patterns are built: stepping stones, medallions, a rug, a snowflake,
-planks, bricks and slabs. They were first planned as uses of
+Five patterns are built: stepping stones, medallions, a rug, planks and
+masonry. They were first planned as uses of
 [wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse),
 which fills a grid with tiles so that every tile agrees with its
 neighbours. None of them uses it now.
@@ -86,10 +86,14 @@ and gives the reasons.
 | Planned as | Built as | How |
 |---|---|---|
 | Stepping stone path | **stepping stones** | points scattered by dart throwing, the ground divided among them as a Voronoi diagram, each stone fitted by itself |
-| Stone slab wall | **slabs**, **bricks**, and stepping stones with the gap at 0 | courses and lengths drawn from the seed; stones of any shape are the stepping stones fitted together |
+| Stone slab wall | **masonry** | every piece the ground nearest its own point, with a measure that makes rectangles for bricks and goes over to the plain distance for stones; the tops bevelled cell by cell |
 | Mosaic floor | **medallions**, **planks** | a few figures repeated, with bands of a distance measure switched on and off; boards of lengths drawn from the seed |
-| Persian rug | **rug** | a border, a layered flower as the medallion, corner pieces and scattered flowers, each flower an outline given by a formula |
-| (not planned) | **snowflake** | arms that branch twice by a fixed rule, drawn as lines along the grid and its diagonals |
+| Persian rug | **rug** | a medallion carpet: borders, a medallion of lobed layers, corner pieces, and a field of scrolls packed circle by circle |
+
+Bricks and slabs were two patterns before masonry replaced both, and a
+snowflake pattern was built and then removed as having no use. A file that
+names bricks or slabs opens as masonry, and one that names a snowflake
+opens with no pattern.
 
 Wave function collapse was written and tried, and the solver remains in
 [core/src/wfc.rs](../core/src/wfc.rs) with its tests. Its rules reach a
@@ -97,6 +101,11 @@ few tiles, so it could not give a stone a size, a rug a medallion at its
 middle, or a floor its symmetry, and the floors it made from small samples
 were even and aimless. A pattern made only of small repeated motifs is
 the case it still suits, and no such pattern is planned yet.
+
+In progress:
+
+- **Parallel processing.** Work is under way to use several processor
+  cores. It is not finished, and no result is recorded here yet.
 
 What remains:
 
@@ -106,13 +115,17 @@ What remains:
   drawn in. Closing the seams needs the two stones either side of an edge
   to be given the same edge, which fitting each stone by itself does not
   do.
-- **A six-armed snowflake.** The snowflake has eight arms because a tile is
-  cut only at 45 degrees. Six arms need lines at 60 degrees, which tiles of
-  one cell draw as staircases.
-- **The rug.** It is being reworked to carry more ornament.
-- **A pattern with depth.** Every pattern is flat: one layer of tiles
-  pushed through the band's depth. A pattern in three dimensions, such as
-  a wall whose stones stand proud of the mortar, is not started.
+- **Bevelled corners of stones.** The bevelled top of an uneven stone in
+  masonry is clean along its sides and jagged at its corners. Where two
+  edges meet at an odd angle, the corners a cell reaches are no brick's
+  shape, and the cell is laid whole or left out. Bricks, whose corners are
+  right angles, are not affected.
+- **A small rug.** The rug shows its detail on a floor 100 tiles or more
+  across. Below that its medallion has one or two layers and its guards
+  are plain lines.
+- **A pattern with depth.** Masonry's bevel is the only depth a pattern
+  has. Every other pattern is one layer of tiles pushed through the band's
+  depth.
 - **Patterns on forms.** A pattern might later be laid over a fitted form
   (a mosaic on a dome) by choosing colours for the form's bricks. That
   needs the pattern mapped onto a curved surface and is a separate step.

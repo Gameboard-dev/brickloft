@@ -73,12 +73,14 @@ stretched, mirrored, turned, pulled out of shape at any point, coloured, and
 combined with others in one workspace.
 
 A flat band or a filled outline can be laid as a pattern in place of solid
-brick: stepping stones, stones fitted together, medallions, a rug, a
-snowflake, planks, bricks or slabs. Each pattern is generated from a seed
-and takes up to eight colours (see
+brick: stepping stones, stones fitted together, medallions, a rug, planks,
+or masonry of bricks or stones with bevelled tops. Each pattern is
+generated from a seed and takes up to eight colours (see
 [docs/features.md](docs/features.md#patterns)).
 
-<img src="docs/images/stepping-stones.png" width="230" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-rug.png" width="230" alt="A square floor laid as a rug, with a flower medallion at its middle, corner pieces and a border"> <img src="docs/images/pattern-slabs.png" width="230" alt="A wall laid as squared stones of many sizes with mortar between">
+<img src="docs/images/pattern-rug.png" width="700" alt="A floor laid as a Persian rug: borders with flowers on a swinging stem, a lobed medallion at the middle, corner pieces, and coiling stems with flowers over the field">
+
+<img src="docs/images/stepping-stones.png" width="345" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-masonry-bevelled.png" width="345" alt="A wall of bricks seen at an angle, the top of each brick bevelled down to the mortar">
 
 ## How good the result is
 

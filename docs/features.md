@@ -222,31 +222,36 @@ is in [algorithm.md](algorithm.md), sections 7.8 and 7.9.
 
 | Pattern | What it lays |
 |---|---|
-| **stepping stones** | separate stones of any shape with gaps between them. With **Gap** at 0 the stones are fitted together, as in a stone wall or a paved floor. |
+| **stepping stones** | separate stones of any shape with gaps between them. With **Gap** at 0 the stones are fitted together, as in a paved floor. |
 | **medallions** | a few ringed figures repeated over the whole floor |
-| **rug** | a Persian rug: a medallion of petals, flowers and leaves on stems, corner pieces and a border |
-| **snowflake** | one flake at the middle whose arms branch and branch again. No bricks are laid where there is no flake, so it can stand by itself or lie on another floor. |
+| **rug** | a Persian carpet: nested borders, a lobed medallion with pendants, corner pieces, and scrolling stems with flowers and leaves |
 | **planks** | a floor of boards |
-| **bricks** | level courses of bricks with mortar between |
-| **slabs** | squared stones of many sizes with mortar between |
+| **masonry** | a wall or floor of bricks all alike, or of stones as uneven as you ask, in courses, with or without mortar, and with their tops bevelled if you like |
 
 <img src="images/stepping-stones.png" width="340" alt="A curved path laid as stepping stones"> <img src="images/pattern-stones-fitted.png" width="340" alt="A square floor of stones fitted together with the gap at 0">
 
-<img src="images/pattern-medallions.png" width="225" alt="A floor of medallions: ringed squares, lozenges and octagons repeated in rows"> <img src="images/pattern-rug.png" width="225" alt="A rug with a flower medallion at its middle, corner pieces, small flowers on stems and a border"> <img src="images/pattern-snowflake.png" width="225" alt="An eight-armed snowflake of bricks alone, its arms branching twice">
+<img src="images/pattern-medallions.png" width="340" alt="A floor of medallions: ringed squares, lozenges and octagons repeated in rows"> <img src="images/pattern-planks.png" width="340" alt="A floor of boards of many lengths laid in rows">
 
-<img src="images/pattern-planks.png" width="225" alt="A floor of boards of many lengths laid in rows"> <img src="images/pattern-bricks.png" width="225" alt="A wall of bricks in level courses with mortar between"> <img src="images/pattern-slabs.png" width="225" alt="A wall of squared stones of many sizes with bevelled corners and mortar between">
+<img src="images/pattern-rug.png" width="690" alt="A rug 240 microbricks by 160: borders with a swinging stem and flowers, a lobed medallion at the middle with a pendant at each end, corner pieces, and coiling stems with flowers over the field">
+
+<img src="images/pattern-masonry-bricks.png" width="225" alt="A wall of bricks all alike with mortar between, seen from the front"> <img src="images/pattern-masonry-bevelled.png" width="225" alt="The same wall at an angle with its bricks' tops bevelled down to the mortar"> <img src="images/pattern-masonry-stones.png" width="225" alt="A wall of uneven stones at an angle, their tops bevelled, with jagged slopes at some corners">
 
 Stepping stones follow the curve, so a spline drawn across the ground
 becomes a winding stone path as wide as the band's **Thickness**. Stones
 fitted together with the gap at 0 still show narrow seams, because each
 stone is fitted with bricks by itself.
 
-The other six patterns are made of tiles one microbrick across. A tile is
+The other four patterns are made of tiles one microbrick across. A tile is
 one colour, or it is cut along a diagonal into two triangles of two
-colours. Medallions, the rug and the snowflake are their own mirror images
-and are set out from the middle of the floor. The floor's edge keeps the
-sloped bricks any flat form has, at most five microbricks long, and they
-take the pattern's colours.
+colours. Medallions and the rug are their own mirror images and are set
+out from the middle of the floor. The floor's edge keeps the sloped bricks
+any flat form has, at most five microbricks long, and they take the
+pattern's colours.
+
+A rug wants a large floor. Its parts are drawn afresh for the size it is
+given, and a small rug has little room to show them: a medallion of one or
+two layers and plain lines for its guards. Lay it 100 microbricks or more
+across. The picture above is 240 by 160.
 
 Each pattern shows the settings it has a use for.
 
@@ -255,28 +260,43 @@ Each pattern shows the settings it has a use for.
 | **Stone size** | stepping stones | about how far apart the middles of neighbouring stones are. A stone is a little under this across. |
 | **Gap** | stepping stones | how wide the space between stones is. 0 fits them together. |
 | **Uneven** | stepping stones | 0 for stones as alike as scattered stones can be, 1 for small ones crowded among large |
-| **Size** | planks, bricks, slabs | how large the boards, bricks or slabs are. 2 is the usual size, 1 half of it and 4 twice. |
-| **Bevel** | slabs | how many microbricks are cut off each corner of a slab. 0 leaves the corners square. |
-| **Border** | medallions, rug, snowflake | how many microbricks of plain ground are left round the edge |
+| **Size** | planks, masonry | how large the boards, bricks or stones are. 2 is the usual size, 1 half of it and 4 twice. |
+| **Uneven** | masonry | how far the pieces are from bricks all alike. At 0% every one is the same rectangle. As it rises they differ more in size and their edges leave the straight, until at 100% they are stones of any shape. |
+| **Mortar between** | masonry | a microbrick of mortar between one piece and the next. Without it the pieces touch and are told apart by their shades alone, so give the pattern several colours. |
+| **Bevel** | masonry | how many microbricks of each piece's top slope down to its edge, all round it. 0 leaves the tops flat. |
+| **Uneven stagger** | masonry | moves each course along by an amount of its own, so the upright joints fall anywhere. Untick it to set one **Stagger** for every course. |
+| **Stagger** | masonry | how far each course is moved along from the one before, as a share of a brick's length. 50% is the usual half-brick bond and 0% stacks the bricks in columns. |
+| **Courses upright** | masonry | runs the courses up the floor instead of across it, so the bricks stand on end |
+| **Border** | medallions, rug | how many microbricks of plain ground are left round the edge |
 | **Seed** | all | which one of the pattern: each whole number is a different one. **Another** takes the next number and the next of the pattern's sets of colours. |
+
+A bevel is real depth: the top of each brick or stone is built of sloped
+bricks along its sides and hipped ones at its corners. It needs room, so
+it can be no more than the form's **Depth** less one. Give the form a
+**Depth** of 2 or more. Bricks bevel cleanly. Uneven stones have clean
+slopes along their sides and jagged ones at some corners, where two edges
+meet at an angle no brick has.
 
 ### The colours of a pattern
 
 Choosing a pattern sets the form's colouring to **As the pattern has it**
-and brings in colours the pattern starts with: a rug's reds and golds, a
+and brings in colours the pattern starts with: a rug's reds and blues, a
 floor of planks' browns. Colours you have set yourself for a pattern are
 kept when you change to another pattern. **Another** always moves to the
 pattern's next set of colours.
 
 A pattern numbers its parts, and the colours are shared among the parts.
-The first colour is the ground, or the mortar of bricks and slabs, and it
-is used for nothing else. The other colours go to the pattern's parts in
-turn: a snowflake's arms, its branches and its tips, a rug's border lines,
-its flowers and its leaves. With two colours the whole pattern is one
-colour on the other. Each colour you add with **+** picks one more part
-out, up to eight colours.
+The first colour is the ground, or the mortar of masonry, and it is used
+for nothing else. The other colours go to the pattern's parts in turn.
+With two colours the whole pattern is one colour on the other. Each colour
+you add with **+** picks one more part out, up to eight colours.
 
-<img src="images/pattern-snowflake-two-colours.png" width="300" alt="A snowflake with two colours chosen, the whole flake in one colour"> <img src="images/pattern-snowflake-eight-colours.png" width="300" alt="The same snowflake with eight colours chosen, its arms, branches, tips, heart and plates each in a colour of their own">
+<img src="images/pattern-medallions-two-colours.png" width="300" alt="A floor of medallions with two colours chosen, the whole pattern in one colour on the other"> <img src="images/pattern-medallions-five-colours.png" width="300" alt="The same floor with five colours chosen, each of its four figures in a colour of its own">
+
+The rug needs all eight of its colours. Its numbers are tones (lines, a
+dark ground, a pale ground, petals, leaves, shade, hearts) that come back
+in every part, so with two or three colours its border and medallion turn
+into solid blocks.
 
 Planks and stepping stones have no ground. Each board or stone takes one of
 the colours, and the sets they start with are shades of one wood or one
@@ -352,10 +372,13 @@ bricks and form together. It can be rebuilt and re-measured from the command
 line (see [development.md](development.md)), which is how fits are compared
 before and after a change.
 
-If the editor ever closes by itself, it writes what went wrong to
-`brickloft-crash.txt` in the same folder before it goes. The file names the
-fault and the line of the program it happened on, and nothing about what
-was being built. It is the thing to send with a report of a crash.
+If the editor ever closes by itself, it first writes what went wrong to
+`brickloft-crash.txt` in the same folder. Each crash adds a record: the
+time, the program's version, the fault's message, the line of the program
+it happened on and the calls that led there. The editor sends the file
+nowhere. It is the thing to send with a report of a crash, since a window
+has no console to show the message in. The file is started afresh once it
+passes a megabyte.
 
 ## Every key and mouse action
 

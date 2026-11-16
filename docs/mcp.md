@@ -127,7 +127,7 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
-| `mosaic` | `[style, size, bevel, border, seed]` lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
+| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven` after it or not, lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
@@ -137,29 +137,41 @@ A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
-The five values of `mosaic` are these. A form has `mosaic` or `stones`,
-and if both are given the stones are laid.
+`mosaic` takes five values, and for masonry four more may follow. A form
+has `mosaic` or `stones`, and if both are given the stones are laid.
 
 | Value | Meaning |
 |---|---|
-| `style` | `medallions`, `rug`, `snowflake`, `planks`, `bricks` or `slabs` (see [features.md](features.md#patterns)) |
-| `size` | how large the boards, bricks or slabs are: 2 is usual, and 1 to 16 is accepted |
-| `bevel` | how many microbricks are cut off each corner of a slab, 0 to 8 |
+| `style` | `medallions`, `rug`, `planks` or `masonry` (see [features.md](features.md#patterns)) |
+| `size` | how large the boards, bricks or stones are: 2 is usual, and 1 to 16 is accepted |
+| `bevel` | masonry only: how many microbricks of each piece's top slope down to its edge, 0 to 8, and no more than the form's `depth` less one |
 | `border` | how many microbricks of plain ground are left round the edge, 0 to 8 |
 | `seed` | any whole number, each a different pattern |
+| `mortar` | masonry: 1 for a microbrick of mortar between pieces, 0 for none |
+| `stagger` | masonry: how far each course is moved along from the one before, in hundredths of a brick's length. 50 is the usual bond, 0 stacks the bricks, and -1 moves each course by an amount of its own. |
+| `upright` | masonry: 1 for courses running up the floor, 0 for across it |
+| `uneven` | masonry: 0 for bricks all alike, rising to 100 for stones of any shape |
 
-For example, this call lays a rug 80 microbricks square. A straight spline
-lying flat is a rectangle as wide as its `thick`.
+Left out, the last four are 1, -1, 0 and 0. The three values `mortar`,
+`stagger` and `upright` may also be given without `uneven`. A file or a
+call that names the old styles is still read: `bricks` and `slabs` become
+masonry with a bevel of 0, and `snowflake` becomes no pattern.
+
+For example, this call lays a wall of bevelled bricks in a half-brick
+bond, 80 microbricks by 60 and 3 deep. A straight spline lying flat is a
+rectangle as wide as its `thick`, and the bevel needs a `depth` of 2 or
+more.
 
 ```json
 {
   "name": "add_form",
   "arguments": {
-    "settings": { "form": "spline", "points": [[-40.5, 0.5, 0.5], [39.5, 0.5, 0.5]], "thick": 80, "depth": 1, "mosaic": ["rug", 2, 1, 0, 3] },
-    "colour": { "mode": "pattern", "colours": ["#70161e", "#d4a546", "#18325c", "#ecdcb4"] }
+    "settings": { "form": "spline", "points": [[-40.5, 0.5, 0.5], [39.5, 0.5, 0.5]], "thick": 60, "depth": 3, "mosaic": ["masonry", 2, 1, 0, 3, 1, 50, 0, 0] }
   }
 }
 ```
+
+A rug wants a rectangle 100 microbricks or more across to show its detail.
 
 A pattern shows its colours only in the mode `pattern`. A form added with
 a pattern and no `colour` comes in that pattern's own colours, as it does

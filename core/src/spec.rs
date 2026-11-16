@@ -347,6 +347,16 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     if spec.grain > 0 {
         return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured);
     }
+    // A pattern of tiles is laid at single microbricks whatever the budget.
+    // A tile is one brick, so a pattern's detail is its brick count: a rug
+    // 240 by 160 is some twenty thousand bricks, and kept within a budget
+    // of 2,500 it was built three times coarser, with every flower a blot.
+    // A larger brick can still be asked for by name (the case above). The
+    // budget is there to keep a solid form from being more bricks than it
+    // needs, and a pattern needs every one of its.
+    if spec.mosaic.is_some() {
+        return build_at(spec, 1, measured);
+    }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
     // g cubed fewer cells to look at, so every size tried on the way down
@@ -2864,6 +2874,18 @@ mod tests {
             grain: 3,
             ..Spec::default()
         });
+    }
+
+    #[test]
+    fn a_pattern_is_laid_at_single_microbricks_whatever_the_budget() {
+        // a floor 240 by 160, which as a plain floor is a handful of bricks
+        let floor = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-119.5, 0.5, 0.5), DVec3::new(120.5, 0.5, 0.5)], thick: 160.0, depth: 1, plane: 2, budget: 2500, mosaic, ..Spec::default() };
+        let rug = crate::pattern::STYLES.iter().position(|style| style.name == "rug").unwrap();
+        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: 0, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: 0 }))).unwrap();
+        // far over the budget, and at the finest size: with the fault put back it is built at 2 or 3 and comes in under it
+        assert_eq!(built.grain, 1);
+        assert!(built.bricks.len() > 2500 * 3, "{} bricks", built.bricks.len());
+        assert_eq!(built.shades.len(), built.bricks.len());
     }
 
     #[test]

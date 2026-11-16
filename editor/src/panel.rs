@@ -610,7 +610,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if built.grain > 1 {
             ui.label(format!("Brick size {} microbricks", built.grain));
         }
-        if state.spec.grain == 0 && built.bricks.len() > state.spec.budget {
+        if state.spec.mosaic.is_some() && state.spec.grain == 0 {
+            // (a pattern is not kept within the budget: see `brickloft_core::spec::build_as`)
+            ui.label("A pattern is laid at single microbricks, whatever the brick budget: its detail is its bricks. Make the form larger for more detail, or set Brick size for less.");
+        } else if state.spec.grain == 0 && built.bricks.len() > state.spec.budget {
             ui.label("Over budget: larger bricks would be too coarse for the form's thinnest part. Thicken it, shrink it, or raise Simplify.");
         }
         if built.solid > 0.0 {
