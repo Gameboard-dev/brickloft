@@ -477,7 +477,9 @@ pub fn run_form(form: usize) {
             // the arrow's mesh lies along x, one long: turned to its axis and stretched to its length
             let turns = [Mat4::identity(), Mat4::from_angle_z(degrees(90.0)), Mat4::from_angle_y(degrees(-90.0))];
             for ((arrow, turn), length) in arrows.iter_mut().zip(turns).zip(reach) {
-                arrow.set_transformation(Mat4::from_translation(v(middle)) * turn * Mat4::from_nonuniform_scale(length as f32, 0.5, 0.5));
+                // (as thick as suits its length, so that a small one is not a blob)
+                let thick = (length as f32 / 10.0).clamp(0.12, 0.6);
+                arrow.set_transformation(Mat4::from_translation(v(middle)) * turn * Mat4::from_nonuniform_scale(length as f32, thick, thick));
             }
             screen.render(&camera, &arrows, &lights);
         }

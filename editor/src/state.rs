@@ -318,6 +318,10 @@ pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
     turned_way(spec.grid, p - DVec3::from_array(spec.grid_at), true)
 }
 
+/// How long the arrows and how wide the rings are, as a share of the way
+/// from the middle of a grid's forms to their furthest side.
+pub const GIZMO: f64 = 0.25;
+
 /// How far from a dragged dot others go with it, in reaches of an added point.
 const FOLLOW_REACH: f64 = 3.0;
 
@@ -1049,9 +1053,11 @@ impl State {
     /// the view.
     pub fn gizmo(&self) -> Option<(DVec3, [f64; 3])> {
         let (lo, hi) = self.grid_box()?;
-        // six tenths of the way out to the furthest side of what is on the
-        // grid, so that it grows and shrinks with it and is never lost in it
-        let reach = (0.6 * (hi - lo).max_element() / 2.0).max(3.0);
+        // A quarter of the way out to the furthest side of what is on the
+        // grid: it grows and shrinks with the grid, and leaves most of it
+        // clear. (Six tenths of the way, as it was first made, covered the
+        // forms it was there to move.)
+        let reach = (GIZMO * (hi - lo).max_element() / 2.0).max(1.5);
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), [reach; 3]))
     }
 
@@ -1828,8 +1834,8 @@ mod tests {
         let both_lo = (2 * own.0 .0[0] + own.1[0]).min(2 * mate.bounds.unwrap().0[0] + mate.place[0]) as f64 / 2.0;
         let both_hi = (2 * own.0 .1[0] + own.1[0]).max(2 * mate.bounds.unwrap().1[0] + mate.place[0]) as f64 / 2.0;
         assert!((middle.x - (both_lo + both_hi) / 2.0).abs() < 1e-9, "not at the middle of the two: {middle:?}");
-        // six tenths of the way out to their furthest side, and the rings as large as the arrows
-        assert!((reach[0] - 0.6 * (both_hi - both_lo) / 2.0).abs() < 1e-9 && state.rings().unwrap().1 == reach[0]);
+        // a quarter of the way out to their furthest side, and the rings as large as the arrows
+        assert!((reach[0] - GIZMO * (both_hi - both_lo) / 2.0).abs() < 1e-9 && state.rings().unwrap().1 == reach[0]);
         let bricks = state.built.bricks.clone();
         let foot = state.handles()[0].1;
 
@@ -2045,7 +2051,7 @@ mod tests {
         // By an arrow it moves along that arrow's axis alone, whatever the
         // view and whatever is locked: here along y, which the lock holds.
         let (middle, reach) = state.gizmo().unwrap();
-        assert!(reach.iter().all(|r| *r >= 5.0));
+        assert!(reach.iter().all(|r| *r >= 1.5));
         let far = middle + DVec3::new(-60.0, -20.0, 40.0);
         let towards = |p: DVec3| (p - far).normalize();
         assert!(state.hold_arrow(1, far, towards(middle + DVec3::Y * 3.0)));
