@@ -102,6 +102,117 @@ pub(crate) fn parts_of(c: [i32; 4], middle: f64) -> Option<Vec<(u8, i32, i32, u8
     Some(parts)
 }
 
+/// Columns of a solid that has a top and an under side over the ground it
+/// covers, as a tube lifted along its length has: for each cell of ground
+/// in `cells`, the bricks between the two.
+///
+/// `span` gives the under side and the top along `axis` over a point (u, v)
+/// of the plane across it; where the solid ends, the two are equal. Both
+/// are taken at the cell's four corners and rounded to whole cells, and
+/// each is then made as [`parts_of`] makes a square of a surface: the top
+/// from its corners' heights, the under side the same way upside down.
+/// Whatever is between them is whole.
+///
+/// So wherever one brick can make each slope the solid's surface is sloped
+/// bricks meeting edge to edge, with no steps: across the tube, where its
+/// top falls away to its sides, and along it, where it climbs. A cell whose
+/// corners no single bricks can join, or where the solid is thinner than
+/// it climbs across the cell, is a plain block from the middle of its
+/// under side to the middle of its top.
+///
+/// Returns the sloped and three-cornered bricks, and the cells that are
+/// whole, for the caller to join into cubes with its own.
+pub fn columns(cells: &[(i32, i32)], span: &dyn Fn(f64, f64) -> (f64, f64), axis: usize, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+    let (ua, va) = plane_axes(axis);
+    let limit = max_ext.max(1);
+    let mut bricks: Vec<CellBrick> = Vec::new();
+    let mut whole: Vec<[i32; 3]> = Vec::new();
+    let level = |u: i32, v: i32| {
+        let (under, top) = span(u as f64, v as f64);
+        ((under.round() as i32).min(top.round() as i32), top.round() as i32)
+    };
+    for &(u, v) in cells {
+        let corners = [level(u, v), level(u + 1, v), level(u, v + 1), level(u + 1, v + 1)];
+        // Four corners at four heights, neither pair of opposite ones level,
+        // cannot be joined by single bricks: a tube running askew of the
+        // grid has many such cells, since its top falls one way across it
+        // and climbs another along it. The nearer pair is then made level,
+        // at the height between them, and the cell is two half squares
+        // rising to and from that pair. Its edge no longer quite meets its
+        // neighbours' at those two corners: a lip of half the difference
+        // between them, where a plain block would be a step of all of it.
+        let joinable = |h: [i32; 4]| {
+            if parts_of(h, 0.5).is_some() {
+                return h;
+            }
+            let (a, b) = if (h[0] - h[3]).abs() <= (h[1] - h[2]).abs() { (0, 3) } else { (1, 2) };
+            let mut made = h;
+            // (halved towards zero from the lower, so that a surface and its mirror image agree)
+            let between = h[a].min(h[b]) + (h[a] - h[b]).abs() / 2;
+            (made[a], made[b]) = (between, between);
+            made
+        };
+        let (under, top) = (joinable(corners.map(|c| c.0)), joinable(corners.map(|c| c.1)));
+        // (made level separately, the two sides can cross at a corner where the solid is thin)
+        let under = [0, 1, 2, 3].map(|k| under[k].min(top[k]));
+        if (0..4).all(|k| under[k] == top[k]) {
+            continue; // nothing over this cell
+        }
+        let (under_hi, top_lo) = (*under.iter().max().unwrap(), *top.iter().min().unwrap());
+        let (mid_under, mid_top) = span(u as f64 + 0.5, v as f64 + 0.5);
+        let share = |lo: i32, hi: i32, at: f64| (at - lo as f64) / (hi - lo).max(1) as f64;
+        let above = parts_of(top, share(top_lo, *top.iter().max().unwrap(), mid_top));
+        // the under side is a surface too, seen from below: its heights negated
+        let hung = under.map(|h| -h);
+        let below = parts_of(hung, share(-under_hi, -*under.iter().min().unwrap(), -mid_under));
+        let mut brick = |local: u8, from: i32, to: i32| {
+            if to <= from || shape_info(local).is_none() {
+                return;
+            }
+            let mask = (0..8u8).filter(|c| local >> c & 1 == 1).fold(0u8, |m, c| m | 1 << ((c & 1) << ua | (c >> 1 & 1) << va | (c >> 2) << axis));
+            let upright = local & 15 == local >> 4;
+            let mut at = from;
+            while at < to {
+                let run = if upright { (to - at).min(limit) } else { to - at };
+                let (mut min, mut ext) = ([0; 3], [0; 3]);
+                (min[ua], min[va], min[axis]) = (u, v, at);
+                (ext[ua], ext[va], ext[axis]) = (1, 1, run);
+                bricks.push(CellBrick { mask, min, ext });
+                at += run;
+            }
+        };
+        let mut block = |from: i32, to: i32| {
+            for w in from..to {
+                let mut at = [0; 3];
+                (at[ua], at[va], at[axis]) = (u, v, w);
+                whole.push(at);
+            }
+        };
+        match (above, below) {
+            // the two sides clear of each other: whole between the highest of the under side and the lowest of the top
+            (Some(above), Some(below)) if top_lo >= under_hi => {
+                block(under_hi, top_lo);
+                for (foot, from, peak, up, in_valley) in above {
+                    brick(foot | foot << 4, top_lo, from);
+                    if up != 0 {
+                        brick(if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 }, from, peak);
+                    }
+                }
+                for (foot, from, peak, up, in_valley) in below {
+                    // upside down: what was `from..peak` going up is `-peak..-from`, with the piece's two ends exchanged
+                    brick(foot | foot << 4, -from, under_hi);
+                    if up != 0 {
+                        let piece = if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 };
+                        brick(piece >> 4 | (piece & 15) << 4, -peak, -from);
+                    }
+                }
+            }
+            _ => block(mid_under.round() as i32, (mid_top.round() as i32).max(mid_under.round() as i32)),
+        }
+    }
+    (bricks, whole)
+}
+
 /// A band to raise. Everything is in cells.
 pub struct Ribbon<'a> {
     /// the band's bricks as fitted flat: all of one thickness across `axis`
@@ -267,6 +378,41 @@ mod tests {
         assert_eq!(parts_of([0, 1, 1, 3], 0.5), Some(vec![(0b0111, 0, 1, 0b0110, false), (0b1110, 1, 3, 0b1000, false)]));
         // four heights with neither pair of opposite corners level: no single bricks
         assert_eq!(parts_of([0, 2, 1, 3], 0.5), None);
+    }
+
+    #[test]
+    fn a_tube_that_climbs_is_sloped_on_top_and_underneath() {
+        // a round bar of radius 3 along x, lying across z, climbing one cell in two from x = 4 to x = 12
+        let lift = |u: f64| ((u - 4.0) / 2.0).clamp(0.0, 4.0);
+        let span = |u: f64, v: f64| {
+            let half = (9.0 - v * v).max(0.0).sqrt();
+            (10.0 + lift(u) - half, 10.0 + lift(u) + half)
+        };
+        let cells: Vec<(i32, i32)> = (0..16).flat_map(|u| (-4..4).map(move |v| (u, v))).collect();
+        let (pieces, whole) = columns(&cells, &span, 2, 80);
+        let mut bricks = pieces.clone();
+        bricks.extend(whole.iter().map(|c| CellBrick { mask: CUBE, min: *c, ext: [1; 3] }));
+        // no point is in two bricks; inside the bar by a cell there is one, and outside it by a cell none
+        let n = 41;
+        for k in 0..n * n * n {
+            let p = [((k % n) as f64 + 0.31) / n as f64 * 16.0, ((k / n % n) as f64 + 0.47) / n as f64 * 8.0 - 4.0, 5.0 + ((k / (n * n)) as f64 + 0.29) / n as f64 * 14.0];
+            let held = holding(&bricks, p);
+            assert!(held <= 1, "{held} bricks hold {p:?}");
+            let (under, top) = span(p[0], p[1]);
+            // (across the bar its side is steep, so a cell's worth across counts as well)
+            let inside = |by: f64| p[1].abs() < 3.0 - by.max(0.0) && p[2] > under + by && p[2] < top - by;
+            if inside(1.0) {
+                assert_eq!(held, 1, "a hole at {p:?}");
+            }
+            if !(p[1].abs() < 4.0 && p[2] > under - 1.5 && p[2] < top + 1.5) {
+                assert_eq!(held, 0, "a brick at {p:?}, off the bar");
+            }
+        }
+        // where it climbs, its top and its under side are sloped bricks, and it is the same on both sides
+        let sloped = |on_top: bool| pieces.iter().filter(|b| b.mask & 15 != b.mask >> 4 && b.min[0] >= 4 && b.min[0] < 12 && (b.min[2] as f64 > 10.0 + lift(b.min[0] as f64)) == on_top).count();
+        assert!(sloped(true) >= 16 && sloped(false) >= 16, "{} on top, {} underneath", sloped(true), sloped(false));
+        let all: std::collections::HashSet<[i32; 3]> = bricks.iter().map(|b| b.min).collect();
+        assert!(all.iter().all(|c| all.contains(&[c[0], -1 - c[1], c[2]])), "not the same either side of its middle");
     }
 
     #[test]

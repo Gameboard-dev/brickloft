@@ -1076,7 +1076,18 @@ impl State {
     /// its own, level until its rings are turned.
     pub fn add_grid(&mut self) {
         let next = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
+        let paint = self.paint.clone();
         self.add_form(Spec { on_grid: next, grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() });
+        self.paint = paint;
+    }
+
+    /// Add a copy of the form being edited to its grid: the same form,
+    /// coloured the same, set down beside it. (A form added from the saved
+    /// ones starts in the plain colour: a saved form has none of its own.)
+    pub fn add_copy(&mut self) {
+        let paint = self.paint.clone();
+        self.add_form(self.full_spec());
+        self.paint = paint;
     }
 
     /// Whether another form can be in the way of the one being edited:
@@ -1744,6 +1755,14 @@ mod tests {
         state.refresh(|| 0.0);
         assert_eq!(state.others.iter().map(|o| o.spec.on_grid).collect::<Vec<_>>(), vec![0, 0]);
         assert_eq!(state.spec.on_grid, 1);
+        // (a copy is coloured as what it was copied from)
+        state.paint.colours = vec![[10, 200, 30]];
+        state.add_copy();
+        assert_eq!(state.paint.colours, vec![[10, 200, 30]]);
+        assert_eq!(state.others.last().unwrap().paint.colours, vec![[10, 200, 30]]);
+        state.remove_active();
+        state.paint = Paint::default();
+        state.refresh(|| 0.0);
         // back to the grid of two: its arrows and rings stand at the middle of both forms
         state.activate(0);
         state.refresh(|| 0.0);

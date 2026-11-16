@@ -1207,8 +1207,9 @@ fn curve(
         }
     }
     // A round tube pulled out of its plane keeps its pipe wherever the pull
-    // does not reach (see `patched`). Not one made oval, whose pipe is not
-    // the plain tube the pulled curve is measured as.
+    // does not reach, and is built in columns where it does (see
+    // `lifted_tube`). Not one made oval, whose pipe is not the plain tube
+    // the pulled curve is measured as.
     if let (Some(axis), true) = (lay_across, spec.tube) {
         let half = spec.thick / 2.0;
         let round = (spec.stretch[axis] - 1.0).abs() < 1e-9 && !spec.fill;
@@ -1223,11 +1224,27 @@ fn curve(
                 .collect();
             let (flat, _) = stacked(spec, level.clone(), closed, axis)?;
             let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
-            let before = Field::Tube(Stroke::new(&level, half, closed, Some(0.5)));
+            // The pipe may have been laid half a cell aside of its curve, to
+            // land on the lattice (see `stacked`): by as much as its middle
+            // is off the level curve's, across the plane. What it is
+            // measured against is the curve moved the same way.
+            let (ua, va) = plane_axes(axis);
+            let aside = |k: usize| {
+                let bricks = (laid.iter().map(|b| b.min[k]).min().unwrap_or(0) + laid.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap_or(0)) as f64 / 2.0;
+                let curve = (level.iter().map(|p| p[k]).fold(f64::MAX, f64::min) + level.iter().map(|p| p[k]).fold(f64::MIN, f64::max)) / 2.0;
+                if (bricks - curve + 0.5).abs() < 0.26 { -0.5 } else { 0.0 }
+            };
+            let mut shift = DVec3::ZERO;
+            (shift[ua], shift[va]) = (aside(ua), aside(va));
+            let path: Vec<DVec3> = path.iter().map(|p| *p + shift).collect();
             let after = Field::Tube(Stroke::new(&path, half, closed, Some(0.5)));
-            let lo = path.iter().chain(&level).fold(DVec3::MAX, |a, p| a.min(*p)) - half;
-            let hi = path.iter().chain(&level).fold(DVec3::MIN, |a, p| a.max(*p)) + half;
-            return patched(spec, laid, &before, 1.0, after, lo, hi, path);
+            let lo = path.iter().fold(DVec3::MAX, |a, p| a.min(*p)).min(level.iter().fold(DVec3::MAX, |a, p| a.min(*p))) - half - 1.0;
+            let hi = path.iter().fold(DVec3::MIN, |a, p| a.max(*p)).max(level.iter().fold(DVec3::MIN, |a, p| a.max(*p))) + half + 1.0;
+            let bricks = lifted_tube(spec, &laid, &path, axis, lay_at[axis], half);
+            let (solid, path) = volume(after.clone(), lo, hi, path)?;
+            let Solid::Volume { min, max, .. } = solid else { unreachable!() };
+            // laid out whole and measured afterwards, as a pyramid is
+            return Ok((Solid::Pyramid { bricks: Some(bricks).filter(|b| !b.is_empty() && spec.wedges), field: after, min, max }, path));
         }
     }
     // the axis the curve lies flat across, if any: every point shares that coordinate
@@ -1266,6 +1283,125 @@ fn curve(
         _ => Field::Tube(Stroke::new(&path, half, closed, Some(0.5))),
     };
     volume(field, lo, hi, path)
+}
+
+/// A round tube whose curve has been pulled out of the plane it lay in, at
+/// `plane` along `axis` (`path` being the curve where the pipe was laid): the
+/// bricks of the flat pipe `laid` wherever the
+/// curve is still in the plane, and columns between the tube's under side
+/// and its top wherever it has left it (see `fit_ribbon::columns`).
+///
+/// The ground is shared out a cell at a time: a cell under a lifted part of
+/// the curve is rebuilt from top to bottom, and so is every cell under a
+/// sloped brick of the pipe that reaches into one, since such a brick
+/// cannot be cut. The rest of the pipe stands as it was.
+///
+/// It was first fitted cell by cell where it was lifted, from the tube's
+/// distance function, on the argument that bricks cannot make a round tube
+/// at a slant. They can, near enough: the tube's top and its under side are
+/// each a surface over the ground, and a surface is sloped bricks.
+fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, plane: f64, radius: f64) -> Vec<CellBrick> {
+    use std::collections::HashSet;
+    let (ua, va) = plane_axes(axis);
+    if laid.is_empty() {
+        return Vec::new();
+    }
+    // the middle of the flat pipe along the axis, which its curve runs through
+    let centre = (laid.iter().map(|b| b.min[axis]).min().unwrap() + laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap()) as f64 / 2.0;
+    // the part of the curve nearest a point of the ground: how far off, how high, how steep
+    let near = |u: f64, v: f64| {
+        let at = DVec2::new(u, v);
+        let mut best = (f64::INFINITY, 0.0, 0.0);
+        for pair in path.windows(2) {
+            let (a, b) = (DVec2::new(pair[0][ua], pair[0][va]), DVec2::new(pair[1][ua], pair[1][va]));
+            let along = b - a;
+            let length = along.length();
+            let t = if length > 1e-9 { ((at - a).dot(along) / (length * length)).clamp(0.0, 1.0) } else { 0.0 };
+            let off = (a + along * t).distance(at);
+            if off < best.0 {
+                let rise = pair[1][axis] - pair[0][axis];
+                best = (off, pair[0][axis] + rise * t - plane, if length > 1e-9 { rise / length } else { 0.0 });
+            }
+        }
+        best
+    };
+    // under side and top: the tube's section stands square to its curve, so
+    // where the curve climbs it is that much taller measured straight up
+    let span = |u: f64, v: f64| {
+        let (off, lift, slope) = near(u, v);
+        let tall = if off < radius { (radius * radius - off * off).sqrt() * (1.0 + slope * slope).sqrt() } else { 0.0 };
+        (centre + lift - tall, centre + lift + tall)
+    };
+    let ground = |b: &CellBrick| {
+        let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
+        (0..wv).flat_map(move |j| (0..wu).map(move |i| (u + i, v + j)))
+    };
+    // the ground under the lifted part, a cell beyond the tube's own width each way
+    let reach = radius.ceil() as i32 + 2;
+    let mut lifted: HashSet<(i32, i32)> = HashSet::new();
+    for pair in path.windows(2).filter(|p| (p[0][axis] - plane).abs() > 1e-6 || (p[1][axis] - plane).abs() > 1e-6) {
+        for p in pair {
+            let (u, v) = (p[ua].floor() as i32, p[va].floor() as i32);
+            for dv in -reach..=reach {
+                for du in -reach..=reach {
+                    lifted.insert((u + du, v + dv));
+                }
+            }
+        }
+    }
+    // and under every sloped brick of the pipe that reaches into it
+    loop {
+        let before = lifted.len();
+        for b in laid.iter().filter(|b| b.mask != CUBE) {
+            if ground(b).any(|c| lifted.contains(&c)) {
+                lifted.extend(ground(b));
+            }
+        }
+        if lifted.len() == before {
+            break;
+        }
+    }
+    let mut bricks: Vec<CellBrick> = Vec::new();
+    let mut whole: Vec<[i32; 3]> = Vec::new();
+    for b in laid {
+        if b.mask != CUBE {
+            if !ground(b).any(|c| lifted.contains(&c)) {
+                bricks.push(*b);
+            }
+            continue;
+        }
+        if !ground(b).any(|c| lifted.contains(&c)) {
+            bricks.push(*b);
+            continue;
+        }
+        // a cube cut by the lifted ground: what is left of it, cell by cell
+        for cell in ground(b).filter(|c| !lifted.contains(c)) {
+            for w in 0..b.ext[axis] {
+                let mut at = [0; 3];
+                (at[ua], at[va], at[axis]) = (cell.0, cell.1, b.min[axis] + w);
+                whole.push(at);
+            }
+        }
+    }
+    let mut cells: Vec<(i32, i32)> = lifted.into_iter().collect();
+    cells.sort();
+    let (pieces, blocks) = crate::fit_ribbon::columns(&cells, &span, axis, spec.max_ext);
+    bricks.extend(pieces);
+    whole.extend(blocks);
+    if !whole.is_empty() {
+        let lo = [0, 1, 2].map(|k| whole.iter().map(|c| c[k]).min().unwrap());
+        let n = [0, 1, 2].map(|k| (whole.iter().map(|c| c[k]).max().unwrap() + 1 - lo[k]) as usize);
+        if (n[0] * n[1] * n[2]) as i64 <= MAX_CELLS {
+            let mut grid = vec![0u8; n[0] * n[1] * n[2]];
+            for c in &whole {
+                grid[(c[0] - lo[0]) as usize + n[0] * ((c[1] - lo[1]) as usize + n[1] * (c[2] - lo[2]) as usize)] = CUBE;
+            }
+            bricks.extend(fit_volume::merge(grid, n, spec.max_ext.max(1) as usize).into_iter().map(|b| CellBrick { mask: CUBE, min: [b.min[0] + lo[0], b.min[1] + lo[1], b.min[2] + lo[2]], ext: b.ext }));
+        } else {
+            bricks.extend(whole.iter().map(|c| CellBrick { mask: CUBE, min: *c, ext: [1; 3] }));
+        }
+    }
+    bricks
 }
 
 /// A flat band whose curve has been pulled out of the plane it lay in, at
@@ -2626,7 +2762,23 @@ mod tests {
         let lifted = Spec { pulls: vec![(at(-30.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 6.0))], pull_reach: 10.0, ..ring.clone() };
         let (flat, raised) = (build(&ring).unwrap(), build(&lifted).unwrap());
         assert!(kept(&flat, &raised) > 0.5, "only {} of the pipe's bricks are left", kept(&flat, &raised));
-        assert!(no_two_share(&raised));
+        // No point is in two bricks. (Not `no_two_share`: where it is lifted
+        // the tube is built of half squares, two to a box.) Looked for over
+        // the lifted part, where the new bricks and the kept ones meet.
+        for k in 0..30 * 30 * 30 {
+            let t = [(k % 30) as f64 + 0.31, (k / 30 % 30) as f64 + 0.47, (k / 900) as f64 + 0.29].map(|v| v / 30.0);
+            let p = [-46.0 + t[0] * 32.0, -22.0 + t[1] * 44.0, -6.0 + t[2] * 20.0];
+            let held = raised
+                .bricks
+                .iter()
+                .filter(|b| {
+                    let u = [0, 1, 2].map(|i| (p[i] - b.min[i] as f64) / b.ext[i] as f64);
+                    u.iter().all(|v| (0.0..1.0).contains(v)) && crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+                })
+                .count();
+            assert!(held <= 1, "{held} bricks hold {p:?}");
+        }
+        assert!(stepped(&lifted, &raised) < 0.08, "{} stepped", stepped(&lifted, &raised));
         assert!(raised.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() >= flat.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() + 4);
         // every brick it keeps on the far side is one the plain ring has
         let plain: HashSet<(u8, [i32; 3], [i32; 3])> = flat.bricks.iter().map(key).collect();

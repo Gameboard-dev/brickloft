@@ -288,7 +288,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             // said where it applies, since the difference is large and not obvious
             let across = s.plane.min(2);
             if state.form == CIRCLE && s.pulls.iter().any(|(_, by)| by[across] != 0.0) {
-                ui.label("A point pulled out of the circle's plane is rough where it was pulled: bricks cannot make a smooth round tube or band at a slant. Pulled within the plane it stays smooth. To tilt the whole circle, drag one of its rings.");
+                ui.label("A point pulled out of the circle's plane is built of sloped pieces where it was pulled, and is less smooth there than one pulled within the plane, more so the steeper it climbs. To tilt the whole circle, drag one of its rings.");
             }
         }
         ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")).on_hover_text("How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.");
@@ -445,7 +445,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
     }
     ui.horizontal(|ui| {
         if ui.button("Add to this grid").on_hover_text("Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.").clicked() {
-            state.add_form(state.full_spec());
+            state.add_copy();
         }
         if ui.button("New grid").on_hover_text("Another of this form on a grid of its own, which its rings turn to any angle and its arrows move, apart from every other grid.").clicked() {
             state.add_grid();
