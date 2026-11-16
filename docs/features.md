@@ -939,7 +939,7 @@ is run and how its grid becomes bricks is in
 | Setting | What it does |
 |---|---|
 | **Program** | Which program runs. The four buildings come first: **Apartemazements** (a block of flats), **CarmaTower** (a tower), **ModernHouse** and **SeaVilla**. Then **PillarsOfEternity** and **Escher** (walkways and stairs) and **StrangeDungeon** (rooms and passages). Programs you have imported follow. Choosing one sets its usual grid and its own colours. |
-| **Import...** | Brings in a program from an `.xml` file (see [Importing a program](#importing-a-program)). |
+| **Import...** | Brings in a program from an `.xml` file whose path you type, as dropping the file on the window does (see [Importing a program](#importing-a-program)). |
 | **Grid** | How many cells the program's starting grid has along X, Y and Z, from 1 to 128 each. A larger grid is a larger building and a longer run. A program may build several cells for each cell of this grid: the four buildings build 5 or more. **Usual** puts back the size the program was written for. |
 | **Cell size** | How many microbricks each cell of the finished grid is built across, from 1 to 20. It changes the size of the building and nothing else, and the program is not run again for it. |
 | **Seed** | Which of the program's buildings this is. **Another** takes the next one. |
@@ -1007,8 +1007,9 @@ figure, the limit and what to change.
 
 ### Importing a program
 
-Type or paste the path of a program's `.xml` file into the box beside
-**Import...** and press the button or Enter. The editor checks that the
+Drop a program's `.xml` file on the window, or type or paste its path
+into the box beside **Import...** and press the button or Enter. The
+editor checks that the
 program loads, copies it into `Documents/brickloft/programs/` with the
 files it reads, adds it to the **Program** list, and makes the form you
 are editing that program. A save that names an imported program opens

@@ -20,7 +20,8 @@
 //! the editor, which are the original's own.
 //!
 //! Only a person brings a program in, by typing its path in the panel or
-//! dropping the file on the window. Claude, through MCP, may name a
+//! dropping the file on the window (`State::drop_file`, from the window's
+//! loop over dropped files in `lib.rs`). Claude, through MCP, may name a
 //! program that is already here and has no tool that takes a path.
 
 use brickloft_core::rewrite::form::{self, Program};

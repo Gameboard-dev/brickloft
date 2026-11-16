@@ -32,9 +32,13 @@
 //! save is opened, stand empty until a thread here has run them
 //! ([`State::grow_others`]).
 
-use super::{bounds_of, State, PROGRAM, SLOW_BUILD_MS};
+use super::{State, PROGRAM};
+// (what only the builds behind the window use, which a page in a browser has none of)
+#[cfg(not(target_arch = "wasm32"))]
+use super::{bounds_of, SLOW_BUILD_MS};
 use brickloft_core::rewrite::form::{self, Grower, Outcome, Program};
 use brickloft_core::rewrite::Fault;
+#[cfg(not(target_arch = "wasm32"))]
 use brickloft_core::spec::{Built, Form};
 use std::sync::Arc;
 
@@ -75,6 +79,7 @@ pub struct Grow {
     /// a form of the workspace that is not the one being edited, being run on a thread of its own, and those that could not be
     #[cfg(not(target_arch = "wasm32"))]
     other: Option<(Program, std::thread::JoinHandle<()>)>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     refused: Vec<Program>,
 }
 

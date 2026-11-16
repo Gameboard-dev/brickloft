@@ -414,12 +414,11 @@ What remains:
   flights of two steps or more. A single step is left square, since it
   is also the edge of every slab, so a low parapet or a one-step roof
   edge stays stepped.
-- **A file dropped on the window.** The editor has a function that
-  takes a dropped `.xml` file (`State::drop_file`), and nothing calls
-  it yet. The windowing library reports dropped files only to a frame
-  loop written by hand, which the mesh import branch adds; when that is
-  merged, its loop over dropped files needs one line to offer each to
-  this function first.
+- **A file dropped on the window, tried by hand.** A dropped `.xml`
+  file is brought in as a program (`State::drop_file`, which the
+  window's loop over dropped files offers each file to before it opens
+  one as a mesh). The function is tested; a file has not been dragged
+  onto the window to see it happen.
 - **A picker for the file.** A path is typed or pasted. A file dialog
   is a crate for each of three systems' dialogs, which the project has
   so far done without.
