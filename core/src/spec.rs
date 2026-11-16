@@ -389,8 +389,21 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     // are a cell or two thick, and at a coarser size they are gone and
     // what is left is a trunk in a cloud. A tree is tens of thousands of
     // bricks; fewer come from a smaller tree or a brick size asked for.
+    //
+    // A tree too large to be fitted at single microbricks is fitted at the
+    // finest size it can be. Refused instead, it stopped growing: past
+    // some height the slider moved and the tree did not, the last one
+    // that could be built standing there still. A tree that large has
+    // parts thick enough to come through at the coarser size.
     if spec.form == Form::Tree {
-        return build_at(spec, 1, measured, threads);
+        let mut refused = None;
+        for &grain in &GRAINS {
+            match build_at(spec, grain, measured, threads) {
+                Err(e) if e.contains("too large") => refused = Some(e),
+                other => return other,
+            }
+        }
+        return Err(refused.unwrap_or_default());
     }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
@@ -1298,9 +1311,15 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
             let (height, spread) = (spec.rise.unwrap_or(usual), spec.radius);
-            // refused by its size before it is grown: a tree's parts are
-            // as many as its size has room for
-            check_size(&[(2.0 * spread + height) as i64 + 8, (2.0 * spread + height) as i64 + 8, height as i64 * 2 + 8])?;
+            // Refused by its size before it is grown: a tree's parts are
+            // as many as its size has room for. This is a guard against
+            // a size no tree could be grown at, and is loose on purpose:
+            // half the most a tree could reach each way. The room the
+            // grown tree does take is checked when it is fitted. (At the
+            // full reach each way, eight times the cells, an oak was
+            // refused from about 150 tall, a size it builds at easily.)
+            let reach = (spread + height / 2.0) as i64 + 8;
+            check_size(&[reach, reach, height as i64 + 8])?;
             let tree = std::sync::Arc::new(crate::tree::Model::new(&spec.tree, foot, height, spread));
             let (lo, hi) = tree.bounds();
             volume(Field::Tree(tree), lo, hi, Vec::new())
@@ -3250,6 +3269,16 @@ mod tests {
         // a floor two deep has no sides to speak of: every brick runs through it
         let floor = laid(2);
         assert!(floor.bricks.iter().all(|b| b.min[2] == floor.bricks[0].min[2] && b.ext[2] == 2));
+    }
+
+    #[test]
+    fn a_tree_too_large_for_single_microbricks_is_built_at_a_larger_size() {
+        let oak = |height: f64| Spec { form: Form::Tree, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: height * 0.55, rise: Some(height), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, ..Default::default() }, ..Spec::default() };
+        // (at single microbricks it is over the limit of cells, and is refused)
+        assert!(build(&Spec { grain: 1, ..oak(600.0) }).is_err_and(|e| e.contains("too large")));
+        let built = build(&Spec { grain: 0, ..oak(600.0) }).unwrap();
+        let top = built.bricks.iter().map(|b| (b.min[2] + b.ext[2]) * built.grain).max().unwrap();
+        assert!(built.grain > 1 && top > 400, "grain {}, {top} tall", built.grain);
     }
 
     #[test]

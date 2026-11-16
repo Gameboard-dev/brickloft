@@ -782,6 +782,11 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     });
     if let Some(n) = choice.filter(|_| choice != now) {
         (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets[n].to_vec());
+        // (the view is drawn again: the colour controls further down look
+        // for a change made in them, and this one was made before they
+        // looked, so a tree stayed in its old colours until something
+        // else changed)
+        state.scene += 1;
     }
     let s = &mut state.spec;
     let mut height = s.rise.unwrap_or(Tree::usual_size(kind).0);
