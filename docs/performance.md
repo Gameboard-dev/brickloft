@@ -8,11 +8,12 @@ sample, corner mask, distance function), are explained in
 
 ## Measurements
 
-These times are for a release build running on one thread on Windows. You
-can reproduce them with
+These times are for a release build running on one thread on Windows. They
+are for the closest fit, with Simplify at 0 and brick size 1.
 `cargo run --release -p brickloft-core --example timing`, which runs
-[core/examples/timing.rs](../core/examples/timing.rs). They are for the
-closest fit, with Simplify at 0 and brick size 1.
+[core/examples/timing.rs](../core/examples/timing.rs), builds the same
+forms. It now uses every core, so on a desktop its times are lower than
+these wherever a build shares its work out (see [Threads](#threads)).
 
 | Form | Time | Bricks | Discrepancy |
 |---|---|---|---|
@@ -263,6 +264,190 @@ What the form holds of each surface cell is the same for both, so the second
 measurement reuses the first's samples (`measure_with` in `report.rs`). That
 took one revolve from 311 ms to 192 ms.
 
+## Threads
+
+A build shares its independent work out over the processor's cores, and
+it builds the same bricks in the same order on any number of them. Before
+this, a build ran on one thread however many cores the desktop had.
+
+### What it saves
+
+The table gives each form's build time in milliseconds on a desktop with 8
+cores and 16 hardware threads (an AMD Ryzen 7 5800X3D, on Windows). "Let
+go" is a measured build and "dragged" an unmeasured one (see
+[the editor](#the-editor)). "Before" is the code as it was with everything
+on one thread, and the other two columns are the code as it is, held to one
+thread and given all sixteen. Each figure is the least of 27 builds or
+more, because the desktop was doing other work throughout, which took
+between two fifths and nine tenths of its processor time. An idle desktop
+would give lower times on sixteen threads than these. That other work is
+also why the first two columns of a row sometimes differ: on one thread the
+code does what it did before, except that measuring does a little less.
+`cargo run --release -p brickloft-core --example timing -- threads` prints
+the one-thread and all-thread columns.
+
+| Form | Bricks | Let go, before | Let go, 1 thread | Let go, 16 threads | Dragged, before | Dragged, 1 thread | Dragged, 16 threads |
+|---|---|---|---|---|---|---|---|
+| Solid sphere, radius 40 | 1,873 | 104 | 103 | 17 | 2.9 | 2.9 | 2.0 |
+| Solid sphere, radius 80 | 3,067 | 567 | 585 | 74 | 5.8 | 5.9 | 4.8 |
+| Hollow sphere, radius 50, wall 2 | 35,191 | 266 | 328 | 59 | 282 | 283 | 55 |
+| Hollow sphere, radius 80, wall 4 | 8,553 | 921 | 880 | 108 | 34 | 34 | 9.4 |
+| Revolve (a bell, radius 50) | 14,310 | 733 | 747 | 140 | 125 | 119 | 38 |
+| Ring as a pipe, radius 60 | 737 | 188 | 184 | 45 | 26 | 25 | 16 |
+| Lifted tube, radius 60 | 3,266 | 708 | 707 | 158 | 120 | 116 | 78 |
+| Lifted band, radius 60 | 965 | 527 | 518 | 144 | 100 | 98 | 62 |
+| Torus, radius 40, 8 thick | 645 | 117 | 117 | 30 | 17 | 16 | 8.3 |
+| Spline band, 320 long, 20 wide | 243 | 61 | 64 | 36 | 66 | 67 | 38 |
+| Round arch, span 320 | 200 | 145 | 143 | 136 | 145 | 149 | 132 |
+| Stepping stones on that band | 1,457 | 160 | 167 | 26 | 145 | 158 | 28 |
+| Stepping stones on a disc, radius 70 | 2,216 | 276 | 299 | 54 | 272 | 280 | 57 |
+| Medallions on that disc | 18,434 | 55 | 46 | 25 | 48 | 49 | 27 |
+| Rug on that disc | 10,226 | 52 | 53 | 28 | 57 | 58 | 36 |
+| Planks on that disc | 674 | 45 | 43 | 23 | 44 | 45 | 25 |
+| Bricks on that disc | 1,083 | 50 | 50 | 28 | 55 | 50 | 27 |
+| Bevelled bricks on that disc | 4,897 | 54 | 58 | 29 | 61 | 52 | 29 |
+| Cobblestone on that disc | 5,143 | 99 | 108 | 31 | 98 | 104 | 39 |
+| Cobblestone on the band | 3,229 | 142 | 135 | 55 | 144 | 132 | 44 |
+| Rug on that disc with a rounded rim, 8 thick | 10,681 | 1,854 | 1,809 | 465 | 62 | 63 | 39 |
+| Cube, 120 by 84 by 48 | 4 | 7.8 | 5.8 | 4.6 | 7.8 | 5.8 | 4.7 |
+| Cobblestone on that cube, its sides too | 9,402 | 101 | 117 | 49 | 121 | 130 | 46 |
+| Bevelled bricks on that cube | 4,495 | 32 | 34 | 31 | 32 | 36 | 29 |
+
+The rows from the stepping stones down were timed again after the cube and
+the two patterns of bricks and cobblestone were added, as the least of 27
+builds, on a desktop busier than before. Their figures are comparable with
+one another and less so with the rows above them.
+
+Measured builds gain the most, because the measurement was most of their
+time and every layer of it is independent. A let-go sphere of radius 80
+went from over half a second to under a tenth. Stepping stones gain as
+much, because nearly all their time is the fitting of each stone by
+itself. Dragged forms that were already quick gain little: a solid sphere
+is laid out in a few milliseconds either way. A patterned floor gains a
+half, and no more, because most of what is left is the search for the
+disc's outline. Cobblestone gains the most of the patterns, since each of
+its tiles looks through the stones near it, and bricks the least, a brick
+being found by arithmetic.
+
+Three rows hardly change. Bevelled bricks on a cube spend over half of
+their time finding the cube's sides and the cells of each (see
+[what stays on one thread](#what-stays-on-one-thread)). A long arch spends nine tenths of its time in the
+search for its outline, which stays on one thread (see
+[what stays on one thread](#what-stays-on-one-thread)). A lifted tube or
+band spends a third or more of its dragged time building columns under
+the lifted part, which also stays on one thread.
+
+### What is shared out
+
+Each of these is work whose items do not depend on one another.
+
+| Work | Shared out by | Where |
+|---|---|---|
+| Measuring a build against its form | layers of cells | `scan` in [core/src/report.rs](../core/src/report.rs) |
+| Choosing each cell's brick, cell by cell | rows of blocks | `classify` in [core/src/fit_volume.rs](../core/src/fit_volume.rs) |
+| Finding longer ramps | surface cells | `stretch_ramps` in `fit_volume.rs` |
+| Sampling an outline's solid | lattice points, then the cells the surface crosses | `fit_planar_towards` in [core/src/fit_planar.rs](../core/src/fit_planar.rs) |
+| The circles of a turned form | circles | `fit_lathe` in [core/src/fit_lathe.rs](../core/src/fit_lathe.rs) |
+| Scoring a sphere's layouts | choices of cuts | `fit_round_on` in [core/src/fit_round.rs](../core/src/fit_round.rs) |
+| Stepping stones | stones | `lay_stones` in [core/src/pattern.rs](../core/src/pattern.rs) |
+| The tiles of bricks, cobblestone, rugs and medallions | tiles | `drawn` in `pattern.rs` |
+| The bevelled tops of bricks | cells | `lay_tiles` in `pattern.rs` |
+
+Two of these needed their work put in a different order first. A turned
+form used to fit each circle when a ring first asked for it, part way
+through building the rings. The circles a form needs follow from its
+section alone, so they are now listed before any ring is built and fitted
+together. Stepping stones were fitted and laid one at a time, because a
+stone that would touch one already laid is fitted again a little smaller.
+The first fit of a stone depends on no other stone, so all the first fits
+are made together, and the stones are then checked, refitted where needed
+and laid one at a time in their old order.
+
+Measuring also lost two pieces of work that only showed once the layers
+ran side by side. A table of which brick holds each cell was filled on one
+thread before any layer was looked at, and each thread now fills its own
+layers' part of it. What the form holds of each surface cell was put into
+a map for a second measurement to reuse, and it is now kept only when a
+second measurement will follow, which is for a turned form. Together they
+were a third of a large sphere's measuring time on sixteen threads.
+
+### How the order is kept
+
+All sharing out goes through one function, `map_ranges` in
+[core/src/par.rs](../core/src/par.rs). It cuts the items into ranges, has
+each thread take the next range not yet taken, and puts every result back
+in its range's place, so the order in which threads finish never reaches a
+result. Three rules for its callers make the bricks independent of where
+the ranges fall:
+
+- The work for one item does not read the work for another.
+- Totals across ranges are whole numbers (counts of samples), which add up
+  the same in any grouping. A sum of fractions does not, so those are
+  added by the caller, item by item, in order.
+- Work that depends on what came before stays on one thread, after the
+  part that does not. A stone is laid only after every stone before it.
+
+A build is given its number of threads where it starts (`build_with` in
+[core/src/spec.rs](../core/src/spec.rs)), and that number is handed down to
+each fitter. Tests use this to build thirty forms on one thread and on two,
+three and seven, and require the same bricks, colours and figures to the
+last bit. The forms in the table above and others, 71 in all with every
+pattern on a disc, a band, a rounded disc and a solid and a hollow cube,
+were also built by the code with everything on one thread, measured and
+unmeasured, and all 142 builds were identical.
+
+### When threads are not started
+
+Starting a thread and waiting for it costs 50 to 100 microseconds on this
+desktop, three quarters of a millisecond for sixteen. Work is therefore
+shared out only where each thread gets about half a millisecond of it, and
+with less than twice that it is done in place. Each caller states how many
+of its items make half a millisecond, from a measurement of one item:
+
+| Work | One item costs | Items for each thread |
+|---|---|---|
+| Measuring | 130 to 180 ns a cell of a solid sphere | 8,000 cells |
+| Choosing each cell's brick | 200 ns a cell of a thin shell | 8,000 cells |
+| Finding longer ramps | 1.2 µs a surface cell | 400 cells |
+| Sampling an outline, lattice points | 40 to 210 ns | 4,000 points |
+| Sampling an outline, crossed cells | 16 samples of 340 to 1,250 ns | 64 cells |
+| Circles of a turned form | 1.6 µs times the radius squared | radii whose squares come to 300 |
+| Scoring a sphere's layouts | 25 to 40 µs | 16 scorings |
+| Stepping stones | 1.0 to 1.4 ms for a stone 10 across, by area | 1 stone from 6 across, 4 of the smallest |
+| Tiles of cobblestone | 3 to 5 µs | 128 tiles |
+| Tiles of bricks | 0.3 µs | 1,600 tiles |
+| Tiles of a rug or medallions | 0.4 µs | 1,280 tiles |
+| Bevelled tops of bricks | 0.2 to 0.4 µs a cell | 1,600 cells |
+
+The two cell counts are set above half a millisecond's worth because a
+form with less surface for its size than a sphere costs less a cell.
+
+The threads are the standard library's
+[scoped threads](https://doc.rust-lang.org/std/thread/fn.scope.html),
+started for one call and joined before it returns. A pool kept alive
+between builds would save the starting, at most three quarters of a
+millisecond for each piece of work shared out, on builds that take tens of
+milliseconds. It would also be state that outlives a build. The `rayon`
+crate provides such a pool and was not added, because the fitting crate
+depends on one small crate and compiles in seconds, and the part of rayon
+needed here is about a hundred lines.
+
+The browser page has no threads (see
+[web-page.md](web-page.md#no-threads)). There `map_ranges` does the work in
+place, and a build is the same bricks as on a desktop.
+
+### What stays on one thread
+
+| Work | Time | Why it stays |
+|---|---|---|
+| The search for an outline (`Search::solve` in `fit_planar.rs`) | 137 ms of a 320-wide arch's 150 | Its stretches are solved in rounds, each round seeing what the last took, and all of them share a table of the triangles already measured. Two mirror-image stretches could be solved at once, for at most half the time. |
+| Columns under a lifted tube or band (`tube_columns` in `spec.rs`) | 20 to 40 ms | It looks through every segment of the curve for every cell. A grid of buckets, as the distance to a curve already uses, would remove most of that work, and that is the better change to make first. |
+| Scattering the points of stepping stones | 3 to 5 ms | Each point is kept or dropped by the points kept before it. |
+| Checking, refitting and laying stones | 1.3 ms for 200 stones, and about 1 ms more for each stone fitted again | Each stone is checked against every stone laid before it. |
+| Taking longer ramps, and joining cubes into boxes | 9 ms and 4 ms of a thin hollow sphere's 55 | Both take the largest piece first and go by what is already taken. |
+| The boards of planks | 0.03 ms | Each board starts where the last one ended. |
+| Finding the flat faces and the sides a pattern is laid on (`pattern_flat_faces` and `pattern_side_faces` in `spec.rs`) | 20 to 30 ms for a cube 120 by 84 by 48, less the tiles | The faces are found from the finished bricks and laid one after another onto one list of them. The tiles drawn on each face are shared out, which took cobblestone on that cube from 120 ms to under 50. |
+
 ## The editor
 
 A dragged form is not measured. While the mouse button is down, forms that
@@ -293,7 +478,11 @@ drag ends. The difference is large for the laid-out forms:
 | Revolve (a bell, radius 29) | 23 ms | 192 ms |
 
 The flat arch gains nothing because its fitter measures as it goes; the
-sphere's drag is forty times quicker.
+sphere's drag is forty times quicker. These times are on one thread. On
+sixteen the let-go times are a quarter to an eighth of these (see
+[Threads](#threads)), so the pause when the button is let go is shorter.
+Measuring is still several times the cost of laying a form out, so a
+dragged form is still not measured.
 
 A frame with nothing new costs nothing, because `refresh` rebuilds the form
 only when its settings differ from those of the last build
@@ -353,14 +542,15 @@ crate, `three-d`, with only the features in use switched on.
 ## Still slow
 
 Thin hollow spheres that fall back to the cell-by-cell fitter take about a
-quarter of a second at radius 50 and need tens of thousands of bricks.
+quarter of a second at radius 50 on one thread, and 55 ms on sixteen. They
+still need tens of thousands of bricks.
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at
 a time.
 
-Everything runs on one thread. The fitters are independent for each form,
-and the measurement is independent for each block, so both could be divided
-across threads. That was not done first because the browser build has no
-threads (see [web-page.md](web-page.md#no-threads)), and the fitters had to
-be fast on one thread there anyway.
+A long flat arch or band is as slow as it was, because the search for its
+outline runs on one thread (see
+[what stays on one thread](#what-stays-on-one-thread)). The browser page
+has no threads at all (see [web-page.md](web-page.md#no-threads)), so every
+build there takes its one-thread time.

@@ -25,6 +25,7 @@
 //! Every piece owns the cells of its bounding box outright, because the game
 //! refuses bricks whose boxes overlap.
 
+use crate::par::Threads;
 use crate::shapes::least_unshared;
 use std::collections::{HashMap, HashSet};
 
@@ -78,6 +79,10 @@ pub struct Opts {
     pub max_ext: i32,
     /// false fits with squares alone
     pub wedges: bool,
+    /// How many threads the solid may be sampled on (see `CORNERS_A_THREAD`).
+    /// One unless a build says otherwise (`spec::build_with`): whoever fits
+    /// many small outlines shares the outlines out and fits each on one.
+    pub threads: Threads,
 }
 
 impl Default for Opts {
@@ -86,9 +91,34 @@ impl Default for Opts {
             brick_cost: 0.0,
             max_ext: 80,
             wedges: true,
+            threads: Threads::ONE,
         }
     }
 }
+
+/// How many lattice points, and how many cells the surface crosses, are
+/// worth a thread of their own when the solid is sampled (see
+/// `par::Threads::map_ranges`).
+///
+/// Sampling is the only part of a fit shared out. It is half or more of the
+/// time for a band, a ring or a disc, and each answer depends on no other.
+/// The search for the outline is the rest, and stays on one thread: its
+/// stretches are solved in rounds that each see what the round before took,
+/// and they share a table of the triangles already measured.
+///
+/// What a question costs depends on the solid and on where it is asked.
+/// Measured on a band along a spline, a ring, a disc and a stepping stone:
+/// 40 to 210 nanoseconds at a lattice point, most of which are far from the
+/// surface and answered without a search (see `sdf::PolyDist`), and 340 to
+/// 1,250 at a sample in a cell the surface crosses, where the nearest
+/// segment has to be found. So 4,000 lattice points are 0.2 to 0.8
+/// milliseconds, and 64 crossed cells, of 16 samples each, 0.3 to 1.3.
+///
+/// A solid that is one formula costs a twentieth of that (a circle: 7 and
+/// 22 nanoseconds), and whoever fits those passes one thread: see
+/// `fit_lathe`, which shares its circles out whole instead.
+const CORNERS_A_THREAD: usize = 4_000;
+const CROSSED_CELLS_A_THREAD: usize = 64;
 
 /// A fit and how good it is, in cells squared.
 #[derive(Clone, Debug, Default)]
@@ -148,7 +178,7 @@ fn unit_pattern(mask: u8) -> u64 {
 const UNIT_MASKS: [u8; 6] = [0, 15, 0b0111, 0b1011, 0b1101, 0b1110];
 
 /// Fit the solid `g` (negative inside) over cells `min..max`.
-pub fn fit_planar(g: &impl Fn(f64, f64) -> f64, min: [i32; 2], max: [i32; 2], opts: &Opts) -> Fit {
+pub fn fit_planar(g: &(impl Fn(f64, f64) -> f64 + Sync), min: [i32; 2], max: [i32; 2], opts: &Opts) -> Fit {
     fit_planar_towards(g, min, max, opts, None)
 }
 
@@ -165,7 +195,7 @@ pub fn fit_planar(g: &impl Fn(f64, f64) -> f64, min: [i32; 2], max: [i32; 2], op
 /// little better and leave them with corners in different places, which is a
 /// step wherever they differ.
 pub fn fit_planar_towards(
-    g: &impl Fn(f64, f64) -> f64,
+    g: &(impl Fn(f64, f64) -> f64 + Sync),
     min: [i32; 2],
     max: [i32; 2],
     opts: &Opts,
@@ -187,11 +217,13 @@ pub fn fit_planar_towards(
     // lattice points, and there the computed value is rounding noise either
     // side of zero: left as it comes, the same point reads inside on one side
     // of a symmetric form and outside on the other.
-    let corner: Vec<f64> = (0..vw * (h + 1))
-        .map(|i| at((i % vw) as f64, (i / vw) as f64))
-        .map(|v| if v.abs() < 1e-9 { 0.0 } else { v })
-        .collect();
+    let corner: Vec<f64> = opts.threads.map(vw * (h + 1), CORNERS_A_THREAD, |i| {
+        let v = at((i % vw) as f64, (i / vw) as f64);
+        if v.abs() < 1e-9 { 0.0 } else { v }
+    });
     let mut solid = vec![0u64; w * h];
+    // the cells the surface may cross, which are sampled; every other is full or empty
+    let mut crossed: Vec<usize> = Vec::new();
     for y in 0..h {
         for x in 0..w {
             let c = [
@@ -202,24 +234,29 @@ pub fn fit_planar_towards(
             ];
             // a distance can't change sign within a cell whose corners are all
             // further from the surface than the cell's half diagonal
-            solid[x + y * w] = if c.iter().all(|&v| v < -0.75) {
-                FULL
-            } else if c.iter().all(|&v| v > 0.75) {
-                0
-            } else {
-                let mut bits = 0u64;
-                for s in 0..K * K {
-                    let (u, v) = (
-                        ((s % K) as f64 + 0.5) / K as f64,
-                        ((s / K) as f64 + 0.5) / K as f64,
-                    );
-                    // strictly inside: a sample exactly on the surface is outside, as
-                    // one exactly on a triangle's hypotenuse is (see `row_span`)
-                    bits |= ((at(x as f64 + u, y as f64 + v) < 0.0) as u64) << s;
-                }
-                bits
-            };
+            if c.iter().all(|&v| v < -0.75) {
+                solid[x + y * w] = FULL;
+            } else if !c.iter().all(|&v| v > 0.75) {
+                crossed.push(x + y * w);
+            }
         }
+    }
+    let sampled = opts.threads.map(crossed.len(), CROSSED_CELLS_A_THREAD, |k| {
+        let (x, y) = (crossed[k] % w, crossed[k] / w);
+        let mut bits = 0u64;
+        for s in 0..K * K {
+            let (u, v) = (
+                ((s % K) as f64 + 0.5) / K as f64,
+                ((s / K) as f64 + 0.5) / K as f64,
+            );
+            // strictly inside: a sample exactly on the surface is outside, as
+            // one exactly on a triangle's hypotenuse is (see `row_span`)
+            bits |= ((at(x as f64 + u, y as f64 + v) < 0.0) as u64) << s;
+        }
+        bits
+    });
+    for (cell, bits) in crossed.iter().zip(sampled) {
+        solid[*cell] = bits;
     }
 
     // the best unit piece for each cell on its own

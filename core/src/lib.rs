@@ -11,6 +11,7 @@
 //! - [`pattern`] fills a flat region with stepping stones in place of solid brick
 //! - [`wfc`] fills a grid with tiles that agree with their neighbours (wave function collapse)
 //! - [`spec`] ties them together: a [`spec::Spec`] in, bricks out
+//! - [`par`] shares a build's work out over the processor's cores
 //! - [`orient`] maps each brick to a game asset, orientation and size
 //! - [`report`] writes a form and its fit out as text, to be read back or inspected
 //! - [`surface`] measures a build's outside against the form's: steps and slopes
@@ -24,6 +25,7 @@ pub mod fit_round;
 pub mod fit_stack;
 pub mod fit_volume;
 pub mod orient;
+pub mod par;
 pub mod pattern;
 pub mod report;
 pub mod sdf;
