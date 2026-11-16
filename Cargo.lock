@@ -102,6 +102,7 @@ dependencies = [
  "brdb",
  "clipboard-win",
  "js-sys",
+ "png",
  "three-d",
  "wasm-bindgen",
  "web-sys",

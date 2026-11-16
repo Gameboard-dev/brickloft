@@ -18,6 +18,13 @@ crate-type = ["cdylib", "rlib"]
 name = "arcs"
 path = "src/main.rs"
 
+# Only for examples/shape_pictures.rs, which writes the pictures of the
+# shapes in docs/images. It is the version three-d's GUI already builds, so
+# it adds nothing to compile, and the program itself does not link it.
+# https://docs.rs/png
+[dev-dependencies]
+png = "0.17"
+
 [dependencies]
 arcs-core = { path = "../core" }
 # Rendering, the orbit camera, picking and the egui panel all come from this

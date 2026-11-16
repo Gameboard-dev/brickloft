@@ -77,19 +77,22 @@ filled with one of nine **shapes**. Every shape is one of the game's own
 microbricks ([core/src/shapes.rs](../core/src/shapes.rs),
 the enum `Kind`). To describe a shape, take its box as the unit cube, where
 $`x`$, $`y`$ and $`z`$ each run from 0 to 1. The column "Solid" gives the
-rule a point of that cube must meet to be inside the shape.
+rule a point of that cube must meet to be inside the shape. Each picture shows
+the shape in yellow inside the outline of its box. The pictures are drawn
+from the mesh the editor itself displays, by
+[editor/examples/shape_pictures.rs](../editor/examples/shape_pictures.rs).
 
-| Shape | Game brick | Solid | Corners held | Share of box | Poses |
-|---|---|---|---|---|---|
-| Cube | Micro-Brick | all of it | 8 | 1 | 1 |
-| Ramp | Micro-Wedge | $`x + y \le 1`$ | 6 | 1/2 | 12 |
-| Tetrahedron | Micro-Wedge Triangle Corner | $`x + y + z \le 1`$ | 4 | 1/6 | 8 |
-| Cut cube | Micro-Wedge Outer Corner | $`x + y + z \le 2`$ | 7 | 5/6 | 8 |
-| Hip | Micro-Wedge Corner | $`\max(x, y) \le 1 - z`$ | 5 | 1/3 | 24 |
-| Inner corner | Micro-Wedge Inner Corner | $`\min(x, y) + z \le 1`$ | 7 | 2/3 | 24 |
-| Half outer corner | Micro-Wedge 1/2 Outer Corner | $`x + y \le 1,\ z \le x + y`$ | 5 | 1/3 | 24 |
-| Half inner corner | Micro-Wedge 1/2 Inner Corner | $`x + y \le 1,\ z \le y`$ | 4 | 1/6 | 12 |
-| its mirror image | Micro-Wedge 1/2 Inner Corner Inv. | $`x + y \le 1,\ z \le x`$ | 4 | 1/6 | 12 |
+| | Shape | Game brick | Solid | Corners held | Share of box | Poses |
+|---|---|---|---|---|---|---|
+| <img src="images/cube.png" width="72" alt="Cube"> | Cube | Micro-Brick | all of it | 8 | 1 | 1 |
+| <img src="images/ramp.png" width="72" alt="Ramp"> | Ramp | Micro-Wedge | $`x + y \le 1`$ | 6 | 1/2 | 12 |
+| <img src="images/tetrahedron.png" width="72" alt="Tetrahedron"> | Tetrahedron | Micro-Wedge Triangle Corner | $`x + y + z \le 1`$ | 4 | 1/6 | 8 |
+| <img src="images/cut-cube.png" width="72" alt="Cut cube"> | Cut cube | Micro-Wedge Outer Corner | $`x + y + z \le 2`$ | 7 | 5/6 | 8 |
+| <img src="images/hip.png" width="72" alt="Hip"> | Hip | Micro-Wedge Corner | $`\max(x, y) \le 1 - z`$ | 5 | 1/3 | 24 |
+| <img src="images/inner-corner.png" width="72" alt="Inner corner"> | Inner corner | Micro-Wedge Inner Corner | $`\min(x, y) + z \le 1`$ | 7 | 2/3 | 24 |
+| <img src="images/half-outer-corner.png" width="72" alt="Half outer corner"> | Half outer corner | Micro-Wedge 1/2 Outer Corner | $`x + y \le 1,\ z \le x + y`$ | 5 | 1/3 | 24 |
+| <img src="images/half-inner-corner.png" width="72" alt="Half inner corner"> | Half inner corner | Micro-Wedge 1/2 Inner Corner | $`x + y \le 1,\ z \le y`$ | 4 | 1/6 | 12 |
+| <img src="images/half-inner-corner-inv.png" width="72" alt="Half inner corner, mirrored"> | its mirror image | Micro-Wedge 1/2 Inner Corner Inv. | $`x + y \le 1,\ z \le x`$ | 4 | 1/6 | 12 |
 
 Each rule is a test on the point's coordinates. The ramp's rule $`x + y \le 1`$
 says that a point is inside when its distance from one side plus its
@@ -171,6 +174,8 @@ on a 45° face, so this rule decides how much of a ramp the measurement of
 section 10 counts.
 
 ### The inner corner
+
+<img src="images/inner-corner.png" width="160" alt="The inner corner in its box"> <img src="images/hip.png" width="160" alt="The hip that is taken out of the box to leave it">
 
 The inner corner is the one shape that is not the convex hull of its
 corners. It is a box with a hip taken out of it: a valley where two slopes
