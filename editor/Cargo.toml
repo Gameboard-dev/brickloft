@@ -37,6 +37,13 @@ serde_json = "1"
 # version three-d already builds, so it adds nothing to compile.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.28"
+# Shows a folder in the system's file manager, for the Go to folder button
+# (see `store::show_folder`). Each system has its own way to ask for that
+# (ShellExecute on Windows, `open` on macOS, `xdg-open` on Linux), and this
+# crate is the one place that knows them: written here, the editor would
+# carry code for three systems' shells that it has no other business with.
+# https://docs.rs/open
+open = "5"
 # Writes PNG files: a screenshot of the window (see `send::save_screenshot`)
 # and the pictures of the shapes in docs/images (examples/shape_pictures.rs).
 # It is the version three-d's GUI already builds, so it adds nothing to

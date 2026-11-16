@@ -9,7 +9,7 @@ change happen in the editor's window.
 
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers ten tools. Claude Code, or
+offers. The editor is the MCP server and offers fourteen tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -89,6 +89,10 @@ file, the entry is a server of type `http` with the URL above.
 | `move_camera` | Sends the camera to a place, or along a path of places, looking at a chosen point at each. |
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
 | `set_view` | Switches the rulers, rings, arrows and dots on and off, lowers the floor, and sizes the rings and arrows. |
+| `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
+| `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Shift + click and a drag do. |
+| `move_pull_point` | Changes how far an added point pulls the form. |
+| `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
 
 ### Forms and their settings
 
@@ -236,10 +240,8 @@ macOS and Linux and holds no file paths.
   box.
 - One port, 7878, is used. If another program has it, the box unticks
   itself and the panel says why.
-- Claude cannot yet drag a single dot, add a pull point by clicking, or
-  read a point cloud. Points and pulls are set through the `points` and
-  `pulls` settings instead. Rebuilding an object from a point cloud is
-  planned (see [future-work.md](future-work.md)).
+- Claude cannot yet read a point cloud or copy the workspace to the
+  clipboard. Both are planned (see [future-work.md](future-work.md)).
 - The live tests so far were made with a script acting as the client. The
-  ten tools were each called against a running editor on Windows; macOS
+  tools were called against a running editor on Windows; macOS
   and Linux run the same code and have not been tried.

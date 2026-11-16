@@ -23,6 +23,7 @@
   "flip": "Mirror the finished form along an axis, about the middle of its points.",
   "floor_below_form": "Lowers the floor in the view so you can look at a form from underneath. The floor is also see-through from below. It changes nothing that is built.",
   "form": "The kind of form to build. Choosing one starts it at its usual size.",
+  "go_to_folder": "Opens this folder of saved forms in your file manager. Each save there is a .brz prefab file that the game can load as it stands.",
   "grid_at_an_angle": "Bricks sit on a grid, and a grid other than the world's can stand at any angle. This grid has been turned by its rings, so everything on it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other grid's way.",
   "longest_brick": "The longest edge a single brick may have, in microbricks. 80 is what the game was seen to accept when this was first tried; the game's own limit is said to be 800 studs, which is 4000 microbricks. Raise it and paste to find out: a form then needs fewer, longer bricks.",
   "mirror": "Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.",

@@ -60,6 +60,11 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
         })
             .response
     });
+    // a page keeps its saves in the browser, where there is no folder to show
+    #[cfg(not(target_arch = "wasm32"))]
+    if helped(ui, help("go_to_folder"), |ui| ui.button("Go to folder")).clicked() {
+        state.store_note = crate::store::show_folder(&state.folder).unwrap_or_else(|e| format!("Not opened: {e}"));
+    }
     if state.folder != before {
         state.list_saved();
     }

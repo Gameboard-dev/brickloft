@@ -334,6 +334,145 @@
         },
         "additionalProperties": false
       }
+    },
+    {
+      "name": "move_point",
+      "title": "Move one of a form's points",
+      "description": "Move one of the points a form is drawn through, leaving the others where they are: an arch's foot, a centre, or one point of a spline, a Bezier curve or a revolve's profile. This is the editor's yellow dot. get_workspace lists each form's `points`, numbered from 0, measured from where the form stands. Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          },
+          "point": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Which point, counted from 0."
+          },
+          "to": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            },
+            "description": "Where it goes, [x, y, z] in microbricks; a value may end in a half."
+          }
+        },
+        "required": [
+          "index",
+          "point",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_pull_point",
+      "title": "Add a point that pulls a form out of shape",
+      "description": "Add a point to a form and pull the form out of shape there, as Shift + click and a drag do in the editor (the orange dot). The form moves by `pulled_by` at the place nearest `at`, and by less the further away, out to `reach`. Works on every form; a form takes up to 12. A pull within a flat curve's plane keeps it smooth; a pull out of the plane is built of sloped pieces and is rougher. Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          },
+          "at": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            },
+            "description": "A place on the form, [x, y, z] in microbricks measured as the form's points are."
+          },
+          "pulled_by": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            },
+            "description": "How far the form moves there, [dx, dy, dz] in microbricks."
+          },
+          "reach": {
+            "type": "number",
+            "minimum": 1,
+            "description": "How far from the point the form goes with it, in microbricks. This is one setting for all of a form's added points; left out, it stays as it is."
+          }
+        },
+        "required": [
+          "index",
+          "at",
+          "pulled_by"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move_pull_point",
+      "title": "Pull an added point further or less",
+      "description": "Change how far one of a form's added points pulls it. get_workspace lists each form's `added_points`, numbered from 0. Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          },
+          "added_point": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Which added point, counted from 0."
+          },
+          "pulled_by": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            },
+            "description": "How far the form now moves there, [dx, dy, dz] in microbricks from where it was before any pull."
+          }
+        },
+        "required": [
+          "index",
+          "added_point",
+          "pulled_by"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove_pull_point",
+      "title": "Take an added point off",
+      "description": "Take one added point off a form, which goes back to its own shape there. The added points after it each move up one number. Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          },
+          "added_point": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Which added point, counted from 0."
+          }
+        },
+        "required": [
+          "index",
+          "added_point"
+        ],
+        "additionalProperties": false
+      }
     }
   ]
 }

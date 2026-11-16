@@ -660,6 +660,8 @@ fn workspace(state: &State) -> Value {
                     "stripe_width": paint.width,
                 },
                 "place": place.map(|u| u as f64 / 2.0),
+                "points": spec.points.iter().map(|p| rounded(*p)).collect::<Vec<_>>(),
+                "added_points": spec.pulls.iter().map(|(at, by)| json!({ "at": rounded(*at), "pulled_by": rounded(*by) })).collect::<Vec<_>>(),
                 "box_in_grid": extents[index].as_ref().map(|e| json!({ "low": rounded(e.low), "high": rounded(e.high), "size": rounded(e.high - e.low) })),
                 "box_in_world": extents[index].as_ref().map(|e| json!({ "low": rounded(e.world_low), "high": rounded(e.world_high), "centre": rounded(e.centre_in_world(spec)) })),
                 "bricks": built.bricks.len(),
@@ -806,6 +808,53 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             }
             state.open(forms);
         }
+        // One dot of a form, as the mouse moves one: a point the form is
+        // drawn through, or a point added to pull it out of shape. The
+        // whole list could be sent through `update_form` instead, which
+        // means reading it, changing one entry and writing every entry
+        // back in the text a save keeps them in: arithmetic and copying
+        // that a caller gets wrong, for what is one drag in the editor.
+        "move_point" => {
+            let at = index(&forms)?;
+            let which = arguments.get("point").and_then(Value::as_u64).ok_or("point is the number of one of the form's points, counted from 0")? as usize;
+            let to = three(arguments.get("to"), "to", brickloft_core::spec::MAX_SPAN)?;
+            let spec = &mut forms[at].0;
+            let count = spec.points.len();
+            *spec.points.get_mut(which).ok_or(format!("the form has {count} points, numbered from 0"))? = DVec3::from_array(to);
+            brickloft_core::spec::build(spec)?;
+            state.open(forms);
+        }
+        "add_pull_point" => {
+            let at = index(&forms)?;
+            let hold = three(arguments.get("at"), "at", brickloft_core::spec::MAX_SPAN)?;
+            let by = three(arguments.get("pulled_by"), "pulled_by", brickloft_core::spec::MAX_SPAN)?;
+            let spec = &mut forms[at].0;
+            if spec.pulls.len() >= crate::state::PULLS {
+                return Err(format!("a form takes at most {} added points", crate::state::PULLS));
+            }
+            spec.pulls.push((DVec3::from_array(hold), DVec3::from_array(by)));
+            if let Some(reach) = arguments.get("reach").filter(|r| !r.is_null()) {
+                spec.pull_reach = reach.as_f64().filter(|r| (1.0..=brickloft_core::spec::MAX_SPAN).contains(r)).ok_or("reach is a number of microbricks, 1 or more")?;
+            }
+            brickloft_core::spec::build(spec)?;
+            state.open(forms);
+        }
+        "move_pull_point" | "remove_pull_point" => {
+            let at = index(&forms)?;
+            let which = arguments.get("added_point").and_then(Value::as_u64).ok_or("added_point is the number of one of the form's added points, counted from 0")? as usize;
+            let spec = &mut forms[at].0;
+            let count = spec.pulls.len();
+            if which >= count {
+                return Err(format!("the form has {count} added points, numbered from 0"));
+            }
+            if name == "remove_pull_point" {
+                spec.pulls.remove(which);
+            } else {
+                spec.pulls[which].1 = DVec3::from_array(three(arguments.get("pulled_by"), "pulled_by", brickloft_core::spec::MAX_SPAN)?);
+            }
+            brickloft_core::spec::build(spec)?;
+            state.open(forms);
+        }
         "remove_form" => {
             let at = index(&forms)?;
             if forms.len() == 1 {
@@ -871,7 +920,7 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 10);
+        assert_eq!(tool_names().len(), 14);
     }
 
     #[test]
@@ -1103,6 +1152,39 @@ mod tests {
         assert!(apply(&mut state, "set_view", &json!({ "rulers": true, "floor_below": 900 }), || 0.0).is_err());
         assert!(apply(&mut state, "set_view", &json!({ "rings": "no" }), || 0.0).is_err());
         assert_eq!((state.show_ruler, state.show_rings), (false, true));
+    }
+
+    #[test]
+    fn one_dot_of_a_form_is_moved_added_and_taken_off() {
+        let mut state = State::new(); // an arch: two feet
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        let before = state.spec.points.clone();
+        let moved = said(apply(&mut state, "move_point", &json!({ "index": 0, "point": 1, "to": [12.5, 0.5, 0.5] }), || 0.0).unwrap());
+        assert_eq!(moved["forms"][0]["points"][1], json!([12.5, 0.5, 0.5]));
+        assert_eq!((state.spec.points[0], state.spec.points[1]), (before[0], DVec3::new(12.5, 0.5, 0.5)), "the other foot moved too");
+        // a point added to pull the arch's crown up, moved further, and taken off
+        let pulled = said(apply(&mut state, "add_pull_point", &json!({ "index": 0, "at": [2.5, 0.5, 8.5], "pulled_by": [0, 0, 3], "reach": 6 }), || 0.0).unwrap());
+        assert_eq!(pulled["forms"][0]["added_points"], json!([{ "at": [2.5, 0.5, 8.5], "pulled_by": [0.0, 0.0, 3.0] }]));
+        assert_eq!(state.spec.pull_reach, 6.0);
+        let high = state.built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        apply(&mut state, "move_pull_point", &json!({ "index": 0, "added_point": 0, "pulled_by": [0, 0, 6] }), || 0.0).unwrap();
+        assert!(state.built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() > high, "pulling the point further did not raise the arch");
+        apply(&mut state, "remove_pull_point", &json!({ "index": 0, "added_point": 0 }), || 0.0).unwrap();
+        assert!(state.spec.pulls.is_empty());
+        // each is one step to undo
+        assert!(state.undo() && state.spec.pulls.len() == 1);
+        let now = state.forms();
+        for (tool, bad) in [
+            ("move_point", json!({ "index": 0, "point": 9, "to": [0, 0, 0] })),
+            ("move_point", json!({ "index": 0, "point": 0, "to": [0, 0] })),
+            ("move_point", json!({ "index": 0, "point": 0, "to": [1e9, 0, 0] })),
+            ("move_pull_point", json!({ "index": 0, "added_point": 4, "pulled_by": [0, 0, 1] })),
+            ("remove_pull_point", json!({ "index": 0 })),
+            ("add_pull_point", json!({ "index": 0, "at": [0, 0, 0], "pulled_by": [0, 0, 1], "reach": 0 })),
+        ] {
+            assert!(apply(&mut state, tool, &bad, || 0.0).is_err(), "{tool} took {bad}");
+            assert_eq!(state.forms(), now, "{tool} with {bad} changed the workspace");
+        }
     }
 
     #[test]

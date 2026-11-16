@@ -7,7 +7,7 @@ Two additions are planned. Neither changes how forms are fitted today (see
 
 Claude can already drive the editor: add, change, colour, turn, measure and
 remove forms, move the camera and take screenshots, through the Model
-Context Protocol ([mcp.md](mcp.md)). Three things are still to come.
+Context Protocol ([mcp.md](mcp.md)). Two things are still to come.
 
 **Rebuilding an object from a point cloud.** Given a point cloud of a solid
 3D object, which is a list of points sampled from its surface, Claude would
@@ -20,11 +20,6 @@ Claude in a form it can reason about, and a large one will need thinning
 first. Judging how well the forms match the cloud needs a measure the
 editor can report, such as the share of the cloud's points lying on or near
 the bricks.
-
-**Finer control of shape.** Claude sets a form's points and added points
-through its settings today. Tools that move one dot, or add a pull point at
-a place on the form's surface, would match what the mouse does and need
-less arithmetic from Claude.
 
 **Copying to the game.** Claude cannot put the workspace on the clipboard,
 so the player still presses Ctrl+C. A tool for it would let Claude finish a

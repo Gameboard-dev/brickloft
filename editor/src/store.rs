@@ -201,6 +201,11 @@ mod files {
             .collect()
     }
 
+    /// Where a folder of saves is on disk.
+    pub fn folder_path(folder: &str) -> Result<PathBuf, String> {
+        Ok(root().join(clean(folder)?))
+    }
+
     pub fn folders() -> Vec<String> {
         sorted_with_starters(names(root(), true))
     }
@@ -317,6 +322,18 @@ mod files {
 }
 
 pub use files::{add_folder, folders, forms};
+
+/// Show `folder` of the saved forms in the system's file manager, making it
+/// first if nothing has been saved there yet. Returns what to tell the player.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn show_folder(folder: &str) -> Result<String, String> {
+    let path = files::folder_path(folder)?;
+    std::fs::create_dir_all(&path).map_err(|e| format!("could not make {}: {e}", path.display()))?;
+    // (the path is handed over as one argument to the system's own opener,
+    // never as text for a shell to read: see the `open` crate)
+    open::that_detached(&path).map_err(|e| format!("could not open {}: {e}", path.display()))?;
+    Ok(format!("Opened {}", path.display()))
+}
 
 /// Delete the save under `name` in `folder`. It cannot be brought back, so
 /// the panel asks first.
