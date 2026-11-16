@@ -803,7 +803,7 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -831,6 +831,10 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         .response
     });
     if let Some(n) = choice.filter(|_| choice != now) {
+        // (grass's Winter set freezes its pond, and any other thaws it: the setting, not the colours, is what the game is told)
+        if kind == Kind::Grass {
+            state.spec.fill = names[n] == "Winter";
+        }
         (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets[n].to_vec());
         // (the view is drawn again: the colour controls further down look
         // for a change made in them, and this one was made before they
@@ -849,17 +853,30 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Peony => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
         Kind::Grass => "Reach to each side",
+        Kind::DatePalm => "Frond length",
+        Kind::Daisy | Kind::Daffodil => "Half the flower's width",
+        Kind::Bed => "How far the bed reaches",
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
     if kind == Kind::Grass {
+        // (a pond is a hollow pushed down deeper than the water stands: see `brickloft_core::tree::grass`)
+        let mut reeds = (s.depth - 1).clamp(0, 10);
+        if helped(ui, help("grass_reeds"), |ui| ui.add(Slider::new(&mut reeds, 0..=10).text("Reeds round the water"))).changed() {
+            s.depth = reeds + 1;
+        }
         brush(ui, &mut state.brush, &mut state.touched, s, largest);
         // (see `brz::walked_through`)
+        helped(ui, help("grass_frozen"), |ui| ui.checkbox(&mut s.fill, "Frozen pond (ice to stand on)"));
         let mut passable = !s.tree.extras;
         if helped(ui, help("grass_passable"), |ui| ui.checkbox(&mut passable, "Blades can be walked through in the game")).changed() {
             s.tree.extras = !passable;
         }
+    }
+    if kind != Kind::Grass {
+        // (see `brz::stuff_of`)
+        helped(ui, help("leaves_passable"), |ui| ui.checkbox(&mut s.tube, "Leaves can be walked through in the game"));
     }
     if Tree::lies_along(kind) {
         // (its length is its line's: there is no slider for it, which once tied it to the thickness)
@@ -867,6 +884,8 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         if s.points.len() > 2 {
             helped(ui, help("closed_loop"), |ui| ui.checkbox(&mut s.closed, if kind == Kind::Grass { "Closed outline, filled" } else { "Closed loop" }));
         }
+        // (straight from dot to dot, with a corner at each: for a hedge round a square bed)
+        helped(ui, help("sharp_corners"), |ui| ui.checkbox(&mut s.protrude, "Sharp corners at its dots"));
     }
     let (fullness, count, bend) = match kind {
         Kind::Pine => ("Fullness", "Tiers of boughs", "Droop"),
@@ -879,7 +898,15 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Hydrangea => ("Leaves", "Flower heads", "Looseness"),
         Kind::Petunia => ("Leaves", "Flowers", "How far it trails"),
         Kind::Reeds => ("Leaves", "Stems", "Sway"),
-        Kind::Grass => ("How thick it grows", "", "Lean"),
+        Kind::Grass => ("How thick it grows", "Water stands this far below it", "Lean"),
+        Kind::Birch => ("Foliage", "Main limbs", "Crookedness"),
+        Kind::Willow => ("Foliage and curtains", "Main limbs", "Crookedness"),
+        Kind::DatePalm => ("Leaflet length", "Fronds", "Lean"),
+        Kind::ScotsPine => ("Needles", "Main limbs", "Crookedness"),
+        Kind::Cypress => ("Density", "", "Looseness"),
+        Kind::Yucca => ("Blade width", "Blades", "Bend of the blades"),
+        Kind::Daisy | Kind::Daffodil => ("Leaves", "Flowers in the clump", "Unused"),
+        Kind::Bed => ("Leaves", "Flowers", "Unevenness"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
     };
@@ -897,7 +924,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Palm => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
         }
-        Kind::Oak | Kind::Beech => {
+        Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::ScotsPine => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no leaves)"));
         }
         Kind::Boxwood | Kind::Hedge => {
@@ -906,7 +933,13 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Reeds => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
         }
-        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass => {}
+        Kind::DatePalm => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Dates"));
+        }
+        Kind::Yucca => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+        }
+        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass | Kind::Cypress | Kind::Daisy | Kind::Daffodil | Kind::Bed => {}
     }
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
@@ -930,7 +963,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
 fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
     use crate::state::{Action, FLATTENS};
     use brickloft_core::DVec3;
-    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
+    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
     let named = |action: Action| match action {
         Action::Up => "Push up",
         Action::Down => "Push down",
