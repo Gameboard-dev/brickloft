@@ -306,8 +306,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
         if crate::state::on_own_grid(s) {
             ui.horizontal(|ui| {
-                ui.label("On a grid of its own, at an angle.").on_hover_text("Bricks sit on a grid, and a grid other than the world's can stand at any angle. This form has been turned by its rings, so it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other form's way.");
-                if ui.button("Level it").clicked() {
+                ui.label("Its grid is at an angle.").on_hover_text("Bricks sit on a grid, and a grid other than the world's can stand at any angle. This grid has been turned by its rings, so everything on it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other grid's way.");
+                if ui.button("Level the grid").clicked() {
                     asked.level = true;
                 }
             });
@@ -430,11 +430,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
 /// The workspace's forms: which is being edited, and adding and removing them.
 fn workspace(ui: &mut Ui, state: &mut State) {
-    ui.label("Workspace");
-    ui.label(format!("> {} (editing)", FORMS[state.form]));
+    ui.label("Workspace").on_hover_text("Forms stand on grids. Forms on one grid are kept clear of each other, and are turned and moved together by the rings and arrows. Grids pass through each other.");
+    let tilted = |spec: &arcs_core::spec::Spec| if crate::state::on_own_grid(spec) { ", at an angle" } else { "" };
+    ui.label(format!("> {} (editing) on grid {}{}", FORMS[state.form], state.spec.on_grid + 1, tilted(&state.spec)));
     let mut switch = None;
     for (k, item) in state.others.iter().enumerate() {
-        if ui.selectable_label(false, format!("   {}", item.name())).on_hover_text("Edit this form. Clicking it in the view does the same.").clicked() {
+        let label = format!("   {} on grid {}{}", item.name(), item.spec.on_grid + 1, tilted(&item.spec));
+        if ui.selectable_label(false, label).on_hover_text("Edit this form, and its grid. Clicking it in the view does the same.").clicked() {
             switch = Some(k);
         }
     }
@@ -442,8 +444,11 @@ fn workspace(ui: &mut Ui, state: &mut State) {
         state.activate(k);
     }
     ui.horizontal(|ui| {
-        if ui.button("Add a copy").on_hover_text("Another of this form, set down beside it.").clicked() {
+        if ui.button("Add to this grid").on_hover_text("Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.").clicked() {
             state.add_form(state.full_spec());
+        }
+        if ui.button("New grid").on_hover_text("Another of this form on a grid of its own, which its rings turn to any angle and its arrows move, apart from every other grid.").clicked() {
+            state.add_grid();
         }
         if ui.add_enabled(!state.others.is_empty(), egui::Button::new("Remove")).on_hover_text("Take the form being edited out of the workspace.").clicked() {
             state.remove_active();

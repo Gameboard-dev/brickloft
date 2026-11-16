@@ -109,12 +109,20 @@ over backwards, a middle click turns it to face what the cursor is on,
 W A S D move it the way it looks and sideways, Space or E raise it, Q lowers
 it, and Shift with the scroll wheel makes it faster or slower.
 
-**Turning.** The red, green and blue arrows move what is being edited along
-x, y or z alone, and the three rings in the same colours turn its whole
-brick grid: drag one round for any angle about that axis. The game keeps
-bricks on grids, and a grid other than the world's can stand at any angle;
-a form turned that way is copied on a grid of its own and is in no other
-form's way. Quarter turns within the grid have their own buttons.
+**Grids.** The game keeps bricks on grids, and a grid other than the
+world's can stand at any angle. Every form in the workspace is on a grid,
+and the list says which. **Add to this grid** puts another form on the grid
+being edited: the two are kept clear of each other, and are turned and moved
+together. **New grid** starts another grid with a form of its own; grids
+pass through each other.
+
+The red, green and blue arrows and rings stand at the middle of everything
+on the grid being edited, and are sized to it. Dragging an arrow moves the
+whole grid along x, y or z; dragging a ring round turns the whole grid about
+that axis, by any angle. A grid at an angle is copied to the clipboard as a
+grid of its own, frozen where it stands. To move one form within its grid,
+drag it by its bricks. Quarter turns of a single form, within its grid, have
+their own buttons.
 
 ## More
 

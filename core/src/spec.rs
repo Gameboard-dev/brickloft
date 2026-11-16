@@ -112,6 +112,13 @@ pub struct Spec {
     /// why nothing in this library reads this, and turned as a whole by
     /// whatever places it (the editor's view, the file it copies).
     pub grid: [f64; 4],
+    /// Where that grid is: what is added to a point of the form, once
+    /// turned by `grid`, to find it in the world. In cells. All zero for a
+    /// grid that is not turned.
+    pub grid_at: [f64; 3],
+    /// Which grid the form is on. Forms with the same number share a grid:
+    /// they are turned and moved together, and kept clear of each other.
+    pub on_grid: u32,
     /// Places where a curve is pulled out of its shape: a point on it, and
     /// how far that point is moved. The curve to either side follows, less
     /// and less, out to `pull_reach` along it (see [`pulled`]). Curves only:
@@ -143,6 +150,8 @@ impl Default for Spec {
             mirror: [false; 3],
             turned: UPRIGHT,
             grid: [0.0, 0.0, 0.0, 1.0],
+            grid_at: [0.0; 3],
+            on_grid: 0,
             pulls: Vec::new(),
             pull_reach: 8.0,
             simplify: 0.0,

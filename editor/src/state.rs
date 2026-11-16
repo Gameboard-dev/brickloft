@@ -245,7 +245,7 @@ pub struct State {
     pub follow: f64,
     /// a ring being dragged: the angle round it where it was taken hold of,
     /// and the grid's angle then
-    spin_from: Option<(f64, [f64; 4])>,
+    spin_from: Option<(f64, [f64; 4], DVec3, DVec3)>,
     /// the workspace as it was before each change, oldest first, and after
     /// each change undone, for Ctrl+Z and Ctrl+Y
     undone: Vec<Snapshot>,
@@ -300,16 +300,20 @@ pub fn turned_way(q: [f64; 4], v: DVec3, back: bool) -> DVec3 {
     v + 2.0 * u.cross(u.cross(v) + v * q[3])
 }
 
-/// Whether a form is on a grid of its own, at an angle.
+/// Whether a form's grid is at an angle, and so not the world's.
 pub fn on_own_grid(spec: &Spec) -> bool {
     spec.grid != LEVEL
 }
 
-/// The point a form's own grid turns about: the middle of its bricks where
-/// it stands, to the nearest unit, so that its bricks are whole units from it.
-pub fn pivot(bounds: Option<Bounds>, place: [i32; 3]) -> DVec3 {
-    let (lo, hi) = bounds.unwrap_or(([0; 3], [0; 3]));
-    DVec3::from_array([0, 1, 2].map(|k| ((lo[k] + hi[k] + place[k]) as f64).round() / 2.0))
+/// Where a point of a form's grid is in the world: turned by the grid's
+/// angle, then moved to where the grid is.
+pub fn out_of_grid(spec: &Spec, p: DVec3) -> DVec3 {
+    DVec3::from_array(spec.grid_at) + turned_way(spec.grid, p, false)
+}
+
+/// The reverse: where a point of the world is in a form's grid.
+pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
+    turned_way(spec.grid, p - DVec3::from_array(spec.grid_at), true)
 }
 
 /// How far from a dragged dot others go with it, in reaches of an added point.
@@ -462,13 +466,8 @@ impl State {
     /// judges it. The way out is up or sideways and never down, so that a
     /// form dragged onto another comes to rest on top of it.
     fn clear_of_others(&self, by: [i32; 3]) -> Option<[i32; 3]> {
-        // A form on a grid of its own is in nobody's way and nobody is in
-        // its: the game lets grids pass through each other, since bricks
-        // only ever collide with bricks of their own grid.
-        if on_own_grid(&self.spec) {
-            return Some(by);
-        }
-        let taken: Vec<Standing> = self.others.iter().filter(|o| !on_own_grid(&o.spec)).map(|o| Standing::new(&o.built.bricks, o.place)).collect();
+        // only what shares its grid: grids pass through each other
+        let taken: Vec<Standing> = self.others.iter().filter(|o| self.in_my_way(&o.spec)).map(|o| Standing::new(&o.built.bricks, o.place)).collect();
         let mine: Vec<[i32; 3]> = cells_of(&self.built.bricks).collect();
         way_out(&mine, self.place, &taken, by)
     }
@@ -481,12 +480,13 @@ impl State {
     /// does not touch are settled first, so that a form pushed aside goes
     /// round them and not into them.
     fn push_others(&mut self) {
-        if self.others.is_empty() || on_own_grid(&self.spec) {
+        if self.others.is_empty() {
             return;
         }
+        let shares: Vec<bool> = self.others.iter().map(|o| self.in_my_way(&o.spec)).collect();
         let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
-        let touched: Vec<bool> = self.others.iter().map(|o| !on_own_grid(&o.spec) && settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
-        for (other, _) in self.others.iter().zip(&touched).filter(|(o, t)| !**t && !on_own_grid(&o.spec)) {
+        let touched: Vec<bool> = self.others.iter().zip(&shares).map(|(o, shares)| *shares && settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
+        for ((other, _), _) in self.others.iter().zip(&touched).zip(&shares).filter(|((_, t), shares)| !**t && **shares) {
             settled.push(Standing::new(&other.built.bricks, other.place));
         }
         for (other, _) in self.others.iter_mut().zip(&touched).filter(|(_, t)| **t) {
@@ -516,7 +516,11 @@ impl State {
     pub fn paste(&mut self, forms: Vec<Placed>) {
         let Some(first) = forms.first().map(|f| f.2) else { return };
         let mut origin = None;
-        for (spec, paint, place) in forms {
+        // on grids of their own, numbered after the ones already here, so
+        // that what is pasted keeps its grids and joins none of these
+        let after = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
+        for (mut spec, paint, place) in forms {
+            spec.on_grid += after;
             // the first is set down beside what is there; the rest keep
             // their distance from it
             let at = origin.map(|o: [i32; 3]| [0, 1, 2].map(|k| o[k] + place[k] - first[k]));
@@ -784,7 +788,7 @@ impl State {
         let s = &mut self.spec;
         (s.radius, s.thick, s.depth, s.stretch, s.plane) = (fresh.radius, fresh.thick, fresh.depth, fresh.stretch, fresh.plane);
         (s.protrude, s.flip, s.symmetric, s.pull_reach) = (fresh.protrude, fresh.flip, fresh.symmetric, fresh.pull_reach);
-        (s.mirror, s.turned, s.grid) = (fresh.mirror, fresh.turned, fresh.grid);
+        (s.mirror, s.turned) = (fresh.mirror, fresh.turned);
         self.arch = 0;
         self.segment = (2.0, 6.0);
         self.preset();
@@ -874,7 +878,7 @@ impl State {
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
         // (the angle of its grid changes nothing about how a form is fitted)
-        let spec = Spec { grid: LEVEL, ..self.full_spec() };
+        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
         // (see `arcs_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
@@ -927,23 +931,21 @@ impl State {
         self.gizmo().map(|(middle, reach)| (middle, reach[0]))
     }
 
-    /// Each form's own grid, the one being edited first: the point it
-    /// turns about and its angle.
-    pub fn grids(&self) -> Vec<(DVec3, [f64; 4])> {
-        std::iter::once((pivot(self.bounds, self.place), self.spec.grid)).chain(self.others.iter().map(|o| (pivot(o.bounds, o.place), o.spec.grid))).collect()
+    /// Each form's grid, the one being edited first: where it is, and its angle.
+    pub fn grids(&self) -> Vec<([f64; 3], [f64; 4])> {
+        std::iter::once((self.spec.grid_at, self.spec.grid)).chain(self.others.iter().map(|o| (o.spec.grid_at, o.spec.grid))).collect()
     }
 
     /// The angle of the cursor's ray round ring `axis`: where the ray meets
     /// the ring's plane, as an angle about the ring's middle. `None` if the
     /// ring is seen edge on.
-    fn round_ring(&self, axis: usize, origin: DVec3, dir: DVec3) -> Option<f64> {
-        let middle = pivot(self.bounds, self.place);
+    fn round_ring(&self, axis: usize, about: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
         let normal = [DVec3::X, DVec3::Y, DVec3::Z][axis];
         let facing = dir.dot(normal);
         if facing.abs() < 0.05 {
             return None;
         }
-        let out = origin + dir * ((middle - origin).dot(normal) / facing) - middle;
+        let out = origin + dir * ((about - origin).dot(normal) / facing) - about;
         let (a, b) = [(1, 2), (2, 0), (0, 1)][axis];
         Some(out[b].atan2(out[a]))
     }
@@ -951,22 +953,33 @@ impl State {
     /// Take hold of ring `axis` where the cursor's ray passes it. Returns
     /// whether it could be.
     pub fn hold_ring(&mut self, axis: usize, origin: DVec3, dir: DVec3) -> bool {
-        self.spin_from = self.round_ring(axis, origin, dir).map(|angle| (angle, self.spec.grid));
+        let Some((lo, hi)) = self.grid_box() else { return false };
+        let middle = (lo + hi) / 2.0;
+        let about = out_of_grid(&self.spec, middle);
+        self.spin_from = self.round_ring(axis, about, origin, dir).map(|angle| (angle, self.spec.grid, about, middle));
         self.spin_from.is_some()
     }
 
-    /// Put the form back on the world's grid, level.
+    /// Put the grid being edited back on the world's grid, level, about
+    /// where its middle is, to the nearest unit.
     pub fn level(&mut self) {
-        self.spec.grid = LEVEL;
-        self.scene += 1;
+        let Some((lo, hi)) = self.grid_box() else { return };
+        let middle = (lo + hi) / 2.0;
+        let gone = ((out_of_grid(&self.spec, middle) - middle) * 2.0).round();
+        let by = [gone.x as i32, gone.y as i32, gone.z as i32];
+        let on = self.spec.on_grid;
+        self.place = [0, 1, 2].map(|k| self.place[k] + by[k]);
+        for other in self.others.iter_mut().filter(|o| o.spec.on_grid == on) {
+            other.place = [0, 1, 2].map(|k| other.place[k] + by[k]);
+        }
+        self.set_grid(LEVEL, [0.0; 3]);
     }
 
     /// The dots as they are seen: where the form's dots are once it has
     /// been turned by quarter turns, and its grid by whatever angle.
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
         let (turn, standing) = (arcs_core::spec::Turn::of(&self.spec.snapped()), self.standing());
-        let (about, grid) = (pivot(self.bounds, self.place), self.spec.grid);
-        self.dots().into_iter().map(|(h, at)| (h, about + turned_way(grid, turn.point(at - standing) + standing - about, false))).collect()
+        self.dots().into_iter().map(|(h, at)| (h, out_of_grid(&self.spec, turn.point(at - standing) + standing))).collect()
     }
 
     /// The dots of the form as it is fitted, before it is turned: where
@@ -997,9 +1010,80 @@ impl State {
     /// every move. An arrow moves it along one axis and no other, whatever
     /// the view.
     pub fn gizmo(&self) -> Option<(DVec3, [f64; 3])> {
-        let (lo, hi) = self.bounds?;
-        let middle = DVec3::new((lo[0] + hi[0]) as f64, (lo[1] + hi[1]) as f64, (lo[2] + hi[2]) as f64) / 2.0 + self.standing();
-        Some((middle, [5.0; 3]))
+        let (lo, hi) = self.grid_box()?;
+        // six tenths of the way out to the furthest side of what is on the
+        // grid, so that it grows and shrinks with it and is never lost in it
+        let reach = (0.6 * (hi - lo).max_element() / 2.0).max(3.0);
+        Some((out_of_grid(&self.spec, (lo + hi) / 2.0), [reach; 3]))
+    }
+
+    /// The box, in the grid's own cells, of every form on the grid of the
+    /// one being edited. The arrows and rings stand at its middle, and so
+    /// move there as the forms on the grid are moved and reshaped.
+    fn grid_box(&self) -> Option<(DVec3, DVec3)> {
+        let corner = |c: [i32; 3], place: [i32; 3]| DVec3::new(c[0] as f64 + place[0] as f64 / 2.0, c[1] as f64 + place[1] as f64 / 2.0, c[2] as f64 + place[2] as f64 / 2.0);
+        let mine = self.bounds.map(|b| (b, self.place));
+        let theirs = self.others.iter().filter(|o| o.spec.on_grid == self.spec.on_grid).filter_map(|o| o.bounds.map(|b| (b, o.place)));
+        mine.into_iter().chain(theirs).map(|((lo, hi), place)| (corner(lo, place), corner(hi, place))).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+    }
+
+    /// Set the angle and place of the grid being edited, for every form on it.
+    fn set_grid(&mut self, grid: [f64; 4], at: [f64; 3]) {
+        let on = self.spec.on_grid;
+        (self.spec.grid, self.spec.grid_at) = (grid, at);
+        for other in self.others.iter_mut().filter(|o| o.spec.on_grid == on) {
+            (other.spec.grid, other.spec.grid_at) = (grid, at);
+        }
+        self.scene += 1;
+    }
+
+    /// Take hold of the form being edited at a place in the view, to move
+    /// it within its grid.
+    pub fn take_hold(&mut self, at: DVec3) {
+        self.grab = Some(into_grid(&self.spec, at));
+    }
+
+    /// Move the whole grid being edited along arrow `axis` to where the
+    /// cursor's ray now passes it. A level grid is the world's, and what is
+    /// on it moves a unit at a time; a grid at an angle moves freely.
+    fn slide_grid(&mut self, axis: usize, origin: DVec3, dir: DVec3) {
+        let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
+        let gone = now[axis] - held[axis];
+        if on_own_grid(&self.spec) {
+            let mut at = self.spec.grid_at;
+            at[axis] += gone;
+            self.set_grid(self.spec.grid, at);
+            self.grab = Some(now);
+            return;
+        }
+        let units = (gone * 2.0).round() as i32;
+        if units == 0 {
+            return;
+        }
+        let limit = (HANDLE_LIMIT * 2.0) as i32;
+        let on = self.spec.on_grid;
+        self.place[axis] = (self.place[axis] + units).clamp(-limit, limit);
+        for other in self.others.iter_mut().filter(|o| o.spec.on_grid == on) {
+            other.place[axis] = (other.place[axis] + units).clamp(-limit, limit);
+        }
+        self.scene += 1;
+        let mut held = held;
+        held[axis] += units as f64 / 2.0;
+        self.grab = Some(held);
+    }
+
+    /// Start another grid: a copy of the form being edited, on a grid of
+    /// its own, level until its rings are turned.
+    pub fn add_grid(&mut self) {
+        let next = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
+        self.add_form(Spec { on_grid: next, grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() });
+    }
+
+    /// Whether another form can be in the way of the one being edited:
+    /// one on its own grid, or, the world's grid being one grid however
+    /// many level groups share it, any level form when this one is level.
+    fn in_my_way(&self, other: &Spec) -> bool {
+        other.on_grid == self.spec.on_grid || (!on_own_grid(other) && !on_own_grid(&self.spec))
     }
 
     /// Where along arrow `axis` the ray from the eye through the cursor
@@ -1044,25 +1128,36 @@ impl State {
         if let Handle::Spin(axis) = handle {
             // Round its ring, by whole degrees: the grid as it was when the
             // ring was taken hold of, turned by as far as the cursor has
-            // gone round since. About the world's axis, as the ring is drawn.
-            let (Some((from, was)), Some(now)) = (self.spin_from, self.round_ring(axis, origin, dir)) else { return };
+            // gone round since, about the world's axis, as the ring is
+            // drawn. What was at the rings' middle stays there.
+            let Some((from, was, about_world, middle)) = self.spin_from else { return };
+            let Some(now) = self.round_ring(axis, about_world, origin, dir) else { return };
             let by = (now - from).to_degrees().round().to_radians();
-            self.spec.grid = turns(was, about(axis, by));
+            let mut grid = turns(was, about(axis, by));
             // a hair off level after a full turn back is level
-            if self.spec.grid[3].abs() > 1.0 - 1e-9 {
-                self.spec.grid = LEVEL;
+            if grid[3].abs() > 1.0 - 1e-9 {
+                grid = LEVEL;
             }
-            self.scene += 1;
+            if grid == LEVEL {
+                self.set_grid(self.spec.grid, self.spec.grid_at);
+                self.level();
+            } else {
+                let at = about_world - turned_way(grid, middle, false);
+                self.set_grid(grid, at.to_array());
+            }
             return;
         }
-        // The dots of a form on a grid of its own are where the grid's
-        // angle puts them, and are dragged from there: the cursor's ray is
-        // turned back into the grid first.
-        let (origin, dir, view) = if !on_own_grid(&self.spec) || matches!(handle, Handle::Move | Handle::Slide(_)) {
+        if let Handle::Slide(axis) = handle {
+            self.slide_grid(axis, origin, dir);
+            return;
+        }
+        // Everything else is done within the form's grid: the cursor's ray
+        // is taken into the grid first, and then moves the form, or a dot
+        // of it, as it would on a level one.
+        let (origin, dir, view) = if !on_own_grid(&self.spec) {
             (origin, dir, view)
         } else {
-            let (about, grid) = (pivot(self.bounds, self.place), self.spec.grid);
-            (about + turned_way(grid, origin - about, true), turned_way(grid, dir, true), turned_way(grid, view, true))
+            (into_grid(&self.spec, origin), turned_way(self.spec.grid, dir, true), turned_way(self.spec.grid, view, true))
         };
         let before = place(self);
         // A form that has been turned is dragged as it was before the turn:
@@ -1070,7 +1165,7 @@ impl State {
         // form as fitted. Not a move of the whole form, which is the same
         // whichever way it faces.
         let turn = arcs_core::spec::Turn::of(&self.spec.snapped());
-        let (origin, dir, view) = if turn.is_none() || matches!(handle, Handle::Move | Handle::Slide(_)) {
+        let (origin, dir, view) = if turn.is_none() || handle == Handle::Move {
             (origin, dir, view)
         } else {
             let standing = self.standing();
@@ -1133,15 +1228,6 @@ impl State {
             self.spec.pulls[i].1[axis] = kept;
             return;
         }
-        if let Handle::Slide(axis) = handle {
-            // along its arrow and no other way, a unit (half a cell) at a time
-            let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
-            let mut by = [0; 3];
-            by[axis] = ((now[axis] - held[axis]) * 2.0).round() as i32;
-            self.move_by(by, held);
-            return;
-        }
-        // a form is moved by the point of it that was taken hold of; it has no dot
         let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
         let Some(at) = held else { return };
         let normal = match (handle, self.lock) {
@@ -1236,9 +1322,7 @@ impl State {
             return None;
         }
         // (where it was clicked, as it is in the form's own grid)
-        let about = pivot(self.bounds, self.place);
-        let at = about + turned_way(self.spec.grid, at - about, true);
-        let at = at - self.standing();
+        let at = into_grid(&self.spec, at) - self.standing();
         // On a curve, or a profile spun about an axis, the point takes hold
         // of the curve as last built where it comes nearest the click. A
         // sphere or a pyramid has no curve: the point takes hold of its
@@ -1650,42 +1734,80 @@ mod tests {
     }
 
     #[test]
-    fn a_ring_turns_the_forms_grid_by_any_angle() {
+    fn the_rings_and_arrows_turn_and_move_a_whole_grid() {
         let mut state = State::new(); // an arch across x, standing along z
         state.refresh(|| 0.0);
+        // a second form on the same grid, and a third on a grid of its own
+        state.add_form(state.full_spec());
+        state.refresh(|| 0.0);
+        state.add_grid();
+        state.refresh(|| 0.0);
+        assert_eq!(state.others.iter().map(|o| o.spec.on_grid).collect::<Vec<_>>(), vec![0, 0]);
+        assert_eq!(state.spec.on_grid, 1);
+        // back to the grid of two: its arrows and rings stand at the middle of both forms
+        state.activate(0);
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.on_grid, 0);
+        let (middle, reach) = state.gizmo().unwrap();
+        let mate = state.others.iter().find(|o| o.spec.on_grid == 0).unwrap();
+        let own = (state.bounds.unwrap(), state.place);
+        let both_lo = (2 * own.0 .0[0] + own.1[0]).min(2 * mate.bounds.unwrap().0[0] + mate.place[0]) as f64 / 2.0;
+        let both_hi = (2 * own.0 .1[0] + own.1[0]).max(2 * mate.bounds.unwrap().1[0] + mate.place[0]) as f64 / 2.0;
+        assert!((middle.x - (both_lo + both_hi) / 2.0).abs() < 1e-9, "not at the middle of the two: {middle:?}");
+        // six tenths of the way out to their furthest side, and the rings as large as the arrows
+        assert!((reach[0] - 0.6 * (both_hi - both_lo) / 2.0).abs() < 1e-9 && state.rings().unwrap().1 == reach[0]);
         let bricks = state.built.bricks.clone();
-        let (middle, wide) = state.rings().unwrap();
-        assert_eq!(wide, state.gizmo().unwrap().1[0], "the rings are as large as the arrows");
         let foot = state.handles()[0].1;
-        // the ring about y, seen along y: taken hold of out along x, and carried 37 degrees round
-        let eye = middle - DVec3::Y * 60.0;
+
+        // the ring about y, seen along y: taken hold of and carried 37 degrees round
+        let eye = middle - DVec3::Y * 200.0;
         let towards = |angle: f64| (middle + DVec3::new(angle.sin(), 0.0, angle.cos()) * 4.0 - eye).normalize();
         assert!(state.hold_ring(1, eye, towards(0.0)));
-        let scene = state.scene;
         state.drag(Handle::Spin(1), eye, towards(37f64.to_radians()), DVec3::Y);
-        assert!(on_own_grid(&state.spec) && state.scene > scene);
-        // by 37 degrees about y, to the degree
-        let turned = turned_way(state.spec.grid, DVec3::Z, false);
-        assert!((turned - DVec3::new(37f64.to_radians().sin(), 0.0, 37f64.to_radians().cos())).length() < 1e-9, "{turned:?}");
-        // it is the same bricks, not fitted again, and its dots have gone round with it
+        assert!(on_own_grid(&state.spec));
+        let up = turned_way(state.spec.grid, DVec3::Z, false);
+        assert!((up - DVec3::new(37f64.to_radians().sin(), 0.0, 37f64.to_radians().cos())).length() < 1e-9, "{up:?}");
+        // both forms on the grid turned, and the one on the other grid did not
+        let grids: Vec<(u32, bool)> = state.others.iter().map(|o| (o.spec.on_grid, on_own_grid(&o.spec))).collect();
+        assert!(grids.contains(&(0, true)) && grids.contains(&(1, false)), "{grids:?}");
+        // about the rings' middle, which has stayed where it was
+        assert!((state.gizmo().unwrap().0 - middle).length() < 1e-9);
+        // the same bricks, not fitted again, and the dots gone round with them
         assert!(!state.refresh(|| 0.0));
         assert_eq!(state.built.bricks, bricks);
         let now = state.handles()[0].1;
         assert!((now - (middle + turned_way(state.spec.grid, foot - middle, false))).length() < 1e-9);
-        assert!((now - foot).length() > 1.0);
-        // a dot is dragged where it is seen: the crown, pulled two cells further along the arch's own up
+
+        // a dot is dragged where it is seen: the crown, two cells further along the arch's own up
         let rise = state.arch_rise();
         let crown = state.handles().iter().find(|h| h.0 == Handle::Rise).unwrap().1;
         let side = turned_way(state.spec.grid, DVec3::Y, false);
-        state.drag(Handle::Rise, crown + turned * 2.0 - side * 80.0, side, side);
+        state.drag(Handle::Rise, crown + up * 2.0 - side * 80.0, side, side);
         assert!((state.arch_rise() - (rise + 2.0)).abs() <= 0.5, "rise {} from {rise}", state.arch_rise());
-        // on a grid of its own it is in no other form's way
         state.spec.rise = Some(rise);
         state.refresh(|| 0.0);
-        assert_eq!(state.clear_of_others([4, 0, -2]), Some([4, 0, -2]));
-        // levelled, it is back on the world's grid
+
+        // an arrow moves the whole grid, freely, and nothing on it against anything else
+        let (middle, _) = state.gizmo().unwrap();
+        let places: Vec<[i32; 3]> = std::iter::once(state.place).chain(state.others.iter().map(|o| o.place)).collect();
+        let far = middle + DVec3::new(-60.0, -200.0, 40.0);
+        assert!(state.hold_arrow(2, far, (middle - far).normalize()));
+        state.drag(Handle::Slide(2), far, (middle + DVec3::Z * 3.3 - far).normalize(), DVec3::Y);
+        assert!((state.gizmo().unwrap().0 - (middle + DVec3::Z * 3.3)).length() < 1e-6, "{:?}", state.gizmo().unwrap().0 - middle);
+        assert_eq!(std::iter::once(state.place).chain(state.others.iter().map(|o| o.place)).collect::<Vec<_>>(), places);
+        // and a form is moved within its grid by its bricks: along the grid's own axes
+        let at = state.handles()[0].1;
+        state.take_hold(at);
+        let along = turned_way(state.spec.grid, DVec3::X, false);
+        state.lock = Lock::Axis(1);
+        state.drag(Handle::Move, at + along * 2.0 - side * 80.0, side, side);
+        assert_eq!([state.place[0] - places[0][0], state.place[1] - places[0][1], state.place[2] - places[0][2]], [4, 0, 0]);
+
+        // levelled, the grid is the world's again, about where its middle was
+        let middle = state.gizmo().unwrap().0;
         state.level();
-        assert!(!on_own_grid(&state.spec));
+        assert!(!on_own_grid(&state.spec) && state.others.iter().all(|o| !on_own_grid(&o.spec)));
+        assert!((state.gizmo().unwrap().0 - middle).length() <= 0.9, "{:?}", state.gizmo().unwrap().0 - middle);
         // seen edge on, a ring cannot be taken hold of
         assert!(!state.hold_ring(1, middle - DVec3::X * 60.0, DVec3::X));
     }

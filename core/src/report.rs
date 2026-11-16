@@ -76,6 +76,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("mirror", spec.mirror.map(|f| f.to_string()).join(","));
     line("turned", spec.turned.to_string());
     line("grid", spec.grid.map(number).join(","));
+    line("grid_at", spec.grid_at.map(number).join(","));
+    line("on_grid", spec.on_grid.to_string());
     // each pull as where it takes hold, then how far it moves
     line("pulls", list(spec.pulls.iter().map(|(at, by)| format!("{} > {}", vec3(at), vec3(by))).collect()));
     line("pull_reach", number(spec.pull_reach));
@@ -195,6 +197,11 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             "wedges" => spec.wedges = flag(value)?,
             "symmetric" => spec.symmetric = flag(value)?,
             "turned" => spec.turned = (whole(value)?.rem_euclid(24)) as u8,
+            "grid_at" => {
+                let parts: Vec<f64> = value.split(',').map(|v| num(v.trim())).collect::<Result<_, _>>()?;
+                spec.grid_at = <[f64; 3]>::try_from(parts).map_err(|_| bad("expected three numbers"))?.map(|v| if v.is_finite() { v.clamp(-10_000.0, 10_000.0) } else { 0.0 });
+            }
+            "on_grid" => spec.on_grid = whole(value)?.clamp(0, 10_000) as u32,
             "grid" => {
                 let parts: Vec<f64> = value.split(',').map(|v| num(v.trim())).collect::<Result<_, _>>()?;
                 let q = <[f64; 4]>::try_from(parts).map_err(|_| bad("expected four numbers"))?;
@@ -864,6 +871,8 @@ mod tests {
                 mirror: [false, true, false],
                 turned: 7,
                 grid: [0.0, 0.6, 0.0, 0.8],
+                grid_at: [3.0, -1.5, 20.0],
+                on_grid: 2,
                 pulls: vec![(DVec3::new(1.0, 2.5, -3.0), DVec3::new(0.0, 0.5, 4.0))],
                 pull_reach: 6.5,
                 simplify: 0.25,

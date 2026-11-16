@@ -53,16 +53,22 @@ further off it is. The form's own points and sizes are untouched.
   changes is fitted cell by cell, which is rougher. A round tube pulled out
   of its plane is treated the same way: the pipe is kept away from the pull.
 
-## Turning
+## Turning, and grids
 
-A form can be turned two ways. By quarter turns it stays on the brick grid:
+A form can be turned two ways. By quarter turns it stays on its brick grid:
 it is fitted as it stands and its bricks are turned afterwards, so it is the
 same bricks facing another way. By any other angle it cannot stay on the
-grid, so its whole grid is turned instead: the game keeps bricks on grids,
-and a grid other than the world's can stand at any angle. The form is
-fitted exactly as if it were level and is copied to the clipboard on a
-frozen grid of its own. Grids pass through each other, so such a form is
-not kept clear of the others.
+grid, so the grid itself is turned: the game keeps bricks on grids, and a
+grid other than the world's can stand at any angle.
+
+Every form is on a numbered grid, and forms with the same number share one.
+A grid has an angle and a place, and everything on it is fitted exactly as
+if it were level; the angle and place only say where the finished bricks
+are shown and where the copied file puts them. A grid that is level is the
+world's own, whatever its number, and its forms are written as ordinary
+bricks. A grid at an angle is written as a grid of its own, frozen in
+place. Forms are kept clear of the others on their grid, and level forms of
+all level ones; grids at an angle pass through everything.
 
 ## Mirror
 

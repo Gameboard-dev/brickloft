@@ -255,7 +255,7 @@ pub fn run_form(form: usize) {
                                     if form > 0 {
                                         state.activate(form - 1);
                                     }
-                                    state.grab = Some(d(hit.position));
+                                    state.take_hold(d(hit.position));
                                     dragging = Some(Handle::Move);
                                 }
                                 *handled = true;
@@ -370,11 +370,11 @@ pub fn run_form(form: usize) {
         if rebuilt || first || shown_scene != state.scene {
             shown_scene = state.scene;
             let bricks = state.painted();
-            // each form's own grid: the point it turns about and its angle, as a turn of the view's
+            // each form's grid, where it is at an angle: turned, then moved to where the grid is
             let grids: Vec<Option<Mat4>> = state
                 .grids()
                 .into_iter()
-                .map(|(about, q)| (q != state::LEVEL).then(|| Mat4::from_translation(v(about)) * Mat4::from(Quat::new(q[3] as f32, q[0] as f32, q[1] as f32, q[2] as f32)) * Mat4::from_translation(-v(about))))
+                .map(|(at, q)| (q != state::LEVEL).then(|| Mat4::from_translation(vec3(at[0] as f32, at[1] as f32, at[2] as f32)) * Mat4::from(Quat::new(q[3] as f32, q[0] as f32, q[1] as f32, q[2] as f32))))
                 .collect();
             for ((object, &mask), owner) in brick_meshes.iter_mut().zip(&masks).zip(owners.iter_mut()) {
                 let mut instances = Instances::default();
