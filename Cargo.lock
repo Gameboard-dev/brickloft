@@ -89,19 +89,22 @@ dependencies = [
 
 [[package]]
 name = "arcs-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "arcs-editor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arcs-core",
  "brdb",
  "clipboard-win",
+ "js-sys",
  "three-d",
+ "wasm-bindgen",
+ "web-sys",
  "winit",
 ]
 

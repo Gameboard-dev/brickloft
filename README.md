@@ -41,6 +41,14 @@ With Rust installed (<https://rustup.rs>):
 cargo run --release -p arcs-editor
 ```
 
+### Optional: a page for the browser
+
+`sh build-editor.sh` builds the same editor as a web page, into `dist/`; the
+top of that file lists the two tools it needs. The page shapes and measures
+forms as the program does, but a browser page cannot put a file on the
+clipboard, so it cannot hand a form to the game. It is there for looking and
+trying, where installing a program is not wanted.
+
 ## Use
 
 1. Pick a form, drag its dots, set thickness and the rest in the panel. The

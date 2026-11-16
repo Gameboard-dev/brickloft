@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# cdylib is what wasm-bindgen packages for the optional browser page (see
+# build-editor.sh); rlib lets src/main.rs run the same editor as the program
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 # The program. Named differently from the library:
 # on Windows a program and a library called arcs-editor and arcs_editor both
 # want the debug file arcs_editor.pdb, and cargo warns that one overwrites
@@ -40,3 +45,11 @@ brdb = { version = "1.0.5", default-features = false, features = ["brz"] }
 # https://docs.rs/clipboard-win
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
+
+# Only for the optional browser page.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# pinned to the installed wasm-bindgen CLI: the two must match exactly or the
+# CLI refuses the build
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Storage"] }
+js-sys = "0.3"

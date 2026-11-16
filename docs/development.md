@@ -6,6 +6,7 @@
 cargo test                      # core and editor logic
 cargo run -p arcs-editor        # the editor as a desktop window (program `arcs`)
 cargo run -p arcs-editor -- 5   # the same, opening on the sixth form in the menu
+sh build-editor.sh              # optional: the editor as a page for a browser, into dist/
 cargo run --release -p arcs-core --example timing
 ```
 
