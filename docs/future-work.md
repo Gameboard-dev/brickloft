@@ -130,22 +130,22 @@ What remains:
   (a mosaic on a dome) by choosing colours for the form's bricks. That
   needs the pattern mapped onto a curved surface and is a separate step.
 
-## Shrubs, flowers and more trees
+## More plants
 
-Three trees are built: a pine, a palm and an oak, each grown by its own
-method ([algorithm.md](algorithm.md), section 7.10). What remains is the
-rest of the flora, and four things the trees do not yet do.
+Three trees, two bushes and two flowers are built: a pine, a palm and an
+oak, a boxwood and a rose, sunflowers and tulips, each grown by its own
+method ([algorithm.md](algorithm.md), section 7.10). What remains:
 
-- **Shrubs and hedges.** A shrub is an oak's rule with no trunk: several
-  stems from the ground, forking early, with leaves all over and not only
-  at the ends. A hedge is the same rule held inside a box in place of a
-  dome.
-- **Flowers.** A flower head places its seeds or petals by Vogel's model
-  of phyllotaxis, which puts the $`k`$-th at the angle
-  $`k \cdot 137.5^\circ`$ and the distance $`c\sqrt{k}`$ from the middle
-  and gives the spirals of a sunflower. The palm's fronds already use the
-  angle. At one cell to a petal a flower is a few bricks, so flowers
-  belong in a pattern (a bed of them) more than as forms.
+- **More bushes.** A hedge is the boxwood's canopy held inside a box in
+  place of a dome. An upright or spiky plant (a juniper, a yucca, an
+  agave) needs a rule of its own, a rosette of stiff blades, which the
+  tulip's leaves are a start on. A hydrangea or rhododendron is the rose
+  with a rounder habit and its blooms in large heads at the ends of the
+  shoots.
+- **More flowers.** A daisy is a small sunflower. A lily or a daffodil
+  needs a trumpet, and a rose seen close needs petals in a spiral, which
+  the golden angle would place. A bed of mixed flowers would be several
+  kinds from one seed.
 - **More kinds.** A birch or a willow is the oak's rule with other
   numbers: a leading stem that carries on, thin limbs, and for the willow
   a pull downwards on the ends of the branches. A date palm is the palm
@@ -160,9 +160,10 @@ rest of the flora, and four things the trees do not yet do.
   build with far fewer steps (sections 7.5 and 7.7). Building the limbs
   that way and only the foliage cell by cell would need the two joined
   where they meet, as added points are joined to a sphere today.
-- **Speed.** A tree takes up to a second on one thread, nearly all of it
-  distance samples. The blocks of a fit are independent and can be
-  divided among threads. Evaluating the samples on a graphics card is
+- **Speed.** A tree takes about a fifth of a second on a desktop's cores
+  and up to a second on one, nearly all of it distance samples. Growing
+  the tree and filing its parts is still done on one thread. Evaluating
+  the samples on a graphics card is
   possible in OpenGL 3.3 and WebGL2, by drawing slices of the field into
   a texture, and would be several times faster again. It was set aside
   because those versions do not fix how arithmetic is rounded, so two

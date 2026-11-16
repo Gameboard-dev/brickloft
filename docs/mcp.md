@@ -127,7 +127,7 @@ The settings Claude can give:
 | `radius` and `stretch` of a `cube` | `radius` is half the cube's side, and `stretch` scales it along x, y and z. A floor 40 by 30 and 2 deep is `radius` 20 with `stretch` `[1, 0.75, 0.05]`. Each length is rounded to a whole microbrick. With `fill` false the cube is hollow, with walls `thick` on every side. `depth`, `tube` and `plane` do nothing to a cube. |
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
-| `tree` | `[kind, seed, fullness, count, bend, extras]` says which tree a `tree` form is; only the kind is needed (see below) |
+| `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven` after it or not, lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
@@ -139,12 +139,14 @@ A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
-`tree` names the kind first, `pine`, `palm` or `oak`, and whatever
-follows it replaces that kind's usual settings in order: the seed, how
-full (0 to 100), how many (a pine's tiers, a palm's fronds, the limbs an
-oak's trunk divides into), how bent (0 to 100: a pine's droop, a palm's
-lean, an oak's gnarl) and 1 or 0 for its extras (a star and baubles,
-coconuts). `"tree": "oak"` is the oak as the editor starts one and
+`tree` names the kind first: `pine`, `palm`, `oak`, `boxwood`, `rose`,
+`sunflower` or `tulip`. Whatever follows it replaces that kind's usual
+settings in order: the seed, how full (0 to 100), how many (a pine's
+tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, a rose's
+canes, the flowers in a clump), how bent (0 to 100: a pine's droop, a
+palm's lean, an oak's gnarl, a rose's arch, a sunflower's nod, how open a
+tulip is) and 1 or 0 for its extras (a star and baubles, coconuts, a
+rose's blooms). The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
 `"tree": ["palm", 3]` the third palm. A tree's height is `rise` and its
 spread `radius`. Added with neither, it is its usual size, a pine 140
 microbricks tall, and comes in its kind's own eight colours with the mode

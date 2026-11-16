@@ -1966,15 +1966,17 @@ present. A pattern made only of small repeated motifs, with no figure
 larger than a few tiles, is the case it still suits (see
 [future-work.md](future-work.md)).
 
-### 7.10 Trees
+### 7.10 Trees, bushes and flowers
 
-A tree is one solid, fitted cell by cell (section 7.1) and coloured part
+A plant is one solid, fitted cell by cell (section 7.1) and coloured part
 by part ([core/src/tree.rs](../core/src/tree.rs)). The solid is the union
 of several thousand simple parts: tapered round branches, the eight-sided
-lengths of a palm's trunk, and balls of leaves. There are three kinds, a
-pine, a palm and an oak, and each is grown by a method of its own, because
-the three differ in how they grow and a single rule general enough for all
-three describes none of them closely.
+lengths of a palm's trunk, and balls of leaves. There are three trees (a
+pine, a palm and an oak), two bushes (a boxwood and a rose) and two
+flowers (a sunflower and a tulip). Each is grown by a method of its own,
+because they differ in how they grow and a single rule general enough for
+all of them describes none of them closely. The trees come first below,
+and the bushes and flowers after them reuse their parts.
 
 <img src="images/tree-pine.png" width="330" alt="A spruce in bricks: a straight brown trunk with tiers of drooping green boughs that shorten to a single pointed leader, with gaps between the tiers"> <img src="images/tree-palm.png" width="330" alt="A coconut palm in bricks: a slender ringed trunk that leans and curves upright, a crown of arching fronds with rows of hanging leaflets, and coconuts under the crown">
 
@@ -2207,10 +2209,90 @@ influences every branch near it, so changing one setting grows a
 different tree. Here a seed is one skeleton, and the height, spread and
 foliage can be changed while the tree stays recognisably itself.
 
+#### The bushes
+
+<img src="images/plant-boxwood.png" width="330" alt="A boxwood bush in bricks: a dense rounded mound of lumpy green foliage, lighter on top, on several short stems"> <img src="images/plant-rose.png" width="330" alt="A rose bush in bricks: arching green canes with tufts of leaves and pink blooms with yellow hearts on the outside">
+
+A boxwood is a dense rounded evergreen, about as tall as it is wide, on
+several stems ([*Buxus sempervirens*](https://plants.ces.ncsu.edu/plants/buxus-sempervirens/)).
+Its stems are grown by forks, as an oak's limbs are, three forks deep,
+each from its own place in the ground. Its leaves are not left to the ends
+of the branches as an oak's are, because a boxwood has no sky in it. Tufts
+of leaves are set all over a dome instead, a golden angle apart: the tuft
+numbered $`n`$ of $`N`$ stands at the height $`1 - 2(n + \tfrac12)/N`$
+of the dome and at the angle $`n \cdot 137.5^\circ`$ round it, which
+covers a ball evenly. Each tuft is pushed in a little by a random amount
+that **Looseness** scales, and the lowest seventh of the dome is left open
+so the stems show at the foot. That gives the lumpy, layered outline of a
+shrub left to grow. Builders of brick bushes get the same effect by
+turning each layer of leaves against the one below
+([leafy bush tutorial](https://fullplatebuilds.com/2018/12/07/leafy-bush-tutorial/)).
+
+A rose is canes: long shoots from the ground that climb and then arch
+over, with the flowers at the ends of the canes and of their side shoots
+([roses](https://plants.ces.ncsu.edu/plants/rosa/)). A cane is a palm's
+frond stood on the ground. It leaves at 6 to 26 degrees from upright and
+turns over by a further $`\beta\,x^{1.6}`$ along its length, with
+$`\beta`$ set by **Arch of the canes**. The canes are set round the
+middle by the golden angle, grown at no particular size and stretched to
+the height and spread asked for. A tuft of leaves sits every few cells
+along the outer two thirds of a cane. A bloom sits on the outward side of
+some tufts and of every tip: a ball of petals about five cells across with
+a small heart of another colour facing outwards.
+
+#### The flowers
+
+<img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers in bricks, of different heights, facing the same way: dark hearts ringed with lighter seeds and yellow petals, on stout stems with broad drooping leaves"> <img src="images/plant-tulips.png" width="330" alt="A clump of tulips in bricks: orange cups flamed with red on bare stems, with strap-shaped leaves arching from the ground">
+
+A flower is small, and a part must be two cells thick to be built, so the
+flowers are large: a sunflower is 90 cells tall with a head 34 across, and
+a tulip 64 tall with a cup 12 across. The head sets the size. A seed is a
+ball two and a half cells through, and a head needs some dozens of them
+before it reads as a disc of seeds and not a button.
+
+A sunflower's head is built as the plant builds it, by Vogel's model
+([Fermat's spiral and the golden angle](https://en.wikipedia.org/wiki/Fermat%27s_spiral#The_golden_ratio_and_the_golden_angle)).
+The seed numbered $`k`$ stands at
+
+```math
+r_k = c\sqrt{k}, \qquad \theta_k = k \cdot 137.508^\circ
+```
+
+from the middle of the disc, with $`c = 1.3`$ cells. Each seed is a
+golden angle on from the last, which packs them evenly at any size of
+head. Rings of seeds, the obvious alternative, leave gaps between the
+rings and line the seeds up in spokes. The inner seeds have one colour
+number and the outer ring another, the disc bulges a little in the middle,
+and its back is a coarser plate of the same pattern in green. Round the
+disc are the ray florets, the petals: 13, 21 or 34 of them by the size of
+the head, Fibonacci numbers as a real head's are, with a second row behind
+and between the first. Each petal is two round ribs side by side at its
+root that meet at its tip, so it is flat and pointed. The head faces to
+one side and nods by an amount **Nod of the head** sets, and the heads of
+a clump face the same way to within 35 degrees, as grown sunflowers all
+face east ([common sunflower](https://en.wikipedia.org/wiki/Common_sunflower)).
+The stem carries heart-shaped leaves, each a fan of five ribs, a golden
+angle apart and smaller towards the top.
+
+A tulip is a cup of six petals in two rings of three, the inner three
+standing in the gaps of the outer, on a bare stem with two or three
+strap-shaped leaves from the ground
+([tulip](https://en.wikipedia.org/wiki/Tulip)). Each petal is three ribs
+side by side, bowed out from the base of the cup and in again at the lip,
+with the middle rib the longest so the petal comes to a point. The cup is
+1.25 times as tall as it is wide. The two rings have different colour
+numbers, so a cup can be one colour, two tones or flamed. A leaf is three
+ribs that leave the ground nearly upright against the stem and turn
+outwards along their length.
+
+A clump of either flower is several plants from one seed. They stand
+round the first by Vogel's model again, each at its own height between
+60% and 96% of the tallest.
+
 #### One colour for each part
 
-Every part carries a number: the trunk, leaves, leaves in shade, new
-growth, limbs, and so on. A brick takes the number of the part its middle
+Every part carries a number: the trunk or stem, leaves, leaves in shade,
+new growth, limbs, and then petals, blooms and the heart of a flower. A brick takes the number of the part its middle
 lies deepest in, and the colouring **As the pattern has it** paints it
 (section 7.9, Colours by feature).
 
@@ -2292,21 +2374,30 @@ of its cells, each answer deciding the next question. A card would have
 to answer every possible question in advance, most of which are never
 asked, or the fitter would have to be rewritten in rounds.
 
-The speed is to be had on the processor. The blocks of a fit are
-independent of one another, so they can be divided among threads, and the
-answer is the same bricks whatever the number of threads.
+The speed was to be had on the processor, and it has been. The blocks of
+a fit are independent of one another, and the fitter now divides them
+among threads (see [performance.md](performance.md), Threads). The bricks
+are the same whatever the number of threads. On a desktop with 16 logical
+cores the pine builds in 0.21 seconds in place of 1.1, which is the gain a
+graphics card was wanted for, without its three costs. The browser build
+has no threads and builds a pine in the one-thread time.
 
 #### What is measured
 
-At the usual sizes, on one thread:
+At the usual sizes:
 
-| Tree | Size | Parts | Bricks | Time |
-|---|---|---|---|---|
-| Pine | 140 tall, 72 across | 5,495 | 33,643 | 1.0 s |
-| Palm | 120 tall, fronds 44 long | 1,149 | 16,753 | 0.4 s |
-| Oak | 110 tall, 124 across | 3,283 | 40,092 | 0.9 s |
+| Plant | Size | Parts | Bricks | One thread | 16 threads |
+|---|---|---|---|---|---|
+| Pine | 140 tall, 72 across | 5,495 | 33,643 | 1.1 s | 0.21 s |
+| Palm | 120 tall, fronds 44 long | 1,149 | 16,753 | 0.36 s | 0.09 s |
+| Oak | 110 tall, 124 across | 3,283 | 40,092 | 1.1 s | 0.22 s |
+| Boxwood | 40 tall, 42 across | 1,065 | 8,513 | 0.23 s | 0.05 s |
+| Rose | 46 tall, 72 across | 533 | 7,143 | 0.16 s | 0.04 s |
+| Sunflowers, three | 90 tall | 659 | 8,581 | 0.23 s | 0.06 s |
+| Tulips, five | 64 tall | 551 | 5,880 | 0.30 s | 0.10 s |
 
-At 100 tall the three take 0.58, 0.27 and 0.55 seconds. The time is nearly
+At 100 tall the three trees take 0.58, 0.27 and 0.55 seconds on one
+thread. The time is nearly
 all distance samples: 9.2 million of them for the pine, at about 100
 nanoseconds each. Growing the tree and filing its parts takes 50
 milliseconds and colouring the bricks 20.
@@ -2719,9 +2810,11 @@ is nearly all surface, and the disagreement is all at the surface.
 Tilted flat curves cannot be filled. Only a curve lying flat across the
 grid has an outline the two-dimensional fitter can fill.
 
-A tree is fitted cell by cell, the roughest method, so its trunk and
-limbs are stepped where a sphere's surface would be smooth, and its
-discrepancy is high (7.10). Its smallest parts are two cells thick, so a
+A tree, bush or flower is fitted cell by cell, the roughest method, so
+its trunk and limbs are stepped where a sphere's surface would be smooth,
+and its discrepancy is high (7.10). A sunflower's seeds are too few for
+its spirals to be counted, and a rose's bloom is a ball with a heart and
+has no petals of its own. Its smallest parts are two cells thick, so a
 tree under about 40 cells tall has room for an outline and little more.
 The leaves of an oak are balls of clusters and not leaves, and a pine's
 needles are the shoots that carry them. A tree is not its own mirror

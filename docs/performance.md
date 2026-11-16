@@ -25,9 +25,11 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Hollow sphere, radius 50, wall 2 | 264 ms | 35,191 | 9.8% |
 | Hollow dome, radius 100, wall 2 | 691 ms | 71,041 | 9.5% |
 | Torus, radius 40, 8 thick | 130 ms | 645 | 11.1% |
-| Pine tree, 140 tall | 1.0 s | 33,643 | 15.3% |
-| Palm tree, 120 tall | 0.4 s | 16,753 | 18.7% |
-| Oak tree, 110 tall, 124 across | 0.9 s | 40,092 | 7.1% |
+| Pine tree, 140 tall | 1.1 s (0.21 s on 16 threads) | 33,643 | 15.3% |
+| Palm tree, 120 tall | 0.36 s (0.09 s) | 16,753 | 18.7% |
+| Oak tree, 110 tall, 124 across | 1.1 s (0.22 s) | 40,092 | 7.1% |
+| Rose bush, 46 tall | 0.16 s (0.04 s) | 7,143 | 9.7% |
+| Three sunflowers, 90 tall | 0.23 s (0.06 s) | 8,581 | 16.5% |
 
 The ordinary forms fit in tens of milliseconds and a large solid sphere in
 about a fifth of a second. The two thin shells are the exceptions. A wall
@@ -265,9 +267,12 @@ the compiler may not assume has the instruction for it. A sample's bucket
 needs three, and they were a fifth of a palm's time. Inside the grid the
 numbers are never negative, so dropping the fraction is the same answer.
 
-What is left is about 100 nanoseconds a sample, nine tenths of a build.
-The blocks of a fit are independent, so the remaining gain is in dividing
-them among threads. A graphics card was considered for the samples and
+What is left is about 100 nanoseconds a sample, nine tenths of a build on
+one thread. The blocks of a fit are independent and the fitter divides
+them among threads (see [Threads](#threads)), which takes a pine from 1.1
+seconds to 0.21 on 16 logical cores with the same bricks. Growing the tree
+and filing its parts, 50 milliseconds, and colouring its bricks, 20, are
+still done on one thread and are now a third of that. A graphics card was considered for the samples and
 not used, because it cannot promise the same bricks on every machine;
 the reasons are in [algorithm.md](algorithm.md), section 7.10.
 
@@ -590,9 +595,9 @@ Thin hollow spheres that fall back to the cell-by-cell fitter take about a
 quarter of a second at radius 50 on one thread, and 55 ms on sixteen. They
 still need tens of thousands of bricks.
 
-A tree takes up to a second at its usual size, and four times as long at
-twice the size, since its time grows with its surface. The view holds
-still for each build, so a tree's sliders move it in steps.
+A tree takes up to a second at its usual size on one thread, which is
+what the browser has, and four times as long at twice the size, since its
+time grows with its surface.
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at

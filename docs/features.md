@@ -338,10 +338,13 @@ Planks and stepping stones have no ground. Each board or stone takes one of
 the colours, and the sets they start with are shades of one wood or one
 stone.
 
-## Trees
+## Plants
 
-**Tree** grows a pine, a palm or an oak. Each kind is grown by a method of
-its own, from the facts of how that tree grows: how they are made is in
+**Plant** grows a tree, a bush or a flower: a pine, a palm or an oak; a
+boxwood or a rose bush; sunflowers or tulips. They are one form with a
+**Kind** because they are set and coloured the same way: a height, a
+spread, three settings and a seed. Each kind is grown by a method of its
+own, from the facts of how that plant grows: how they are made is in
 [algorithm.md](algorithm.md), section 7.10.
 
 <img src="images/tree-pine-decorated.png" width="330" alt="A pine with a gold star on its leader and red and gold baubles under the ends of its boughs"> <img src="images/tree-oak-autumn.png" width="330" alt="An oak in its early autumn colours: gold leaves in clumps, orange in their shade, on dark spreading limbs">
@@ -351,36 +354,53 @@ its own, from the facts of how that tree grows: how they are made is in
 | **Pine** | a spruce, the Christmas tree: a straight stem with tiers of drooping boughs that shorten to one pointed leader, each bough a flat spray of side shoots |
 | **Palm** | a coconut palm: a slender, ringed, eight-sided trunk, swollen at the foot, that leans and curves upright, and one crown of arching fronds with a row of leaflets down each side |
 | **Oak** | an oak grown in the open: a short thick trunk, flared at the foot, dividing into heavy crooked limbs that spread wide and fork again and again, with leaves in separate masses at the ends of the branches |
+| **Boxwood bush** | a dense rounded evergreen: a closed, lumpy mound of leaves on several short stems |
+| **Rose bush** | long canes from the ground that climb and arch over, with tufts of leaves along them and blooms on the outside |
+| **Sunflower** | a stout stem with heart-shaped leaves and a nodding head: a disc of seeds set by the golden angle, ringed with two rows of petals |
+| **Tulip** | a cup of six petals in two rings on a bare stem, with strap-shaped leaves from the ground |
+
+<img src="images/plant-rose.png" width="330" alt="A rose bush with pink blooms"> <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers of different heights facing the same way">
 
 Every tree has a **Height** and a **Spread** (a palm's is its **Frond
 length**), which the dot at its top and the dot at its side set too. Three
 more settings mean something different for each kind.
 
-| Setting | Pine | Palm | Oak |
-|---|---|---|---|
-| a number | **Tiers of boughs**, 4 to 40 | **Fronds**, 5 to 40 | **Main limbs**, 2 to 7 |
-| how full, 0 to 100% | **Fullness**: more boughs, wider sprays | **Leaflet length** | **Foliage**: larger masses of leaves, less sky |
-| how bent, 0 to 100% | **Droop** of the boughs | **Lean** of the trunk | **Gnarl**: how crooked the limbs are |
-| extras | **A star and baubles** | **Coconuts** | none |
+| Kind | A number | How full, 0 to 100% | How bent, 0 to 100% | Extras |
+|---|---|---|---|---|
+| Pine | **Tiers of boughs**, 4 to 40 | **Fullness**: more boughs, wider sprays | **Droop** of the boughs | **A star and baubles** |
+| Palm | **Fronds**, 5 to 40 | **Leaflet length** | **Lean** of the trunk | **Coconuts** |
+| Oak | **Main limbs**, 2 to 7 | **Foliage**: larger masses of leaves, less sky | **Gnarl**: how crooked the limbs are | none |
+| Boxwood | **Stems**, 2 to 12 | **Density** of the canopy | **Looseness** of its outline | none |
+| Rose | **Canes**, 3 to 16 | **Leaves and blooms** | **Arch of the canes** | **In flower** |
+| Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
+| Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
-**Seed** is which tree of its kind: any whole number, each a different
-tree, and the same number is always the same tree. **Another** takes the
+A flower's **Spread** is half the width of its head or cup, and a clump
+is as many flowers as you ask for, each its own height, standing a little
+apart.
+
+**Seed** is which plant of its kind: any whole number, each a different
+one, and the same number is always the same plant. **Another** takes the
 next number. The height, spread and other settings change the tree a seed
 gives without making it a different tree.
 
 **Colours** offers each kind's sets of colours: for a pine spruce green,
 under snow, blue spruce and in frost; for a palm three; for an oak summer,
-early autumn, late autumn and spring. A tree is coloured **As the pattern
+early autumn, late autumn and spring; for a rose pink, red, white, yellow
+and a hydrangea's blue; for a tulip six, one of them flamed. A tree is coloured **As the pattern
 has it**, with a colour for each of its parts: the trunk, leaves, leaves
 in shade, new growth, limbs, the top of a pine's boughs or the rib of a
-frond, and two for the extras. Change any of the eight under
+frond or a flower's petals, and two for the extras, the blooms or the
+seeds and heart of a flower. Change any of the eight under
 [Colour](#colour) to make a set of your own. Under snow, the white is the
 colour for the tops of the boughs.
 
-A tree starts large, a pine 140 microbricks tall, because its shoots and
-leaflets are two microbricks thick at any size and a small tree has room
-for little else. At that size a tree is 17,000 to 40,000 bricks and takes
-up to a second to build, so a slider moves it in steps. **Brick size**
+A plant starts large, a pine 140 microbricks tall and a sunflower 90,
+because its shoots, leaflets and petals are two microbricks thick at any
+size and a small one has room for little else. At that size a tree is
+17,000 to 40,000 bricks and a bush or a clump of flowers 6,000 to 9,000. A
+tree builds in about a fifth of a second on a desktop's cores and in up to
+a second on one core or in the browser. **Brick size**
 left on **Automatic** always builds a tree at 1 microbrick, whatever the
 budget. A tree can be turned, flipped, moved, joined to other forms and
 put on a grid of its own like any form. It cannot be mirrored and takes no
