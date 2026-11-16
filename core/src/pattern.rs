@@ -323,9 +323,6 @@ pub struct Mosaic {
     /// how large the boards, bricks or slabs of a style that has them
     /// are: 2 is the usual, 1 half that, 4 twice it
     pub size: i32,
-    /// how many cells of the top of each brick or cobble slope down to its
-    /// edge, all round it
-    pub bevel: i32,
     /// whether bricks or cobbles have a tile of mortar between them
     pub mortar: bool,
     /// how far each course of bricks is moved along from the one before,
@@ -337,9 +334,9 @@ pub struct Mosaic {
     /// so that the stagger is from side to side
     pub upright: bool,
     /// How unlike one another the bricks or cobbles are, 0 to 100, each
-    /// way: along the courses, across them, and in how far each stands
-    /// out of the wall. At 0 they are all alike that way.
-    pub uneven: [i32; 3],
+    /// way: along the courses and across them. At 0 they are all alike
+    /// that way.
+    pub uneven: [i32; 2],
     /// how many tiles wide the plain border round the edge is
     pub border: i32,
     /// which filling: any number, each a different mosaic
@@ -455,10 +452,10 @@ fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 /// which moved the bricks' points about and bent the measure of nearness
 /// from one that makes rectangles to the plain distance. Halfway along,
 /// it gave neither: bricks with corners sheared off at a slant, whose
-/// bevelled tops had edges no brick could follow. The two are different
+/// sides were at no angle a brick is cut at. The two are different
 /// things to want, with different colours, and each is drawn its own way.
 ///
-/// ## Uneven, three ways
+/// ## Uneven, two ways
 ///
 /// A brick's course is as deep as the rest and its ends are a brick's
 /// length apart, unless told otherwise. Uneven along moves every joint
@@ -468,11 +465,9 @@ fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 /// stays on the grid and every brick stays a rectangle. For cobbles the
 /// two say how far each stone's point is moved from its place in a grid
 /// of points, along and across: at nothing both ways the stones are all
-/// alike. Uneven in depth lets each brick or cobble stand a cell or more
-/// short of the wall's face, by an amount of its own, as the stones of a
-/// rough wall do.
+/// alike.
 ///
-/// ## Mortar and bevel
+/// ## Mortar
 ///
 /// How far inside its own outline a place is, is known for either kind:
 /// for a brick, how far it is from the nearest of its four sides; for a
@@ -483,14 +478,13 @@ fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 /// Bricks' numbers go odd and even by turns along a course, so that two
 /// side by side differ even with no mortar between them.
 ///
-/// The bevel is the same distance used as a height. The top `bevel`
-/// cells of a piece are not laid full: at its outline the piece stands
-/// `bevel` cells short, and it rises a cell for every cell in from the
-/// outline, so that its top slopes down to its edge all round (see
-/// `lay_mosaic`, which lays the sloped bricks). A brick's sides are on
-/// the grid, so its bevel is a sloped brick along each side and a hipped
-/// one at each corner, exactly. A cobble's sides are at any angle, and
-/// its bevel is as near as bricks cut at half a right angle can come.
+/// ## No bevel
+///
+/// For a while the top cells of each piece could slope down to its edge
+/// (a sloped brick along each side, a hipped one at each corner), and
+/// each piece could stand a cell or more short of the wall's face. Both
+/// were taken out at the player's word: at one cell to a tile the slopes
+/// read as clutter and not as stone. A wall is flat through its depth.
 struct Masonry {
     cobbles: bool,
     /// how many tiles a brick is long and a course deep, each with its
@@ -499,15 +493,12 @@ struct Masonry {
     deep: f64,
     /// how many tiles of mortar lie between two pieces: 1 or 0
     mortar: f64,
-    /// 0 to 1: along, across, and in depth
-    uneven: [f64; 3],
+    /// 0 to 1: along and across
+    uneven: [f64; 2],
     stagger: i32,
     upright: bool,
     seed: u64,
 }
-
-/// The most cells a piece may stand short of the wall's face.
-const MOST_SHORT: f64 = 3.0;
 
 impl Masonry {
     fn new(settings: &Mosaic, cobbles: bool) -> Masonry {
@@ -617,11 +608,6 @@ impl Masonry {
         } else {
             1 + 2 * ((self.number(row, nth, 3) * 3.0) as u8 % 3) + nth.rem_euclid(2) as u8
         }
-    }
-
-    /// How many cells short of the wall's face a piece stands, of `most` at most.
-    fn short(&self, (row, nth): (i64, i64), most: i32) -> i32 {
-        ((self.number(row, nth, 4) * (self.uneven[2] * most as f64 + 0.999)) as i32).min(most)
     }
 
     /// The colour at a place: its piece's number, or the mortar's, 0.
@@ -1462,15 +1448,6 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
     let unbroken: Vec<bool> = whole_cells.iter().map(|n| *n == wide * tall).collect();
     let edge = settings.border.clamp(0, 8) as f64 - 0.5;
     let plain: Vec<bool> = (0..across * down).map(|k| !unbroken[k] || inside[k] < edge).collect();
-    // Masonry with a bevel, or with pieces that stand short of the wall's
-    // face: the top cells of every piece are laid one by one further down,
-    // and everything else stops short of them. (A wall one cell deep has
-    // no room for either: the bevel gives way first, then the standing
-    // short.)
-    let wall = matches!(style.drawn, Drawn::Bricks | Drawn::Cobbles).then(|| Masonry::new(settings, style.drawn == Drawn::Cobbles));
-    let bevel = if wall.is_some() { settings.bevel.clamp(0, 8).min(depth - 1) } else { 0 };
-    let most_short = wall.as_ref().map_or(0, |wall| ((wall.uneven[2] * MOST_SHORT).round() as i32).min(depth - 1 - bevel));
-    let low = depth - bevel - most_short;
     let plain_colour = 0;
     let mut tiles = drawn(style.drawn, [across, down], &unbroken, settings);
     // (the pattern as it was drawn, for the sloped bricks of the edge to be coloured by)
@@ -1481,8 +1458,8 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
     let mut push = |mask4: u8, x: i32, y: i32, w: i32, h: i32, shade: u8| {
         let mask = (0..8u8).fold(0u8, |m, c| m | (mask4 >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
         let mut at = 0;
-        while at < low {
-            let run = (low - at).min(opts.max_ext.max(1));
+        while at < depth {
+            let run = (depth - at).min(opts.max_ext.max(1));
             let (mut min, mut ext) = ([0; 3], [0; 3]);
             (min[ua], min[va], min[axis]) = (x, y, w0 + at);
             (ext[ua], ext[va], ext[axis]) = (w, h, run);
@@ -1537,70 +1514,6 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
     // colour. (The largest rectangles would be fewer bricks still, and are
     // a harder problem than a floor's worth of bricks is worth.)
     whole.sort();
-    // The tops. For each cell of a piece, and each of the top layers, the
-    // piece is asked at the cell's eight corners whether it reaches that
-    // high there. A piece's top is the wall's face, less however far the
-    // piece stands short; `bevel` below its top it is whole, and from
-    // there up it is a cell further in from its outline for every cell
-    // higher. The corners it reaches are a shape: all eight a whole cell,
-    // the four below and two above a sloped brick, the four below and one
-    // above the hipped brick of a corner. A set of corners that is no
-    // shape of brick (where two sides of a cobble meet at an odd angle)
-    // is laid whole or not at all, by what the middle of the cell says.
-    //
-    // This is how the fitter of solid forms chooses a cell's brick (see
-    // `fit_volume`), done here by hand for a few layers, since a wall of
-    // stones is thousands of small solids and that fitter is made for
-    // one large one.
-    let mut tops: Vec<(CellBrick, u8)> = Vec::new();
-    if let (Some(wall), true) = (&wall, bevel + most_short > 0) {
-        // (a cell's place in the pattern: tiles are counted from the first, and a tile is a cell)
-        let place = |x: f64, y: f64| DVec2::new(x - (from[0] + first[0] * wide) as f64, y - (from[1] + first[1] * tall) as f64);
-        for layer in 0..bevel + most_short {
-            // the whole cells of this layer, to be joined along their rows
-            let mut run: Option<(i32, i32, i32, u8)> = None; // x, y, how many, colour
-            let laid = |run: &mut Option<(i32, i32, i32, u8)>, tops: &mut Vec<(CellBrick, u8)>| {
-                if let Some((x, y, long, colour)) = run.take() {
-                    let (mut min, mut ext) = ([0; 3], [0; 3]);
-                    (min[ua], min[va], min[axis]) = (x, y, w0 + low + layer);
-                    (ext[ua], ext[va], ext[axis]) = (long, 1, 1);
-                    tops.push((CellBrick { mask: 0xff, min, ext }, colour));
-                }
-            };
-            for &(y, x, colour) in whole.iter().filter(|cell| cell.2 != 0) {
-                let piece = wall.piece(place(x as f64 + 0.5, y as f64 + 0.5));
-                // how many layers above `low` the piece's top is, and where its bevel begins
-                let top = (bevel + most_short - wall.short(piece, most_short)) as f64;
-                let reaches = |dx: f64, dy: f64, up: f64| {
-                    let high = layer as f64 + up;
-                    high <= top + 1e-6 && wall.inside(piece, place(x as f64 + dx, y as f64 + dy)) >= (high - (top - bevel as f64)).max(0.0) - 1e-6
-                };
-                // (a corner is bit `across | deep << 1 | up << 2`, here across the wall, down it, and out of it)
-                let corners = (0..8u8).fold(0u8, |mask, c| mask | (reaches((c & 1) as f64, (c >> 1 & 1) as f64, (c >> 2) as f64) as u8) << c);
-                let corners = match corners {
-                    0xff | 0 => corners,
-                    shaped if crate::shapes::shape_info((0..8u8).fold(0u8, |m, c| m | (shaped >> ((c >> ua & 1) | (c >> va & 1) << 1 | (c >> axis & 1) << 2) & 1) << c)).is_some() => shaped,
-                    _ if reaches(0.5, 0.5, 0.5) => 0xff,
-                    _ => 0,
-                };
-                if corners == 0xff && run.is_some_and(|(x0, y0, long, shade)| y0 == y && x0 + long == x && shade == colour && long < opts.max_ext.max(1)) {
-                    run.as_mut().unwrap().2 += 1;
-                    continue;
-                }
-                laid(&mut run, &mut tops);
-                if corners == 0xff {
-                    run = Some((x, y, 1, colour));
-                } else if corners != 0 {
-                    let mask = (0..8u8).fold(0u8, |m, c| m | (corners >> ((c >> ua & 1) | (c >> va & 1) << 1 | (c >> axis & 1) << 2) & 1) << c);
-                    let (mut min, mut ext) = ([0; 3], [1; 3]);
-                    (min[ua], min[va], min[axis]) = (x, y, w0 + low + layer);
-                    ext[axis] = 1;
-                    tops.push((CellBrick { mask, min, ext }, colour));
-                }
-            }
-            laid(&mut run, &mut tops);
-        }
-    }
     let limit = opts.max_ext.max(1);
     let mut open: Vec<(i32, i32, i32, i32, u8)> = Vec::new(); // x, y, w, h, colour: bricks that end on the row above
     let mut at = 0;
@@ -1635,27 +1548,17 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
     for (x, y, w, h, colour) in open {
         push(15, x, y, w, h, colour);
     }
-    for (brick, colour) in joined(tops, opts.max_ext.max(1)) {
-        bricks.push(brick);
-        shades.push(colour);
-    }
     fit
 }
 
 /// Bricks laid a cell at a time, joined into the longest bricks that fill
-/// the same room: the sloped bricks along one side of a bevelled stone
-/// into one long sloped brick, and the whole cells within into blocks.
+/// the same room: cells into rows, rows into slabs and slabs into blocks.
 ///
 /// Two bricks join if they are the same shape and colour, lie end to end
 /// along an axis with the same extent across it, and the shape is the
 /// same all the way along that axis: a sloped brick may be lengthened
 /// along its ridge and not across its slope, which would change the
-/// slope, and a hipped corner not at all. Each axis is taken in turn, so
-/// cells join into rows, rows into slabs and slabs into blocks.
-///
-/// The tops were first laid as they were worked out, a brick to a cell,
-/// and a bevelled wall was a mesh of lines: eleven bricks along the side
-/// of one stone where one would do.
+/// slope. Each axis is taken in turn.
 pub(crate) fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
     let mut bricks = bricks;
     for along in 0..3 {
@@ -1835,7 +1738,7 @@ mod tests {
         let whole_floor = fit_planar(&|x, y| disc(DVec2::new(x, y)), min, max, &Opts::default());
         for (style, named) in STYLES.iter().enumerate() {
             let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-            let settings = Mosaic { style, size: 2, bevel: 2, border: 1, seed: 7, mortar: true, stagger: -1, upright: false, uneven: [0; 3] };
+            let settings = Mosaic { style, size: 2, border: 1, seed: 7, mortar: true, stagger: -1, upright: false, uneven: [0; 2] };
             let fit = lay_mosaic(&disc, &settings, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
             let name = named.name;
             assert_eq!(bricks.len(), shades.len(), "{name}");
@@ -1872,7 +1775,7 @@ mod tests {
             let name = named.name;
             let lay = |seed: u64| {
                 let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-                lay_mosaic(&floor, &Mosaic { style, size: 2, bevel: 2, border: 1, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
+                lay_mosaic(&floor, &Mosaic { style, size: 2, border: 1, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
                 (bricks, shades)
             };
             for seed in [1, 5, 12] {
@@ -1906,7 +1809,7 @@ mod tests {
         // A rug 128 by 80: its main border is 8 tiles between guards of
         // 4, and both its sides are a whole number of swings of 8.
         let (across, down) = (128, 80);
-        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
         let tile = |i: usize, j: usize| tiles[j * across + i];
         // Round a corner the frame is its own mirror image in the
         // corner's diagonal, which swaps a tile's top right and bottom
@@ -1929,7 +1832,7 @@ mod tests {
         assert_eq!(tile(63, 7)[1..], [ON_CUT, ON_CUT, 3], "the top side's middle");
         assert_eq!(tile(7, 39)[1..], [ON_CUT, ON_CUT, 3], "the left side's middle");
         // a side that is not a multiple of the border's breadth closes too
-        let tiles = drawn(Drawn::Rug, [120, 80], &vec![true; 120 * 80], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        let tiles = drawn(Drawn::Rug, [120, 80], &vec![true; 120 * 80], &Mosaic { style: 1, size: 2, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
         assert_eq!(tiles[7 * 120 + 59][1..], [ON_CUT, ON_CUT, 3], "the top side's middle, 120 across");
     }
 
@@ -1939,7 +1842,7 @@ mod tests {
         for across in (4..=70).step_by(3) {
             for down in (4..=70).step_by(5) {
                 for seed in [2, 9] {
-                    let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+                    let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
                     assert!(tiles.iter().flatten().all(|colour| *colour < 8 || *colour == ON_CUT), "{across} by {down}, seed {seed}");
                 }
             }
@@ -1951,7 +1854,7 @@ mod tests {
         // A mirror image swaps a tile's corners: left with right, or top with bottom.
         for (across, down) in [(120, 80), (90, 132), (250, 160)] {
             for seed in 0..12 {
-                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
                 for j in 0..down {
                     for i in 0..across {
                         let [a, b, c, d] = tiles[j * across + i];
@@ -1977,7 +1880,7 @@ mod tests {
             let took = (0..5)
                 .map(|_| {
                     let started = std::time::Instant::now();
-                    let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+                    let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
                     assert_eq!(tiles.len(), across * down);
                     started.elapsed().as_millis()
                 })
@@ -2034,10 +1937,10 @@ mod tests {
     #[test]
     fn bricks_are_rectangles_however_uneven_and_cobbles_are_stones_of_any_shape() {
         let (across, down) = (90, 40);
-        let wall = |seed: u64, size: i32, mortar: bool, stagger: i32, upright: bool, uneven: [i32; 3]| Mosaic { style: 0, size, bevel: 0, border: 0, seed, mortar, stagger, upright, uneven };
+        let wall = |seed: u64, size: i32, mortar: bool, stagger: i32, upright: bool, uneven: [i32; 2]| Mosaic { style: 0, size, border: 0, seed, mortar, stagger, upright, uneven };
         let laid = |kind: Drawn, across: usize, settings: Mosaic| -> Vec<Tile> { drawn(kind, [across, down], &vec![true; across * down], &settings) };
         // bricks: no tile is cut; a course is three tiles of brick and one of mortar; a brick is eight tiles and one of mortar
-        let bricks = laid(Drawn::Bricks, across, wall(4, 2, true, -1, false, [0; 3]));
+        let bricks = laid(Drawn::Bricks, across, wall(4, 2, true, -1, false, [0; 2]));
         assert!(bricks.iter().all(|tile| *tile == [tile[0]; 4] && tile[0] < 8));
         for row in 0..down {
             assert_eq!(bricks[row * across..(row + 1) * across].iter().all(|tile| tile[0] == 0), row % 4 == 0, "row {row}");
@@ -2051,18 +1954,18 @@ mod tests {
         // every course moved along by its own amount
         assert!(starts.len() >= 4, "every course starts at one of {starts:?}");
         // a larger size is larger bricks
-        assert!(joints(&laid(Drawn::Bricks, across, wall(4, 4, true, -1, false, [0; 3])), 1).len() < joints(&bricks, 1).len());
+        assert!(joints(&laid(Drawn::Bricks, across, wall(4, 4, true, -1, false, [0; 2])), 1).len() < joints(&bricks, 1).len());
         // a stagger of nothing stacks the joints; of half a brick, every other course lines up and the ones between do not
-        let stacked = laid(Drawn::Bricks, across, wall(4, 2, true, 0, false, [0; 3]));
+        let stacked = laid(Drawn::Bricks, across, wall(4, 2, true, 0, false, [0; 2]));
         assert!((1..down).step_by(4).all(|row| joints(&stacked, row) == joints(&stacked, 1)));
-        let bonded = laid(Drawn::Bricks, across, wall(4, 2, true, 50, false, [0; 3]));
+        let bonded = laid(Drawn::Bricks, across, wall(4, 2, true, 50, false, [0; 2]));
         assert_eq!(joints(&bonded, 1), joints(&bonded, 9));
         assert!(joints(&bonded, 5).iter().all(|joint| !joints(&bonded, 1).contains(joint)), "the second course's joints fall on the first's");
         // upright: the same wall turned over its diagonal
-        let (turned, level) = (laid(Drawn::Bricks, 40, wall(4, 2, true, 50, true, [0; 3])), laid(Drawn::Bricks, 40, wall(4, 2, true, 50, false, [0; 3])));
+        let (turned, level) = (laid(Drawn::Bricks, 40, wall(4, 2, true, 50, true, [0; 2])), laid(Drawn::Bricks, 40, wall(4, 2, true, 50, false, [0; 2])));
         assert!((0..1600).all(|k| turned[k] == level[k % 40 * 40 + k / 40]));
         // with no mortar there is no ground, and no brick has the number of the brick beside it in its course
-        let bare = laid(Drawn::Bricks, across, wall(4, 2, false, 50, false, [0; 3]));
+        let bare = laid(Drawn::Bricks, across, wall(4, 2, false, 50, false, [0; 2]));
         assert!(bare.iter().all(|tile| tile[0] != 0 && *tile == [tile[0]; 4]));
         for row in 0..down {
             let ends = (1..across).filter(|at| bare[row * across + at] != bare[row * across + at - 1]).collect::<Vec<_>>();
@@ -2070,86 +1973,39 @@ mod tests {
         }
         // Uneven along: bricks of many lengths, and still no tile cut.
         // Uneven across too: courses of more than one depth.
-        let long = laid(Drawn::Bricks, across, wall(4, 3, true, 50, false, [100, 0, 0]));
+        let long = laid(Drawn::Bricks, across, wall(4, 3, true, 50, false, [100, 0]));
         assert!(long.iter().all(|tile| *tile == [tile[0]; 4]), "an uneven brick has a slanted side");
         let lengths: HashSet<usize> = (1..down).step_by(6).flat_map(|row| joints(&long, row).windows(2).map(|pair| pair[1] - pair[0]).collect::<Vec<_>>()).collect();
         assert!(lengths.len() >= 4, "bricks of lengths {lengths:?}");
-        let both = laid(Drawn::Bricks, across, wall(4, 3, true, 50, false, [100, 100, 0]));
+        let both = laid(Drawn::Bricks, across, wall(4, 3, true, 50, false, [100, 100]));
         assert!(both.iter().all(|tile| *tile == [tile[0]; 4]));
         let beds: Vec<usize> = (0..down).filter(|row| both[row * across..(row + 1) * across].iter().all(|tile| tile[0] == 0)).collect();
         let depths: HashSet<usize> = beds.windows(2).map(|pair| pair[1] - pair[0]).collect();
         assert!(depths.len() >= 2, "courses of depths {depths:?}");
         // cobbles: stones with slanted sides (tiles cut in two), mortar between a tenth and a half of the wall, every number in use
-        let cobbles = laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [60, 60, 0]));
+        let cobbles = laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [60, 60]));
         assert!(cobbles.iter().filter(|tile| tile.contains(&ON_CUT)).count() > 100);
         let mortar = cobbles.iter().filter(|tile| **tile == [0; 4]).count() as f64 / (across * down) as f64;
         assert!((0.1..0.5).contains(&mortar), "{mortar} of the wall is mortar");
         assert_eq!(cobbles.iter().flatten().filter(|c| **c != ON_CUT).collect::<HashSet<_>>().len(), 8);
-        assert_eq!(laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [60, 60, 0])), cobbles);
-        assert_ne!(laid(Drawn::Cobbles, across, wall(5, 2, true, -1, false, [60, 60, 0])), cobbles);
-        assert_ne!(laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [0, 0, 0])), cobbles);
+        assert_eq!(laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [60, 60])), cobbles);
+        assert_ne!(laid(Drawn::Cobbles, across, wall(5, 2, true, -1, false, [60, 60])), cobbles);
+        assert_ne!(laid(Drawn::Cobbles, across, wall(4, 2, true, -1, false, [0, 0])), cobbles);
     }
 
     #[test]
-    fn a_bevel_slopes_the_top_of_every_brick_down_to_its_edge() {
-        // a floor 60 by 40 and 3 deep, of bricks with mortar
+    fn a_wall_of_bricks_or_cobbles_is_flat_through_its_whole_depth() {
+        // Bricks and cobbles once had tops that sloped down to their edges
+        // and stood at uneven heights, which the player found ugly and had
+        // taken out: every brick of the wall now runs from its back to its
+        // face, as every other pattern's does.
         let floor = |p: DVec2| (p.x.abs() - 30.0).max(p.y.abs() - 20.0);
-        let lay = |style: &str, deep: i32, bevel: i32, uneven: [i32; 3]| {
+        for name in ["bricks", "cobblestone"] {
+            let style = STYLES.iter().position(|s| s.name == name).unwrap();
             let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-            let style = STYLES.iter().position(|s| s.name == style).unwrap();
-            lay_mosaic(&floor, &Mosaic { style, size: 2, bevel, border: 0, seed: 3, mortar: true, stagger: 50, upright: false, uneven }, 2, [-30, -20], [30, 20], 0, deep, &Opts::default(), &mut bricks, &mut shades);
-            (bricks, shades)
-        };
-        let kinds = |tops: &[&CellBrick]| tops.iter().map(|b| crate::shapes::shape_info(b.mask).expect("a top that is no shape of brick").kind).collect::<HashSet<crate::shapes::Kind>>();
-        // (no two bricks' boxes share room, but for the two halves of a tile cut on its diagonal, which share a box between them)
-        let clear = |bricks: &[CellBrick]| bricks.iter().enumerate().all(|(n, a)| bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k]) || (a.min == b.min && a.ext == b.ext && a.mask != 0xff && b.mask != 0xff && a.mask & b.mask != a.mask)));
-        use crate::shapes::Kind;
-        let (flat, _) = lay("bricks", 3, 0, [0; 3]);
-        assert!(flat.iter().all(|b| b.mask == 0xff && b.min[2] == 0 && b.ext[2] == 3), "with no bevel every brick is the wall's whole depth");
-        let (bricks, shades) = lay("bricks", 3, 1, [0; 3]);
-        assert_eq!(bricks.len(), shades.len());
-        // everything stops a cell short of the top but the tops of the bricks, which are the top cell
-        assert!(bricks.iter().all(|b| (b.min[2] == 0 && b.ext[2] == 2) || (b.min[2] == 2 && b.ext[2] == 1)));
-        assert!(bricks.iter().zip(&shades).filter(|(b, _)| b.min[2] == 2).all(|(_, shade)| *shade != 0), "mortar reaches the top");
-        // A brick 8 by 3 has, in its top cell, a sloped brick along each
-        // side and a hipped one at each corner, and whole cells within:
-        // the four ramps that slope down outwards along x and y, the four
-        // hips of the four corners, and no other shapes.
-        let tops: Vec<&CellBrick> = bricks.iter().filter(|b| b.min[2] == 2).collect();
-        assert_eq!(kinds(&tops), HashSet::from([Kind::Cube, Kind::Ramp, Kind::Hip]));
-        let masks = |kind| tops.iter().filter(|b| crate::shapes::shape_info(b.mask).unwrap().kind == kind).map(|b| b.mask).collect::<HashSet<u8>>();
-        assert_eq!((masks(Kind::Ramp).len(), masks(Kind::Hip).len()), (4, 4));
-        // every sloped top keeps its four lower corners: it slopes down, and stands on what is under it
-        assert!(tops.iter().all(|b| b.mask & 0x0f == 0x0f));
-        assert!(clear(&bricks), "two bricks share room");
-        // The top of a whole brick, 8 by 3, is nine bricks and no more: a
-        // sloped brick the length of each side, a hipped one at each
-        // corner, and one block within. (Laid a cell at a time it was 24.)
-        let ramps: Vec<&&CellBrick> = tops.iter().filter(|b| crate::shapes::shape_info(b.mask).unwrap().kind == Kind::Ramp).collect();
-        assert!(ramps.iter().any(|b| b.ext[0] == 6) && ramps.iter().any(|b| b.ext[1] == 1) && ramps.iter().all(|b| b.ext[0] == 1 || b.ext[1] == 1), "the sloped bricks along a side are not one brick");
-        let whole_bricks = 6 * 9; // six across and nine up of whole bricks is the least a floor 60 by 40 holds
-        assert!(tops.len() < whole_bricks * 9 * 2, "{} bricks in the tops", tops.len());
-        // a deeper bevel than the wall has room for is as deep as there is room: two cells of three
-        assert!(lay("bricks", 3, 8, [0; 3]).0.iter().all(|b| b.min[2] + b.ext[2] <= 3) && lay("bricks", 3, 8, [0; 3]).0.iter().any(|b| b.min[2] == 1 && b.mask != 0xff));
-        // Bricks uneven along and across are still rectangles, and bevel
-        // the same way: nothing but whole cells, the four ramps and the
-        // four hips. (As one pattern with the cobbles, an uneven brick
-        // had slanted sides and its bevel was a heap of odd cells.)
-        let (uneven, _) = lay("bricks", 3, 1, [100, 100, 0]);
-        let tops: Vec<&CellBrick> = uneven.iter().filter(|b| b.min[2] == 2).collect();
-        assert_eq!(kinds(&tops), HashSet::from([Kind::Cube, Kind::Ramp, Kind::Hip]));
-        assert!(tops.iter().all(|b| b.mask & 0x0f == 0x0f) && clear(&uneven));
-        // Uneven in depth: bricks stand at more than one height, none past the wall's face, and each is whole under its own top
-        let (rough, _) = lay("bricks", 6, 1, [0, 0, 100]);
-        let heights: HashSet<i32> = rough.iter().filter(|b| b.mask != 0xff).map(|b| b.min[2]).collect();
-        assert!(heights.len() >= 3 && rough.iter().all(|b| b.min[2] + b.ext[2] <= 6), "sloped tops at heights {heights:?}");
-        assert!(clear(&rough));
-        // cobbles bevel too, with every top a shape of brick
-        let (cobbles, _) = lay("cobblestone", 3, 1, [60, 60, 0]);
-        assert!(cobbles.iter().filter(|b| b.min[2] == 2).all(|b| crate::shapes::shape_info(b.mask).is_some()), "a cobble's top is no shape of brick");
-        let sloped = cobbles.iter().filter(|b| b.min[2] == 2 && b.mask != 0xff).count();
-        assert!(sloped > 20, "{sloped} sloped tops on the cobbles");
-        assert!(clear(&cobbles), "two bricks of the cobbles share room");
+            lay_mosaic(&floor, &Mosaic { style, size: 2, border: 0, seed: 3, mortar: true, stagger: 50, upright: false, uneven: [60, 60] }, 2, [-30, -20], [30, 20], 0, 5, &Opts::default(), &mut bricks, &mut shades);
+            assert!(!bricks.is_empty() && bricks.iter().all(|b| b.min[2] == 0 && b.ext[2] == 5), "{name}: a brick stops short of the wall's face");
+        }
     }
 
     #[test]
@@ -2158,7 +2014,7 @@ mod tests {
         let floor = |p: DVec2| ((p.x - 62.5).abs() - 60.5).max((p.y - 46.5).abs() - 39.5);
         let style = STYLES.iter().position(|s| s.name == "rug").unwrap();
         let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-        lay_mosaic(&floor, &Mosaic { style, size: 4, bevel: 3, border: 0, seed: 2, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }, 2, [2, 7], [123, 86], 0, 1, &Opts::default(), &mut bricks, &mut shades);
+        lay_mosaic(&floor, &Mosaic { style, size: 4, border: 0, seed: 2, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }, 2, [2, 7], [123, 86], 0, 1, &Opts::default(), &mut bricks, &mut shades);
         // the coloured bricks reach as near one side of the floor as the other
         let coloured = || bricks.iter().zip(&shades).filter(|(_, shade)| **shade != 0).map(|(brick, _)| brick);
         for (axis, (low, high)) in [(2, 123), (7, 86)].into_iter().enumerate() {

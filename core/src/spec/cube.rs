@@ -270,7 +270,7 @@ mod tests {
             let whole = cells(&build(&slab).unwrap());
             let low = whole.iter().map(|c| c[thin]).min().unwrap();
             for style in 0..crate::pattern::STYLES.len() {
-                let mosaic = crate::pattern::Mosaic { style, size: 2, bevel: 0, border: 1, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 3] };
+                let mosaic = crate::pattern::Mosaic { style, size: 2, border: 1, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 2] };
                 let built = build(&Spec { mosaic: Some(mosaic), ..slab.clone() }).unwrap();
                 let name = crate::pattern::STYLES[style].name;
                 assert_eq!(built.shades.len(), built.bricks.len(), "{name}");

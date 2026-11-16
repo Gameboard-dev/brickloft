@@ -2165,7 +2165,7 @@ mod tests {
     #[test]
     fn a_mosaic_is_coloured_as_its_pattern_has_it() {
         let mut state = State::new();
-        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 2, border: 1, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }), ..Spec::default() };
+        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, border: 1, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }), ..Spec::default() };
         state.form = CIRCLE;
         state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::MOSAIC.to_vec(), axis: 2, width: 2 };
         state.refresh(|| 0.0);
@@ -2756,7 +2756,7 @@ mod tests {
         let mut state = a_cube();
         let at = state.handles().iter().find(|h| h.0 == Handle::Side(1)).unwrap().1;
         state.drag(Handle::Side(1), at - DVec3::X * 15.0 - DVec3::Y * 80.0, DVec3::Y, DVec3::Y);
-        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 0, size: 2, bevel: 0, border: 1, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 0, size: 2, border: 1, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
         state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: vec![[200, 200, 200], [150, 30, 30], [30, 30, 150]], ..Paint::default() };
         assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
         assert_eq!(state.bounds, Some(([-8, -8, 0], [-6, 9, 17])));

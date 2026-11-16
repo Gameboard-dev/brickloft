@@ -406,7 +406,7 @@ mod tests {
         // a hollow box 30 by 12 by 6, patterned, and one left as it started
         state.spec.stretch = brickloft_core::DVec3::new(30.0, 12.0, 6.0) / 17.0;
         (state.spec.fill, state.spec.thick) = (false, 2.0);
-        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 0, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
         state.refresh(|| 0.0);
         state.add_cube();
         state.refresh(|| 0.0);
