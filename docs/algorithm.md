@@ -1095,9 +1095,28 @@ up for a short way made $`m`$ very large there and the tube a tall blade. A
 curve pulled into a loop passes over the same ground twice at two heights,
 and each pass is built as its own tube. Whole cells would give that wall the outline of a
 staircase wherever the tube runs at an angle to the grid, so each notch of
-the staircase is filled with half a cell, a ramp standing on end. On a tube
-11 across pulled up by 25 cells, the stepped share of the outside fell from
-6.7% to 4.9%.
+the staircase is filled with half a cell, a ramp standing on end.
+
+Upright columns still fail where the curve itself climbs more steeply than
+one cell up per cell along, because the top and the underside are then
+steeper than a brick one cell square can follow, and the tube came out as a
+comb of tall fins. A curve cannot run steeply along all three axes at once,
+so such a stretch is built in columns lying on their sides, along the axis
+the curve runs least along there (`steep_stretches` in `spec.rs`). Seen
+along that axis, the steep stretch is a gently sloped tube again. Where a
+stretch built one way gives way to a stretch built the other, both are cut
+off square at a lattice plane the curve crosses once, and each keeps to its
+own side. A last pass leaves out any brick that shares room with one
+already placed, since the two ways of building do not agree to the cell at
+a tight turn.
+
+Bricks are laid a cell at a time and then joined: a row of like bricks end
+to end becomes one brick (`in_rows` in `fit_ribbon.rs`), so a slope that is
+level across a tube five cells wide is one ramp five wide.
+
+On a tube 11 across pulled up by 25 cells, the stepped share of the outside
+fell from 6.7% with a round section in upright columns to 3.5% now, and the
+brick count from 4,387 to 3,592.
 
 Each surface is built one cell of ground at a time, from its heights at the
 cell's four corners rounded to whole cells (`columns` and `parts_of` in
@@ -1454,7 +1473,9 @@ Building thick tori as spun profiles was tried and measured rougher.
 
 A lifted tube or band is rougher than a flat one, more so the steeper it
 climbs. Where a tube is thinner than it climbs across one cell, that cell
-falls back to a plain block.
+falls back to a plain block. Where a stretch built in upright columns
+meets one built lying down, the two surfaces do not meet to the cell, and
+the join shows as a seam.
 
 A sphere's radius should end on the lattice. With the centre in the middle
 of a cell, a radius of 12.5 or 13.5 ends on a lattice plane, and 13 does

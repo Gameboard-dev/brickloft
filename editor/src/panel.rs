@@ -212,7 +212,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         // a setting of the view, not of any one form: above everything that changes with the form
         helped(ui, help("arrows_and_rings"), |ui| {
-            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.01).text("Arrows and rings"))
+            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.01).text("UI Size"))
         });
         ui.horizontal(|ui| {
             ui.label("Show");

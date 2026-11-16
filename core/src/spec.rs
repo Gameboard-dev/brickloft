@@ -1531,7 +1531,9 @@ impl Stretch {
 /// change of axis is a seam, and is not worth making for a small gain.
 const LEAN: f64 = 0.3;
 
-/// How steeply.
+/// How steeply the curve must climb along its columns, in cells up per
+/// cell along, before a stretch is worth laying on its side: a little
+/// under the one in one past which upright columns cannot follow it.
 const STEEP: f64 = 0.85;
 
 /// The curve of a lifted tube in stretches, each built in columns along the
