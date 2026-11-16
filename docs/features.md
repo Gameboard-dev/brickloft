@@ -29,7 +29,7 @@ drawn, from 0.1 to 1 of the size of what is on the grid.
 
 | Form | Points | Options |
 |---|---|---|
-| **Arch** | two feet, and a height | Kind: round, pointed, triangular, elliptical, parabolic, catenary. **Add point** gives it a third point (the arc through all three), and more, up to eight (the smooth curve through them all). |
+| **Arch** | two feet, and a height | Kind: round, pointed, triangular, elliptical, parabolic, catenary. Shift + click adds a point that pulls it out of shape (see [Added points](#added-points)). |
 | **Circle** | a centre, and a radius | **Facing**: which axis it faces (Z is lying flat). Stretch within its plane makes an ellipse. |
 | **Spline** | any number, passed through | **Closed loop** joins its end to its start. |
 | **Bézier** | any number, pulled towards | A weight per point: how hard it pulls. |

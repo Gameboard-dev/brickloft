@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
 use arcs_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -434,10 +434,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             hint(ui, help("flip"));
         });
 
-        if state.can_add_points() {
+        // A spline, a Bezier curve and a profile are drawn through their
+        // own dots, so those forms need a way to have more of them. An arch
+        // had these buttons too, from before a point could be added to any
+        // form with Shift + click, which does the same job for it.
+        if state.can_add_points() && state.form != ARCH {
             ui.horizontal(|ui| {
-                let full = state.form == ARCH && state.spec.points.len() >= ARCH_POINTS;
-                if ui.add_enabled(!full, egui::Button::new("Add point")).clicked() {
+                if ui.button("Add point").clicked() {
                     state.add_point();
                 }
                 if ui.button("Remove point").clicked() {

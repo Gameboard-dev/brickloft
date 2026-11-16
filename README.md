@@ -46,7 +46,7 @@ The full explanation, with the equations, is in [docs/algorithm.md](docs/algorit
 
 | Form | Shaped by |
 |---|---|
-| Arch | two feet and a height (round, pointed, triangular, elliptical, parabolic, catenary), or up to eight points for a curve through them |
+| Arch | two feet and a height (round, pointed, triangular, elliptical, parabolic, catenary) |
 | Circle | a centre and a radius: a ring, a disc, or, as a round tube, a torus |
 | Spline | a smooth curve through any number of points |
 | Bézier | a curve pulled towards weighted points |
