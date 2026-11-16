@@ -114,8 +114,7 @@ own method ([algorithm.md](algorithm.md), section 7.10). What remains:
   agave) needs a rule of its own, a rosette of stiff blades, which the
   tulip's leaves are a start on. A rose bush was built and taken out: its blooms were
   balls, and a rose needs petals in a spiral, as the peony now has. A hedge
-  that turns a corner or follows a curve, and a dot to drag a hedge's
-  length by, are not there.
+  that turns a sharp corner is not there: its line is a smooth curve.
 - **More flowers.** A daisy is a small sunflower. A lily or a daffodil
   needs a trumpet, and a rose seen close needs petals in a spiral, which
   the golden angle would place. A bed of mixed flowers would be several

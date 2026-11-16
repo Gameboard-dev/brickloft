@@ -2417,10 +2417,21 @@ The same tufts of leaves are set over the top, the two sides and the two
 ends in rows, each row half a step along from the last, and each tuft is
 set back by a random amount that **Looseness** scales: at none the hedge
 is freshly clipped, at full it has grown out. The inside is filled, and
-each plant of the row shows two or three stems under the leaves. The
-length is the form's thickness stretched along x, so a hedge of any length
-has the same texture all along it and takes as long to build as its
-surface is large.
+each plant of the row shows two or three stems under the leaves. A hedge follows a line. Its points are joined by the smooth curve a spline
+has (section 4), closed into a ring if asked, and bent further by any
+points added to it. The hedge is grown straight, as long as the line, and
+then laid along it: a part that was $`s`$ along the straight hedge and
+$`t`$ to one side of its middle goes to the place $`s`$ along the line and
+$`t`$ to the side of it there. Each ball and branch is moved whole and none
+is sheared, so the tufts on the outside of a bend stand a little apart and
+those on the inside crowd. Laid along a straight line, a hedge is part for
+part the hedge it was before it could bend. Reeds stand along a line the
+same way.
+
+The line has a length of its own. At first the length was the thickness
+times a number, so making a hedge thicker made it longer too: a hedge 240
+long made 160 thick became 1,600 long and three quarters of a million
+bricks, and each step back took seconds.
 
 **Berries** puts small balls of another colour number just proud of the
 tufts of a boxwood or a hedge. A box has no berries: its fruit is a small
@@ -2548,6 +2559,51 @@ like a hedge the stand has a length along x, for a bank. Every stem leans
 downwind by an amount of its own that **Sway** scales. The leaves spring
 low on the stem, stand nearly upright and flop outwards at the tip: the
 angle from upright grows with the cube of the way along the leaf.
+
+#### Grass
+
+<img src="images/plant-grass.png" width="640" alt="A lawn in bricks with a high hill and a lower one raised in it: tufts of blades in three greens over a thin skin of brown soil that follows the ground">
+
+Grass covers the ground within its reach of a line, and everything the
+line encloses if it is closed, so it is a strip along a path or a lawn of
+any outline. It is a surface. Under the blades is a skin of soil about two
+cells thick in a colour of its own, so that a patch set on a floor leaves
+no gap and a hill is closed on top. Under a hill there is nothing.
+
+The ground is shaped the way terrain is in games that have a tool for it,
+by touches of a brush. A touch has a place, a range $`R`$ and an amount
+$`a`$, and does one of two things. A push adds a smooth hill, or with a
+negative amount takes a hollow out of raised ground:
+
+```math
+h \leftarrow h + a\,\frac{1 + \cos(\pi d / R)}{2} \qquad (d < R)
+```
+
+at the distance $`d`$ from its middle. That curve is level at the middle
+and level again at the edge, so hills run into each other and into the
+flat without a crease. A flattening touch moves the ground towards one
+height $`a`$: all the way within half its range, and by a share that
+falls on the same curve from there to its edge, which leaves a level
+terrace with a bank that runs back into the hill. The touches are applied
+in the order they were made, as strokes are, and the ground is never taken
+below the floor.
+
+The first version raised the ground by the reach all added points share,
+8 cells, and a touch was a spike. Each touch now has its own range.
+
+The blades are in tufts on a grid shaken so that no rows show, two to four
+blades to a tuft, each of its own height and lean and one of three greens.
+They stand upright on the ground wherever it has been pushed to. A touch is
+one of the form's added points, so it is undone, saved and copied like any
+other. A brush dragged across the ground was considered and not built: the
+ground it leaves would have to be kept as a grid of heights in the form,
+where everything a form keeps now is a few numbers a person can read.
+
+The game's file gives each brick a flag for what it stops: the player,
+weapons, interaction and physics. The bricks of the blades are written
+with the first, second and fourth off, so a player walks through the grass
+and stands on the soil. A brick counts as blade if its middle is more than
+two cells above the ground under and beside it.
 
 #### One colour for each part
 

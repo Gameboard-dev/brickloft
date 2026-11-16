@@ -1320,8 +1320,13 @@ impl State {
 
     /// The rings the form's grid is turned by: their middle and how wide
     /// they are, which is as long as the arrows that move it.
+    ///
+    /// They stand at the middle of everything on the grid, which is what
+    /// they turn, wherever the arrows are: those stand at the middle of
+    /// the forms they move.
     pub fn rings(&self) -> Option<(DVec3, f64)> {
-        self.gizmo().map(|(middle, reach)| (middle, reach[0]))
+        let (lo, hi) = self.grid_box()?;
+        Some((out_of_grid(&self.spec, (lo + hi) / 2.0), self.gizmo()?.1[0]))
     }
 
     /// Each form's grid, the one being edited first: where it is, and its angle.
@@ -1477,6 +1482,9 @@ impl State {
     /// one form against another that way meant turning the view between
     /// every move. An arrow moves it along one axis and no other, whatever
     /// the view.
+    ///
+    /// They stand at the middle of the forms they move: the one being
+    /// edited and any on its grid picked with it (see `slide_grid`).
     pub fn gizmo(&self) -> Option<(DVec3, [f64; 3])> {
         let (lo, hi) = self.grid_box()?;
         // A quarter of the way out to the furthest side of what is on the
@@ -1484,6 +1492,7 @@ impl State {
         // clear. (Six tenths of the way, as it was first made, covered the
         // forms it was there to move.)
         let reach = (GIZMO * (hi - lo).max_element() / 2.0).max(1.5);
+        let (lo, hi) = self.box_of(true)?;
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), [reach; 3]))
     }
 
@@ -1491,9 +1500,15 @@ impl State {
     /// one being edited. The arrows and rings stand at its middle, and so
     /// move there as the forms on the grid are moved and reshaped.
     fn grid_box(&self) -> Option<(DVec3, DVec3)> {
+        self.box_of(false)
+    }
+
+    /// [`State::grid_box`], or with `picked` the box of only the form being
+    /// edited and those on its grid picked with it.
+    fn box_of(&self, picked: bool) -> Option<(DVec3, DVec3)> {
         let corner = |c: [i32; 3], place: [i32; 3]| DVec3::new(c[0] as f64 + place[0] as f64 / 2.0, c[1] as f64 + place[1] as f64 / 2.0, c[2] as f64 + place[2] as f64 / 2.0);
         let mine = self.bounds.map(|b| (b, self.place));
-        let theirs = self.others.iter().filter(|o| o.spec.on_grid == self.spec.on_grid).filter_map(|o| o.bounds.map(|b| (b, o.place)));
+        let theirs = self.others.iter().filter(|o| o.spec.on_grid == self.spec.on_grid && (o.picked || !picked)).filter_map(|o| o.bounds.map(|b| (b, o.place)));
         mine.into_iter().chain(theirs).map(|((lo, hi), place)| (corner(lo, place), corner(hi, place))).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
     }
 
@@ -1513,12 +1528,64 @@ impl State {
         self.grab = Some(into_grid(&self.spec, at));
     }
 
-    /// Move the whole grid being edited along arrow `axis` to where the
-    /// cursor's ray now passes it. A level grid is the world's, and what is
-    /// on it moves a unit at a time; a grid at an angle moves freely.
+    /// Move what is picked along arrow `axis` to where the cursor's ray
+    /// now passes it: the form being edited, and any on its grid picked
+    /// with it (Shift + click).
+    ///
+    /// The arrows moved the whole grid, always. A form could then be set
+    /// along one axis only by dragging it by its bricks with that axis
+    /// locked, and several forms could not be moved together at all
+    /// without every other form on their grid coming too. The rings still
+    /// turn the whole grid: forms on one grid share its angle, so there is
+    /// nothing else for a ring to turn.
+    ///
+    /// With every form on the grid picked (or one form alone on it) the
+    /// grid itself moves, as it did: a level grid is the world's, and what
+    /// is on it moves a unit at a time; a grid at an angle moves freely.
+    /// Fewer than all move within the grid, a unit at a time along the
+    /// grid's own axis of that name, and stop short of the forms left
+    /// behind unless Ctrl is held to join them. (On a grid at an angle
+    /// that axis is not quite the way the arrow points, the arrows being
+    /// drawn along the world's.)
     fn slide_grid(&mut self, axis: usize, origin: DVec3, dir: DVec3) {
         let (Some(held), Some(now)) = (self.grab, self.on_arrow(axis, origin, dir)) else { return };
         let gone = now[axis] - held[axis];
+        let on = self.spec.on_grid;
+        if self.others.iter().any(|o| o.spec.on_grid == on && !o.picked) {
+            let mut units = (gone * 2.0).round() as i32;
+            let goes = |o: &Item| o.spec.on_grid == on && o.picked;
+            if self.merge {
+                // (joined with the blend it had if it was joined already, and a sharp crease if not)
+                self.spec.blend = Some(self.spec.blend.unwrap_or(0.0));
+            } else {
+                // as far as none of them meets a form that stays, a form joined on purpose aside
+                let stays: Vec<Standing> = self.others.iter().filter(|o| !goes(o) && self.in_my_way(&o.spec) && o.spec.blend.is_none()).map(|o| Standing::new(&o.built.bricks, o.place)).collect();
+                let moved: Vec<(&[CellBrick], [i32; 3])> = std::iter::once((&self.built.bricks[..], self.place, self.spec.blend)).chain(self.others.iter().filter(|o| goes(o)).map(|o| (&o.built.bricks[..], o.place, o.spec.blend))).filter(|m| m.2.is_none()).map(|m| (m.0, m.1)).collect();
+                let meets = |units: i32| {
+                    moved.iter().any(|(bricks, place)| {
+                        let mut at = *place;
+                        at[axis] += units;
+                        stays.iter().any(|stay| stay.meets(cells_of(bricks), at))
+                    })
+                };
+                while units != 0 && meets(units) {
+                    units -= units.signum();
+                }
+            }
+            if units == 0 {
+                return;
+            }
+            let limit = (HANDLE_LIMIT * 2.0) as i32;
+            self.place[axis] = (self.place[axis] + units).clamp(-limit, limit);
+            for other in self.others.iter_mut().filter(|o| goes(o)) {
+                other.place[axis] = (other.place[axis] + units).clamp(-limit, limit);
+            }
+            self.scene += 1;
+            let mut held = held;
+            held[axis] += units as f64 / 2.0;
+            self.grab = Some(held);
+            return;
+        }
         if on_own_grid(&self.spec) {
             let mut at = self.spec.grid_at;
             at[axis] += gone;
@@ -2841,6 +2908,8 @@ mod tests {
         state.activate(0);
         state.refresh(|| 0.0);
         assert_eq!(state.spec.on_grid, 0);
+        // (both picked: the arrows stand at the middle of what they move, and move the whole grid when that is all of it)
+        state.others.iter_mut().filter(|o| o.spec.on_grid == 0).for_each(|o| o.picked = true);
         let (middle, reach) = state.gizmo().unwrap();
         let mate = state.others.iter().find(|o| o.spec.on_grid == 0).unwrap();
         let own = (state.bounds.unwrap(), state.place);
@@ -2903,6 +2972,62 @@ mod tests {
         assert!((state.gizmo().unwrap().0 - middle).length() <= 0.9, "{:?}", state.gizmo().unwrap().0 - middle);
         // seen edge on, a ring cannot be taken hold of
         assert!(!state.hold_ring(1, middle - DVec3::X * 60.0, DVec3::X));
+    }
+
+    #[test]
+    fn an_arrow_moves_the_forms_that_are_picked_and_leaves_the_rest_of_the_grid() {
+        let mut state = State::new();
+        state.form = CUBE;
+        state.preset();
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        assert!(state.others.iter().all(|o| o.spec.on_grid == state.spec.on_grid));
+        let places = |state: &State| -> Vec<[i32; 3]> { std::iter::once(state.place).chain(state.others.iter().map(|o| o.place)).collect() };
+        let pull = |state: &mut State, axis: usize, by: f64| {
+            let (middle, _) = state.gizmo().unwrap();
+            let far = middle + DVec3::new(-60.0, -200.0, 40.0);
+            assert!(state.hold_arrow(axis, far, (middle - far).normalize()));
+            let mut to = middle;
+            to[axis] += by;
+            state.drag(Handle::Slide(axis), far, (to - far).normalize(), DVec3::Y);
+        };
+        // nothing else picked: the form being edited goes up alone, and the arrows with it
+        let (before, rings) = (places(&state), state.rings().unwrap().0);
+        let arrows = state.gizmo().unwrap().0;
+        pull(&mut state, 2, 5.0);
+        let after = places(&state);
+        assert_eq!(after[0], [before[0][0], before[0][1], before[0][2] + 10]);
+        assert_eq!(after[1..], before[1..]);
+        assert!((state.gizmo().unwrap().0 - (arrows + DVec3::Z * 5.0)).length() < 1e-9);
+        // (the rings are at the middle of the whole grid, which is not where the arrows are)
+        assert!((state.rings().unwrap().0 - state.gizmo().unwrap().0).length() > 1.0 && (state.rings().unwrap().0 - rings).length() < 6.0);
+        // one picked with it: the two go together, and the third stays
+        state.others[0].picked = true;
+        pull(&mut state, 2, 3.0);
+        let two = places(&state);
+        assert_eq!((two[0][2] - after[0][2], two[1][2] - after[1][2], two[2]), (6, 6, after[2]));
+        // moved down again beside the one that stays, and across at it: it stops short of it
+        state.others[0].picked = false;
+        pull(&mut state, 2, -8.0);
+        let towards = [0, 1].map(|k| state.others[1].place[k] - state.place[k]);
+        let axis = if towards[0].abs() > towards[1].abs() { 0 } else { 1 };
+        let was = state.place[axis];
+        pull(&mut state, axis, towards[axis] as f64 / 2.0);
+        assert!(state.place[axis] != was && state.place[axis] != state.others[1].place[axis], "did not move towards it, or went into it: {:?}", places(&state));
+        let all = state.painted();
+        let unit_box = |b: &Painted| ([0, 1, 2].map(|k| 2 * b.0.min[k] + b.3[k]), [0, 1, 2].map(|k| 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k]));
+        for (n, a) in all.iter().enumerate() {
+            let a_box = unit_box(a);
+            assert!(all[n + 1..].iter().all(|b| { let b_box = unit_box(b); (0..3).any(|k| a_box.1[k] <= b_box.0[k] || b_box.1[k] <= a_box.0[k]) }), "two forms share room");
+        }
+        // all picked: the whole grid, as it always was
+        state.others.iter_mut().for_each(|o| o.picked = true);
+        let before = places(&state);
+        pull(&mut state, 0, 4.0);
+        assert!(places(&state).iter().zip(&before).all(|(now, was)| now[0] - was[0] == 8));
     }
 
     #[test]
