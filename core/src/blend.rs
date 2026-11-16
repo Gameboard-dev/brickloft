@@ -530,7 +530,10 @@ const BESIDE_A_HOLE: f64 = 1.5;
 fn in_zone(a: f64, b: f64, k: f64, hole: bool) -> bool {
     if hole {
         let left = -smooth_min(-a, b, k);
-        -b > a - apart(k) && left < OUTSIDE && left > -BESIDE_A_HOLE
+        // (outside by the plain measure, not the rounded one: a rim rounded
+        // by a large blend is cut back further than the bricks of the form
+        // taken away reach, and a brick there is cut by the zone or by nothing)
+        -b > a - apart(k) && a.max(-b) < OUTSIDE && left > -BESIDE_A_HOLE
     } else {
         (a - b).abs() < apart(k) && a.min(b) > -INSIDE && smooth_min(a, b, k) < OUTSIDE
     }
