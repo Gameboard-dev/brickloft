@@ -441,7 +441,7 @@ fn answer(body: &str, call: &dyn Fn(&str, &Value) -> Answered) -> Option<Value> 
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "brickloft", "title": "Brickloft editor", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Tools for the Brickloft editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one example arch. To build something of your own, change that arch into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
+                "instructions": "Tools for the Brickloft editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one cube. To build something of your own, change that cube into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
             })
         }
         "ping" => json!({}),

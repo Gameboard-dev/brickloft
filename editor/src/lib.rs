@@ -96,7 +96,8 @@ fn d(p: Vec3) -> DVec3 {
 }
 
 pub fn run() {
-    run_form(0, false);
+    // (on a cube: the plainest form there is, and the one new forms are added as)
+    run_form(state::CUBE, false);
 }
 
 /// Open the editor on one of `state::FORMS`, by its place in that list.
