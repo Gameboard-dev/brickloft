@@ -1,40 +1,58 @@
 # Brickloft
 
 Brickloft builds curved shapes out of bricks for
-[Brickadia](https://brickadia.com), a building game whose smallest pieces
-are microbricks: cubes, ramps and corner wedges on a grid. The fixed shapes
-and the grid are what make building approachable, since a brick cannot be
-placed wrongly and everything built shares one style. The cost is curves. A
-grid has none, so an arch or a dome takes many more pieces than a wall, and
-the usual result is a staircase where a smooth slope should be.
+[Brickadia](https://brickadia.com). You shape an arch, a dome, a torus or a
+vase on screen, Brickloft works out the bricks that make it, and you paste
+the result into the game.
 
 <img src="docs/images/editor.png" width="700" alt="The editor: a blue and white torus in the 3D view, with the settings panel down the left side">
 
-Building a curve by hand is hard for a reason that has little to do with
-skill. Every brick is several decisions at once (which shape, how long,
-turned which way, and whether it will meet its neighbours), made while
-aiming the mouse, switching tools and keeping hold of the shape you set out
-to make. A stone ball for the top of a gatepost, 100 microbricks across, is
-2,215 such bricks, and one misplaced wedge shows as a notch. Brickloft lets
-you work on the shape and leaves the bricks to the program. You pick
-Sphere, drag one dot until the size is right, and press Ctrl+C, and the
-ball that pastes into the game has no steps on it and differs from a true
-sphere over only 1.2% of its volume. The bricks are refitted as you drag,
-pull, mirror, turn and colour a form, so you see the real result at every
-step and keep refining it, where a tool that converts a finished model
-gives one answer at the end and no say in between.
+Brickadia is a building game, and its smallest pieces are microbricks:
+cubes, ramps and corner wedges that sit on a grid and can be stretched to
+any length. The fixed set of shapes and the grid are what make building
+approachable. A brick cannot be placed wrongly, everything built shares one
+style, and the game can draw a large build cheaply because it is the same
+few shapes repeated. The cost is curves. A grid has none, so a curve has to
+be approximated with many more pieces than a straight wall, and the usual
+result is a staircase where a smooth slope should be.
 
-The bricks it chooses are also few and large, which keeps a build light for
-the game to store, send and draw: that ball fills about 524,000 microbrick
-cells and is covered by 2,215 bricks, each stretched as far as the shape
-allows. It can do this because every brick shape is a box with some of its
-corners kept. For each box Brickloft asks which corners lie inside the
-shape you drew, and that answer names the brick; neighbours share corners,
-so slopes run on from one brick to the next
-([docs/algorithm.md](docs/algorithm.md) has the method for each kind of
-shape). It is a single desktop program written in Rust, with nothing to
-install in the game or on a server, and Claude can drive it for you while
-you watch ([docs/mcp.md](docs/mcp.md)).
+Building a curve by hand is hard for a reason that has little to do with
+skill. Every brick is a decision with several parts: which shape, how long,
+turned which way, and whether it will meet the bricks already beside it and
+the ones still to come. You have to hold all of that in your head while
+also aiming the mouse, switching tools and remembering keys, and the whole
+time keep hold of the shape you set out to make. A curve multiplies the
+decisions, so most of your attention goes on placing bricks and little is
+left for the design.
+
+Brickloft lets you work on the shape and leaves the bricks to the program.
+You edit a form through a few dots and settings: drag a foot of an arch,
+pull one point of a ring outwards, mirror it, turn it, colour it. The
+bricks are refitted as you go, so you see the real result at every step and
+can keep refining it. A tool that only converts a finished model into
+bricks gives you one answer at the end and no say in between. Here the
+choices that make a build yours stay in your hands, and the thousands of
+small placements do not.
+
+The bricks it chooses are also few and large, which matters once a build is
+in the game. Brickloft stretches each brick as far as the shape allows and
+joins neighbours into one. Fewer bricks are less for the game to store,
+send and draw, so a curved build made this way stays light.
+
+It can do this because every brick shape is a box with some of its corners
+kept. For each box Brickloft asks which corners lie inside the shape you
+drew, and that answer names the brick. Neighbouring bricks share their
+corners, so when the corners are right the bricks meet face to face and the
+slopes run on from one brick to the next. Each kind of shape has its own
+method for placing the boxes, described in
+[docs/algorithm.md](docs/algorithm.md). When the bricks are chosen,
+Brickloft measures them against the true shape and reports the difference,
+so you can see how good a fit is before you paste it.
+
+It is a single desktop program, written in Rust. Nothing is installed in
+the game or on a server: the bricks travel on the clipboard as an ordinary
+Brickadia prefab. If you use Claude, it can drive the editor for you and
+build while you watch (see [docs/mcp.md](docs/mcp.md)).
 
 ## What it makes
 
