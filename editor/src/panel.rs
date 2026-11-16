@@ -1215,7 +1215,7 @@ fn furniture(ui: &mut Ui, state: &mut State, largest: f64) {
 fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
     use crate::state::{Action, FLATTENS};
     use brickloft_core::DVec3;
-    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
+    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. The settings here are for touches still to be made. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
     let named = |action: Action| match action {
         Action::Up => "Push up",
         Action::Down => "Push down",
@@ -1261,16 +1261,20 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
             if ui.button("Next").clicked() {
                 *touched = Some((i + 1) % s.pulls.len());
             }
-            if ui.button("New touches only").clicked() {
+            if ui.button("Done").clicked() {
                 *touched = None;
             }
         });
+    } else if !s.pulls.is_empty() && ui.button("Change a touch already made").clicked() {
+        *touched = Some(s.pulls.len() - 1);
     }
 }
 
 /// How the form being edited is coloured.
 fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
+    // (a plant's colours go up it: see below)
+    let plant = state.form == TREE;
     let paint = &mut state.paint;
     let name = MODES.iter().find(|m| m.0 == paint.mode).map_or("", |m| m.1);
     helped(ui, help("colour_mode"), |ui| {
@@ -1320,7 +1324,14 @@ fn colours(ui: &mut Ui, state: &mut State) {
             }
             hint(ui, help("colours"));
         });
-        if most > 1 {
+        // Only for a blend or stripes, which run some way: a pattern's
+        // colours are its parts', and the list was shown for them too,
+        // where it did nothing. A plant's blend or stripes run up it, the
+        // one way that suits a thing that grows, so it has no list either.
+        if plant {
+            paint.axis = 2;
+        }
+        if matches!(paint.mode, Mode::Blend | Mode::Stripes) && !plant {
             helped(ui, help("colour_runs_along"), |ui| {
                 ComboBox::from_label("Runs along").selected_text(["X", "Y", "Z (up)"][paint.axis.min(2)]).show_ui(ui, |ui| {
                     for (i, axis) in ["X", "Y", "Z (up)"].iter().enumerate() {
