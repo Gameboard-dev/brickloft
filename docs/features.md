@@ -248,6 +248,13 @@ out from the middle of the floor. The floor's edge keeps the sloped bricks
 any flat form has, at most five microbricks long, and they take the
 pattern's colours.
 
+These four are laid at single microbricks whatever the **Brick budget**
+says, because a tile is one brick and a pattern's detail is its brick
+count. A rug 240 by 160 is some twenty thousand bricks, and held to a
+budget of 2,500 it was built three times coarser, with every flower a
+blot. Make the form larger for more detail, or set a **Brick size** by
+name for less.
+
 A rug wants a large floor. Its parts are drawn afresh for the size it is
 given, and a small rug has little room to show them: a medallion of one or
 two layers and plain lines for its guards. Lay it 100 microbricks or more

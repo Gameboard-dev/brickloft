@@ -1472,6 +1472,13 @@ A tile could once be set larger than one cell, and wider than it was deep.
 That drew the same pattern coarser or stretched and did nothing else a
 player wanted, so a tile is now always one cell.
 
+A form with a tile pattern is also built at the finest brick
+size whatever the brick budget (section 9). The budget keeps a solid form
+from being more bricks than it needs, and a pattern needs every one of its
+bricks. A rug 240 cells by 160 is some twenty thousand bricks, and kept
+within a budget of 2,500 it was built three times coarser. A larger brick
+size can still be chosen by name.
+
 The medallions and the rug are their own mirror images, and their tiles
 are set out from the middle of the floor. Set out on the
 grid's own lines, a floor that did not lie evenly on them had a part row of
