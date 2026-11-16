@@ -1068,8 +1068,19 @@ mosaic = {values}
                 max_ext: 40,
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
+                blend: Some(2.5),
             },
         ];
+        // a save from before forms could be joined has no line for it, and one out of range is refused
+        assert_eq!(parse_spec("form = sphere
+").unwrap().blend, None);
+        assert_eq!(parse_spec("blend = 0
+").unwrap().blend, Some(0.0));
+        assert!(parse_spec("blend = 7
+").is_err() && parse_spec("blend = -1
+").is_err() && parse_spec("blend = inf
+").is_err() && parse_spec("blend = nan
+").is_err());
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

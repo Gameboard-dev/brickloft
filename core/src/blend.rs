@@ -89,6 +89,7 @@
 //! [`seeds`] and [`refit`], so that it can be shared among threads with no
 //! change to the result.
 
+use crate::par::Threads;
 use crate::fit_volume::{drop_spikes, merge, patterns, stretch_ramps, K};
 use crate::shapes::{least_unshared, shape_info, CellBrick, Kind, CUBE};
 use crate::spec::{Built, Probe, Spec, MAX_CELLS};
@@ -111,10 +112,18 @@ pub const MAX_BLEND: f64 = 6.0;
 /// cutting alone.
 const MOST: usize = 8;
 
+/// How far outside the joined solid's surface a cell's middle may be and
+/// the cell still be looked at, in cells. A form's own sloped bricks lie
+/// within about a cell and a half of its surface.
+const OUTSIDE: f64 = 1.5;
+
 /// How far inside the nearer form's surface a cell's middle may be and the
-/// cell still be looked at, in cells. A form's own sloped bricks lie within
-/// about a cell and a half of its surface.
-const INSIDE: f64 = 1.5;
+/// cell still be looked at, in cells. A cell further in than `OUTSIDE`:
+/// where one form's surface dips just under the other's, the cells round
+/// its sloped bricks would otherwise be cut out of the other form and left
+/// half empty a cell and a half down, near enough the surface to show
+/// through a thin place in it.
+const INSIDE: f64 = 2.5;
 
 /// How far two forms' distances may differ at a cell's middle and the
 /// forms' own sloped bricks still overlap there, in cells: twice `INSIDE`,
@@ -142,6 +151,12 @@ fn apart(k: f64) -> f64 {
 /// where two surfaces cross, and a block's half diagonal is added to every
 /// bound, so large blocks pass nearly everything near either surface.
 const BLOCK: i32 = 4;
+
+/// The fewest blocks, and the fewest cells of a zone, worth a thread of
+/// their own (see `par::Threads::map_ranges`): about half a millisecond's
+/// work each. PLACEHOLDER
+const BLOCKS_A_THREAD: usize = 400;
+const CELLS_A_THREAD: usize = 400;
 
 /// A cell whose middle is further than this from the surface is taken as
 /// wholly inside or outside without sampling it. Half a cell's diagonal is
@@ -218,11 +233,16 @@ fn cells(b: &CellBrick) -> impl Iterator<Item = [i32; 3]> {
 /// the form being edited first, and choosing another form to edit must not
 /// change a brick.
 pub fn union(members: &[Member]) -> Vec<Piece> {
+    union_with(members, Threads::available())
+}
+
+/// [`union`], on so many threads. The bricks are the same on any number.
+pub fn union_with(members: &[Member], threads: Threads) -> Vec<Piece> {
     let boxes: Vec<Option<Box3>> = members.iter().map(|m| m.built.bricks.iter().map(|b| in_units(b, m.place)).reduce(|a, b| ([0, 1, 2].map(|k| a.0[k].min(b.0[k])), [0, 1, 2].map(|k| a.1[k].max(b.1[k]))))).collect();
     let order = order(members, &boxes);
     let mut pieces: Vec<Vec<Piece>> = members.iter().enumerate().map(|(member, m)| m.built.bricks.iter().enumerate().map(|(n, brick)| Piece { brick: *brick, member, from: Some(n), loose: false }).collect()).collect();
     for cluster in clusters(members, &boxes, &order) {
-        refit(members, &cluster, &mut pieces);
+        refit(members, &cluster, &mut pieces, threads);
     }
     give_up_room(members, &order, &mut pieces);
     pieces.into_iter().flatten().collect()
@@ -245,7 +265,7 @@ fn order(members: &[Member], boxes: &[Option<Box3>]) -> Vec<usize> {
 /// cells: its distance at a cell of the zone is at most `1.25 * k` and the
 /// margins (see [`seeds`]).
 fn reach(k: f64) -> f64 {
-    1.25 * k + INSIDE + apart(k) + 0.5
+    1.25 * k + OUTSIDE + apart(k) + 0.5
 }
 
 /// The blend between two members, if they are joined to one another: the
@@ -366,12 +386,6 @@ impl Joined {
         least
     }
 
-    /// The joined solid's distance at `p`.
-    #[cfg(test)]
-    fn distance(&self, p: DVec3) -> f64 {
-        self.together(&self.each(p))
-    }
-
     /// Which part a place belongs to: the one whose own distance is the least there.
     fn owner(&self, p: DVec3) -> usize {
         (0..self.parts.len()).map(|i| (i, self.own(i, p))).fold((0, f64::INFINITY), |best, now| if now.1 < best.1 { now } else { best }).0
@@ -385,7 +399,7 @@ impl Joined {
 /// `k`, the two distances `a` and `b` have
 ///
 /// ```text
-/// |a - b| < apart(k)      and      -INSIDE < min(a, b)      and      smin(a, b) < INSIDE
+/// |a - b| < apart(k)      and      -INSIDE < min(a, b)      and      smin(a, b) < OUTSIDE
 /// ```
 ///
 /// The first says the two surfaces are near one another: near enough for a
@@ -397,7 +411,7 @@ impl Joined {
 /// Blocks of cells are tested first by their middles and passed over whole
 /// where neither bound can be met inside them, as the volume fitter passes
 /// over blocks far from the surface: a distance changes by at most 1 a cell.
-fn seeds(solid: &Joined) -> Vec<[i32; 3]> {
+fn seeds(solid: &Joined, threads: Threads) -> Vec<[i32; 3]> {
     let mut blocks: Vec<(usize, usize, [i32; 3], [i32; 3])> = Vec::new();
     for i in 0..solid.parts.len() {
         for j in i + 1..solid.parts.len() {
@@ -420,10 +434,11 @@ fn seeds(solid: &Joined) -> Vec<[i32; 3]> {
             }
         }
     }
-    // (each block by itself: this is the map that threads can share)
-    let found = blocks.iter().flat_map(|&(i, j, at, size)| {
+    // Each block by itself, so threads may share them.
+    let found = threads.map(blocks.len(), BLOCKS_A_THREAD, |block| {
+        let (i, j, at, size) = blocks[block];
         let k = solid.k[i][j];
-        let (inside, outside) = (-INSIDE, k / 4.0 + INSIDE + apart(k));
+        let (inside, outside) = (-INSIDE, k / 4.0 + OUTSIDE + apart(k));
         let half = DVec3::new(size[0] as f64, size[1] as f64, size[2] as f64) / 2.0;
         let base = DVec3::new(at[0] as f64, at[1] as f64, at[2] as f64);
         let far = half.length();
@@ -441,7 +456,7 @@ fn seeds(solid: &Joined) -> Vec<[i32; 3]> {
                         continue;
                     }
                     let b = solid.own(j, p);
-                    if (a - b).abs() < apart(k) && a.min(b) > -INSIDE && smooth_min(a, b, k) < INSIDE {
+                    if (a - b).abs() < apart(k) && a.min(b) > -INSIDE && smooth_min(a, b, k) < OUTSIDE {
                         cells.push([at[0] + x, at[1] + y, at[2] + z]);
                     }
                 }
@@ -449,7 +464,7 @@ fn seeds(solid: &Joined) -> Vec<[i32; 3]> {
         }
         cells
     });
-    found.collect()
+    found.into_iter().flatten().collect()
 }
 
 /// Whether two parts of a join are joined to one another, and with what blend.
@@ -469,6 +484,20 @@ fn sliced_along(b: &CellBrick) -> Option<usize> {
 /// be taken as smooth across the cell (see [`fit_cell`]).
 const SMOOTH: f64 = 0.02;
 
+/// Two more places in a cell where a form's true distance is compared with
+/// what its corners give, besides the middle. The middle alone passed a
+/// form whose distance jumps part of the way across the cell (the square
+/// end of an arch's foot), where the corners happened to average to it.
+const OFF_MIDDLE: [DVec3; 2] = [DVec3::new(0.25, 0.3, 0.2), DVec3::new(0.7, 0.8, 0.75)];
+
+/// A value at `t` (each coordinate 0 to 1 across a cell) from its values
+/// at the cell's eight corners, corner `c` being at `(c & 1, c >> 1 & 1, c >> 2)`.
+fn between(v: &[f64; 8], t: DVec3) -> f64 {
+    let along_x = |lo: f64, hi: f64| lo + (hi - lo) * t.x;
+    let (low, high) = (along_x(v[0], v[1]) + (along_x(v[2], v[3]) - along_x(v[0], v[1])) * t.y, along_x(v[4], v[5]) + (along_x(v[6], v[7]) - along_x(v[4], v[5])) * t.y);
+    low + (high - low) * t.z
+}
+
 /// The best brick for one cell of the joined solid, and the solid's samples
 /// in it if they were taken: `fit_volume`'s choice, for a cell on its own.
 ///
@@ -482,8 +511,8 @@ const SMOOTH: f64 = 0.02;
 /// sample; what is worked out between corners is one form's own distance,
 /// which is nearly straight across a cell wherever the form is smooth. Where
 /// it is not (a form's own edge crossing the cell: its true distance at the
-/// middle is not what the corners give), that form is asked at every sample
-/// as before.
+/// middle, or at either of two places off it, is not what the corners
+/// give), that form is asked at every sample as before.
 fn fit_cell(solid: &Joined, at: DVec3, wedges: bool) -> (u8, Option<u64>) {
     let n = solid.parts.len();
     let middle = solid.each(at + 0.5);
@@ -502,23 +531,15 @@ fn fit_cell(solid: &Joined, at: DVec3, wedges: bool) -> (u8, Option<u64>) {
         for (c, value) in corner[i].iter_mut().enumerate() {
             *value = solid.own(i, corner_at(c));
         }
-        let mean = corner[i].iter().sum::<f64>() / 8.0;
         // (a form that is "far" at any of them is no number to work out between)
-        smooth[i] = middle[i].is_finite() && corner[i].iter().all(|v| v.is_finite()) && (mean - middle[i]).abs() < SMOOTH;
+        smooth[i] = middle[i].is_finite() && corner[i].iter().all(|v| v.is_finite()) && (between(&corner[i], DVec3::splat(0.5)) - middle[i]).abs() < SMOOTH && OFF_MIDDLE.iter().all(|t| (between(&corner[i], *t) - solid.own(i, at + *t)).abs() < SMOOTH);
     }
     let mut d = [f64::INFINITY; MOST];
     let mut bits = 0u64;
     for s in 0..K * K * K {
         let t = DVec3::new((s % K) as f64 + 0.5, (s / K % K) as f64 + 0.5, (s / (K * K)) as f64 + 0.5) / K as f64;
         for i in 0..n {
-            d[i] = if smooth[i] {
-                let v = &corner[i];
-                let along_x = |lo: f64, hi: f64| lo + (hi - lo) * t.x;
-                let (low, high) = (along_x(v[0], v[1]) + (along_x(v[2], v[3]) - along_x(v[0], v[1])) * t.y, along_x(v[4], v[5]) + (along_x(v[6], v[7]) - along_x(v[4], v[5])) * t.y);
-                low + (high - low) * t.z
-            } else {
-                solid.own(i, at + t)
-            };
+            d[i] = if smooth[i] { between(&corner[i], t) } else { solid.own(i, at + t) };
         }
         // strictly inside, as the volume fitter has it
         bits |= ((solid.together(&d) < 0.0) as u64) << s;
@@ -539,7 +560,7 @@ fn fit_cell(solid: &Joined, at: DVec3, wedges: bool) -> (u8, Option<u64>) {
 
 /// Fit one join afresh where its forms meet, and cut their own bricks back
 /// to make room for it: `pieces` of each member of `cluster` are replaced.
-fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>]) {
+fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threads: Threads) {
     let parity = members[cluster[0]].place.map(|u| u.rem_euclid(2));
     let parts: Vec<Part> = cluster
         .iter()
@@ -569,7 +590,7 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>]) {
     }
     let solid = Joined { parts, k };
     let parts = &solid.parts;
-    let mut zone: HashSet<[i32; 3]> = seeds(&solid).into_iter().collect();
+    let mut zone: HashSet<[i32; 3]> = seeds(&solid, threads).into_iter().collect();
     if zone.is_empty() {
         return;
     }
@@ -628,9 +649,9 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>]) {
     let wedges = parts.iter().all(|p| members[p.member].spec.wedges);
     let max_ext = parts.iter().map(|p| members[p.member].spec.max_ext).min().unwrap_or(1).max(1) as usize;
     let mut wanted: Vec<usize> = (0..mark.len()).filter(|i| mark[*i] == IN).collect();
-    // (each cell by itself: this is the map that threads can share)
+    // Each cell by itself, so threads may share them.
     let fit_at = |i: usize| fit_cell(&solid, DVec3::from_array(cell_at(i).map(|v| v as f64)), wedges);
-    let fitted: Vec<(u8, Option<u64>)> = wanted.iter().map(|&i| fit_at(i)).collect();
+    let fitted: Vec<(u8, Option<u64>)> = threads.map(wanted.len(), CELLS_A_THREAD, |at| fit_at(wanted[at]));
     let mut shape = vec![0u8; mark.len()];
     let mut sampled: Vec<(usize, u64)> = Vec::new();
     for (&i, &(mask, bits)) in wanted.iter().zip(&fitted) {
@@ -666,7 +687,7 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>]) {
     sampled.retain(|s| mark[s.0] == IN);
     if wedges {
         // (a stretched ramp never enters a cell the solid does not reach, and so never leaves the zone)
-        sloped = stretch_ramps(&mut shape, &sampled, n, max_ext).0;
+        sloped = stretch_ramps(&mut shape, &sampled, n, max_ext, threads).0;
     }
     // Which brick of each form covers each cell of the zone.
     let mut cover: Vec<HashMap<usize, usize>> = vec![HashMap::new(); parts.len()];
@@ -695,14 +716,14 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>]) {
         }
         shape[i] = 0;
         let cell = CellBrick { mask: CUBE, min: cell_at(i), ext: [1; 3] };
+        // (to the first form in the order that has a block there, as in the cutting that follows: the form that gives way to nobody is then never cut where it is solid)
+        if let Some(home) = (0..parts.len()).find(|&p| cover[p].get(&i).is_some_and(|at| members[parts[p].member].built.bricks[*at].mask == CUBE)) {
+            back[home].insert(i);
+            continue;
+        }
         let owner = solid.owner(middle_of(&cell));
         let part = &parts[owner];
-        let from = cover[owner].get(&i).copied();
-        if from.is_some_and(|at| members[part.member].built.bricks[at].mask == CUBE) {
-            back[owner].insert(i);
-        } else {
-            fresh[owner].push(Piece { brick: CellBrick { min: [0, 1, 2].map(|k| cell.min[k] - part.off[k]), ..cell }, member: part.member, from, loose: true });
-        }
+        fresh[owner].push(Piece { brick: CellBrick { min: [0, 1, 2].map(|k| cell.min[k] - part.off[k]), ..cell }, member: part.member, from: cover[owner].get(&i).copied(), loose: true });
     }
     // and its sloped bricks: the stretched ramps, and the rest joined along their ridges
     sloped.extend(merge(shape, n, max_ext));
@@ -916,3 +937,6 @@ pub fn holds(brick: &CellBrick, p: DVec3) -> bool {
     }
     shape_info(brick.mask).is_some_and(|info| crate::shapes::inside_shape(info, t[0], t[1], t[2]))
 }
+
+#[cfg(test)]
+mod tests;
