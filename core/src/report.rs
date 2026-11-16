@@ -11,6 +11,7 @@
 
 use crate::curves::{ArchType, ARCH_TYPES};
 use crate::fit_volume::{patterns, K};
+use crate::par::Threads;
 use crate::shapes::{inside_sampled, shape_info, CellBrick, Kind, CUBE};
 use crate::spec::{build, plane_axes, Built, Form, Probe, Spec};
 use glam::DVec3;
@@ -336,7 +337,7 @@ pub fn analyse(spec: &Spec, built: &Built) -> Result<Analysis, String> {
 
 /// [`analyse`] against a form already in hand.
 pub fn analyse_probe(probe: &Probe, built: &Built) -> Result<Analysis, String> {
-    scan(probe, built, true, &mut Seen::new())
+    scan(probe, built, true, &mut Seen::new(), Threads::available())
 }
 
 /// Most cells [`measure`] will look at: 4 bytes each.
@@ -350,8 +351,8 @@ const MAX_MEASURE_CELLS: usize = 32_000_000;
 /// than a report would be read for: with the record's limit in the way, a
 /// sphere over 78 cells in radius could not be measured, and so was fitted
 /// cell by cell after all, as fifty thousand bricks instead of five hundred.
-pub(crate) fn measure(probe: &Probe, built: &Built) -> Result<(f64, f64), String> {
-    measure_with(probe, built, &mut Seen::new())
+pub(crate) fn measure(probe: &Probe, built: &Built, threads: Threads) -> Result<(f64, f64), String> {
+    measure_with(probe, built, &mut Seen::new(), threads)
 }
 
 /// What the form holds of each cell its surface passes through, as found by
@@ -367,14 +368,44 @@ pub(crate) type Seen = std::collections::HashMap<[i32; 3], (u64, u64)>;
 /// lookup in a map for each such cell is nothing beside the 64 questions it
 /// saves, and a map holds only the cells at the surface, where an array over
 /// the whole box would hold every cell of two boxes that need not coincide.
-pub(crate) fn measure_with(probe: &Probe, built: &Built, seen: &mut Seen) -> Result<(f64, f64), String> {
-    let found = scan(probe, built, false, seen)?;
+pub(crate) fn measure_with(probe: &Probe, built: &Built, seen: &mut Seen, threads: Threads) -> Result<(f64, f64), String> {
+    let found = scan(probe, built, false, seen, threads)?;
     Ok((found.form_volume, found.missing + found.extra))
 }
 
+/// What [`scan`] finds in some of the layers of cells it looks at.
+struct Layers {
+    /// samples inside the form, form no brick covers, and brick outside the form
+    inside: u64,
+    missing: u64,
+    extra: u64,
+    cells: Vec<CellNote>,
+    /// each cell's samples, where they are kept
+    form_bits: Vec<u64>,
+    brick_bits: Vec<u64>,
+    /// what the form was asked about here that `seen` did not hold
+    asked: Vec<([i32; 3], (u64, u64))>,
+}
+
+/// How many cells of a measurement are worth a thread of their own (see
+/// `par::Threads::map_ranges`). A cell of a solid sphere takes 130 to 180
+/// nanoseconds on average (most are settled by their block or their middle,
+/// and the few at the surface are asked about 64 times), so half a
+/// millisecond is about 3,000 of them. Twice that and more, since a form
+/// with less of its box at its surface than a sphere costs less a cell.
+const CELLS_A_THREAD: usize = 8_000;
+
 /// The bricks against the form, cell by cell. `keep` says whether to keep
 /// what was found in each cell, for a report, or only the totals.
-fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Analysis, String> {
+///
+/// The layers of cells are shared out over `threads`. Measuring is most of
+/// what a form laid out whole takes to build (see `spec::build_upright`),
+/// and what is found in a cell depends on nothing found in another: the
+/// totals are whole numbers of samples, added up in any grouping, and the
+/// cells kept for a report are put end to end in the order of the layers.
+/// Only `seen` is shared, and it is read while the layers are looked at
+/// and added to afterwards, in order.
+fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen, threads: Threads) -> Result<Analysis, String> {
     if built.bricks.is_empty() {
         return Err("there are no bricks to analyse".into());
     }
@@ -429,11 +460,6 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Ana
             (s / (K * K)) as f64 + 0.5,
         ) / K as f64
     };
-    let kept = if keep { count } else { 0 };
-    let (mut form_bits, mut brick_bits) = (vec![0u64; kept], vec![0u64; kept]);
-    let mut inside = 0u64;
-    let (mut missing, mut extra) = (0u64, 0u64);
-    let mut cells = Vec::new();
     // The form is asked about once for each block of cells before any cell
     // in it: where the block's middle is further from the surface than its
     // own corners are, every cell in it is wholly in or wholly out, and
@@ -454,97 +480,129 @@ fn scan(probe: &Probe, built: &Built, keep: bool, seen: &mut Seen) -> Result<Ana
             }
         }
     }
-    for z in min[2]..max[2] {
-        for y in min[1]..max[1] {
-            for x in min[0]..max[0] {
-                let at = [x, y, z];
-                let i = index(at);
-                let corner = DVec3::new(x as f64, y as f64, z as f64);
-                // a cell whose centre is further from the surface than its
-                // corners are from its centre is wholly in or out
-                let block = far[((x - min[0]) / BLOCK + blocks[0] * ((y - min[1]) / BLOCK + blocks[1] * ((z - min[2]) / BLOCK))) as usize];
-                let centre = match block {
-                    1 => f64::INFINITY,
-                    -1 => f64::NEG_INFINITY,
-                    _ => probe.distance(corner + 0.5),
-                };
-                // `edge` marks the samples that lie on the form's surface itself
-                let (form, edge) = if centre > 0.87 {
-                    (0, 0)
-                } else if centre < -0.87 {
-                    (u64::MAX, 0)
-                } else {
-                    *seen.entry(at).or_insert_with(|| {
-                        (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
-                            let d = probe.distance(corner + sample(s));
-                            (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
-                        })
-                    })
-                };
-                let holds = (owner[i] > 0).then(|| owner[i] as usize - 1);
-                let samples_of = |b: CellBrick| -> Result<u64, String> {
-                    if b.mask == CUBE {
-                        return Ok(u64::MAX);
+    let seen_before: &Seen = seen;
+    let layer = dims[0] * dims[1];
+    let found = threads.map_ranges(dims[2], CELLS_A_THREAD.div_ceil(layer.max(1)), |layers| -> Result<Layers, String> {
+        let kept = if keep { layers.len() * layer } else { 0 };
+        let (mut form_bits, mut brick_bits) = (vec![0u64; kept], vec![0u64; kept]);
+        let first = index([min[0], min[1], min[2] + layers.start as i32]);
+        let mut inside = 0u64;
+        let (mut missing, mut extra) = (0u64, 0u64);
+        let mut cells = Vec::new();
+        let mut asked = Vec::new();
+        for z in min[2] + layers.start as i32..min[2] + layers.end as i32 {
+            for y in min[1]..max[1] {
+                for x in min[0]..max[0] {
+                    let at = [x, y, z];
+                    let i = index(at);
+                    let corner = DVec3::new(x as f64, y as f64, z as f64);
+                    // a cell whose centre is further from the surface than its
+                    // corners are from its centre is wholly in or out
+                    let block = far[((x - min[0]) / BLOCK + blocks[0] * ((y - min[1]) / BLOCK + blocks[1] * ((z - min[2]) / BLOCK))) as usize];
+                    let centre = match block {
+                        1 => f64::INFINITY,
+                        -1 => f64::NEG_INFINITY,
+                        _ => probe.distance(corner + 0.5),
+                    };
+                    // `edge` marks the samples that lie on the form's surface itself
+                    let (form, edge) = if centre > 0.87 {
+                        (0, 0)
+                    } else if centre < -0.87 {
+                        (u64::MAX, 0)
+                    } else {
+                        match seen_before.get(&at) {
+                            Some(held) => *held,
+                            None => {
+                                let held = (0..K * K * K).fold((0u64, 0u64), |(bits, edge), s| {
+                                    let d = probe.distance(corner + sample(s));
+                                    (bits | ((d < 0.0) as u64) << s, edge | ((d.abs() < 1e-9) as u64) << s)
+                                });
+                                asked.push((at, held));
+                                held
+                            }
+                        }
+                    };
+                    let holds = (owner[i] > 0).then(|| owner[i] as usize - 1);
+                    let samples_of = |b: CellBrick| -> Result<u64, String> {
+                        if b.mask == CUBE {
+                            return Ok(u64::MAX);
+                        }
+                        let info = shape_info(b.mask).ok_or("a brick has a mask that is not a shape")?;
+                        Ok((0..K * K * K).fold(0u64, |bits, s| {
+                            let p = corner + sample(s);
+                            let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+                            bits | (inside_sampled(info, u[0], u[1], u[2]) as u64) << s
+                        }))
+                    };
+                    let mut bricks = match holds {
+                        None => 0,
+                        Some(h) => samples_of(built.bricks[h])?,
+                    };
+                    if let Some(others) = shared.get(&i) {
+                        for &other in others {
+                            bricks |= samples_of(built.bricks[other])?;
+                        }
                     }
-                    let info = shape_info(b.mask).ok_or("a brick has a mask that is not a shape")?;
-                    Ok((0..K * K * K).fold(0u64, |bits, s| {
-                        let p = corner + sample(s);
-                        let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
-                        bits | (inside_sampled(info, u[0], u[1], u[2]) as u64) << s
-                    }))
-                };
-                let mut bricks = match holds {
-                    None => 0,
-                    Some(h) => samples_of(built.bricks[h])?,
-                };
-                if let Some(others) = shared.get(&i) {
-                    for &other in others {
-                        bricks |= samples_of(built.bricks[other])?;
+                    // A sample exactly on the form's surface is on neither side of
+                    // it, so it agrees with whatever the bricks do there. Counted
+                    // as outside, as a strict test has it, every sloped brick
+                    // lying exactly along a sloped face of the form was charged
+                    // for the samples on that face, and a pyramid built exactly
+                    // measured 5% wrong.
+                    let form = (form & !edge) | (bricks & edge);
+                    inside += form.count_ones() as u64;
+                    if keep {
+                        form_bits[i - first] = form;
+                        brick_bits[i - first] = bricks;
                     }
+                    let wrong = (form ^ bricks).count_ones();
+                    if wrong == 0 {
+                        continue;
+                    }
+                    missing += (form & !bricks).count_ones() as u64;
+                    extra += (bricks & !form).count_ones() as u64;
+                    if !keep {
+                        continue;
+                    }
+                    let &(best, pattern) = patterns()
+                        .iter()
+                        .min_by_key(|(_, p)| (form ^ p).count_ones())
+                        .unwrap();
+                    let best_wrong = (form ^ pattern).count_ones();
+                    let tied = patterns()
+                        .iter()
+                        .filter(|(_, p)| (form ^ p).count_ones() == best_wrong)
+                        .count()
+                        > 1;
+                    cells.push(CellNote {
+                        at,
+                        form: form.count_ones(),
+                        bricks: bricks.count_ones(),
+                        wrong,
+                        holds,
+                        best,
+                        best_wrong,
+                        tied,
+                    });
                 }
-                // A sample exactly on the form's surface is on neither side of
-                // it, so it agrees with whatever the bricks do there. Counted
-                // as outside, as a strict test has it, every sloped brick
-                // lying exactly along a sloped face of the form was charged
-                // for the samples on that face, and a pyramid built exactly
-                // measured 5% wrong.
-                let form = (form & !edge) | (bricks & edge);
-                inside += form.count_ones() as u64;
-                if keep {
-                    form_bits[i] = form;
-                    brick_bits[i] = bricks;
-                }
-                let wrong = (form ^ bricks).count_ones();
-                if wrong == 0 {
-                    continue;
-                }
-                missing += (form & !bricks).count_ones() as u64;
-                extra += (bricks & !form).count_ones() as u64;
-                if !keep {
-                    continue;
-                }
-                let &(best, pattern) = patterns()
-                    .iter()
-                    .min_by_key(|(_, p)| (form ^ p).count_ones())
-                    .unwrap();
-                let best_wrong = (form ^ pattern).count_ones();
-                let tied = patterns()
-                    .iter()
-                    .filter(|(_, p)| (form ^ p).count_ones() == best_wrong)
-                    .count()
-                    > 1;
-                cells.push(CellNote {
-                    at,
-                    form: form.count_ones(),
-                    bricks: bricks.count_ones(),
-                    wrong,
-                    holds,
-                    best,
-                    best_wrong,
-                    tied,
-                });
             }
         }
+        Ok(Layers { inside, missing, extra, cells, form_bits, brick_bits, asked })
+    });
+    let (mut form_bits, mut brick_bits) = (Vec::new(), Vec::new());
+    let mut inside = 0u64;
+    let (mut missing, mut extra) = (0u64, 0u64);
+    let mut cells = Vec::new();
+    for layers in found {
+        // (the first layers to fail, as on one thread)
+        let layers = layers?;
+        inside += layers.inside;
+        missing += layers.missing;
+        extra += layers.extra;
+        cells.extend(layers.cells);
+        form_bits.extend(layers.form_bits);
+        brick_bits.extend(layers.brick_bits);
+        seen.extend(layers.asked);
     }
     cells.sort_by_key(|c| (std::cmp::Reverse(c.wrong), c.at));
     let per = SAMPLES as f64;
@@ -1183,5 +1241,26 @@ mod tests {
         // a 6 x 1 bar: six full cells in a row, in both pictures, and no difference
         assert_eq!(text.matches("  ..######..\n").count(), 2, "{text}");
         assert!(text.contains("measured here: missing = 0.00, extra = 0.00"));
+    }
+
+    #[test]
+    fn an_analysis_is_the_same_on_any_number_of_threads() {
+        // the record a report is written from: every cell's samples and every cell that disagrees, in order
+        let spec = Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 9.0, fill: false, thick: 3.0, ..Spec::default() };
+        let built = build(&spec).unwrap();
+        let probe = Probe::new(&spec, built.grain).unwrap();
+        let told = |a: &Analysis| (a.missing.to_bits(), a.extra.to_bits(), a.form_volume.to_bits(), a.form_bits.clone(), a.brick_bits.clone(), a.cells.iter().map(|c| (c.at, c.form, c.bricks, c.wrong, c.holds, c.best, c.best_wrong, c.tied)).collect::<Vec<_>>());
+        let (mut seen_by_one, mut seen_by_several) = (Seen::new(), Seen::new());
+        let one = scan(&probe, &built, true, &mut seen_by_one, Threads::ONE).unwrap();
+        assert!(one.cells.len() > 100 && one.form_bits.iter().any(|bits| *bits != 0));
+        for threads in [2, 3, 7] {
+            seen_by_several.clear();
+            let several = scan(&probe, &built, true, &mut seen_by_several, Threads::forced(threads)).unwrap();
+            assert!(told(&one) == told(&several), "{threads} threads");
+            assert_eq!(seen_by_one, seen_by_several, "{threads} threads");
+        }
+        // and with what the form holds already known from the measurement before
+        let again = scan(&probe, &built, true, &mut seen_by_several, Threads::forced(3)).unwrap();
+        assert!(told(&one) == told(&again));
     }
 }

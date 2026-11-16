@@ -11,6 +11,7 @@ use crate::fit_planar::{self, fit_planar, fit_planar_towards};
 use crate::fit_pyramid::{fit_pyramid, Pyramid};
 use crate::fit_round::{fit_round, Round};
 use crate::fit_volume::{self, fit_volume};
+use crate::par::Threads;
 use crate::sdf::{Field, Fill, Region, Stroke};
 use crate::shapes::{CellBrick, CUBE, UPRIGHT};
 use glam::{DVec2, DVec3};
@@ -309,7 +310,19 @@ impl Turn {
 
 /// [`build`], with the choice of leaving the fit unmeasured.
 pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
-    let mut built = build_upright(spec, measured)?;
+    build_with(spec, measured, Threads::available())
+}
+
+/// [`build_as`], on so many threads.
+///
+/// A build is the same bricks in the same order whatever `threads` is (see
+/// [`crate::par`], and the test `a_build_is_the_same_on_any_number_of_threads`):
+/// the number decides only how long it takes. It is given here, where a
+/// build starts, and handed down to each part that shares work out, so
+/// that the cores are counted once a build and a test can ask for one
+/// thread or several.
+pub fn build_with(spec: &Spec, measured: bool, threads: Threads) -> Result<Built, String> {
+    let mut built = build_upright(spec, measured, threads)?;
     let turn = Turn::of(&spec.snapped());
     if !turn.is_none() {
         built.bricks = built.bricks.iter().map(|b| turn.brick(b)).collect();
@@ -327,7 +340,7 @@ pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
 /// second, so the editor builds unmeasured then and measures once when the
 /// mouse is let go. An unmeasured build has `unmeasured` set and its `solid`
 /// and `error` at 0.
-fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
+fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built, String> {
     if !(spec.thick > 0.0) || spec.depth < 1 || !(spec.radius > 0.0) || spec.max_ext < 1 {
         return Err("thickness, depth and radius must all be positive".into());
     }
@@ -345,7 +358,7 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
         return Err(format!("the form is too large to build: nothing may be more than {MAX_SPAN} microbricks across; bring its points closer together"));
     }
     if spec.grain > 0 {
-        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured);
+        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured, threads);
     }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
@@ -356,7 +369,7 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     let mut last_error = None;
     let limit = spec.snapped().coarsest_grain();
     for &grain in GRAINS.iter().rev().filter(|g| **g <= limit) {
-        match build_at(spec, grain, measured) {
+        match build_at(spec, grain, measured, threads) {
             Ok(built) if built.bricks.is_empty() => {} // too coarse to hold the form at all
             Ok(built) => {
                 let over = built.bricks.len() > spec.budget;
@@ -512,21 +525,21 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
     })
 }
 
-fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
+fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result<Built, String> {
     let g = grain.max(1) as f64;
     let coarse = coarse(spec, grain);
-    let (solid, path) = solid(&coarse)?;
+    let (solid, path) = solid(&coarse, threads)?;
     // A turned form is laid out two ways and the closer kept, which means
     // measuring both. Unmeasured, it is laid out one way only: what is on
     // screen during a drag may then change a little when the mouse is let
     // go, for a drag several times as quick.
     let quick = match &solid {
-        Solid::Lathe { .. } if !measured => [false, true].into_iter().find_map(|short_sides| turned(&coarse, &solid, g, short_sides)),
+        Solid::Lathe { .. } if !measured => [false, true].into_iter().find_map(|short_sides| turned(&coarse, &solid, g, short_sides, threads)),
         _ => None,
     };
     let mut built = match quick {
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
-        None => fit(&coarse, &solid, path, g),
+        None => fit(&coarse, &solid, path, g, threads),
     };
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
@@ -543,7 +556,7 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::measure(&Probe::of(solid), &built) {
+        match crate::report::measure(&Probe::of(solid), &built, threads) {
             Ok((volume, wrong)) => {
                 built.solid = volume;
                 built.error = wrong;
@@ -555,6 +568,7 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
                         &Solid::Volume { field, min, max },
                         std::mem::take(&mut built.path),
                         g,
+                        threads,
                     )
                 }
                 None => return Err(e),
@@ -703,7 +717,7 @@ impl Probe {
     /// The form as it was fitted at brick size `grain` (a `Built`'s `grain`).
     pub fn new(spec: &Spec, grain: i32) -> Result<Probe, String> {
         let coarse = coarse(spec, grain);
-        let (solid, _) = solid(&coarse)?;
+        let (solid, _) = solid(&coarse, Threads::available())?;
         Ok(Probe { solid, grain: grain.max(1) as f64, mirror: mirrors(&coarse), turn: Turn::of(&spec.snapped()) })
     }
 
@@ -752,13 +766,13 @@ impl Probe {
 /// mirrored after that, is no longer a sphere or a pyramid where it was
 /// pulled. It keeps its own layout wherever the pulls do not reach, and
 /// only what they change is fitted cell by cell (see [`patched`]).
-fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
-    let (plain, path) = solid_as_made(spec)?;
+fn solid(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
+    let (plain, path) = solid_as_made(spec, threads)?;
     if spec.pulls.is_empty() || !matches!(spec.form, Form::Sphere | Form::Pyramid) {
         return Ok((plain, path));
     }
     // the solid as it would be laid out with nothing added to it
-    let laid = fit(spec, &plain, Vec::new(), 1.0).bricks;
+    let laid = fit(spec, &plain, Vec::new(), 1.0, threads).bricks;
     let (Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Volume { field, min, max }) = plain else {
         return Ok((plain, path));
     };
@@ -774,7 +788,7 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         }
     }
     let (lo, hi) = (min.map(|v| v as f64), max.map(|v| v as f64));
-    patched(spec, laid, &before, 1.0 / (1.0 + stretch), field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path)
+    patched(spec, laid, &before, 1.0 / (1.0 + stretch), field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path, threads)
 }
 
 /// A form laid out whole, then changed in places: its own bricks kept
@@ -797,7 +811,7 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
 /// out. Along the seam the two fits meet as two fits of the same solid do:
 /// nearly, with here and there a sliver's difference.
 #[allow(clippy::too_many_arguments)]
-fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after: Field, lo: DVec3, hi: DVec3, path: Vec<DVec3>) -> Result<(Solid, Vec<DVec3>), String> {
+fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after: Field, lo: DVec3, hi: DVec3, path: Vec<DVec3>, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
     let (solid, path) = volume(after.clone(), lo, hi, path)?;
     let Solid::Volume { min, max, .. } = solid else { unreachable!() };
     if laid.is_empty() || !spec.wedges {
@@ -860,7 +874,7 @@ fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after:
     let to = [0, 1, 2].map(|k| to[k].min(max[k]) + 1);
     if (0..3).all(|k| to[k] > from[k]) {
         // every ramp one cell long, so that each can be taken or left by its own cell
-        let opts = fit_volume::Opts { max_ext: spec.max_ext, wedges: true, stretch: false };
+        let opts = fit_volume::Opts { max_ext: spec.max_ext, wedges: true, stretch: false, threads };
         for b in fit_volume(&|p| after.eval(p), from, to, &opts).bricks {
             if b.mask == CUBE {
                 loose.extend(cells(&b).filter(|c| !unchanged(*c)));
@@ -888,7 +902,7 @@ fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after:
 }
 
 /// [`solid`], before any points added to a sphere or pyramid are applied.
-fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
+fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
     let need = |n: usize| {
         if spec.points.len() < n {
             Err(format!(
@@ -905,7 +919,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let p = need(3)?;
             let c = circle3(p[0], p[1], p[2]).ok_or("the three points are in a straight line")?;
             let path = c.path(0.0, if spec.closed { 2.0 * PI } else { c.a2 });
-            curve(spec, path, spec.closed, Some(c.normal))
+            curve(spec, path, spec.closed, Some(c.normal), threads)
         }
         Form::Circle => {
             let centre = need(1)?[0];
@@ -915,7 +929,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let mut within = spec.stretch.max(DVec3::splat(0.05));
             within[spec.plane.min(2)] = 1.0;
             let path = c.path(0.0, 2.0 * PI).into_iter().map(|p| centre + (p - centre) * within).collect();
-            curve(spec, path, true, Some(c.normal))
+            curve(spec, path, true, Some(c.normal), threads)
         }
         Form::Arch(kind) => {
             let p = need(2)?;
@@ -923,10 +937,10 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
                 .rise
                 .unwrap_or_else(|| kind.default_rise(p[0].distance(p[1]) / 2.0));
             let (path, normal) = arch(p[0], p[1], kind, rise, DVec3::Z)?;
-            curve(spec, path, false, Some(normal))
+            curve(spec, path, false, Some(normal), threads)
         }
-        Form::Spline => curve(spec, catmull_rom(need(2)?, spec.closed)?, spec.closed, None),
-        Form::Bezier => curve(spec, rational_bezier(need(2)?, &spec.weights)?, false, None),
+        Form::Spline => curve(spec, catmull_rom(need(2)?, spec.closed)?, spec.closed, None, threads),
+        Form::Bezier => curve(spec, rational_bezier(need(2)?, &spec.weights)?, false, None, threads),
         Form::Sphere => {
             let center = need(1)?[0];
             let radii = spec.stretch.max(DVec3::splat(0.05)) * spec.radius;
@@ -969,7 +983,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         }
         // A torus is a circle as a round tube, and is built as one. It was a
         // form of its own while it was fitted cell by cell from a formula.
-        Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }),
+        Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }, threads),
         Form::Pyramid => {
             let base = need(1)?[0];
             let half = [spec.radius * spec.stretch.x.max(0.05), spec.radius * spec.stretch.y.max(0.05)];
@@ -1192,6 +1206,7 @@ fn curve(
     path: Vec<DVec3>,
     closed: bool,
     normal: Option<DVec3>,
+    threads: Threads,
 ) -> Result<(Solid, Vec<DVec3>), String> {
     if path.len() < 2 {
         return Err("the curve has no length".into());
@@ -1217,7 +1232,7 @@ fn curve(
     }
     if let (Some(axis), false, false) = (lay_across, spec.tube, spec.fill) {
         if path.iter().any(|p| (p[axis] - lay_at[axis]).abs() > 1e-6) {
-            if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis])? {
+            if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis], threads)? {
                 return Ok(raised);
             }
         }
@@ -1239,7 +1254,7 @@ fn curve(
                 })
                 .collect();
             let (flat, _) = stacked(spec, level.clone(), closed, axis)?;
-            let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+            let laid = fit(spec, &flat, Vec::new(), 1.0, threads).bricks;
             // The pipe may have been laid half a cell aside of its curve, to
             // land on the lattice (see `stacked`): by as much as its middle
             // is off the level curve's, across the plane. What it is
@@ -2074,7 +2089,7 @@ const LONG_RISE: f64 = 1.5;
 /// `plane` along `axis`: the flat band's bricks where the curve is still in
 /// the plane, and columns where it has left it (see `lifted_band`). `None`
 /// if the band is not a flat outline to begin with.
-fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
+fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64, threads: Threads) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
     let level: Vec<DVec3> = path
         .iter()
         .map(|p| {
@@ -2087,7 +2102,7 @@ fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) ->
     let (flat, _) = planar(spec, level, closed, axis)?;
     let Solid::Flat { w0, depth, .. } = &flat else { return Ok(None) };
     let (w0, depth) = (*w0, *depth);
-    let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+    let laid = fit(spec, &flat, Vec::new(), 1.0, threads).bricks;
     // the curve where the flat band was laid: half a cell aside if the band was (see `planar`)
     let (ua, va) = plane_axes(axis);
     let aside: Vec<DVec3> = path
@@ -2353,20 +2368,21 @@ fn volume(
 /// deeper must not change how its outline is fitted.
 /// A turned form laid out one of the two ways `fit_lathe` knows; `None` if
 /// `solid` is not one or cannot be laid out so.
-fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool) -> Option<Vec<CellBrick>> {
+fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Threads) -> Option<Vec<CellBrick>> {
     let Solid::Lathe { profile, axis, far, low, high, .. } = solid else { return None };
     let section = |out: f64, up: f64| profile.eval(DVec2::new(out, up));
-    let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext };
+    let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext, threads };
     fit_lathe(&lathe).filter(|_| spec.wedges)
 }
 
-fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
+fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,
                 wedges: spec.wedges,
                 stretch: true,
+                threads,
             };
             let fit = fit_volume(&|p| field.eval(p), *min, *max, &opts);
             Built {
@@ -2387,12 +2403,12 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let mut seen = crate::report::Seen::new();
             let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
             let ways = [false, true].map(|short_sides| {
-                let bricks = turned(spec, solid, g, short_sides)?;
+                let bricks = turned(spec, solid, g, short_sides, threads)?;
                 let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true, shades: Vec::new() };
                 // The two totals only: the record a report keeps of every
                 // cell took most of the time here, and was thrown away. And
                 // what the form holds of each cell is asked once for both.
-                if let Ok((volume, wrong)) = crate::report::measure_with(&form, &built, &mut seen) {
+                if let Ok((volume, wrong)) = crate::report::measure_with(&form, &built, &mut seen, threads) {
                     (built.solid, built.error, built.unmeasured) = (volume, wrong, false);
                 }
                 Some(built)
@@ -2400,12 +2416,12 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let closer = ways.into_iter().flatten().min_by(|a, b| a.error.total_cmp(&b.error));
             match closer {
                 Some(built) => Built { path, ..built },
-                None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
+                None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g, threads),
             }
         }
         Solid::Pyramid { bricks, field, min, max } => match bricks.clone().filter(|_| spec.wedges) {
             Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
-            None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
+            None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g, threads),
         },
         Solid::Round {
             round,
@@ -2431,6 +2447,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 },
                 path,
                 g,
+                threads,
             ),
         },
         Solid::Flat {
@@ -2443,13 +2460,13 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
         } => {
             let mut bricks = Vec::new();
             let mut shades = Vec::new();
-            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
+            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges, threads };
             let fit = match (&spec.stones, &spec.mosaic) {
                 // each stone its own outline, where a solid form is one
                 (Some(stones), _) => crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
                 // each colour of the mosaic its own outline
                 (None, Some(mosaic)) => crate::pattern::lay_mosaic(&|p| region.eval(p), mosaic, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
-                (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),
+                (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, threads, &mut bricks),
             };
             let depth = *depth as f64;
             Built {
@@ -2463,7 +2480,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             }
         }
         Solid::Pipe { top, full, chamfer, rise, axis, first, layers, min, max, .. } => {
-            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: true };
+            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: true, threads };
             let narrower = |x: f64, y: f64| top.eval(DVec2::new(x, y));
             let fit = fit_planar_towards(&|x, y| full.eval(DVec2::new(x, y)), *min, *max, &opts, Some((&narrower, *chamfer)));
             let pipe = crate::fit_stack::Pipe { wall: &fit.pieces, top: &narrower, chamfer: *chamfer, rise: *rise, axis: *axis, first: *first, layers: *layers, max_ext: spec.max_ext };
@@ -2479,7 +2496,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
         } => {
             let mut bricks = Vec::new();
             for (region, w0, depth) in layers {
-                fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks);
+                fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, threads, &mut bricks);
             }
             // measured against the round tube by the caller
             Built {
@@ -2506,6 +2523,7 @@ fn fit_layer(
     w0: i32,
     depth: i32,
     g: f64,
+    threads: Threads,
     bricks: &mut Vec<CellBrick>,
 ) -> fit_planar::Fit {
     let (ua, va) = plane_axes(axis);
@@ -2513,6 +2531,7 @@ fn fit_layer(
         brick_cost: spec.simplify / (g * g),
         max_ext: spec.max_ext,
         wedges: spec.wedges,
+        threads,
     };
     let fit = fit_planar(&|x, y| region.eval(DVec2::new(x, y)), min, max, &opts);
     for piece in &fit.pieces {
@@ -3389,7 +3408,7 @@ mod tests {
         let quick = build_as(&bell, false).unwrap();
         assert!(quick.unmeasured && quick.error == 0.0 && quick.bricks.iter().any(|b| b.mask != CUBE));
         assert!(!built.unmeasured && built.error > 0.0);
-        let (volume, wrong) = crate::report::measure(&Probe::new(&bell, built.grain).unwrap(), &built).unwrap();
+        let (volume, wrong) = crate::report::measure(&Probe::new(&bell, built.grain).unwrap(), &built, Threads::available()).unwrap();
         assert!((volume - built.solid).abs() < 1e-9 && (wrong - built.error).abs() < 1e-9, "measured apart {wrong} of {volume}, together {} of {}", built.error, built.solid);
         // solid, and a plain dome's profile
         let (_, solid) = stepped(&Spec { fill: true, ..bell.clone() });
@@ -3852,5 +3871,93 @@ mod tests {
             ..Spec::default()
         })
         .contains("positive"));
+    }
+
+    /// Forms of every kind that shares work out over threads, each small
+    /// enough to build in a few milliseconds.
+    fn forms_built_on_threads() -> Vec<(&'static str, Spec)> {
+        use crate::pattern::{Mosaic, Stones};
+        let ball = Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 14.0, fill: true, ..Spec::default() };
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 24.0, thick: 6.0, tube: true, ..Spec::default() };
+        let lift = vec![(at(-24.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 9.0))];
+        let wavy: Vec<DVec3> = (0..5).map(|i| at(i as f64 * 20.0 - 40.0, if i % 2 == 0 { -8.0 } else { 8.0 }, 0.0)).collect();
+        let band = Spec { form: Form::Spline, points: wavy, thick: 14.0, depth: 2, ..Spec::default() };
+        let floor = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 26.0, fill: true, depth: 3, ..Spec::default() };
+        let mosaic = |style: usize| Mosaic { style, size: 2, bevel: 2, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 40 };
+        vec![
+            // measured layer by layer
+            ("solid sphere", ball.clone()),
+            ("ellipsoid, brick size chosen for it", Spec { stretch: DVec3::new(1.0, 0.7, 1.3), grain: 0, budget: 300, ..ball.clone() }),
+            // fitted cell by cell, a row of blocks at a time
+            ("thin hollow sphere", Spec { fill: false, thick: 2.0, ..ball.clone() }),
+            ("sphere with a point pulled out", Spec { pulls: vec![(at(14.0, 0.0, 0.0), DVec3::new(5.0, 0.0, 0.0))], pull_reach: 8.0, ..ball.clone() }),
+            // circles fitted together
+            ("bell", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, ..Spec::default() }),
+            ("vase, filled", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 20.0), at(6.0, 0.0, 10.0), at(8.0, 0.0, 0.0)], fill: true, ..Spec::default() }),
+            // outlines sampled together
+            ("ring as a pipe", ring.clone()),
+            ("ring as stacked bands", Spec { protrude: true, ..ring.clone() }),
+            ("lifted tube", Spec { pulls: lift.clone(), pull_reach: 12.0, ..ring.clone() }),
+            ("lifted band", Spec { tube: false, thick: 4.0, depth: 3, pulls: lift, pull_reach: 12.0, ..ring.clone() }),
+            ("band along a spline", band.clone()),
+            ("arch", Spec { form: Form::Arch(ArchType::Round), points: vec![at(-30.0, 0.0, 0.0), at(30.0, 0.0, 0.0)], thick: 3.0, depth: 4, simplify: 0.25, ..Spec::default() }),
+            ("pyramid", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 12.0, fill: true, ..Spec::default() }),
+            // stones fitted together, then laid in order
+            ("stepping stones on a band", Spec { stones: Some(Stones { size: 7.0, gap: 0.5, uneven: 0.6, seed: 3 }), ..band.clone() }),
+            ("small stones with no gap on a disc", Spec { stones: Some(Stones { size: 4.0, gap: 0.0, uneven: 1.0, seed: 8 }), ..floor.clone() }),
+            // tiles drawn together
+            ("medallions", Spec { mosaic: Some(mosaic(0)), ..floor.clone() }),
+            ("rug", Spec { mosaic: Some(mosaic(1)), ..floor.clone() }),
+            ("planks", Spec { mosaic: Some(mosaic(2)), ..floor.clone() }),
+            ("masonry with bevelled tops", Spec { mosaic: Some(mosaic(3)), ..floor.clone() }),
+            ("masonry on a band", Spec { mosaic: Some(Mosaic { mortar: false, uneven: 0, stagger: 50, ..mosaic(3) }), depth: 4, ..band }),
+        ]
+    }
+
+    /// Whatever differs between two builds of one form: nothing, if they
+    /// are the same bricks in the same order with the same figures, to the
+    /// last bit.
+    fn difference(a: &Built, b: &Built) -> Option<String> {
+        if a.bricks.len() != b.bricks.len() {
+            return Some(format!("{} bricks against {}", a.bricks.len(), b.bricks.len()));
+        }
+        if let Some(k) = (0..a.bricks.len()).find(|k| a.bricks[*k] != b.bricks[*k]) {
+            return Some(format!("brick {k} of {} is {:?} against {:?}", a.bricks.len(), a.bricks[k], b.bricks[k]));
+        }
+        if a.shades != b.shades {
+            return Some("the same bricks in other colours".into());
+        }
+        if (a.solid.to_bits(), a.error.to_bits()) != (b.solid.to_bits(), b.error.to_bits()) {
+            return Some(format!("volume {} and discrepancy {} against {} and {}", a.solid, a.error, b.solid, b.error));
+        }
+        ((a.grain, a.unmeasured, &a.path) != (b.grain, b.unmeasured, &b.path)).then(|| "another brick size, curve, or measured and not".into())
+    }
+
+    #[test]
+    fn a_build_is_the_same_on_any_number_of_threads() {
+        // A build is compared with builds saved in reports and tests, and a
+        // seeded pattern has to be one pattern on every machine: so the
+        // number of threads may decide how long a build takes and nothing
+        // else. `forced` shares out even these small forms, which are
+        // otherwise under every threshold; 3 and 7 so that the work is cut
+        // where no block, row or power of two ends.
+        let mut bricks = 0;
+        for (name, spec) in forms_built_on_threads() {
+            for measured in [true, false] {
+                let one = build_with(&spec, measured, Threads::ONE).unwrap_or_else(|e| panic!("{name}: {e}"));
+                bricks += one.bricks.len();
+                for threads in [2, 3, 7] {
+                    let several = build_with(&spec, measured, Threads::forced(threads)).unwrap_or_else(|e| panic!("{name} on {threads} threads: {e}"));
+                    if let Some(differs) = difference(&one, &several) {
+                        panic!("{name}, {}, on {threads} threads and on one: {differs}", if measured { "measured" } else { "unmeasured" });
+                    }
+                }
+                // and as the editor builds it, on as many as there are, where there is work enough for them
+                let usual = build_as(&spec, measured).unwrap();
+                assert!(difference(&one, &usual).is_none(), "{name}: {:?}", difference(&one, &usual));
+            }
+        }
+        // (the forms did build: a pattern that laid nothing would pass every comparison)
+        assert!(bricks > 20_000, "{bricks}");
     }
 }

@@ -10,6 +10,7 @@
 //! Stretched ramps and corners are not fitted here yet; merging only joins
 //! bricks whose union is the same solid, so it never changes the fit.
 
+use crate::par::Threads;
 use crate::sdf::FAR_MARGIN;
 use crate::shapes::{all_masks, inside_sampled, least_unshared, shape_info, CellBrick, Kind, CUBE};
 use glam::DVec3;
@@ -45,6 +46,9 @@ pub struct Opts {
     pub wedges: bool,
     /// false keeps every ramp one cell across (see `stretch_ramps`)
     pub stretch: bool,
+    /// How many threads the cells may be looked at on (see `classify`). One
+    /// unless a build says otherwise (`spec::build_with`).
+    pub threads: Threads,
 }
 
 // There is deliberately no price per brick here, as the planar fitter has.
@@ -61,6 +65,7 @@ impl Default for Opts {
             max_ext: 80,
             wedges: true,
             stretch: true,
+            threads: Threads::ONE,
         }
     }
 }
@@ -102,7 +107,7 @@ pub(crate) fn patterns() -> &'static [(u8, u64)] {
 }
 
 /// Fit the solid `f` (negative inside) over cells `min..max`.
-pub fn fit_volume(f: &impl Fn(DVec3) -> f64, min: [i32; 3], max: [i32; 3], opts: &Opts) -> Fit {
+pub fn fit_volume(f: &(impl Fn(DVec3) -> f64 + Sync), min: [i32; 3], max: [i32; 3], opts: &Opts) -> Fit {
     let n = [0, 1, 2].map(|i| (max[i] - min[i]).max(0) as usize);
     if n.contains(&0) {
         return Fit::default();
@@ -134,7 +139,7 @@ pub fn fit_volume(f: &impl Fn(DVec3) -> f64, min: [i32; 3], max: [i32; 3], opts:
 
 /// The samples of the cell at `cell` that are inside the form, and which of
 /// its corners are.
-fn cell_bits(f: &impl Fn(DVec3) -> f64, cell: DVec3) -> (u64, u8) {
+fn cell_bits(f: &(impl Fn(DVec3) -> f64 + Sync), cell: DVec3) -> (u64, u8) {
     let bits = (0..K * K * K).fold(0u64, |bits, s| {
         let p = DVec3::new(
             (s % K) as f64 + 0.5,
@@ -162,8 +167,18 @@ fn cell_bits(f: &impl Fn(DVec3) -> f64, cell: DVec3) -> (u64, u8) {
 /// Also returned: the form's samples in every cell the surface passes
 /// through, by cell index in ascending order. Only those cells, which are a
 /// thin shell of the volume, so a sorted list and not a second full grid.
+///
+/// The blocks are shared out over `opts.threads` a row at a time (the
+/// blocks along x at one y and z). This is three quarters of the time a
+/// form fitted cell by cell takes, and a block's cells depend on no other
+/// block. Each row's bricks come back as a slab of their own and are copied
+/// into place, one copy of a byte a cell: handing each thread its own part
+/// of the one array would save the copy, but a row of blocks is not one
+/// stretch of that array (it is eight short stretches in each of eight
+/// layers), and the standard library can only lend a thread a whole stretch.
+/// The two totals are whole numbers of samples, the same in any grouping.
 fn classify(
-    f: &impl Fn(DVec3) -> f64,
+    f: &(impl Fn(DVec3) -> f64 + Sync),
     min: [i32; 3],
     n: [usize; 3],
     opts: &Opts,
@@ -175,88 +190,115 @@ fn classify(
         &patterns()[..2]
     };
     let per_cell = (K * K * K) as u64;
-    let mut shape = vec![0u8; n[0] * n[1] * n[2]];
-    let mut sampled = Vec::new();
-    let (mut solid, mut error) = (0u64, 0u64);
-    // one block's lattice values, reused; a grid of the whole volume's would
-    // be 4 bytes for every lattice point to save the 40% a block re-evaluates
-    // on the faces it shares with its neighbours
     const SIDE: usize = BLOCK + 1;
-    let mut corner = [0f32; SIDE * SIDE * SIDE];
-
-    for bz in (0..n[2]).step_by(BLOCK) {
-        for by in (0..n[1]).step_by(BLOCK) {
-            for bx in (0..n[0]).step_by(BLOCK) {
-                let b = [bx, by, bz];
-                let size = [0, 1, 2].map(|i| BLOCK.min(n[i] - b[i]));
-                let half = DVec3::new(size[0] as f64, size[1] as f64, size[2] as f64) / 2.0;
-                let base = origin + DVec3::new(bx as f64, by as f64, bz as f64);
-                let centre = f(base + half);
-                if centre > half.length() {
-                    continue;
-                }
-                let index =
-                    |x: usize, y: usize, z: usize| bx + x + n[0] * (by + y + n[1] * (bz + z));
-                if centre < -half.length() {
-                    for z in 0..size[2] {
-                        for y in 0..size[1] {
-                            shape[index(0, y, z)..index(size[0], y, z)].fill(CUBE);
-                        }
-                    }
-                    solid += (size[0] * size[1] * size[2]) as u64 * per_cell;
-                    continue;
-                }
-                for z in 0..=size[2] {
-                    for y in 0..=size[1] {
-                        for x in 0..=size[0] {
-                            corner[x + SIDE * (y + SIDE * z)] =
-                                f(base + DVec3::new(x as f64, y as f64, z as f64)) as f32;
-                        }
-                    }
-                }
+    // row `r` of blocks: where it starts along y and z, and its size there
+    let rows_a_layer = n[1].div_ceil(BLOCK);
+    let place = |r: usize| {
+        let (by, bz) = (r % rows_a_layer * BLOCK, r / rows_a_layer * BLOCK);
+        (by, bz, BLOCK.min(n[1] - by), BLOCK.min(n[2] - bz))
+    };
+    let rows = opts.threads.map(rows_a_layer * n[2].div_ceil(BLOCK), CELLS_A_THREAD.div_ceil(n[0] * BLOCK * BLOCK), |r| {
+        let (by, bz, deep, tall) = place(r);
+        // this row's cells, x fastest
+        let mut shape = vec![0u8; n[0] * deep * tall];
+        let mut sampled = Vec::new();
+        let (mut solid, mut error) = (0u64, 0u64);
+        // one block's lattice values, reused; a grid of the whole volume's would
+        // be 4 bytes for every lattice point to save the 40% a block re-evaluates
+        // on the faces it shares with its neighbours
+        let mut corner = [0f32; SIDE * SIDE * SIDE];
+        for bx in (0..n[0]).step_by(BLOCK) {
+            let size = [BLOCK.min(n[0] - bx), deep, tall];
+            let half = DVec3::new(size[0] as f64, size[1] as f64, size[2] as f64) / 2.0;
+            let base = origin + DVec3::new(bx as f64, by as f64, bz as f64);
+            let centre = f(base + half);
+            if centre > half.length() {
+                continue;
+            }
+            // a cell's place in the whole volume, and in this row's slab
+            let index = |x: usize, y: usize, z: usize| bx + x + n[0] * (by + y + n[1] * (bz + z));
+            let here = |x: usize, y: usize, z: usize| bx + x + n[0] * (y + deep * z);
+            if centre < -half.length() {
                 for z in 0..size[2] {
                     for y in 0..size[1] {
-                        for x in 0..size[0] {
-                            let c: [f32; 8] = std::array::from_fn(|k| {
-                                corner[x
-                                    + (k & 1)
-                                    + SIDE * (y + (k >> 1 & 1) + SIDE * (z + (k >> 2)))]
-                            });
-                            if c.iter().all(|&v| v > CELL_REACH) {
-                                continue;
-                            }
-                            if c.iter().all(|&v| v < -CELL_REACH) {
-                                shape[index(x, y, z)] = CUBE;
-                                solid += per_cell;
-                                continue;
-                            }
-                            let cell = base + DVec3::new(x as f64, y as f64, z as f64);
-                            let (bits, _) = cell_bits(f, cell);
-                            let corners = (0..8).fold(0u8, |m, k| m | ((c[k] <= 0.0) as u8) << k);
-                            // least disagreement, then the shape whose corners
-                            // best match the solid's; see `least_unshared`
-                            // for what happens to exact ties
-                            let mut scores = [(0u32, 0u32); 30];
-                            for (score, (mask, pattern)) in scores.iter_mut().zip(patterns) {
-                                *score =
-                                    ((bits ^ pattern).count_ones(), (corners ^ mask).count_ones());
-                            }
-                            let (mask, pattern) =
-                                patterns[least_unshared(&scores[..patterns.len()], 2)];
-                            shape[index(x, y, z)] = mask;
-                            sampled.push((index(x, y, z), bits));
-                            solid += bits.count_ones() as u64;
-                            error += (bits ^ pattern).count_ones() as u64;
+                        shape[here(0, y, z)..here(size[0], y, z)].fill(CUBE);
+                    }
+                }
+                solid += (size[0] * size[1] * size[2]) as u64 * per_cell;
+                continue;
+            }
+            for z in 0..=size[2] {
+                for y in 0..=size[1] {
+                    for x in 0..=size[0] {
+                        corner[x + SIDE * (y + SIDE * z)] =
+                            f(base + DVec3::new(x as f64, y as f64, z as f64)) as f32;
+                    }
+                }
+            }
+            for z in 0..size[2] {
+                for y in 0..size[1] {
+                    for x in 0..size[0] {
+                        let c: [f32; 8] = std::array::from_fn(|k| {
+                            corner[x
+                                + (k & 1)
+                                + SIDE * (y + (k >> 1 & 1) + SIDE * (z + (k >> 2)))]
+                        });
+                        if c.iter().all(|&v| v > CELL_REACH) {
+                            continue;
                         }
+                        if c.iter().all(|&v| v < -CELL_REACH) {
+                            shape[here(x, y, z)] = CUBE;
+                            solid += per_cell;
+                            continue;
+                        }
+                        let cell = base + DVec3::new(x as f64, y as f64, z as f64);
+                        let (bits, _) = cell_bits(f, cell);
+                        let corners = (0..8).fold(0u8, |m, k| m | ((c[k] <= 0.0) as u8) << k);
+                        // least disagreement, then the shape whose corners
+                        // best match the solid's; see `least_unshared`
+                        // for what happens to exact ties
+                        let mut scores = [(0u32, 0u32); 30];
+                        for (score, (mask, pattern)) in scores.iter_mut().zip(patterns) {
+                            *score =
+                                ((bits ^ pattern).count_ones(), (corners ^ mask).count_ones());
+                        }
+                        let (mask, pattern) =
+                            patterns[least_unshared(&scores[..patterns.len()], 2)];
+                        shape[here(x, y, z)] = mask;
+                        sampled.push((index(x, y, z), bits));
+                        solid += bits.count_ones() as u64;
+                        error += (bits ^ pattern).count_ones() as u64;
                     }
                 }
             }
         }
+        (shape, sampled, solid, error)
+    });
+    let mut shape = vec![0u8; n[0] * n[1] * n[2]];
+    let mut sampled = Vec::new();
+    let (mut solid, mut error) = (0u64, 0u64);
+    for (r, (slab, found, inside, wrong)) in rows.into_iter().enumerate() {
+        let (by, bz, deep, _) = place(r);
+        for (k, line) in slab.chunks_exact(n[0]).enumerate() {
+            let at = n[0] * (by + k % deep + n[1] * (bz + k / deep));
+            shape[at..at + n[0]].copy_from_slice(line);
+        }
+        sampled.extend(found);
+        solid += inside;
+        error += wrong;
     }
     // blocks are visited in order but each holds a range of cells
     sampled.sort_unstable_by_key(|s| s.0);
     (shape, sampled, solid, error)
 }
+
+/// How many cells are worth a thread of their own when each is given its
+/// brick (see `par::Threads::map_ranges`). A cell of a thin hollow sphere
+/// takes about 200 nanoseconds on average, most of them settled a block at
+/// a time and the few at the surface asked about 64 times, so half a
+/// millisecond is 2,500 of them. Three times that, since a solid form has
+/// less of its box at its surface than a thin shell and costs less a cell.
+const CELLS_A_THREAD: usize = 8_000;
 
 /// Remove tetrahedra that stand on the form like spikes, and return the
 /// change in disagreement, in samples.

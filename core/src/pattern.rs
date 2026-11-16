@@ -36,6 +36,7 @@
 //! seed, so one seed is always one path of stones, on every machine.
 
 use crate::fit_planar::{fit_planar, Fit, Opts};
+use crate::par::Threads;
 use crate::shapes::CellBrick;
 use glam::DVec2;
 use std::collections::HashMap;
@@ -239,8 +240,17 @@ fn in_piece(mask: u8, u: f64, v: f64) -> bool {
 /// meet: the gap runs between them. Only where what they fill would meet
 /// (each fit may stray half a cell from its stone, and the gap may be
 /// nothing) is the later stone fitted again a little smaller.
+///
+/// The stones are fitted on `opts.threads`, and laid on one. A stone's
+/// first fit is of the stone as it is and depends on no other stone, and
+/// those fits are nearly all the time a path of stones takes. Whether a
+/// stone meets one already laid, and its fitting again if it does, depends
+/// on every stone before it, so that is done afterwards, stone by stone in
+/// their order, exactly as when the first fits were made there too. Fitting
+/// each stone at all three of its sizes ahead of time would leave nothing
+/// but the checking to the one thread, for three times the work.
 #[allow(clippy::too_many_arguments)]
-pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
+pub fn lay_stones(region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Stones, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
     use crate::fit_planar::Piece;
     let (ua, va) = match axis {
         0 => (1, 2),
@@ -268,25 +278,36 @@ pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize,
             })
         })
     };
-    // (each stone has a number, for its bricks to be coloured alike by: see `colour_of`)
-    for (nth, mut stone) in stones(region, min, max, settings).into_iter().enumerate() {
+    let stones = stones(region, min, max, settings);
+    // the cells a stone is fitted over, if any of them are in the box
+    let room = |stone: &Stone| {
         // No place is further from the nearest stone's point than the
         // points are kept apart, or a dart would have landed there: so a
         // stone reaches no further than that from its own.
         let reach = size * 0.9 + 1.0;
         let (lo, hi) = (stone.at - DVec2::splat(reach), stone.at + DVec2::splat(reach));
         let (from, to) = ([(lo.x.floor() as i32).max(min[0]), (lo.y.floor() as i32).max(min[1])], [(hi.x.ceil() as i32).min(max[0]), (hi.y.ceil() as i32).min(max[1])]);
-        if to[0] <= from[0] || to[1] <= from[1] {
-            continue;
-        }
-        // as it is; then, if it would meet a stone already laid, drawn in by half a cell, and by a whole one
-        let mut fit = fit_planar(&|x, y| stone.eval(DVec2::new(x, y), region), from, to, opts);
+        (to[0] > from[0] && to[1] > from[1]).then_some((from, to))
+    };
+    // Each stone is fitted on one thread: it is the stones that are shared
+    // out, not the samples of each, which are too few to be worth it.
+    let alone = Opts { threads: Threads::ONE, ..*opts };
+    // Every stone as it is. A stone 10 cells across takes 1.0 to 1.4
+    // milliseconds to fit, and the time goes by its area, so one stone is
+    // worth a thread of its own from 6 cells across, and four of the
+    // smallest are (see `par::Threads::map_ranges`).
+    let stones_a_thread = (36.0 / (size * size)).ceil().max(1.0) as usize;
+    let first = opts.threads.map(stones.len(), stones_a_thread, |n| room(&stones[n]).map(|(from, to)| fit_planar(&|x, y| stones[n].eval(DVec2::new(x, y), region), from, to, &alone)));
+    // (each stone has a number, for its bricks to be coloured alike by: see `colour_of`)
+    for (nth, (mut stone, first)) in stones.into_iter().zip(first).enumerate() {
+        let (Some(mut fit), Some((from, to))) = (first, room(&stone)) else { continue };
+        // then, if it would meet a stone already laid, drawn in by half a cell, and by a whole one
         for _ in 0..2 {
             if !fit.pieces.iter().any(|piece| meets(piece, &laid, &over)) {
                 break;
             }
             stone.half_gap += 0.5;
-            fit = fit_planar(&|x, y| stone.eval(DVec2::new(x, y), region), from, to, opts);
+            fit = fit_planar(&|x, y| stone.eval(DVec2::new(x, y), region), from, to, &alone);
         }
         whole.solid += fit.solid;
         whole.error += fit.error;
@@ -428,7 +449,7 @@ pub enum Drawn {
 /// So an edge between two colours that runs along the grid or on its
 /// diagonals is drawn exactly, and one at any other angle as the nearest
 /// run of whole and cut tiles.
-fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
+fn tile_at(colour: &impl Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
     // the quarters towards the tile's top, right, bottom and left sides
     let [top, right, bottom, left] = [(0.5, 1.0 / 6.0), (5.0 / 6.0, 0.5), (0.5, 5.0 / 6.0), (1.0 / 6.0, 0.5)].map(|(dx, dy)| colour(x + dx, y + dy));
     if top == left && bottom == right && top != bottom {
@@ -730,7 +751,7 @@ fn planks([across, down]: [usize; 2], seed: u64, size: i32) -> Vec<Tile> {
 /// which are two or three; so a rug 250 tiles square is drawn in about
 /// thirty thousandths of a second. Asking every scroll at every place
 /// would be hundreds of them.
-fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> f64) -> Box<dyn Fn(f64, f64) -> u8> {
+fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> f64) -> Box<dyn Fn(f64, f64) -> u8 + Send + Sync> {
     use std::f64::consts::{PI, TAU};
     // the features (see The features above)
     const LINE: u8 = 1;
@@ -1191,13 +1212,18 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
 /// `unbroken` says which tiles are whole tiles of the floor. The pattern
 /// is set out about the middle of the rectangle of tiles that takes them
 /// all in.
-fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &Mosaic) -> Vec<Tile> {
+///
+/// The tiles are drawn on `threads`: a tile's colours are asked of the
+/// pattern at its own place and depend on no other tile. (Not the boards
+/// of `planks`, which are laid end to end along a row, each from where the
+/// last stopped, and take a third of a millisecond for a whole floor.)
+fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &Mosaic, threads: Threads) -> Vec<Tile> {
     let seed = settings.seed;
     match kind {
         Drawn::Planks => return planks([across, down], seed, settings.size),
         Drawn::Masonry => {
             let wall = Masonry::new(settings);
-            return (0..across * down).map(|k| tile_at(&|x, y| wall.colour(DVec2::new(x, y)), (k % across) as f64, (k / across) as f64)).collect();
+            return threads.map(across * down, MASONRY_TILES_A_THREAD, |k| tile_at(&|x, y| wall.colour(DVec2::new(x, y)), (k % across) as f64, (k / across) as f64));
         }
         _ => {}
     }
@@ -1221,7 +1247,7 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
     // A measure: how far a folded place is from a figure. Boxed, since the
     // figures of one pattern are of several kinds in one list, and there
     // are a few dozen at most.
-    type Measure = Box<dyn Fn(f64, f64) -> f64>;
+    type Measure = Box<dyn Fn(f64, f64) -> f64 + Send + Sync>;
     const NONE: f64 = f64::INFINITY;
     // A figure about a middle: within `across` of it one way and `along`
     // the other, and within `both` of it by the two added together. Left
@@ -1298,14 +1324,32 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
             0
         }
     };
-    for j in j0..j0 + 2 * half_deep as usize {
-        for i in i0..i0 + 2 * half_wide as usize {
-            let (x, y) = (i as f64 - middle.0, j as f64 - middle.1);
-            tiles[j * across + i] = tile_at(&colour, x, y);
-        }
+    // (the rectangle of whole tiles, row by row; the tiles round it stay plain)
+    let (wide, deep) = (2 * half_wide as usize, 2 * half_deep as usize);
+    let figured = threads.map(wide * deep, FIGURED_TILES_A_THREAD, |k| tile_at(&colour, (i0 + k % wide) as f64 - middle.0, (j0 + k / wide) as f64 - middle.1));
+    for (k, tile) in figured.into_iter().enumerate() {
+        tiles[(j0 + k / wide) * across + i0 + k % wide] = tile;
     }
     tiles
 }
+
+/// How many tiles of a pattern are worth a thread of their own to draw
+/// (see `par::Threads::map_ranges`): a tile of masonry takes about 4
+/// microseconds, since each of the four or five places it is asked at looks
+/// through fifteen pieces twice; a tile of a rug or of medallions about
+/// 0.4, the distance to a few dozen figures.
+const MASONRY_TILES_A_THREAD: usize = 128;
+const FIGURED_TILES_A_THREAD: usize = 1_280;
+
+/// How many cells of masonry are worth a thread of their own when their
+/// bevelled tops are shaped: about 2.5 microseconds a cell, its piece asked
+/// at the cell's eight corners.
+const BEVELLED_CELLS_A_THREAD: usize = 200;
+
+/// How many places a region is asked about are worth a thread of their
+/// own: the figure `fit_planar` has for lattice points, the same question
+/// asked as far from the region's edge.
+const PLACES_A_THREAD: usize = 4_000;
 
 /// Fit a mosaic over a region and push it through cells `w0..w0 + depth`
 /// across `axis`, onto `bricks`, with each brick's colour (0 to 7) onto
@@ -1337,7 +1381,7 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
 /// `border` of the edge. A floor mosaic has a border, and it keeps the
 /// pattern clear of the part of the floor the edge has cut up.
 #[allow(clippy::too_many_arguments)]
-pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
+pub fn lay_mosaic(region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
     let (ua, va) = match axis {
         0 => (1, 2),
         1 => (0, 2),
@@ -1377,7 +1421,7 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
     let tile_of = |x: i32, y: i32| ((y - from[1]).div_euclid(tall) - first[1]) as usize * across + ((x - from[0]).div_euclid(wide) - first[0]) as usize;
     let middle = |k: usize| DVec2::new(from[0] as f64 + ((first[0] + (k % across) as i32) as f64 + 0.5) * wide as f64, from[1] as f64 + ((first[1] + (k / across) as i32) as f64 + 0.5) * tall as f64);
     // how deep inside the region a tile's middle is, in tiles (by its shorter side): under nothing, it is outside
-    let inside: Vec<f64> = (0..across * down).map(|k| -region(middle(k)) / wide.min(tall) as f64).collect();
+    let inside: Vec<f64> = opts.threads.map(across * down, PLACES_A_THREAD, |k| -region(middle(k)) / wide.min(tall) as f64);
     let cells = |piece: &crate::fit_planar::Piece| {
         let (x, y, w, h) = (piece.x, piece.y, piece.w, piece.h);
         (0..w * h).map(move |k| (x + k % w, y + k / w))
@@ -1435,7 +1479,7 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
     let bevel = if wall.is_some() { settings.bevel.clamp(0, 8).min(depth - 1) } else { 0 };
     let low = depth - bevel;
     let plain_colour = 0;
-    let mut tiles = drawn(style.drawn, [across, down], &unbroken, settings);
+    let mut tiles = drawn(style.drawn, [across, down], &unbroken, settings, opts.threads);
     // (the pattern as it was drawn, for the sloped bricks of the edge to be coloured by)
     let pattern = tiles.clone();
     for k in (0..across * down).filter(|k| plain[*k]) {
@@ -1529,17 +1573,26 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
                     tops.push((CellBrick { mask: 0xff, min, ext }, colour));
                 }
             };
-            for &(y, x, colour) in whole.iter().filter(|cell| cell.2 != 0) {
+            // The corners each cell reaches are found on `opts.threads`,
+            // a cell's being its own affair; joining whole cells into runs
+            // along a row goes by the cell before, and is done after, in order.
+            let shaped: Vec<u8> = opts.threads.map(whole.len(), BEVELLED_CELLS_A_THREAD, |k| {
+                let (y, x, colour) = whole[k];
+                if colour == 0 {
+                    return 0;
+                }
                 let piece = wall.piece(place(x as f64 + 0.5, y as f64 + 0.5));
                 let reaches = |dx: f64, dy: f64, up: f64| wall.inside(piece, place(x as f64 + dx, y as f64 + dy)) >= layer as f64 + up - 1e-6;
                 // (a corner is bit `across | deep << 1 | up << 2`, here across the wall, down it, and out of it)
                 let corners = (0..8u8).fold(0u8, |mask, c| mask | (reaches((c & 1) as f64, (c >> 1 & 1) as f64, (c >> 2) as f64) as u8) << c);
-                let corners = match corners {
+                match corners {
                     0xff | 0 => corners,
                     shaped if crate::shapes::shape_info((0..8u8).fold(0u8, |m, c| m | (shaped >> ((c >> ua & 1) | (c >> va & 1) << 1 | (c >> axis & 1) << 2) & 1) << c)).is_some() => shaped,
                     _ if reaches(0.5, 0.5, 0.5) => 0xff,
                     _ => 0,
-                };
+                }
+            });
+            for (&(y, x, colour), corners) in whole.iter().zip(shaped).filter(|(cell, _)| cell.2 != 0) {
                 if corners == 0xff && run.is_some_and(|(x0, y0, long, shade)| y0 == y && x0 + long == x && shade == colour && long < opts.max_ext.max(1)) {
                     run.as_mut().unwrap().2 += 1;
                     continue;
@@ -1790,7 +1843,7 @@ mod tests {
         // A rug 128 by 80: its main border is 8 tiles between guards of
         // 4, and both its sides are a whole number of swings of 8.
         let (across, down) = (128, 80);
-        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 });
+        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 }, Threads::ONE);
         let tile = |i: usize, j: usize| tiles[j * across + i];
         // Round a corner the frame is its own mirror image in the
         // corner's diagonal, which swaps a tile's top right and bottom
@@ -1813,7 +1866,7 @@ mod tests {
         assert_eq!(tile(63, 7)[1..], [ON_CUT, ON_CUT, 3], "the top side's middle");
         assert_eq!(tile(7, 39)[1..], [ON_CUT, ON_CUT, 3], "the left side's middle");
         // a side that is not a multiple of the border's breadth closes too
-        let tiles = drawn(Drawn::Rug, [120, 80], &vec![true; 120 * 80], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 });
+        let tiles = drawn(Drawn::Rug, [120, 80], &vec![true; 120 * 80], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 }, Threads::ONE);
         assert_eq!(tiles[7 * 120 + 59][1..], [ON_CUT, ON_CUT, 3], "the top side's middle, 120 across");
     }
 
@@ -1823,7 +1876,7 @@ mod tests {
         for across in (4..=70).step_by(3) {
             for down in (4..=70).step_by(5) {
                 for seed in [2, 9] {
-                    let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: 0 });
+                    let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: 0 }, Threads::ONE);
                     assert!(tiles.iter().flatten().all(|colour| *colour < 8 || *colour == ON_CUT), "{across} by {down}, seed {seed}");
                 }
             }
@@ -1835,7 +1888,7 @@ mod tests {
         // A mirror image swaps a tile's corners: left with right, or top with bottom.
         for (across, down) in [(120, 80), (90, 132), (250, 160)] {
             for seed in 0..12 {
-                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: 0 });
+                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: 0 }, Threads::ONE);
                 for j in 0..down {
                     for i in 0..across {
                         let [a, b, c, d] = tiles[j * across + i];
@@ -1861,7 +1914,7 @@ mod tests {
             let took = (0..5)
                 .map(|_| {
                     let started = std::time::Instant::now();
-                    let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 });
+                    let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: 0 }, Threads::ONE);
                     assert_eq!(tiles.len(), across * down);
                     started.elapsed().as_millis()
                 })
@@ -1919,7 +1972,7 @@ mod tests {
     fn masonry_is_bricks_all_alike_or_stones_as_uneven_as_asked() {
         let (across, down) = (90, 40);
         let wall = |seed: u64, size: i32, mortar: bool, stagger: i32, upright: bool, uneven: i32| Mosaic { style: 0, size, bevel: 0, border: 0, seed, mortar, stagger, upright, uneven };
-        let laid = |across: usize, settings: Mosaic| -> Vec<Tile> { drawn(Drawn::Masonry, [across, down], &vec![true; across * down], &settings) };
+        let laid = |across: usize, settings: Mosaic| -> Vec<Tile> { drawn(Drawn::Masonry, [across, down], &vec![true; across * down], &settings, Threads::ONE) };
         // bricks: no tile is cut; a course is three tiles of brick and one of mortar; a brick is eight tiles and one of mortar
         let bricks = laid(across, wall(4, 2, true, -1, false, 0));
         assert!(bricks.iter().all(|tile| *tile == [tile[0]; 4] && tile[0] < 8));
