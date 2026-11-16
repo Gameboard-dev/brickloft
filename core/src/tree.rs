@@ -1893,16 +1893,71 @@ pub struct Lay {
     pub run: Vec<DVec3>,
     /// whether the line comes back to where it began
     pub closed: bool,
-    /// grass: places its ground is raised, and by how much (see [`grass`])
-    pub mounds: Vec<(DVec3, f64)>,
-    /// how far from each such place the ground goes with it
-    pub reach: f64,
+    /// grass: what has been done to its ground, in order (see [`Sculpt`])
+    pub mounds: Vec<Sculpt>,
+}
+
+/// One touch of a brush on the ground under grass: where, how wide, and
+/// what it does. The ground is the floor with every touch applied to it
+/// in turn (see [`ground`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sculpt {
+    /// where on the ground, from the plant's foot
+    pub at: DVec3,
+    /// how far out from there it reaches
+    pub range: f64,
+    /// Pushing: how far the ground is raised at its middle, or lowered if
+    /// negative. Flattening: the height the ground is brought to.
+    pub amount: f64,
+    /// bring the ground to a level, where otherwise it is pushed up or down
+    pub flatten: bool,
+}
+
+/// The least a brush reaches: under this a push is a spike.
+pub const LEAST_RANGE: f64 = 4.0;
+
+/// How high the ground under grass is at `p`, over the floor it lies on.
+///
+/// The touches are applied in the order they were made, as strokes of a
+/// brush are, so a later one works on the ground the earlier ones left.
+///
+/// A push adds a smooth hill (or takes a hollow out of ground that has
+/// been raised): `amount * (1 + cos(pi * d / range)) / 2` at the distance
+/// `d` from its middle, nothing beyond its range. That is level at the
+/// middle and level again at the edge, so hills run into one another and
+/// into the flat with no crease.
+/// https://en.wikipedia.org/wiki/Raised_cosine_distribution
+///
+/// Flattening moves the ground towards one height: all the way within
+/// half its range, and by less from there out to the edge, on the same
+/// curve. A terrace cut into a hillside then has a level top and a bank
+/// that runs smoothly back into the hill.
+///
+/// The ground never goes below the floor: grass is a skin, and under the
+/// floor there is nothing for it to lie on.
+pub fn ground(touches: &[Sculpt], p: DVec3) -> f64 {
+    let mut height: f64 = 0.0;
+    for touch in touches {
+        let range = touch.range.max(LEAST_RANGE);
+        let d = touch.at.truncate().distance(p.truncate());
+        if d >= range {
+            continue;
+        }
+        if touch.flatten {
+            let share = if d < range * 0.5 { 1.0 } else { 0.5 * (1.0 + (PI * (d - range * 0.5) / (range * 0.5)).cos()) };
+            height += (touch.amount - height) * share;
+        } else {
+            height += touch.amount * 0.5 * (1.0 + (PI * d / range).cos());
+        }
+        height = height.max(0.0);
+    }
+    height
 }
 
 impl Lay {
     /// Straight along x, `long` to each side of the foot.
     pub fn straight(long: f64) -> Lay {
-        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, mounds: Vec::new(), reach: 8.0 }
+        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, mounds: Vec::new() }
     }
 }
 
@@ -2014,13 +2069,10 @@ impl Grown {
 /// the mind only: over a floor of another colour the floor shows between
 /// every tuft, and a raised patch would be blades standing in the air.
 ///
-/// The ground is raised by the points added to it. A point lifted by `h`
-/// lifts the ground round it by
-/// `h * (1 + cos(pi * d / reach)) / 2` at the distance `d`, out to the
-/// reach, the same bell the points added to other forms pull by (see
-/// `sdf::Field::Warp`). The reach is the form's, or `1.5 h + 8` if that
-/// is more. It is never lowered below the floor the patch
-/// stands on: a dip is made in ground that has first been raised.
+/// The ground is shaped as terrain is in a game that has a tool for it:
+/// by touches of a brush, each with a range and an amount, that push the
+/// ground up, push it down or flatten it (see [`ground`]). The soil and
+/// the blades follow the ground, and the blades stay upright on it.
 ///
 /// The blades are in tufts, on a grid shaken so that no rows show, two to
 /// four to a tuft, each of its own height and lean and of one of three
@@ -2030,18 +2082,7 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
     let (thick, lean) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let run = Run::new(lay);
     let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
-    // A mound is at least as wide as it is high, half as far again and
-    // a little more, whatever reach is asked: its sides are then no
-    // steeper than grass grows on. With the reach a form starts at, 8, a
-    // point lifted 18 was a spike with its soil torn open up the sides.
-    let reach = |by: f64| lay.reach.max(1.5 * by.abs() + 8.0);
-    let lifted = |p: DVec3| {
-        let all: f64 = lay.mounds.iter().map(|(at, by)| {
-            let (d, reach) = (at.truncate().distance(p.truncate()), reach(*by));
-            if d < reach { by * 0.5 * (1.0 + (PI * d / reach).cos()) } else { 0.0 }
-        }).sum();
-        all.max(0.0)
-    };
+    let lifted = |p: DVec3| ground(&lay.mounds, p);
     let (lo, hi) = run.points.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p - spread), hi.max(*p + spread)));
     g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.0, 1.0], None, 0);
     // the soil: a skin of flat balls, close enough to run together
@@ -3137,7 +3178,7 @@ mod tests {
         assert!(west(&ring) == 40 && west(&open) < 10, "{} of 40 closed, {} open", west(&ring), west(&open));
 
         // reeds stand along a line the same way
-        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, mounds: vec![], reach: 8.0 });
+        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, mounds: vec![] });
         let feet: Vec<DVec3> = bank.limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0]).collect();
         assert!(feet.iter().any(|f| f.y > 40.0 && f.x > 50.0) && feet.iter().any(|f| f.x < 20.0 && f.y.abs() < 9.0) && !feet.iter().any(|f| f.x < 40.0 && f.y > 20.0), "the reeds do not follow the bank");
     }
@@ -3172,7 +3213,7 @@ mod tests {
         assert!(blades(100) > blades(0) * 3 / 2);
 
         // a point added and lifted raises the ground round it, by about as much, and leaves the far end alone
-        let mound = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::Z * 12.0)], pull_reach: 16.0, ..strip.clone() }).unwrap();
+        let mound = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::new(16.0, 0.0, 12.0))], ..strip.clone() }).unwrap();
         let (at_it, far) = (top_at(&mound, 10.5, 2.5).unwrap(), top_at(&mound, -25.5, 2.5).unwrap());
         assert!(at_it as f64 > 12.0 && at_it as f64 <= 12.0 + height + 3.0 && far as f64 <= height + 3.0, "{at_it} high at the mound, {far} far from it");
         // a surface: under the mound there is nothing
@@ -3180,8 +3221,33 @@ mod tests {
         // the soil is its skin still: soil bricks up at the mound's height
         assert!(bricks_of(&mound, &[TRUNK]).iter().any(|b| b.z > 9.0));
         // pushed down, the ground stays on the floor it stands on
-        let dip = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), -DVec3::Z * 12.0)], pull_reach: 16.0, ..strip.clone() }).unwrap();
+        let dip = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::new(16.0, 0.0, -12.0))], ..strip.clone() }).unwrap();
         assert_eq!(dip.bricks.iter().map(|b| b.min[2]).min(), Some(0));
+
+        // The ground as a brush shapes it. A wide push is a hill, not a
+        // spike: half way out it is half as high, and at its edge it is gone.
+        let hill = Sculpt { at: DVec3::ZERO, range: 30.0, amount: 10.0, flatten: false };
+        let at = |touches: &[Sculpt], x: f64| ground(touches, DVec3::new(x, 0.0, 0.0));
+        assert!((at(&[hill], 0.0) - 10.0).abs() < 1e-9 && (at(&[hill], 15.0) - 5.0).abs() < 1e-9 && at(&[hill], 30.0) == 0.0 && at(&[hill], 29.0) < 0.1);
+        // level at its top and at its edge: no crease where it meets the flat
+        assert!(at(&[hill], 0.0) - at(&[hill], 1.0) < 0.05 && at(&[hill], 29.0) - at(&[hill], 30.0) < 0.05);
+        // two pushes add, and a push down takes a hollow out of raised ground and no more
+        let beside = Sculpt { at: DVec3::new(20.0, 0.0, 0.0), ..hill };
+        assert!(at(&[hill, beside], 10.0) > at(&[hill], 10.0) + 4.0);
+        let hollow = Sculpt { at: DVec3::ZERO, range: 10.0, amount: -4.0, flatten: false };
+        assert!((at(&[hill, hollow], 0.0) - 6.0).abs() < 1e-9 && at(&[hollow], 0.0) == 0.0);
+        // flattening brings the ground to its level within half its range, and leaves it alone beyond it
+        let terrace = Sculpt { at: DVec3::new(12.0, 0.0, 0.0), range: 12.0, amount: 3.0, flatten: true };
+        for x in [7.0, 12.0, 17.0] {
+            assert!((at(&[hill, terrace], x) - 3.0).abs() < 1e-9, "{} at {x}", at(&[hill, terrace], x));
+        }
+        assert_eq!(at(&[hill, terrace], -5.0), at(&[hill], -5.0));
+        // strokes are in order: a hill pushed up after the flattening stands on the terrace
+        assert!(at(&[terrace, hill], 12.0) > 3.0);
+        // and built: a flattened top is level, where the hill it was cut from was not
+        let top = |pulls: Vec<(DVec3, DVec3)>| { let built = build(&Spec { pulls, ..strip.clone() }).unwrap(); bricks_of(&built, &[TRUNK]).iter().filter(|b| (b.x - 0.5).abs() < 6.0 && b.y.abs() < 6.0).map(|b| b.z).fold((f64::MAX, f64::MIN), |(lo, hi), z| (lo.min(z), hi.max(z))) };
+        let (raised, levelled) = (top(vec![(DVec3::new(8.5, 0.5, 0.5), DVec3::new(24.0, 0.0, 12.0))]), top(vec![(DVec3::new(8.5, 0.5, 0.5), DVec3::new(24.0, 0.0, 12.0)), (DVec3::new(0.5, 0.5, 0.5), DVec3::new(20.0, 16.0, 6.0))]));
+        assert!(raised.1 - raised.0 > 2.5 && levelled.1 - levelled.0 <= 2.0 && (levelled.0 - 6.0).abs() < 2.5, "raised {raised:?}, flattened {levelled:?}");
 
         // a closed line is an outline, filled; open, it is a strip along the line
         let corners = [(-40.0, -40.0), (40.0, -40.0), (40.0, 40.0), (-40.0, 40.0)];

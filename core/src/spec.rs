@@ -2891,7 +2891,10 @@ fn fit_layer(
 /// With two points or more the line is the smooth curve through them, as
 /// a spline's is, closed if the form is, and for a hedge or reeds bent
 /// further by any points added to it, as any curve is. Grass's added
-/// points raise its ground and leave its line alone.
+/// points are the touches of a brush on its ground (see
+/// [`crate::tree::Sculpt`]) and leave its line alone: each is where it
+/// touched, and in place of how far it was pulled, its range, whether it
+/// flattens (anything but 0), and its amount.
 ///
 /// With one point it is straight along x, the form's thickness stretched:
 /// what a hedge was before it had a line, which a saved one still is. The
@@ -2920,9 +2923,21 @@ fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), 
         let flat: Vec<(DVec3, DVec3)> = spec.pulls.iter().map(|(at, by)| (level(*at), DVec3::new(by.x, by.y, 0.0))).collect();
         path = pulled(&path, closed, &flat, spec.pull_reach);
     }
-    let mounds = if grass { spec.pulls.iter().map(|(at, by)| (*at - foot, by.z)).collect() } else { Vec::new() };
-    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, mounds, reach: spec.pull_reach };
+    let mounds = if grass { grass_touches(spec, foot) } else { Vec::new() };
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, mounds };
     Ok((lay, path))
+}
+
+/// The touches on a patch of grass's ground, as its added points have them.
+fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
+    spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y != 0.0, amount: by.z }).collect()
+}
+
+/// How high the ground of a patch of grass is at a place, over the floor
+/// it lies on: for whoever flattens it to the height it has somewhere.
+pub fn grass_ground(spec: &Spec, at: DVec3) -> f64 {
+    let Some(foot) = spec.points.first().copied() else { return 0.0 };
+    crate::tree::ground(&grass_touches(spec, foot), at - foot)
 }
 
 fn check_size(sides: &[i64]) -> Result<(), String> {

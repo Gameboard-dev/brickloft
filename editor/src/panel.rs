@@ -554,7 +554,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
             }
         }
-        if !s.pulls.is_empty() {
+        // (grass's added points are touches of a brush, each with a range of its own: see `tree`)
+        let brushed = state.form == TREE && s.tree.kind == brickloft_core::tree::Kind::Grass;
+        if !s.pulls.is_empty() && brushed {
+            if ui.button(format!("Undo the last touch ({})", s.pulls.len())).clicked() {
+                s.pulls.pop();
+                state.touched = None;
+            }
+            if ui.button("Smooth it all away").clicked() {
+                s.pulls.clear();
+                state.touched = None;
+            }
+        }
+        if !s.pulls.is_empty() && !brushed {
             helped(ui, help("reach_of_added_points"), |ui| ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")));
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
@@ -813,9 +825,17 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
+    if kind == Kind::Grass {
+        brush(ui, &mut state.brush, &mut state.touched, s, largest);
+        // (see `brz::walked_through`)
+        let mut passable = !s.tree.extras;
+        if helped(ui, help("grass_passable"), |ui| ui.checkbox(&mut passable, "Blades can be walked through in the game")).changed() {
+            s.tree.extras = !passable;
+        }
+    }
     if Tree::lies_along(kind) {
         // (its length is its line's: there is no slider for it, which once tied it to the thickness)
-        ui.label(if kind == Kind::Grass { "Drag its dots to lay it out. Alt + click on it adds a point to raise or lower the ground." } else { "Drag its dots to lengthen or bend it. Alt + click on it adds a point to bend it further." });
+        ui.label(if kind == Kind::Grass { "Drag its yellow dots to lay it out." } else { "Drag its dots to lengthen or bend it. Alt + click on it adds a point to bend it further." });
         if s.points.len() > 2 {
             helped(ui, help("closed_loop"), |ui| ui.checkbox(&mut s.closed, if kind == Kind::Grass { "Closed outline, filled" } else { "Closed loop" }));
         }
@@ -868,6 +888,71 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         }
         hint(ui, help("tree_seed"));
     });
+}
+
+/// The brush grass's ground is shaped with, and the touch last made with it.
+///
+/// A touch is a point added to the form, so it is undone, saved and
+/// copied as any added point is. A brush dragged over the ground, as in
+/// a game with terrain, was the other way to do it, and was not taken:
+/// the ground it leaves would have to be kept as a grid of heights in
+/// the form, where everything a form keeps now is a few numbers a person
+/// can read and change, and a stroke would be hundreds of them. Touches
+/// with a wide range do what strokes do, one at a time.
+fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
+    use crate::state::{Action, FLATTENS};
+    use brickloft_core::DVec3;
+    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
+    let named = |action: Action| match action {
+        Action::Up => "Push up",
+        Action::Down => "Push down",
+        Action::Flatten => "Flatten",
+    };
+    // the touch being changed, if there is one: the sliders show it, and change it and the brush together
+    let touch = touched.filter(|i| *i < s.pulls.len());
+    if let Some(i) = touch {
+        let by = s.pulls[i].1;
+        (brush.range, brush.action) = (if by.x > 0.0 { by.x } else { brush.range }, if by.y != 0.0 { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up });
+        if by.y == 0.0 {
+            brush.amount = by.z.abs();
+        }
+    }
+    let was = *brush;
+    helped(ui, help("grass_action"), |ui| {
+        ComboBox::from_label("Brush").selected_text(named(brush.action)).show_ui(ui, |ui| {
+            for action in [Action::Up, Action::Down, Action::Flatten] {
+                ui.selectable_value(&mut brush.action, action, named(action));
+            }
+        })
+        .response
+    });
+    helped(ui, help("grass_range"), |ui| ui.add(Slider::new(&mut brush.range, brickloft_core::tree::LEAST_RANGE..=largest.min(200.0)).logarithmic(true).step_by(1.0).text("Range")));
+    let mut level = touch.map_or(0.0, |i| s.pulls[i].1.z);
+    if brush.action == Action::Flatten && touch.is_some() {
+        helped(ui, help("grass_level"), |ui| ui.add(Slider::new(&mut level, 0.0..=largest.min(100.0)).step_by(0.5).text("Level")));
+    } else if brush.action != Action::Flatten {
+        helped(ui, help("grass_intensity"), |ui| ui.add(Slider::new(&mut brush.amount, 0.5..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Intensity")));
+    }
+    if let Some(i) = touch {
+        let was_level = s.pulls[i].1.z;
+        if *brush != was || level != was_level {
+            // (made a flattening touch, it flattens to the height it had pushed to)
+            s.pulls[i].1 = match brush.action {
+                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
+                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
+                Action::Flatten => DVec3::new(brush.range, FLATTENS, level.max(0.0)),
+            };
+        }
+        ui.horizontal(|ui| {
+            ui.label(format!("Changing touch {} of {}.", i + 1, s.pulls.len()));
+            if ui.button("Next").clicked() {
+                *touched = Some((i + 1) % s.pulls.len());
+            }
+            if ui.button("New touches only").clicked() {
+                *touched = None;
+            }
+        });
+    }
 }
 
 fn colours(ui: &mut Ui, state: &mut State) {

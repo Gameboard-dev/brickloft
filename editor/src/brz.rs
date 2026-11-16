@@ -12,7 +12,7 @@ use crate::state::{Painted, Placed};
 use crate::store::{describe, forms_in};
 use brickloft_core::orient::{Models, Solver};
 use brickloft_core::shapes::Kind;
-use brdb::{BString, Brick, BrickSize, BrickType, Color, Direction, Rotation, World};
+use brdb::{BString, Brick, BrickSize, BrickType, Collision, Color, Direction, Rotation, World};
 
 /// The game's brick asset for each shape.
 const fn asset(kind: Kind) -> &'static str {
@@ -51,14 +51,14 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
         let (cell, colour, form, place) = brick;
         match forms.get(*form).filter(|f| crate::state::on_own_grid(&f.0)) {
             Some(form) => own.entry(form.0.on_grid).or_default().push(brick),
-            None => world.bricks.push(brick_for(&solver, cell, *colour, *place)?),
+            None => world.bricks.push(brick_for(&solver, cell, *colour, *place, forms.get(*form).is_some_and(|f| walked_through(&f.0, cell)))?),
         }
     }
     if !own.is_empty() {
         world.register_all_components();
     }
     for bricks in own.into_values() {
-        let on_grid: Vec<Brick> = bricks.iter().map(|(cell, colour, _, place)| brick_for(&solver, cell, *colour, *place)).collect::<Result<_, _>>()?;
+        let on_grid: Vec<Brick> = bricks.iter().map(|(cell, colour, form, place)| brick_for(&solver, cell, *colour, *place, forms.get(*form).is_some_and(|f| walked_through(&f.0, cell)))).collect::<Result<_, _>>()?;
         let spec = &forms[bricks[0].2].0;
         let [x, y, z, w] = spec.grid.map(|v| v as f32);
         // where the grid is, in units, of which there are two to a cell
@@ -71,7 +71,38 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
 }
 
 /// One of the editor's bricks as the file has it.
-fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3]) -> Result<Brick, String> {
+/// Whether a brick of a form is one a player should walk through: a blade
+/// of grass, unless the form says its blades are solid.
+///
+/// A brick in the game's file has a flag for each thing it may stop: the
+/// player, weapons, interaction and physics (`brdb::Collision`, which
+/// writes them as the file's `CollisionFlags_Player`, `_Weapon`,
+/// `_Interaction` and `_Physics`). A lawn of blades a few microbricks
+/// high that stopped the player would be a lawn to trip over.
+///
+/// A blade is told from the soil by where it is and not by its colour,
+/// which a player may change: a brick whose middle is over two cells
+/// above the ground under and beside it (see `brickloft_core::spec::grass_ground`)
+/// is above the soil, which is a skin a cell and a half thick. A brick
+/// lower than that keeps its collision, so the lowest cell of some blades
+/// does; it is the height of the soil and does not stand in the way.
+///
+/// Only grass as it was grown: turned or flipped, its bricks are no
+/// longer where its ground says, and all keep their collision.
+fn walked_through(spec: &brickloft_core::spec::Spec, cell: &brickloft_core::shapes::CellBrick) -> bool {
+    use brickloft_core::{spec::Form, tree::Kind, DVec3};
+    if spec.form != Form::Tree || spec.tree.kind != Kind::Grass || spec.tree.extras || spec.turned != brickloft_core::shapes::UPRIGHT || spec.flip.contains(&true) {
+        return false;
+    }
+    let Some(foot) = spec.points.first() else { return false };
+    let middle = DVec3::new(cell.min[0] as f64 + cell.ext[0] as f64 / 2.0, cell.min[1] as f64 + cell.ext[1] as f64 / 2.0, cell.min[2] as f64 + cell.ext[2] as f64 / 2.0);
+    // (the ground at its highest within the soil's reach of the brick: on a slope the soil of the higher ground beside it reaches over)
+    let spec = spec.snapped();
+    let ground = [DVec3::ZERO, DVec3::X, -DVec3::X, DVec3::Y, -DVec3::Y].iter().map(|way| brickloft_core::spec::grass_ground(&spec, middle + *way * 2.5)).fold(0.0, f64::max);
+    middle.z - foot.z.floor() > ground + 2.0
+}
+
+fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3], walked_through: bool) -> Result<Brick, String> {
     {
         let placed = solver.place(cell).ok_or_else(|| format!("no brick fits the piece at {:?}", cell.min))?;
         // a brick's size in the file is its half-extent in game units, which
@@ -91,6 +122,10 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
             direction,
             rotation,
             color: Color::new(r, g, b),
+            // Walked through: nothing of the player's, no weapon and no
+            // physics object is stopped by it. Interaction is left on,
+            // so that the brick can still be pointed at and selected.
+            collision: if walked_through { Collision { player: false, weapon: false, physics: false, ..Collision::default() } } else { Collision::default() },
             ..Default::default()
         })
     }
@@ -112,10 +147,10 @@ pub fn tilted_trial() -> Result<Vec<u8>, String> {
     world.register_all_components();
     let ring = build(&Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 14.0, thick: 3.0, ..Spec::default() })?;
     for cell in &ring.bricks {
-        world.bricks.push(brick_for(&solver, cell, Some([90, 150, 220]), [0; 3])?);
+        world.bricks.push(brick_for(&solver, cell, Some([90, 150, 220]), [0; 3], false)?);
     }
     let arch = build(&Spec { points: vec![DVec3::new(-7.5, 0.5, 0.5), DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, depth: 3, ..Spec::default() })?;
-    let on_grid: Vec<Brick> = arch.bricks.iter().map(|cell| brick_for(&solver, cell, Some([230, 150, 60]), [0; 3])).collect::<Result<_, _>>()?;
+    let on_grid: Vec<Brick> = arch.bricks.iter().map(|cell| brick_for(&solver, cell, Some([230, 150, 60]), [0; 3], false)).collect::<Result<_, _>>()?;
     // a quarter of a turn is two halves: the turn about x, then the turn about z
     let (half_x, half_z) = (15f32.to_radians(), 10f32.to_radians());
     let (about_x, about_z) = ([half_x.sin(), 0.0, 0.0, half_x.cos()], [0.0, 0.0, half_z.sin(), half_z.cos()]);
@@ -243,6 +278,44 @@ mod tests {
         assert!(archive.brick_chunk_index(1).is_ok(), "the world's grid is missing");
         assert!(grids > 0);
         assert!(archive.entity_chunk_index().unwrap().len() >= 1, "no second grid");
+    }
+
+    /// Read back out of the file itself, chunk by chunk: what the game is given.
+    #[test]
+    fn blades_of_grass_are_written_to_be_walked_through_and_the_soil_is_not() {
+        use brickloft_core::spec::{build, Form};
+        use brickloft_core::tree::{Kind, Tree, LEAF, LEAF_DARK, LEAF_LIGHT, TRUNK};
+        use brickloft_core::DVec3;
+        let grass = Spec { form: Form::Tree, points: vec![DVec3::new(-15.5, 0.5, 0.5), DVec3::new(0.5, 0.5, 0.5), DVec3::new(15.5, 0.5, 0.5)], radius: 10.0, rise: Some(8.0), tree: Tree::of(Kind::Grass), pulls: vec![(DVec3::new(4.5, 0.5, 0.5), DVec3::new(14.0, 0.0, 9.0))], ..Spec::default() };
+        let built = build(&grass).unwrap();
+        let written = |spec: &Spec| {
+            let bricks: Vec<Painted> = built.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+            let world = prefab(&bricks, &[(spec.clone(), Paint::default(), [0; 3])]).unwrap();
+            let archive = Brz::read_slice(&world.to_brz_vec().unwrap()).unwrap().into_reader();
+            let data = archive.read_global_data().unwrap();
+            let mut all = Vec::new();
+            for chunk in archive.brick_chunk_index(1).unwrap() {
+                let soa = archive.brick_chunk_soa(1, chunk.index).unwrap();
+                all.extend(soa.iter_bricks(chunk.index, data.clone()).map(|b| b.unwrap()));
+            }
+            assert_eq!(all.len(), built.bricks.len());
+            all
+        };
+        let file = written(&grass);
+        let (soft, solid) = (file.iter().filter(|b| !b.collision.player).count(), file.iter().filter(|b| b.collision.player).count());
+        let (blades, soil) = (built.shades.iter().filter(|s| matches!(**s, LEAF | LEAF_DARK | LEAF_LIGHT)).count(), built.shades.iter().filter(|s| **s == TRUNK).count());
+        // most of the blades' bricks are walked through (the lowest of some are at the soil's height and stay solid), and every brick of soil is solid, on the mound as on the flat
+        assert!(soft > blades * 6 / 10 && soft <= blades && solid >= soil, "{soft} walked through of {blades} of blade; {solid} solid for {soil} of soil");
+        for (cell, shade) in built.bricks.iter().zip(&built.shades).filter(|(_, s)| **s == TRUNK) {
+            assert!(!walked_through(&grass, cell), "soil at {:?} would be walked through", cell.min);
+        }
+        // a brick walked through stops no weapon and no physics object either, and can still be pointed at
+        assert!(file.iter().filter(|b| !b.collision.player).all(|b| !b.collision.weapon && !b.collision.physics && b.collision.interact));
+        assert!(file.iter().filter(|b| b.collision.player).all(|b| b.collision.weapon && b.collision.physics && b.collision.interact));
+        // asked to be solid, turned, or not grass at all: every brick stops the player
+        for other in [Spec { tree: Tree { extras: true, ..grass.tree }, ..grass.clone() }, Spec { turned: 3, ..grass.clone() }, Spec { tree: Tree::of(Kind::Reeds), ..grass.clone() }] {
+            assert!(written(&other).iter().all(|b| b.collision.player));
+        }
     }
 
     #[test]
