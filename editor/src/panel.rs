@@ -435,7 +435,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if choice != before {
                 s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
                 // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
-                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
+                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false });
                 // A pattern is its colours, and each has colours of its
                 // own to start in (a rug's reds and golds, a floor of
                 // planks' browns). They are brought in with the pattern
@@ -471,6 +471,20 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 }
                 if style == "slabs" {
                     helped(ui, help("pattern_bevel"), |ui| ui.add(Slider::new(&mut laid.bevel, 0..=4).text("Bevel")));
+                }
+                if matches!(style, "bricks" | "slabs") {
+                    helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
+                }
+                if style == "bricks" {
+                    // below nothing, every course is moved along by an amount of its own
+                    let mut uneven = laid.stagger < 0;
+                    if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
+                        laid.stagger = if uneven { -1 } else { 50 };
+                    }
+                    if !uneven {
+                        helped(ui, help("pattern_stagger"), |ui| ui.add(Slider::new(&mut laid.stagger, 0..=50).suffix("%").text("Stagger")));
+                    }
+                    helped(ui, help("pattern_upright"), |ui| ui.checkbox(&mut laid.upright, "Courses upright"));
                 }
                 if matches!(style, "medallions" | "rug" | "snowflake") {
                     helped(ui, help("pattern_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
@@ -788,6 +802,8 @@ fn dropped_form(ui: &mut Ui, state: &mut State) {
 mod tests {
     use super::*;
     #[test]
+    // (the windowless way of running egui that this test uses has newer names in egui; the old ones are what the version three_d carries still has in common with them)
+    #[allow(deprecated)]
     fn the_panel_draws_every_pattern_on_every_curve_without_panicking() {
         // the panel drawn with no window, as it is every frame, for each form with each pattern chosen
         let styles = brickloft_core::pattern::STYLES.len();
@@ -798,7 +814,7 @@ mod tests {
                 state.preset();
                 state.refresh(|| 0.0);
                 state.spec.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
+                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false });
                 if choice != 0 {
                     state.paint.mode = Mode::Pattern;
                     state.paint.colours = crate::paint::palette(if choice == 1 { "stepping stones" } else { brickloft_core::pattern::STYLES[choice - 2].name }).to_vec();

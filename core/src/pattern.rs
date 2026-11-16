@@ -325,6 +325,16 @@ pub struct Mosaic {
     pub size: i32,
     /// how many tiles are cut off each corner of a slab
     pub bevel: i32,
+    /// whether bricks and slabs have a tile of mortar between them
+    pub mortar: bool,
+    /// how far each course of bricks is moved along from the one before,
+    /// as so many hundredths of a brick's length: 0 stacks the bricks in
+    /// columns, 50 is the half-brick step of a running bond, and anything
+    /// below 0 moves every course by an amount of its own
+    pub stagger: i32,
+    /// whether the courses of bricks run up the floor and not across it,
+    /// so that the stagger is from side to side
+    pub upright: bool,
     /// how many tiles wide the plain border round the edge is
     pub border: i32,
     /// which filling: any number, each a different mosaic
@@ -437,12 +447,20 @@ fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 /// is the ground, 0, and every brick or stone has one of seven numbers
 /// for whoever paints it to give a shade to (see [`colour_of`]).
 ///
-/// Bricks are all one size, laid in level courses with a tile of mortar
-/// between courses and between bricks. At the usual size, 2, a brick is
-/// eight tiles by three. Each course is moved along by its own amount,
-/// so the upright joints fall anywhere against the course below, as in
-/// a wall laid without a bond in mind.
-/// <https://en.wikipedia.org/wiki/Brickwork>
+/// Bricks are all one size, laid in level courses, with a tile of mortar
+/// between courses and between bricks unless `mortar` is off. At the
+/// usual size, 2, a brick is eight tiles by three. `stagger` says how far
+/// each course is moved along from the one before: half a brick is the
+/// running bond, a third or a quarter a raking bond, nothing a stack
+/// bond, and below nothing each course is moved by an amount of its own,
+/// as in a wall laid with no bond in mind. With `upright` the courses run
+/// the other way, so that the stagger is from side to side.
+/// <https://en.wikipedia.org/wiki/Brickwork#Bonds>
+///
+/// With no mortar, two bricks side by side must still be told apart, and
+/// are by their numbers: along a course the numbers go odd, even, odd, so
+/// that no brick has its neighbour's. (The courses above and below may
+/// share one; a wall of more than a few shades seldom shows it.)
 ///
 /// Slabs are stones squared but not matched: courses of several depths,
 /// and in each course stones of many lengths, larger than bricks. Each
@@ -451,20 +469,28 @@ fn tile_at(colour: &dyn Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 ///
 /// Stones of any shape at all, fitted together, are the stepping stones
 /// with no gap between them (see [`lay_stones`]).
-fn walled(kind: Drawn, [across, down]: [usize; 2], seed: u64, size: i32, bevel: i32) -> Vec<Tile> {
-    let size = size.clamp(1, 16) as f64;
+fn walled(kind: Drawn, [across, down]: [usize; 2], settings: &Mosaic) -> Vec<Tile> {
+    let (seed, bevel) = (settings.seed, settings.bevel);
+    let size = settings.size.clamp(1, 16) as f64;
+    // how many tiles of mortar lie between two bricks or slabs
+    let mortar = if settings.mortar { 1.0 } else { 0.0 };
     if kind == Drawn::Bricks {
         // a number from 0 to 1 that belongs to a pair of whole numbers
         let number = |a: i64, b: i64, which: u64| Numbers(seed ^ (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ which.wrapping_mul(0x1656_67B1_9E37_79F9)).unit();
-        // how many tiles a course is deep and a brick long, each with its tile of mortar
-        let (course, brick) = ((1.5 * size).round() + 1.0, 4.0 * size + 1.0);
+        // how many tiles a course is deep and a brick long, each with its mortar
+        let (course, brick) = ((1.5 * size).round() + mortar, 4.0 * size + mortar);
+        let (stagger, upright) = (settings.stagger.min(100), settings.upright);
         let colour = |x: f64, y: f64| {
+            let (x, y) = if upright { (y, x) } else { (x, y) };
             let row = (y / course).floor();
-            let along = x + (number(row as i64, 0, 5) * brick).floor();
-            if y - row * course >= course - 1.0 || along.rem_euclid(brick) >= brick - 1.0 {
+            let moved = if stagger < 0 { (number(row as i64, 0, 5) * brick).floor() } else { (row * brick * stagger as f64 / 100.0).round() };
+            let along = x + moved;
+            if y - row * course >= course - mortar || along.rem_euclid(brick) >= brick - mortar {
                 0
             } else {
-                1 + (number(row as i64, (along / brick).floor() as i64, 3) * 7.0) as u8 % 7
+                let nth = (along / brick).floor() as i64;
+                // one of 1 to 6: odd for every other brick of the course, even for those between
+                1 + 2 * ((number(row as i64, nth, 3) * 3.0) as u8 % 3) + nth.rem_euclid(2) as u8
             }
         };
         return (0..across * down).map(|k| tile_at(&colour, (k % across) as f64, (k / across) as f64)).collect();
@@ -494,7 +520,7 @@ fn walled(kind: Drawn, [across, down]: [usize; 2], seed: u64, size: i32, bevel: 
     let colour = |x: f64, y: f64| {
         let [x0, y0, long, deep, shade] = slab[(y.floor() as usize).min(down - 1) * across + (x.floor() as usize).min(across - 1)];
         // where in the stone the place is, the stone being its box less the mortar along two sides
-        let (a, b, long, deep) = (x - x0 as f64, y - y0 as f64, (long - 1) as f64, (deep - 1) as f64);
+        let (a, b, long, deep) = (x - x0 as f64, y - y0 as f64, long as f64 - mortar, deep as f64 - mortar);
         if a >= long || b >= deep || a.min(long - a) + b.min(deep - b) < bevel {
             0
         } else {
@@ -776,7 +802,7 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
     let seed = settings.seed;
     match kind {
         Drawn::Planks => return planks([across, down], seed, settings.size),
-        Drawn::Bricks | Drawn::Slabs => return walled(kind, [across, down], seed, settings.size, settings.bevel),
+        Drawn::Bricks | Drawn::Slabs => return walled(kind, [across, down], settings),
         _ => {}
     }
     let mut tiles: Vec<Tile> = vec![[0; 4]; across * down];
@@ -1343,7 +1369,7 @@ mod tests {
         let whole_floor = fit_planar(&|x, y| disc(DVec2::new(x, y)), min, max, &Opts { max_ext: EDGE_BRICK, ..Opts::default() });
         for (style, named) in STYLES.iter().enumerate() {
             let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-            let settings = Mosaic { style, size: 2, bevel: 2, border: 1, seed: 7 };
+            let settings = Mosaic { style, size: 2, bevel: 2, border: 1, seed: 7, mortar: true, stagger: -1, upright: false };
             let fit = lay_mosaic(&disc, &settings, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
             let name = named.name;
             assert_eq!(bricks.len(), shades.len(), "{name}");
@@ -1380,7 +1406,7 @@ mod tests {
             let name = named.name;
             let lay = |seed: u64| {
                 let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-                lay_mosaic(&floor, &Mosaic { style, size: 2, bevel: 2, border: 1, seed }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
+                lay_mosaic(&floor, &Mosaic { style, size: 2, bevel: 2, border: 1, seed, mortar: true, stagger: -1, upright: false }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
                 (bricks, shades)
             };
             for seed in [1, 5, 12] {
@@ -1455,35 +1481,54 @@ mod tests {
     #[test]
     fn a_wall_is_bricks_in_courses_or_slabs_with_mortar_between() {
         let (across, down) = (90, 40);
+        let wall = |seed: u64, size: i32, bevel: i32, mortar: bool, stagger: i32, upright: bool| Mosaic { style: 0, size, bevel, border: 0, seed, mortar, stagger, upright };
         // bricks: no tile is cut; a course is three tiles of brick and one of mortar; a brick is eight tiles and one of mortar
-        let bricks = walled(Drawn::Bricks, [across, down], 4, 2, 0);
+        let bricks = walled(Drawn::Bricks, [across, down], &wall(4, 2, 0, true, -1, false));
         assert!(bricks.iter().all(|tile| *tile == [tile[0]; 4] && tile[0] < 8));
         for row in 0..down {
             assert_eq!(bricks[row * across..(row + 1) * across].iter().all(|tile| tile[0] == 0), row % 4 == 3, "row {row}");
         }
-        let joints = |row: usize| (0..across).filter(|at| bricks[row * across + at][0] == 0).collect::<Vec<_>>();
+        let joints = |tiles: &[Tile], row: usize| (0..across).filter(|at| tiles[row * across + at][0] == 0).collect::<Vec<_>>();
         let mut starts = HashSet::new();
         for row in (0..down).step_by(4) {
-            assert!(joints(row).windows(2).all(|pair| pair[1] - pair[0] == 9), "row {row}: joints at {:?}", joints(row));
-            starts.insert(joints(row)[0]);
+            assert!(joints(&bricks, row).windows(2).all(|pair| pair[1] - pair[0] == 9), "row {row}: joints at {:?}", joints(&bricks, row));
+            starts.insert(joints(&bricks, row)[0]);
         }
-        // the courses are moved along by different amounts
+        // every course moved along by its own amount
         assert!(starts.len() >= 4, "every course starts at one of {starts:?}");
-        assert_eq!(bricks.iter().map(|tile| tile[0]).collect::<HashSet<_>>().len(), 8);
         // a larger size is larger bricks
-        assert!(walled(Drawn::Bricks, [across, down], 4, 4, 0)[..across].iter().filter(|tile| tile[0] == 0).count() < joints(0).len());
+        assert!(joints(&walled(Drawn::Bricks, [across, down], &wall(4, 4, 0, true, -1, false)), 0).len() < joints(&bricks, 0).len());
+        // a stagger of nothing stacks the joints; of half a brick, every other course lines up and the ones between do not
+        let stacked = walled(Drawn::Bricks, [across, down], &wall(4, 2, 0, true, 0, false));
+        assert!((0..down).step_by(4).all(|row| joints(&stacked, row) == joints(&stacked, 0)));
+        let bonded = walled(Drawn::Bricks, [across, down], &wall(4, 2, 0, true, 50, false));
+        assert_eq!(joints(&bonded, 0), joints(&bonded, 8));
+        assert!(joints(&bonded, 4).iter().all(|joint| !joints(&bonded, 0).contains(joint)), "the second course's joints fall on the first's");
+        // upright: the same wall turned over its diagonal
+        let turned = walled(Drawn::Bricks, [40, 40], &wall(4, 2, 0, true, 50, true));
+        let level = walled(Drawn::Bricks, [40, 40], &wall(4, 2, 0, true, 50, false));
+        assert!((0..1600).all(|k| turned[k] == level[k % 40 * 40 + k / 40]));
+        // with no mortar there is no ground, and no brick has the number of the brick beside it in its course
+        let bare = walled(Drawn::Bricks, [across, down], &wall(4, 2, 0, false, 50, false));
+        assert!(bare.iter().all(|tile| tile[0] != 0));
+        for row in 0..down {
+            let ends = (1..across).filter(|at| bare[row * across + at] != bare[row * across + at - 1]).collect::<Vec<_>>();
+            assert!(ends.windows(2).all(|pair| pair[1] - pair[0] == 8), "row {row}: bricks end at {ends:?}");
+        }
         // slabs with square corners: no tile cut, mortar between a tenth and a half of the wall, stones of many sizes
-        let slabs = walled(Drawn::Slabs, [across, down], 4, 2, 0);
+        let slabs = walled(Drawn::Slabs, [across, down], &wall(4, 2, 0, true, -1, false));
         assert!(slabs.iter().all(|tile| *tile == [tile[0]; 4] && tile[0] < 8));
         let mortar = slabs.iter().filter(|tile| **tile == [0; 4]).count() as f64 / (across * down) as f64;
         assert!((0.1..0.5).contains(&mortar), "{mortar} of the wall is mortar");
         let lengths: HashSet<usize> = (0..across).scan(0, |run, at| { *run = if slabs[at][0] == 0 { 0 } else { *run + 1 }; Some(*run) }).collect();
         assert!(lengths.len() > 12, "stones of lengths up to {:?}", lengths.iter().max());
         // with their corners cut off: tiles cut in two at every corner
-        let bevelled = walled(Drawn::Slabs, [across, down], 4, 2, 2);
+        let bevelled = walled(Drawn::Slabs, [across, down], &wall(4, 2, 2, true, -1, false));
         assert!(bevelled.iter().filter(|tile| tile.contains(&ON_CUT)).count() > 60);
-        assert_eq!(walled(Drawn::Slabs, [across, down], 4, 2, 2), bevelled);
-        assert_ne!(walled(Drawn::Slabs, [across, down], 5, 2, 2), bevelled);
+        assert_eq!(walled(Drawn::Slabs, [across, down], &wall(4, 2, 2, true, -1, false)), bevelled);
+        assert_ne!(walled(Drawn::Slabs, [across, down], &wall(5, 2, 2, true, -1, false)), bevelled);
+        // and slabs with no mortar and square corners have no ground either
+        assert!(walled(Drawn::Slabs, [across, down], &wall(4, 2, 0, false, -1, false)).iter().all(|tile| tile[0] != 0));
     }
 
     #[test]
@@ -1492,7 +1537,7 @@ mod tests {
         let floor = |p: DVec2| ((p.x - 62.5).abs() - 60.5).max((p.y - 46.5).abs() - 39.5);
         let style = STYLES.iter().position(|s| s.name == "rug").unwrap();
         let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-        lay_mosaic(&floor, &Mosaic { style, size: 4, bevel: 3, border: 0, seed: 2 }, 2, [2, 7], [123, 86], 0, 1, &Opts::default(), &mut bricks, &mut shades);
+        lay_mosaic(&floor, &Mosaic { style, size: 4, bevel: 3, border: 0, seed: 2, mortar: true, stagger: -1, upright: false }, 2, [2, 7], [123, 86], 0, 1, &Opts::default(), &mut bricks, &mut shades);
         // the coloured bricks reach as near one side of the floor as the other
         let coloured = || bricks.iter().zip(&shades).filter(|(_, shade)| **shade != 0).map(|(brick, _)| brick);
         for (axis, (low, high)) in [(2, 123), (7, 86)].into_iter().enumerate() {
