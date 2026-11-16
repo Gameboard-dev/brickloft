@@ -6,8 +6,8 @@ use crate::shapes::{shape_info, transform_mask, CellBrick, Kind, KINDS, ORIENT};
 /// How the game's asset for each kind sits at orientation 16 (Z+, unrotated):
 /// which corners of its box it fills. Indexed by `Kind as usize`.
 ///
-/// The defaults have been confirmed in the game; `/arc calibrate` shows them
-/// again if an update or a change of assets puts them in doubt.
+/// The defaults are how the game makes each brick, and have been confirmed
+/// in it by pasting forms from the clipboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Models {
     pub local_mask: [u8; 9],

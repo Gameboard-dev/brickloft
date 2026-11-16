@@ -1,5 +1,5 @@
 //! The workspace as a Brickadia prefab file (.brz), and that file on the
-//! clipboard, to try a build in the game without the plugin.
+//! clipboard, for the game to paste: the editor's one route into the game.
 //!
 //! Desktop only. A web page may put text and images on the clipboard and
 //! nothing else, so there is no way for the browser editor to offer a file.
@@ -15,8 +15,7 @@ use arcs_core::orient::{Models, Solver};
 use arcs_core::shapes::Kind;
 use brdb::{BString, Brick, BrickSize, BrickType, Color, Direction, Rotation, World};
 
-/// The game's brick asset for each shape: the plugin's defaults (`doc.json`).
-/// The plugin can be configured otherwise; a file made here cannot ask it.
+/// The game's brick asset for each shape.
 const fn asset(kind: Kind) -> &'static str {
     match kind {
         Kind::Cube => "PB_DefaultMicroBrick",
@@ -217,7 +216,7 @@ fn place_on_clipboard(path: &std::path::Path) -> Result<(), String> {
 
 /// The forms in a .brz file's bytes, to add to the workspace.
 ///
-/// A file holding any brick that is not one of the four microbricks is
+/// A file holding any brick that is not one of the microbricks is
 /// refused, naming them: the editor has no such bricks to show. One that
 /// holds only microbricks but was not copied from this editor is refused
 /// too, since it carries no forms.

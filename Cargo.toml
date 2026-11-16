@@ -12,7 +12,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 
-# Compile-time settings. Our own crates build unoptimised with thin debug info
+# Compile-time settings. The editor builds unoptimised with thin debug info
 # for fast rebuilds; dependencies are optimised once and then cached, which
 # also keeps the editor usable in a dev build.
 [profile.dev]

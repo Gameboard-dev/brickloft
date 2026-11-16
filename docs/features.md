@@ -1,7 +1,7 @@
 # Features
 
 Everything the editor does, and how to do it. For how the bricks are chosen,
-see [how-it-fits.md](how-it-fits.md).
+see [algorithm.md](algorithm.md).
 
 Sizes are in **microbricks** throughout. One microbrick is a fifth of a stud
 and two of the game's positional units, so half steps are single units.
@@ -60,9 +60,10 @@ becomes a disc, and a round-tube ring a disc with a rounded rim.
   It is the same bricks facing another way, so a pyramid can lie on its side.
 - **Neighbouring dots follow** sets how much of a dragged dot's movement the
   dots near it share, from 0 (it moves alone) to 1.
-- **Snap to best fit nearby** tries each dot and size half a microbrick and
-  a whole one either way and keeps whatever fits closest, with a progress
-  bar in the top right. **Do that after every drag** does it automatically.
+- **Snap to best fit nearby** tries each dot a whole microbrick either way
+  (and half a microbrick too when **Snap dots to half microbricks** is on),
+  and each size half a microbrick and a whole one either way, and keeps
+  whatever fits closest, with a progress bar in the top right. **Do that after every drag** does it automatically.
 - **Reset this form** puts its dots, sizes, stretch, flips and mirrors back
   to how the form starts.
 

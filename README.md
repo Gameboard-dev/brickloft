@@ -13,6 +13,14 @@ result on the clipboard for the game to paste.
 It is a desktop program written in Rust. Nothing is installed in the game or
 on a server.
 
+## How does it work?
+
+> There isn't one algorithm, there's a small family of them, because a sphere and an arch need different algorithms. Bricks sit on a grid, and every brick shape is just a box with some of its corners "filled in". The program asks "which corners of this box are inside the shape I'm trying to build?" If all eight are, it's a cube. If one is missing, it's a cube with a corner sliced off. If only four are in, it's a wedge. Neighbouring bricks share corners, so if the corners are right, the bricks meet edge to edge. The clever part is choosing where to cut the grid so those corners land on the true shape. For a sphere, it slices each direction at carefully chosen distances so that every corner on the surface sits exactly on the sphere. For an arch, it traces the outline and picks the fewest corner points that still hug the curve, preferring one long slope over a staircase of short steps to minimize brick count. For a tube (or pipe), it fits the wide outline first and then cuts the edges down layer by layer. When none of those tricks apply, it falls back to going through the grid cell by cell and picking whichever brick matches best. That looks rougher, because no cell knows what its neighbours are doing. At the end it measures the result against the true shape, which is the volumetric discrepancy, and this is reported.
+>
+> Picking those corner points is done with dynamic programming. It works along the outline one point at a time, recording for each point only the cheapest way of having reached it, so every new answer is built from the answers it already has. So it finds the best outline exactly without trying every combination.
+
+The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
+
 ## What it makes
 
 | Form | Shaped by |
@@ -77,7 +85,7 @@ and every key.
 | | |
 |---|---|
 | [docs/features.md](docs/features.md) | What the editor does and how to use it |
-| [docs/how-it-fits.md](docs/how-it-fits.md) | The principles and the algorithms, with the equations |
+| [docs/algorithm.md](docs/algorithm.md) | The principles and the algorithms, with the equations |
 | [docs/performance.md](docs/performance.md) | What makes it fast, with measurements |
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |

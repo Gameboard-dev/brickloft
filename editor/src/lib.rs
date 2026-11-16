@@ -1,9 +1,9 @@
 //! The arcs editor: a view of a form and its bricks, handles to reshape it,
-//! and a button that sends the bricks to the game.
+//! and a copy of the bricks to the clipboard for the game to paste.
 //!
 //! All geometry comes from `arcs-core`; this crate draws it and edits the
-//! spec. It builds for the browser (the page the plugin serves) and, for
-//! development, as a desktop window.
+//! spec. It builds as a desktop program and, as an optional extra, as a
+//! page for a browser (see docs/web-page.md).
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod brz;
@@ -108,8 +108,9 @@ pub fn run_form(form: usize) {
     let mut sun = DirectionalLight::new(&context, 2.6, Srgba::new_opaque(255, 247, 235), vec3(-0.45, 0.6, -1.0));
     let fill_light = DirectionalLight::new(&context, 0.55, Srgba::new_opaque(200, 215, 255), vec3(0.7, -0.5, -0.35));
 
-    // One instanced mesh per brick shape: the whole build is drawn in at most
-    // 29 draw calls however many bricks it has. A mesh per brick would be a
+    // One instanced mesh per pose of each brick shape (125 in all): the
+    // whole build is drawn in at most that many draw calls, one for each
+    // pose in use, however many bricks it has. A mesh per brick would be a
     // draw call per brick, which is what limits WebGL long before triangles do.
     let masks = all_masks();
     let mut brick_meshes: Vec<Gm<InstancedMesh, material::BrickMaterial>> = masks
