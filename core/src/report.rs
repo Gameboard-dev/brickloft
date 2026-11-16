@@ -914,7 +914,7 @@ mod tests {
                 radius: 12.5,
                 max_ext: 40,
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
-                mosaic: Some(crate::pattern::Mosaic { style: 2, tile: 3, tall: 2, border: 2, seed: 41 }),
+                mosaic: Some(crate::pattern::Mosaic { style: 1, tile: 3, tall: 2, border: 2, seed: 41 }),
             },
         ];
         for spec in specs {

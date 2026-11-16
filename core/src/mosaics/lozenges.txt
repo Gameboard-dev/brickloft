@@ -1,8 +1,0 @@
-# Lozenges on plain ground: four triangles point to point, with a smaller
-# one of a third colour here and there. Stretch the tiles for long ones.
-0 0   0   0 0 0
-0 0/1 1\0 0 0 0
-0 0\1 1/0 0 0 0
-0 0   0   0 0/2 2\0
-0 0   0   0 0\2 2/0
-0 0   0   0 0   0

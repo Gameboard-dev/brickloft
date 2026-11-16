@@ -445,16 +445,18 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 if mosaic {
                     s.stones = None;
                 }
-                // (started as medallions, the style that shows most of what a mosaic can be on a floor of any outline)
-                let style = brickloft_core::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap_or(0);
-                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style, tile: 2, tall: 2, border: 1, seed: 1 });
+                // A tile is one microbrick. It could once be set larger, and
+                // wider than deep, and that did nothing a player wanted:
+                // it drew the same pattern coarser, or stretched.
+                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style: 0, tile: 1, tall: 1, border: 1, seed: 1 });
                 // a mosaic is its colours: started in a mosaic's unless the pattern's colouring is already chosen
                 if mosaic && state.paint.mode != Mode::Pattern {
-                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::MOSAIC.to_vec());
+                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(brickloft_core::pattern::STYLES[0].name).to_vec());
                 }
             }
             if let Some(laid) = &mut s.mosaic {
                 let styles = &brickloft_core::pattern::STYLES;
+                let style_before = laid.style.min(styles.len() - 1);
                 helped(ui, help("mosaic_style"), |ui| {
                     ComboBox::from_label("Style").selected_text(styles[laid.style.min(styles.len() - 1)].name).show_ui(ui, |ui| {
                         for (i, style) in styles.iter().enumerate() {
@@ -463,14 +465,23 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     })
                     .response
                 });
-                helped(ui, help("mosaic_tile"), |ui| ui.add(Slider::new(&mut laid.tile, 1..=16).text("Tile width")));
-                helped(ui, help("mosaic_tall"), |ui| ui.add(Slider::new(&mut laid.tall, 1..=16).text("Tile depth")));
+                // A style has colours of its own to start in (a rug's reds
+                // and golds, a floor of planks' browns). They follow the
+                // style while they are still as the last style set them,
+                // and are left alone once the player has changed any.
+                let now = styles[laid.style.min(styles.len() - 1)].name;
+                if laid.style != style_before && crate::paint::palettes(styles[style_before].name).iter().any(|set| state.paint.colours == *set) {
+                    state.paint.colours = crate::paint::palette(now).to_vec();
+                }
                 helped(ui, help("mosaic_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
                     ui.label("Seed");
                     if ui.button("Another").clicked() {
                         laid.seed = laid.seed.wrapping_add(1);
+                        // another pattern, in the next of the style's sets of colours
+                        let sets = crate::paint::palettes(now);
+                        state.paint.colours = sets[laid.seed as usize % sets.len()].to_vec();
                     }
                     hint(ui, help("mosaic_seed"));
                 });
@@ -677,11 +688,30 @@ fn colours(ui: &mut Ui, state: &mut State) {
             .response
     });
     {
-        // one colour for a solid; up to four to blend, stripe or speckle between
-        let most = if paint.mode == Mode::Solid { 1 } else { 4 };
-        ui.horizontal(|ui| {
+        // one colour for a solid; up to four to blend, stripe or speckle between; one for each feature of a pattern
+        let most = match paint.mode {
+            Mode::Solid => 1,
+            Mode::Pattern => crate::paint::MOST_COLOURS,
+            _ => 4,
+        };
+        // A colour is made the same as another by copying one and pasting
+        // it on the other, from the menu a right click on either opens.
+        // The copied colour is kept in the panel's own memory and not on
+        // the system clipboard, which holds the last prefab copied.
+        let copied = egui::Id::new("copied colour");
+        ui.horizontal_wrapped(|ui| {
             for colour in paint.colours.iter_mut().take(most) {
-                ui.color_edit_button_srgb(colour);
+                ui.color_edit_button_srgb(colour).context_menu(|ui| {
+                    if ui.button("Copy colour").clicked() {
+                        ui.data_mut(|data| data.insert_temp(copied, *colour));
+                        ui.close();
+                    }
+                    let held: Option<[u8; 3]> = ui.data(|data| data.get_temp(copied));
+                    if ui.add_enabled(held.is_some(), egui::Button::new("Paste colour")).clicked() {
+                        *colour = held.unwrap_or(*colour);
+                        ui.close();
+                    }
+                });
             }
             if most > 1 && paint.colours.len() < most && ui.small_button("+").on_hover_text(help("colour_more")).clicked() {
                 paint.colours.push([230, 230, 230]);
