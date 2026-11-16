@@ -437,6 +437,18 @@ const FOLLOW_REACH: f64 = 3.0;
 /// Most points that may be added to one curve.
 pub const PULLS: usize = 12;
 
+/// The most touches of a brush a patch of grass's ground may have. Far
+/// more than the points another form may be pulled by, because a touch
+/// costs only a little arithmetic for each tuft of grass, where a pull
+/// bends a whole curve or wraps a solid; and a stroke of the brush is
+/// tens of touches.
+pub const TOUCHES: usize = 240;
+
+/// The most added points a form may have (see [`PULLS`] and [`TOUCHES`]).
+pub fn most_pulls(spec: &Spec) -> usize {
+    if spec.form == Form::Tree && spec.tree.kind == brickloft_core::tree::Kind::Grass { TOUCHES } else { PULLS }
+}
+
 /// How many changes can be undone. Each is a few hundred bytes.
 const HISTORY: usize = 200;
 
@@ -1253,6 +1265,8 @@ impl State {
         let (height, spread) = Tree::usual_size(kind);
         self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
         (self.spec.radius, self.spec.rise) = (spread, Some(height));
+        // (reeds round a pond in grass: a few, until asked for more)
+        self.spec.depth = 3;
         // (from one kind that lies along a line to another, the line is kept)
         self.spec.stretch = DVec3::ONE;
         self.lay_tree();
@@ -1874,6 +1888,28 @@ impl State {
         // it is and how far it reaches stay as they are.
         if let (Handle::Pull(i), true) = (handle, self.is_grass()) {
             let Some(&(from, by)) = self.spec.pulls.get(i) else { return };
+            // With Ctrl held it is a stroke: the brush is dragged over
+            // the ground, and wherever the cursor has gone 0.4 of the
+            // brush's range from the last touch, the same touch is made
+            // again there. A flattening stroke keeps the level it began
+            // at, as such a tool does. The cursor's place is taken on
+            // the level the last touch left its own middle at.
+            if self.lift {
+                let Some(&(last, same)) = self.spec.pulls.last() else { return };
+                let level = last.z.floor() + brickloft_core::spec::grass_ground(&self.spec.snapped(), last) + self.standing().z;
+                if dir.z.abs() < 1e-6 || self.spec.pulls.len() >= TOUCHES {
+                    return;
+                }
+                let along = (level - origin.z) / dir.z;
+                let hit = origin + dir * along - self.standing();
+                let here = DVec3::new(hit.x.round().clamp(-HANDLE_LIMIT, HANDLE_LIMIT), hit.y.round().clamp(-HANDLE_LIMIT, HANDLE_LIMIT), last.z);
+                let apart = same.x.max(brickloft_core::tree::LEAST_RANGE) * 0.4;
+                if along > 0.0 && along < 2000.0 && here.truncate().distance(last.truncate()) >= apart {
+                    self.spec.pulls.push((here, same));
+                    self.touched = Some(self.spec.pulls.len() - 1);
+                }
+                return;
+            }
             let Some(up) = along_line(from + self.standing(), DVec3::Z, origin, dir) else { return };
             let floor = from.z.floor() - from.z;
             let amount = snap(up).clamp(-HANDLE_LIMIT, HANDLE_LIMIT);
@@ -2030,7 +2066,7 @@ impl State {
     /// a curve through many points, but then it would be a circle no longer:
     /// its radius could not be changed, nor the bump taken off again.
     pub fn add_pull(&mut self, at: DVec3) -> Option<Handle> {
-        if !self.can_pull() || self.spec.pulls.len() >= PULLS {
+        if !self.can_pull() || self.spec.pulls.len() >= most_pulls(&self.full_spec()) {
             return None;
         }
         // (where it was clicked, as it is in the form's own grid)
@@ -2613,6 +2649,22 @@ mod tests {
         state.add_pull(DVec3::new(1.5, 3.5, 2.0) + state.standing()).unwrap();
         assert!(flank > 2.0 && state.spec.pulls[2].1.y != 0.0 && (state.spec.pulls[2].1.z - flank).abs() <= 0.25, "{:?}, flank {flank}", state.spec.pulls[2]);
         assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        // a stroke: with Ctrl held, the cursor moved 30 cells along the ground leaves a row of the same touch, 0.4 of its range apart
+        state.brush = Brush { range: 10.0, amount: 3.0, action: Action::Up };
+        let begun = state.add_pull(DVec3::new(-20.5, -5.5, 2.0) + state.standing()).unwrap();
+        let had = state.spec.pulls.len();
+        state.lift = true;
+        for step in 1..=60 {
+            let over = DVec3::new(-20.5 + step as f64, -5.5, 0.5) + state.standing();
+            state.drag(begun, over + DVec3::Z * 200.0, -DVec3::Z, -DVec3::Z);
+        }
+        state.lift = false;
+        let stroke = &state.spec.pulls[had - 1..];
+        assert!(stroke.len() >= 13 && stroke.len() <= 17, "{} touches in a stroke of 60", stroke.len());
+        assert!(stroke.iter().all(|t| t.1 == DVec3::new(10.0, 0.0, 3.0)) && stroke.windows(2).all(|w| (w[1].0.x - w[0].0.x - 4.0).abs() <= 1.0 && w[1].0.y == w[0].0.y), "{stroke:?}");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        // and a patch takes far more touches than a form takes added points, up to its own most
+        assert!(state.spec.pulls.len() > PULLS && most_pulls(&state.full_spec()) == TOUCHES);
         // the line's dots moved, the touches stay as they are
         let before = state.spec.pulls.clone();
         let end = state.handles()[2].1;

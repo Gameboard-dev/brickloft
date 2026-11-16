@@ -46,7 +46,7 @@ until you tick it.
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
-| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip or petunias; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch or a willow; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 
 ### The cube
 
@@ -59,7 +59,7 @@ in the middle moves the whole cube. **Size along X / Y / Z** in the panel
 sets each length about the middle instead.
 
 Made short along one axis, a cube is a rectangular floor or wall.
-A **Pattern** (see [Patterns](#patterns)) is laid through the cube's
+A texture from the **Texture** list (see [Patterns](#patterns)) is laid through the cube's
 shortest length, so it shows on the largest face: the top of a floor, or
 the face of a wall. When two lengths are equally short, the pattern goes
 through the height before the depth, and through the depth before the
@@ -293,14 +293,15 @@ one form's settings, are still listed and opened.
 
 ## Patterns
 
-**Pattern**, on a cube or on any curve, lays the form as a pattern in
+**Texture**, the tinted box under the settings every form shares, lays a
+cube or any curve as a pattern in
 place of plain brick. The list starts at **none**, and a form has one
 pattern at most. A cube made short one way gives a rectangular floor or
 wall, a filled circle a round one, and a curved band a path. How each
 pattern is made, and why that way, is in [algorithm.md](algorithm.md),
 sections 7.8 and 7.9.
 
-| Pattern | What it lays |
+| Texture | What it lays |
 |---|---|
 | **stepping stones** | separate stones of any shape with gaps between them. With **Gap** at 0 the stones are fitted together, as in a paved floor. |
 | **medallions** | a few ringed figures repeated over the whole floor |
@@ -464,7 +465,13 @@ more settings mean something different for each kind.
 | Peony | **Stems in the clump**, 1 to 9 | **Petals and leaves** | **How open the bloom is**: bud to full blown | none |
 | Petunias | **Flowers**, 3 to 80 | **Leaves** | **How far it trails** | none |
 | Reeds | **Stems**, 1 to 120 | **Leaves** | **Sway** | **Feathery plumes** |
-| Grass | none | **How thick it grows** | **Lean** of the blades | none |
+| Grass | **Water stands this far below it**, 0 to 40 | **How thick it grows** | **Lean** of the blades | none |
+| Birch, Willow, Scots pine | **Main limbs**, 3 to 9 | **Foliage** | **Crookedness** | **Bare** |
+| Date palm | **Fronds**, 8 to 60 | **Leaflet length** | **Lean** | **Dates** |
+| Cypress | none | **Density** | **Looseness** | none |
+| Yucca | **Blades**, 8 to 80 | **Blade width** | **Bend of the blades** | **In flower** |
+| Daisies, Daffodils | **Flowers in the clump**, 1 to 20 | **Leaves** | not used | none |
+| Bed of mixed flowers | **Flowers**, 2 to 40 | **Leaves** | **Unevenness** | none |
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
@@ -473,7 +480,9 @@ clump is as many flowers as you ask for, each its own height.
 
 A hedge, a stand of reeds and a patch of grass lie along a line. They
 start with three yellow dots in a row: drag an end to lengthen it and the
-middle one aside to bend it. Alt + click on a hedge or reeds adds a point
+middle one aside to bend it. **Sharp corners at its dots** runs it
+straight from dot to dot with a corner at each, and reeds inside a closed
+line fill it. Alt + click on a hedge or reeds adds a point
 that bends it further, and **Closed loop** joins a line of three or more
 points into a ring. The thickness is its own setting, with a dot out to
 one side of the line, and changing it leaves the length alone.
@@ -492,7 +501,25 @@ with a brush:
 - The panel's sliders change the touch made or dragged last. **Next**
   steps through the touches, and **New touches only** leaves them alone.
 - Flatten brings the ground to the height it has where you click.
-- A patch takes at most twelve touches. Use a wide range for a hill.
+- Keep the button down after Alt + click and hold Ctrl to paint a stroke:
+  the same touch is made again every 0.4 of its range as you move.
+- A patch takes 240 touches.
+- **Push down** goes below the lawn's own level. A hollow deeper than
+  **Water stands this far below it** is a pond: the grass thins at its
+  bank, then sand, then the pond's bed with a few stones, and water to
+  the level. **Reeds round the water** sets how thickly reeds stand at
+  its margin. Set the water to 0 for a dry hollow. A patch with a pond
+  reaches below the floor it was laid on by the pond's depth, so raise it
+  or set it on ground that deep.
+
+<img src="images/plant-pond.png" width="420" alt="A lawn with a pond dug in it: blue water with a flat top, a rim of sand, and bulrushes standing round the margin">
+
+**Frozen pond** writes the water as ice: collision on, and less
+see-through. Choosing the **Winter** colours ticks it and any other set
+unticks it; grass also has an **Autumn** set. On every other plant,
+**Leaves can be walked through in the game** writes its greenery (leaves,
+needles, fronds, petals, berries, baubles) with collision off and leaves
+its wood solid; it is unticked to begin with.
 
 **Blades can be walked through in the game** writes the blades with their
 collision off, so a player walks through the grass and stands on the

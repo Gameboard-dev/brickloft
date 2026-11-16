@@ -165,7 +165,7 @@ gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
 `tree` names the kind first: `pine`, `palm`, `oak`, `beech`, `boxwood`,
-`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds` or `grass`
+`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds`, `grass`, `birch`, `willow`, `datepalm`, `scotspine`, `cypress`, `yucca`, `daisy`, `daffodil` or `bed`
 (`rose`, a kind that is gone, is read as `peony`). Whatever follows it replaces that kind's usual
 settings in order: the seed, how full (0 to 100), how many (a pine's
 tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, the plants
@@ -180,7 +180,12 @@ them. With one point it is straight along x, `stretch` `[n, 1, 1]` times
 as long as `radius`. On grass, `add_pull_point` is a touch of the brush
 that shapes its ground: `at` is where, and `pulled_by` is `[range, flatten,
 amount]`, with `flatten` 0 for a push (a negative amount pushes down) and
-16 to flatten the ground to the height `amount`. A grass's `extras` of 1
+16 to flatten the ground to the height `amount`. `protrude` true gives a hedge, reeds or grass sharp corners at its
+points. Grass's `count` is how far below it water stands (0 for none): a
+touch with a negative amount digs, and a hollow deeper than that is a
+pond. Its `depth` less 1 is how thickly reeds stand round the water, 0 to
+10. Grass takes 240 touches. `fill` true freezes a grass's pond (ice, with collision), and `tube`
+true on any other plant writes its greenery to be walked through. A grass's `extras` of 1
 makes its blades solid in the game; at 0 they are written to be walked
 through. The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
 `"tree": ["palm", 3]` the third palm. A tree's height is `rise` and its

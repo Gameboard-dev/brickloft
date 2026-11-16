@@ -274,6 +274,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // limit met. The sliders are logarithmic, since a slider that reaches
         // 1000 in even steps cannot be set to 3.
         let largest = state.max_size;
+        texture(ui, state, largest);
         ui.separator();
         workspace(ui, state);
         ui.separator();
@@ -452,103 +453,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && state.form != TREE {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
-        // (a round tube too: a pattern is laid on whatever of a form is flat, see `brickloft_core::spec::pattern_flat_faces`)
-        // (and a cube, which is its largest face pushed through its shortest length)
         if is_curve || state.form == CUBE {
-            // One pattern in place of solid brick, or none: see
-            // `brickloft_core::pattern`. One list and not a tickbox for
-            // each, since a form has one pattern at most. 0 is none, 1
-            // the stepping stones, and 2 onwards the styles of mosaic.
-            let styles = &brickloft_core::pattern::STYLES;
-            let named = |choice: usize| match choice {
-                0 => "none",
-                1 => "stepping stones",
-                _ => styles[(choice - 2).min(styles.len() - 1)].name,
-            };
-            let before = if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
-            let mut choice = before;
-            helped(ui, help("pattern"), |ui| {
-                ComboBox::from_label("Pattern").selected_text(named(choice)).show_ui(ui, |ui| {
-                    for n in 0..styles.len() + 2 {
-                        ui.selectable_value(&mut choice, n, named(n));
-                    }
-                })
-                .response
-            });
-            if choice != before {
-                s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
-                // (cobbles start uneven: all alike, they are a grid of squares)
-                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
-                // A pattern is its colours, and each has colours of its
-                // own to start in (a rug's reds and golds, a floor of
-                // planks' browns). They are brought in with the pattern
-                // unless the player has colours of their own for one:
-                // the pattern's colouring already chosen, in colours
-                // that are none of the last pattern's sets.
-                let own = state.paint.mode == Mode::Pattern && !crate::paint::palettes(named(before)).iter().any(|set| state.paint.colours == *set);
-                if choice != 0 && !own {
-                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(named(choice)).to_vec());
-                }
-            }
-            // another pattern, in the next of its sets of colours
-            let mut another = None;
-            if let Some(laid) = &mut s.stones {
-                helped(ui, help("stone_size"), |ui| ui.add(Slider::new(&mut laid.size, brickloft_core::pattern::LEAST_STONE..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Stone size")));
-                helped(ui, help("stone_gap"), |ui| ui.add(Slider::new(&mut laid.gap, brickloft_core::pattern::LEAST_GAP..=8.0).step_by(0.5).text("Gap")));
-                helped(ui, help("stone_uneven"), |ui| ui.add(Slider::new(&mut laid.uneven, 0.0..=1.0).step_by(0.05).text("Uneven")));
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
-                    ui.label("Seed");
-                    if ui.button("Another").clicked() {
-                        laid.seed = laid.seed.wrapping_add(1);
-                        another = Some(laid.seed);
-                    }
-                    hint(ui, help("pattern_seed"));
-                });
-            }
-            if let Some(laid) = &mut s.mosaic {
-                // (each style shows the settings it has a use for)
-                let style = named(choice);
-                let masonry = matches!(style, "bricks" | "cobblestone");
-                if style == "planks" || masonry {
-                    helped(ui, help("pattern_size"), |ui| ui.add(Slider::new(&mut laid.size, 1..=8).text("Size")));
-                }
-                if masonry {
-                    // how unlike one another the pieces are, each way (see `brickloft_core::pattern::Masonry`)
-                    helped(ui, help("pattern_uneven_along"), |ui| ui.add(Slider::new(&mut laid.uneven[0], 0..=100).suffix("%").text("Uneven along")));
-                    helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
-                    helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
-                }
-                if style == "bricks" {
-                    helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
-                    // below nothing, every course is moved along by an amount of its own
-                    let mut uneven = laid.stagger < 0;
-                    if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
-                        laid.stagger = if uneven { -1 } else { 50 };
-                    }
-                    if !uneven {
-                        helped(ui, help("pattern_stagger"), |ui| ui.add(Slider::new(&mut laid.stagger, 0..=50).suffix("%").text("Stagger")));
-                    }
-                    helped(ui, help("pattern_upright"), |ui| ui.checkbox(&mut laid.upright, "Courses upright"));
-                }
-                if matches!(style, "medallions" | "rug") {
-                    helped(ui, help("pattern_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
-                }
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
-                    ui.label("Seed");
-                    if ui.button("Another").clicked() {
-                        laid.seed = laid.seed.wrapping_add(1);
-                        another = Some(laid.seed);
-                    }
-                    hint(ui, help("pattern_seed"));
-                });
-            }
-            if let Some(seed) = another {
-                let sets = crate::paint::palettes(named(choice));
-                state.paint.colours = sets[seed as usize % sets.len()].to_vec();
-            }
             // (a cube's depth is one of its three lengths)
             if state.form != CUBE {
                 helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
@@ -771,12 +676,135 @@ fn workspace(ui: &mut Ui, state: &mut State) {
     });
 }
 
-/// How the form being edited is coloured.
+/// How the form's faces are laid: one texture in place of plain brick, or
+/// none. The patterns of `brickloft_core::pattern`, under the name a
+/// player looks for them by. (Not Materials, as it was called for a day:
+/// in the game a material is what the paint can gives a brick, plastic or
+/// glass or metal, which this is not.)
+///
+/// It stands under the settings every form shares, in a box of its own
+/// colour. It was a list called Pattern among a form's own sliders, below
+/// its thickness, where it was passed over: what a wall or a floor is made
+/// of is asked before how thick it is, and a list that changes the whole
+/// look of a form was drawn like any slider beside it.
+///
+/// For a curve or a cube, which have a flat face to lay it on (a round
+/// tube too: see `brickloft_core::spec::pattern_flat_faces`; a cube is its
+/// largest face pushed through its shortest length).
+fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
+    if !(state.form <= BEZIER || state.form == CUBE) {
+        return;
+    }
+    // A warm tint laid over whichever theme the panel is in, and the
+    // name in a stronger one of the same: a fixed colour would be right
+    // in the dark theme or the light one and not both.
+    let dark = ui.visuals().dark_mode;
+    let (fill, ink) = if dark { (egui::Color32::from_rgba_unmultiplied(214, 150, 70, 26), egui::Color32::from_rgb(236, 184, 112)) } else { (egui::Color32::from_rgba_unmultiplied(190, 120, 40, 30), egui::Color32::from_rgb(138, 82, 20)) };
+    egui::Frame::group(ui.style()).fill(fill).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let s = &mut state.spec;
+    // One pattern in place of solid brick, or none: see
+    // `brickloft_core::pattern`. One list and not a tickbox for
+    // each, since a form has one pattern at most. 0 is none, 1
+    // the stepping stones, and 2 onwards the styles of mosaic.
+    let styles = &brickloft_core::pattern::STYLES;
+    let named = |choice: usize| match choice {
+        0 => "none",
+        1 => "stepping stones",
+        _ => styles[(choice - 2).min(styles.len() - 1)].name,
+    };
+    let before = if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
+    let mut choice = before;
+    helped(ui, help("pattern"), |ui| {
+        ComboBox::from_label(egui::RichText::new("Texture").strong().color(ink)).selected_text(named(choice)).show_ui(ui, |ui| {
+            for n in 0..styles.len() + 2 {
+                ui.selectable_value(&mut choice, n, named(n));
+            }
+        })
+        .response
+    });
+    if choice != before {
+        s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
+        // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
+        // (cobbles start uneven: all alike, they are a grid of squares)
+        s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
+        // A pattern is its colours, and each has colours of its
+        // own to start in (a rug's reds and golds, a floor of
+        // planks' browns). They are brought in with the pattern
+        // unless the player has colours of their own for one:
+        // the pattern's colouring already chosen, in colours
+        // that are none of the last pattern's sets.
+        let own = state.paint.mode == Mode::Pattern && !crate::paint::palettes(named(before)).iter().any(|set| state.paint.colours == *set);
+        if choice != 0 && !own {
+            (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(named(choice)).to_vec());
+        }
+    }
+    // another pattern, in the next of its sets of colours
+    let mut another = None;
+    if let Some(laid) = &mut s.stones {
+        helped(ui, help("stone_size"), |ui| ui.add(Slider::new(&mut laid.size, brickloft_core::pattern::LEAST_STONE..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Stone size")));
+        helped(ui, help("stone_gap"), |ui| ui.add(Slider::new(&mut laid.gap, brickloft_core::pattern::LEAST_GAP..=8.0).step_by(0.5).text("Gap")));
+        helped(ui, help("stone_uneven"), |ui| ui.add(Slider::new(&mut laid.uneven, 0.0..=1.0).step_by(0.05).text("Uneven")));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
+            ui.label("Seed");
+            if ui.button("Another").clicked() {
+                laid.seed = laid.seed.wrapping_add(1);
+                another = Some(laid.seed);
+            }
+            hint(ui, help("pattern_seed"));
+        });
+    }
+    if let Some(laid) = &mut s.mosaic {
+        // (each style shows the settings it has a use for)
+        let style = named(choice);
+        let masonry = matches!(style, "bricks" | "cobblestone");
+        if style == "planks" || masonry {
+            helped(ui, help("pattern_size"), |ui| ui.add(Slider::new(&mut laid.size, 1..=8).text("Size")));
+        }
+        if masonry {
+            // how unlike one another the pieces are, each way (see `brickloft_core::pattern::Masonry`)
+            helped(ui, help("pattern_uneven_along"), |ui| ui.add(Slider::new(&mut laid.uneven[0], 0..=100).suffix("%").text("Uneven along")));
+            helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
+            helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
+        }
+        if style == "bricks" {
+            helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
+            // below nothing, every course is moved along by an amount of its own
+            let mut uneven = laid.stagger < 0;
+            if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
+                laid.stagger = if uneven { -1 } else { 50 };
+            }
+            if !uneven {
+                helped(ui, help("pattern_stagger"), |ui| ui.add(Slider::new(&mut laid.stagger, 0..=50).suffix("%").text("Stagger")));
+            }
+            helped(ui, help("pattern_upright"), |ui| ui.checkbox(&mut laid.upright, "Courses upright"));
+        }
+        if matches!(style, "medallions" | "rug") {
+            helped(ui, help("pattern_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
+            ui.label("Seed");
+            if ui.button("Another").clicked() {
+                laid.seed = laid.seed.wrapping_add(1);
+                another = Some(laid.seed);
+            }
+            hint(ui, help("pattern_seed"));
+        });
+    }
+    if let Some(seed) = another {
+        let sets = crate::paint::palettes(named(choice));
+        state.paint.colours = sets[seed as usize % sets.len()].to_vec();
+    }
+    });
+}
+
 /// The controls of a tree: its kind, its size, the three settings each
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -804,6 +832,10 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         .response
     });
     if let Some(n) = choice.filter(|_| choice != now) {
+        // (grass's Winter set freezes its pond, and any other thaws it: the setting, not the colours, is what the game is told)
+        if kind == Kind::Grass {
+            state.spec.fill = names[n] == "Winter";
+        }
         (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets[n].to_vec());
         // (the view is drawn again: the colour controls further down look
         // for a change made in them, and this one was made before they
@@ -822,17 +854,30 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Peony => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
         Kind::Grass => "Reach to each side",
+        Kind::DatePalm => "Frond length",
+        Kind::Daisy | Kind::Daffodil => "Half the flower's width",
+        Kind::Bed => "How far the bed reaches",
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
     if kind == Kind::Grass {
+        // (a pond is a hollow pushed down deeper than the water stands: see `brickloft_core::tree::grass`)
+        let mut reeds = (s.depth - 1).clamp(0, 10);
+        if helped(ui, help("grass_reeds"), |ui| ui.add(Slider::new(&mut reeds, 0..=10).text("Reeds round the water"))).changed() {
+            s.depth = reeds + 1;
+        }
         brush(ui, &mut state.brush, &mut state.touched, s, largest);
         // (see `brz::walked_through`)
+        helped(ui, help("grass_frozen"), |ui| ui.checkbox(&mut s.fill, "Frozen pond (ice to stand on)"));
         let mut passable = !s.tree.extras;
         if helped(ui, help("grass_passable"), |ui| ui.checkbox(&mut passable, "Blades can be walked through in the game")).changed() {
             s.tree.extras = !passable;
         }
+    }
+    if kind != Kind::Grass {
+        // (see `brz::stuff_of`)
+        helped(ui, help("leaves_passable"), |ui| ui.checkbox(&mut s.tube, "Leaves can be walked through in the game"));
     }
     if Tree::lies_along(kind) {
         // (its length is its line's: there is no slider for it, which once tied it to the thickness)
@@ -840,6 +885,8 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         if s.points.len() > 2 {
             helped(ui, help("closed_loop"), |ui| ui.checkbox(&mut s.closed, if kind == Kind::Grass { "Closed outline, filled" } else { "Closed loop" }));
         }
+        // (straight from dot to dot, with a corner at each: for a hedge round a square bed)
+        helped(ui, help("sharp_corners"), |ui| ui.checkbox(&mut s.protrude, "Sharp corners at its dots"));
     }
     let (fullness, count, bend) = match kind {
         Kind::Pine => ("Fullness", "Tiers of boughs", "Droop"),
@@ -852,7 +899,15 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Hydrangea => ("Leaves", "Flower heads", "Looseness"),
         Kind::Petunia => ("Leaves", "Flowers", "How far it trails"),
         Kind::Reeds => ("Leaves", "Stems", "Sway"),
-        Kind::Grass => ("How thick it grows", "", "Lean"),
+        Kind::Grass => ("How thick it grows", "Water stands this far below it", "Lean"),
+        Kind::Birch => ("Foliage", "Main limbs", "Crookedness"),
+        Kind::Willow => ("Foliage and curtains", "Main limbs", "Crookedness"),
+        Kind::DatePalm => ("Leaflet length", "Fronds", "Lean"),
+        Kind::ScotsPine => ("Needles", "Main limbs", "Crookedness"),
+        Kind::Cypress => ("Density", "", "Looseness"),
+        Kind::Yucca => ("Blade width", "Blades", "Bend of the blades"),
+        Kind::Daisy | Kind::Daffodil => ("Leaves", "Flowers in the clump", "Unused"),
+        Kind::Bed => ("Leaves", "Flowers", "Unevenness"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
     };
@@ -870,7 +925,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Palm => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
         }
-        Kind::Oak | Kind::Beech => {
+        Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::ScotsPine => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no leaves)"));
         }
         Kind::Boxwood | Kind::Hedge => {
@@ -879,7 +934,13 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Reeds => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
         }
-        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass => {}
+        Kind::DatePalm => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Dates"));
+        }
+        Kind::Yucca => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+        }
+        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass | Kind::Cypress | Kind::Daisy | Kind::Daffodil | Kind::Bed => {}
     }
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
@@ -903,7 +964,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
 fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
     use crate::state::{Action, FLATTENS};
     use brickloft_core::DVec3;
-    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
+    ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
     let named = |action: Action| match action {
         Action::Up => "Push up",
         Action::Down => "Push down",
@@ -956,6 +1017,7 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     }
 }
 
+/// How the form being edited is coloured.
 fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
     let paint = &mut state.paint;
