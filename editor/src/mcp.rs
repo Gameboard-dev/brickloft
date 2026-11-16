@@ -1276,6 +1276,43 @@ mod tests {
         assert!((x.abs() + y.abs()) < 1e-12 && (z - w).abs() < 1e-12);
     }
     #[test]
+    fn a_form_is_joined_to_another_and_its_join_rounded() {
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "cube", "points": [[0, 0, 8]], "radius": 8, "fill": true }, "place": [0, 0, 0] }), || 0.0).unwrap();
+        let ball = json!({ "form": "sphere", "points": [[0, 0, 0]], "radius": 9, "fill": true });
+        // set half in the cube's corner and not joined, it is only two forms in one place
+        let apart = said(apply(&mut state, "add_form", &json!({ "settings": ball, "place": [9, 3, 15] }), || 0.0).unwrap());
+        assert_eq!(apart["forms"][0]["settings"]["blend"], "none");
+        state.refresh(|| 0.0);
+        let own = state.built.bricks.len() + state.others[0].built.bricks.len();
+        assert_eq!(state.painted().len(), own);
+        // joined, the two are one build with no brick's box in another's, and a blend rounds the join
+        let room = |state: &State| state.painted().iter().map(|b| b.0.volume()).sum::<f64>();
+        let shares_room = |state: &State| {
+            let all = state.painted();
+            let unit_box = |b: &crate::state::Painted| ([0, 1, 2].map(|k| 2 * b.0.min[k] + b.3[k]), [0, 1, 2].map(|k| 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k]));
+            all.iter().enumerate().any(|(n, a)| all[n + 1..].iter().any(|b| (0..3).all(|k| unit_box(a).0[k] < unit_box(b).1[k] && unit_box(b).0[k] < unit_box(a).1[k])))
+        };
+        let joined = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "blend": 0 } }), || 0.0).unwrap());
+        assert_eq!(joined["forms"][0]["settings"]["blend"], "0");
+        state.refresh(|| 0.0);
+        assert!(state.joined() && !shares_room(&state));
+        let sharp = room(&state);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "blend": 4 } }), || 0.0).unwrap();
+        state.refresh(|| 0.0);
+        assert!(!shares_room(&state) && room(&state) > sharp + 20.0, "a blend of 4 added {} microbricks", room(&state) - sharp);
+        // a blend past what a join can be fitted with is refused, and changes nothing
+        for blend in [json!(6.5), json!(-1), json!("wide"), json!(1e300)] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "blend": blend } }), || 0.0).is_err(), "{blend} was taken for a blend");
+        }
+        assert_eq!(state.spec.blend, Some(4.0));
+        // and `none` sets the form apart again
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "blend": "none" } }), || 0.0).unwrap();
+        assert!(!state.joined());
+    }
+
+    #[test]
     fn a_cube_is_added_resized_and_moved() {
         let mut state = State::new();
         let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();

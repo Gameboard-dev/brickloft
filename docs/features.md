@@ -147,22 +147,35 @@ Several forms can be worked on together.
 ### Joining forms
 
 The form being edited, dragged with **Ctrl** held, goes where it is
-dragged, into other forms if that is where, so a tower can be sunk into a wall or a dome set
-into a roof. The moved form is then joined to the others on its grid. It
-gives up the room it shares with them, so that no two bricks overlap, which
-the game would refuse. The other forms keep all their bricks.
+dragged, into other forms if that is where, so a tower can be sunk into a
+wall or a dome set into a roof. The moved form is then joined to the others
+on its grid: the forms become one build, with no two bricks overlapping,
+which the game would refuse.
 
-Where the moved form's plain blocks reach into another form they are cut
-back to the cells that are free. A sloped brick that shares any room is
-left out whole, since a slope cannot be cut down to cells, so the join can
-show a notch a cell or two deep where the moved form's sloped surface meets
-the other form.
+Where the two surfaces meet, the bricks are fitted afresh to the two forms
+as one solid, so the seam has no notch in it. Away from the seam each form
+keeps its own bricks. Deep inside, where blocks of one form overlap blocks
+of another, the joined form's are cut back to the cells that are free.
+
+A joined form has a **Blend** slider, from 0 to 6 microbricks.
+
+| Blend | The seam |
+|---|---|
+| 0 | a sharp crease, as if the forms were carved from one piece |
+| above 0 | a rounded fillet that reaches that many microbricks along each form from where they meet |
+
+The join is fitted with single wedges and ramps, so it is rougher than a
+sphere's own facets, and a small blend on a curved seam is a ring of
+single wedges. Three kinds of form are joined by cutting alone, with a
+notch a microbrick or two deep where a sloped brick had to be left out, and
+the blend does nothing to them: a form that stands half a microbrick off
+the other (move either by half a microbrick), a form laid as a pattern, and
+a plant. The panel says so under the slider.
 
 A joined form stays where it is when a form it sits in is reshaped, where
-an unjoined one would be pushed clear. Dragging it again without Ctrl
-sets it clear of the others. Being joined is not remembered by undo or by a
-save. After Ctrl+Z, or when a save is opened again, drag the form with
-Ctrl once more to join it.
+an unjoined one would be pushed clear. Dragging it again without Ctrl sets
+it clear of the others. The join and its blend are part of the form, so
+undo, a save and a copy all keep them.
 
 Ctrl can also be pressed after the drag has begun.
 

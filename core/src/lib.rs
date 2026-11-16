@@ -17,6 +17,7 @@
 //! - [`report`] writes a form and its fit out as text, to be read back or inspected
 //! - [`surface`] measures a build's outside against the form's: steps and slopes
 
+pub mod blend;
 pub mod curves;
 pub mod fit_lathe;
 pub mod fit_planar;

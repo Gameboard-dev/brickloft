@@ -284,6 +284,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if state.form == TREE {
             tree(ui, state, largest);
         }
+        let unblended = state.unblended();
         let s = &mut state.spec;
         let is_curve = state.form <= BEZIER;
         match state.form {
@@ -562,6 +563,15 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             let across = s.plane.min(2);
             if state.form == CIRCLE && s.pulls.iter().any(|(_, by)| by[across] != 0.0) {
                 ui.label("A point pulled out of the circle's plane is built of sloped pieces where it was pulled, and is less smooth there than one pulled within the plane, more so the steeper it climbs. To tilt the whole circle, drag one of its rings.");
+            }
+        }
+        // Only for a form that has been joined: Ctrl + drag is what joins
+        // one, and a slider for a blend with nothing to blend into would be
+        // one more control that does nothing.
+        if let Some(blend) = &mut s.blend {
+            helped(ui, help("blend"), |ui| ui.add(Slider::new(blend, 0.0..=brickloft_core::blend::MAX_BLEND).step_by(0.5).text("Blend")));
+            if let Some(why) = unblended {
+                ui.label(why);
             }
         }
         helped(ui, help("neighbouring_dots_follow"), |ui| ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")));
