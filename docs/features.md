@@ -45,6 +45,29 @@ until you tick it.
 | **Sphere** | a centre, and a radius | Solid or a hollow shell; stretch along each axis for an ellipsoid; keep the whole, a dome, or a segment between two heights. |
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
+| **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
+
+### The cube
+
+A cube is a box of whole bricks, so it is built with no discrepancy and
+from very few bricks: one if it is solid and no longer than the longest
+brick. It starts 17 microbricks each way. Drag the dot on a side to move
+that side in or out by whole microbricks. The opposite side stays where it
+is, so a floor already laid against a wall stays against it. The yellow dot
+in the middle moves the whole cube. **Size along X / Y / Z** in the panel
+sets each length about the middle instead.
+
+Made short along one axis, a cube is a rectangular floor, wall or slab.
+A **Pattern** (see [Patterns](#patterns)) is laid through the cube's
+shortest length, so it shows on the largest face: the top of a floor, or
+the face of a wall. When two lengths are equally short, the pattern goes
+through the height before the depth, and through the depth before the
+width.
+
+Unticking **Solid** makes the cube hollow, with walls as thick as **Wall
+thickness** on all six sides. A hollow cube that is too short to have room
+inside between two walls is open through its shortest length instead. That
+gives a frame, such as the border of a rug or the surround of a window.
 
 ### Curves as bricks
 
@@ -65,8 +88,9 @@ becomes a disc, and a round-tube ring a disc with a rounded rim.
 - **Drag a dot** to move a point or change a size. Dots snap to the grid.
 - **Dots move** (in the panel) chooses the plane a dragged point moves in:
   facing the camera, or with x, y or z held still.
-- **Ctrl + scroll** makes a circle, sphere or pyramid a microbrick larger or
-  smaller.
+- **Ctrl + scroll** makes a circle, sphere, pyramid or cube a microbrick
+  larger or smaller. A cube keeps its proportions as nearly as whole
+  microbricks allow.
 - **Stretch** scales a form along each axis, up to 1000 times.
 - **Flip** mirrors the finished bricks along x, y or z: a dome becomes a bowl.
 - **Quarter turn X / Y / Z** turns the form a quarter turn within its grid.
@@ -151,8 +175,13 @@ is on a numbered grid, shown in the list.
 
 | Button | What it does |
 |---|---|
-| **Add to this grid** | another copy of this form on the same grid: kept clear of the others on it, and turned and moved with them |
-| **New grid** | another copy on a grid of its own |
+| **Add to this grid** | a new cube on the same grid, in the plain colour: kept clear of the others on it, and turned and moved with them |
+| **New grid** | a new cube on a grid of its own |
+| **Duplicate** (or **Ctrl+D**) | a copy of the form being edited on its grid, in the same colours, set down beside it |
+
+A new form always starts as a cube, whatever was being edited. Choose
+another kind from **Form**, or drag the cube's sides to make a floor or a
+wall.
 
 An arch whose two feet differ along both X and Y stands at an angle to its
 grid. It cannot be fitted smoothly there, and the panel says so. **Turn its
@@ -181,6 +210,7 @@ an angle is copied as a grid of its own, frozen in place.
 | **Ctrl + click** another form | marks it `+` to be copied too, or unmarks it |
 | **Ctrl+A** | marks every form |
 | **Ctrl+V** | adds the forms of a copied prefab back to the workspace, as forms that can still be reshaped, on the grid being worked on |
+| **Ctrl+D** | duplicates the form being edited, as **Duplicate** does, without using the clipboard |
 
 The prefab carries each form's bricks, colours, place and grid, and, in its
 description, the settings each form was made from. That is how a paste back
@@ -213,10 +243,10 @@ one form's settings, are still listed and opened.
 
 ## Patterns
 
-**Pattern**, on any curve built as a flat band, lays the band or the filled
-outline as a pattern in place of solid brick. The list starts at **none**,
-and a form has one pattern at most. A straight spline with a large
-**Thickness** gives a rectangular floor or wall, a filled circle a round
+**Pattern**, on a cube or on any curve built as a flat band, lays the cube,
+the band or the filled outline as a pattern in place of solid brick. The
+list starts at **none**, and a form has one pattern at most. A cube made
+short one way gives a rectangular floor or wall, a filled circle a round
 one, and a curved band a path. How each pattern is made, and why that way,
 is in [algorithm.md](algorithm.md), sections 7.8 and 7.9.
 
@@ -394,7 +424,7 @@ passes a megabyte.
 | Click a form | edit it |
 | Drag a form by its bricks | move it within its grid |
 | Ctrl + drag the form being edited | move it into another form and join the two |
-| Drag a dot | reshape the form |
+| Drag a dot | reshape the form; on a cube, move one side |
 | Drag an arrow, a ring | move, turn the whole grid |
 | Shift + click a form | add a point to it |
 | Shift + right-click an added point | take it off |
@@ -402,9 +432,10 @@ passes a megabyte.
 | Ctrl + click another form | mark it to be copied too |
 | Ctrl+A | mark every form |
 | Ctrl+C, Ctrl+V | copy, paste |
+| Ctrl+D | duplicate the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
 | Delete | remove the form being edited |
-| Ctrl + scroll | resize a circle, sphere or pyramid |
+| Ctrl + scroll | resize a circle, sphere, pyramid or cube |
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift + scroll | camera speed |
