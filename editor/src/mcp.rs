@@ -530,7 +530,12 @@ fn changed(spec: &Spec, changes: &Map<String, Value>) -> Result<Spec, String> {
         };
         text += &format!("{key} = {value}\n");
     }
-    let spec = parse_spec(&text)?;
+    let mut spec = parse_spec(&text)?;
+    // A form of a mesh says which mesh by its name in the imports folder, and nothing reaches here that is not a name
+    // of that folder's own shape: the parser refuses the rest (`brickloft_core::mesh::Import::named`). The mesh is found
+    // by that name. A name with no file behind it leaves the form without a mesh, and it is then refused where every
+    // change is refused that cannot be built.
+    crate::import::attach(&mut spec);
     if spec.points.len() > MAX_POINTS || spec.pulls.len() > crate::state::most_pulls(&spec) {
         return Err(format!("a form takes at most {MAX_POINTS} points and {} added points", crate::state::most_pulls(&spec)));
     }
@@ -654,7 +659,7 @@ fn workspace(state: &State) -> Value {
             } else if matches!(program, Some(None)) && cfg!(not(target_arch = "wasm32")) {
                 Some("its program is still being run: ask again in a moment".to_string())
             } else if built.bricks.is_empty() {
-                brickloft_core::spec::build(spec).err()
+                crate::import::built(spec).err()
             } else {
                 None
             };
@@ -791,6 +796,18 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.scene += 1;
             return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap }).to_string());
         }
+        // The rule programs a `program` form may name: those that come
+        // with the editor, and those the player has brought in. Names
+        // and nothing else of the folder: a program is run by its name.
+        "list_programs" => {
+            let bundled: Vec<Value> = brickloft_core::rewrite::form::BUNDLED.iter().map(|entry| json!({ "name": entry.name, "makes": entry.about, "usual_grid": entry.size })).collect();
+            let imported: Vec<Value> = crate::programs::imported().into_iter().map(|name| json!({ "name": format!("imported:{name}"), "usual_grid": crate::programs::usual_size(&name) })).collect();
+            return Ok(json!({ "come_with_the_editor": bundled, "imported": imported }).to_string());
+        }
+        "list_meshes" => {
+            let meshes: Vec<Value> = crate::import::listed().into_iter().map(|(name, bytes)| json!({ "name": name, "bytes": bytes })).collect();
+            return Ok(json!({ "meshes": meshes }).to_string());
+        }
         "measure_between" => {
             let which = |name: &str| -> Result<usize, String> {
                 let index = arguments.get(name).and_then(Value::as_u64).ok_or(format!("{name} is a form's place in the list get_workspace gives"))? as usize;
@@ -858,6 +875,19 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.rise = Some(USUAL_HEIGHT);
                 }
             }
+            let imported = spec.form == brickloft_core::spec::Form::Imported;
+            if imported {
+                if spec.import.name.is_empty() {
+                    return Err("an imported form needs `import`: the name of a mesh in the imports folder, as list_meshes gives it".into());
+                }
+                // (and a mesh given no size is the size the editor opens one at, filled, as the editor has it)
+                if !settings.contains_key("radius") {
+                    spec.radius = crate::state::USUAL_MESH_RADIUS;
+                }
+                if !settings.contains_key("fill") {
+                    spec.fill = true;
+                }
+            }
             let program = spec.form == brickloft_core::spec::Form::Program;
             if program && spec.program.imported && settings.get("program").and_then(Value::as_str).is_some_and(|given| !given.contains(',')) {
                 // (and a program brought in from outside, named and no more, is the size it was brought in at)
@@ -872,8 +902,10 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.weights = weights;
                 }
             }
-            brickloft_core::spec::build(&spec)?;
+            crate::import::built(&spec)?;
             let paint = arguments.get("colour").map(|c| recoloured(&Paint::default(), c)).transpose()?;
+            // (a mesh comes in its own colours)
+            let own_paint = crate::import::paint_of(&spec).filter(|_| imported);
             let place = arguments.get("place").map(placed).transpose()?;
             state.record();
             // set down beside what is there, and edited; then as asked
@@ -882,7 +914,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             // (a maze's colours go by what its walls are)
             let walls = maze.then(|| crate::paint::maze_palettes(crate::paint::maze_texture(&spec))[0].clone());
             state.add_form(spec);
-            if let Some(paint) = paint {
+            if let Some(paint) = paint.or(own_paint) {
                 state.paint = paint;
             } else if let Some(colours) = walls {
                 state.paint = Paint { mode: Mode::Pattern, colours, ..Paint::default() };
@@ -902,12 +934,16 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let was = spec.form;
             let was_hedge = spec.hedged();
             let walls_were = crate::paint::maze_texture(spec);
+            let mesh_was = (spec.import.name.clone(), spec.import.colours);
             let program_was = (spec.program.name.clone(), spec.program.imported);
             *spec = changed(spec, settings)?;
-            brickloft_core::spec::build(spec)?;
+            crate::import::built(spec)?;
             let maze = spec.form == brickloft_core::spec::Form::Maze;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
+            } else if spec.form == brickloft_core::spec::Form::Imported && (was != spec.form || mesh_was != (spec.import.name.clone(), spec.import.colours)) {
+                // (a form made into a mesh, or given another mesh or another number of colours, comes in the mesh's own)
+                *paint = crate::import::paint_of(spec).unwrap_or_default();
             } else if maze && (was != spec.form || walls_were != crate::paint::maze_texture(spec)) {
                 // (a form made into a maze, or a maze given other walls, comes in those walls' colours)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::maze_palettes(crate::paint::maze_texture(spec))[0].clone(), ..Paint::default() };
@@ -944,7 +980,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let spec = &mut forms[at].0;
             let count = spec.points.len();
             *spec.points.get_mut(which).ok_or(format!("the form has {count} points, numbered from 0"))? = DVec3::from_array(to);
-            brickloft_core::spec::build(spec)?;
+            crate::import::built(spec)?;
             state.open(forms);
         }
         "add_pull_point" => {
@@ -1079,7 +1115,7 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 18);
+        assert_eq!(tool_names().len(), 20);
     }
 
     #[test]
@@ -1756,8 +1792,11 @@ mod tests {
             assert!(apply(&mut state, "add_form", &json!({ "settings": { "form": "program", "program": bad } }), || 0.0).is_err(), "{bad} was added");
             assert_eq!(state.forms(), before, "{bad} changed the workspace");
         }
-        // there is no tool that takes a file to bring in
+        // there is no tool that takes a file to bring in; the one that lists programs gives names, the seven that come with the editor among them
         assert!(tool_names().iter().all(|name| !name.contains("import")));
+        let listed = said(apply(&mut state, "list_programs", &json!({}), || 0.0).unwrap());
+        assert_eq!(listed["come_with_the_editor"].as_array().unwrap().iter().map(|entry| entry["name"].as_str().unwrap()).collect::<Vec<_>>(), form::BUNDLED.map(|entry| entry.name));
+        assert!(listed["imported"].as_array().unwrap().iter().all(|entry| entry["name"].as_str().unwrap().starts_with("imported:")));
         // and a run is of a rule program, by a name the tool knows
         assert!(apply(&mut state, "run_program", &json!({ "action": "rewind" }), || 0.0).unwrap_err().contains("play, pause, step, restart or finish"));
         apply(&mut state, "add_form", &json!({ "settings": { "form": "cube" } }), || 0.0).unwrap();

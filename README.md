@@ -71,6 +71,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a single rose, water lily or gerbera, a birch, a willow, a cherry in blossom, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds and streams |
 | Furniture | pieces that rebuild themselves at any size, in five styles, from a seed: a bookcase with its books, cupboards, tables, chairs and sofas, lamps that light in the game, a bed, plants in pots, a trellis with a climber, and framed paintings and portraits |
 | Maze | a maze to walk through, in rings or in squares, grown from a seed: one way in, a room in the middle, walls plain, of brick, stone or planks, or of hedge |
+| Imported | a 3D model from a `.glb`, `.obj` or `.ply` file, at any size, in its own colours |
 
 Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and
@@ -94,6 +95,14 @@ rings, or grown as hedge (see
 earlier brickmaze generator.
 
 <img src="docs/images/maze-bricks.png" width="345" alt="A maze of rings with brick walls, the courses running level round every ring"> <img src="docs/images/maze-hedge.png" width="345" alt="A maze of rings with walls of clipped hedge">
+
+A model made in another program is built from its file: drop a `.glb`,
+`.obj` or `.ply` file on the window. Ramps and corner pieces are laid in
+the model's own faces, so a roof at a whole-number slope is long ramps
+and not stairs, and each brick takes the colour of the model's surface
+at it (see [docs/features.md](docs/features.md#meshes-from-files)).
+
+<img src="docs/images/mesh/figure-12-colours.png" width="345" alt="A figure with brown hair, a red shirt and blue trousers on a green disc, built from a mesh of 124,000 triangles in twelve colours"> <img src="docs/images/mesh/house.png" width="345" alt="A house built from a mesh in ten bricks, its roof two slopes of long ramps">
 
 A rule program grows a building on a grid, a little each turn, and you
 can watch it: a block of flats, a tower, a house, a villa over the sea.

@@ -33,6 +33,7 @@ pub mod fit_volume;
 pub mod furniture;
 pub mod grass;
 pub mod maze;
+pub mod mesh;
 pub mod orient;
 pub mod par;
 pub mod pattern;

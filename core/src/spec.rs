@@ -62,6 +62,10 @@ pub enum Form {
     /// `radius` to the middle of its outside wall, with walls `thick`
     /// through and `rise` tall
     Maze,
+    /// 1 point, the middle of the underside of its box: the mesh `import`
+    /// names, `radius` from the middle of its box to each end of its
+    /// longest side; `fill` for solid, or a shell `thick` through
+    Imported,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -188,6 +192,8 @@ pub struct Spec {
     pub furniture: crate::furniture::Furniture,
     /// Which maze a `Form::Maze` is (see [`crate::maze`]). Other forms take no notice of it.
     pub maze: crate::maze::Maze,
+    /// Which mesh a `Form::Imported` is, and how it is fitted (see [`crate::mesh`]). Other forms take no notice of it.
+    pub import: crate::mesh::Import,
     /// Which rule program a `Form::Program` is, and how far it has run (see [`crate::rewrite::form`]). Other forms take no notice of it.
     pub program: crate::rewrite::form::Program,
 }
@@ -227,6 +233,7 @@ impl Default for Spec {
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
             maze: crate::maze::Maze::default(),
+            import: crate::mesh::Import { colours: crate::mesh::form::USUAL_COLOURS, ..crate::mesh::Import::default() },
             program: crate::rewrite::form::Program::default(),
             simplify: 0.0,
             grain: 1,
@@ -557,11 +564,14 @@ impl Spec {
             _ if !self.pulls.is_empty() => 1.0,
             Form::Revolve if self.fill => f64::INFINITY,
             Form::Sphere | Form::Revolve => self.thick / 2.0,
+            // (a mesh has no thinnest part that is known of: filled, any size may be tried, and the budget decides)
+            Form::Imported if self.fill => f64::INFINITY,
+            Form::Imported => self.thick / 2.0,
             // a curve
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree | Form::Maze) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree | Form::Maze | Form::Imported) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -587,6 +597,8 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.stones = spec.stones.map(|s| crate::pattern::Stones { size: s.size / g, gap: s.gap / g, ..s });
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
+    // (a loose piece is as many microbricks across at any brick size: in larger bricks, fewer of them)
+    coarse.import.loose = (spec.import.loose as f64 / g).ceil() as i32;
     coarse.snapped()
 }
 
@@ -937,6 +949,10 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g, threads),
     };
+    // (a mesh with nothing to show at this size says so: an empty build of it looked like a file that had not opened)
+    if coarse.form == Form::Imported && built.bricks.is_empty() {
+        return Err(crate::mesh::MeshError::NothingBuilt.into());
+    }
     // The form's bricks before a pattern that only colours them, to be
     // measured in place of the patterned ones. A pattern's tiles cut in
     // two were measured a few percent further from a rounded form than
@@ -1086,6 +1102,9 @@ pub enum Solid {
     /// A maze, which is several outlines and colours at once and is built
     /// by its own code (see [`crate::maze::walls`]).
     Maze(Box<crate::maze::walls::Walls>),
+    /// A mesh from a file, which is asked for its bricks by its own code
+    /// (see [`crate::mesh::form`]).
+    Mesh(Box<crate::mesh::Stood>),
     /// A patch of grass, which is laid out from the height of its ground
     /// and is its bricks exactly, as furniture is (see [`crate::grass`]).
     Grass(std::sync::Arc<crate::grass::Model>),
@@ -1109,6 +1128,7 @@ impl Solid {
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Furniture(model) => model.distance(p),
             Solid::Maze(walls) => walls.distance(p),
+            Solid::Mesh(stood) => stood.distance(p),
             Solid::Grass(lawn) => lawn.distance(p),
             Solid::Flat {
                 region,
@@ -1179,6 +1199,7 @@ impl Probe {
             | Solid::Furniture(_)
             | Solid::Grass(_)
             | Solid::Maze(_)
+            | Solid::Mesh(_)
             | Solid::Pipe { .. } => None,
         }
     }
@@ -1452,6 +1473,7 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             check_size(&[(hi.x - lo.x) as i64, (hi.y - lo.y) as i64, (hi.z - lo.z) as i64])?;
             Ok((Solid::Maze(Box::new(walls)), Vec::new()))
         }
+        Form::Imported => Ok((Solid::Mesh(Box::new(crate::mesh::Stood::new(&spec.import, need(1)?[0], spec.radius, (!spec.fill).then_some(spec.thick))?)), Vec::new())),
         Form::Tree => {
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
@@ -1471,7 +1493,7 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             check_size(&[long, wide, height as i64 + 8])?;
             // Grass is laid out and not fitted (see `crate::grass`): it comes with its bricks, as furniture does.
             if spec.tree.kind == crate::tree::Kind::Grass {
-                return Ok((Solid::Grass(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads))), path));
+                return Ok((Solid::Grass(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads)), path));
             }
             let tree = std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spread, &lay));
             let (lo, hi) = tree.bounds();
@@ -2899,6 +2921,11 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -
             let (bricks, shades, solid, error) = walls.built(spec.mosaic.as_ref(), spec.wedges, spec.max_ext, threads);
             Built { bricks, solid, error, path, grain: 1, unmeasured: false, shades }
         }
+        Solid::Mesh(stood) => {
+            // (a brick's price is in cells of the finest lattice: `g` cubed of them to a cell of this one)
+            let laid = stood.built(spec.wedges, spec.max_ext, spec.simplify / (g * g * g), threads);
+            Built { bricks: laid.bricks, solid: laid.solid, error: laid.error, path, grain: 1, unmeasured: false, shades: laid.shades }
+        }
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,
@@ -3097,7 +3124,7 @@ fn fit_layer(
 /// three quarters of a million bricks, each change of the slider back took
 /// seconds, and past a point the build was refused and the giant stood.
 /// A line has a length of its own, which the thickness does not touch.
-fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), String> {
+pub(crate) fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), String> {
     use crate::tree::{Kind, Lay, Tree};
     let level = |p: DVec3| DVec3::new(p.x, p.y, foot.z);
     if !Tree::lies_along(spec.tree.kind) {
@@ -3162,7 +3189,7 @@ pub fn lawn(spec: &Spec) -> Option<std::sync::Arc<crate::grass::Model>> {
     let foot = *spec.points.first()?;
     let (lay, _) = tree_lay(&spec, foot).ok()?;
     let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
-    Some(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available())))
+    Some(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available()))
 }
 
 /// The ground under the lawn a spec describes, without its bricks: how
