@@ -160,6 +160,12 @@ pub struct Spec {
     /// clipboard) remembers its spec, and a join that undo forgot was the
     /// fault this replaced.
     pub blend: Option<f64>,
+    /// Whether a joined form is taken away from the forms it is joined to,
+    /// and not added to them: a window through a wall, a hole through a
+    /// sphere. It means something only with `blend` set, which is then how
+    /// far the rim of the hole is rounded. None of the form's own bricks are
+    /// built (see [`crate::blend`]). Kept here for the reason `blend` is.
+    pub carve: bool,
     /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
     pub tree: crate::tree::Tree,
     /// Which maze a `Form::Maze` is (see [`crate::maze`]). Other forms take no notice of it.
@@ -196,6 +202,7 @@ impl Default for Spec {
             stones: None,
             mosaic: None,
             blend: None,
+            carve: false,
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             maze: crate::maze::Maze::default(),
             simplify: 0.0,

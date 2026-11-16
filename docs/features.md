@@ -166,18 +166,49 @@ A joined form has a **Blend** slider, from 0 to 6 microbricks.
 | 0 | a sharp crease, as if the forms were carved from one piece |
 | above 0 | a rounded fillet that reaches that many microbricks along each form from where they meet |
 
-The join is fitted with single wedges and ramps, so it is rougher than a
-sphere's own facets, and a small blend on a curved seam is a ring of
-single wedges. Three kinds of form are joined by cutting alone, with a
-notch a microbrick or two deep where a sloped brick had to be left out, and
-the blend does nothing to them: a form that stands half a microbrick off
-the other (move either by half a microbrick), a form laid as a pattern, and
-a plant. The panel says so under the slider.
+The join is fitted a microbrick at a time and then laid with stretched
+ramps and corner pieces wherever one lies closer to the joined surface, so
+most single wedges standing alone are gone. It is still rougher than a
+sphere's own facets, because its bricks are chosen one at a time and do not
+meet edge to edge as a sphere's do
+([algorithm.md](algorithm.md), "Where it falls short").
+
+A joined form stands a whole number of microbricks from the form it joins,
+because the two can be fitted as one only if their bricks line up. A drag
+with Ctrl therefore moves a whole microbrick at a time, and a form joined
+half a microbrick off in any other way is moved by that half, with a note
+over the view. Forms built at one **Brick size** above 1 are lined up to
+whole bricks of that size, and are then joined in bricks of that size.
+
+Two kinds of form are joined by cutting alone, with a notch a microbrick
+or two deep where a sloped brick had to be left out, and the blend does
+nothing to them: a form laid as a pattern, and a plant. The panel says so
+under the slider.
+
+#### Cutting a form out of another
+
+A joined form has a tick box, **Cut out of what it joins**. Ticked, the
+form is taken away from the forms it is joined to and none of its own
+bricks are built: a cube through a wall is a window, and a bar through a
+sphere is a hole. The form is drawn as red glass, fainter when it is not
+the form being edited, so that it can still be seen, clicked and dragged.
+**Blend** then rounds the rim of the hole. A form that is cut out cuts
+every form on its grid that it reaches, joined or not, patterns and plants
+included.
+
+| Blend | The hole |
+|---|---|
+| 0 | sharp edges, as if cut with a knife |
+| above 0 | a rim rounded for that many microbricks along the hole and along the form it is in |
+
+The walls of a hole are fitted a microbrick at a time, so a round hole is
+rougher inside than the same form is outside. A square one through a wall
+is blocks and nothing else.
 
 A joined form stays where it is when a form it sits in is reshaped, where
 an unjoined one would be pushed clear. Dragging it again without Ctrl sets
-it clear of the others. The join and its blend are part of the form, so
-undo, a save and a copy all keep them.
+it clear of the others. The join, its blend and whether it is cut out are
+part of the form, so undo, a save and a copy all keep them.
 
 Ctrl can also be pressed after the drag has begun.
 

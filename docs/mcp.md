@@ -132,16 +132,31 @@ The settings Claude can give:
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `blend` | Joins the form to the forms it stands in: `0` for a sharp crease, up to `6` for a fillet that many microbricks wide, `none` for a form that stands apart (see below) |
+| `carve` | `true` takes a joined form away from the forms it joins and builds none of its own bricks; `false`, the usual, adds it (see below) |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
 Forms are fitted one at a time, so two forms set in the same place
 overlap, and the game refuses a brick that overlaps another. To build one
 thing out of two forms, give the second a `place` partly inside the first
 and a `blend`. The two are then fitted as one solid where they meet (see
-[features.md](features.md), "Joining forms"). Both must stand a whole
-number of microbricks apart along every axis, so a `place` ending in a half
-on one form needs the same on the other. A pattern or a plant is joined by
-cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is refused.
+[features.md](features.md), "Joining forms"). A joined form must stand a
+whole number of microbricks from the form it joins along every axis, so one
+given a `place` half a microbrick off is moved by that half, and the
+workspace that comes back says where it stands. A pattern or a plant is
+joined by cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is
+refused.
+
+To cut a window or a hole, give the cutting form a `place` inside what it
+is to cut, a `blend` and `carve: true`. It is taken away from every form on
+its grid that it reaches, and `blend` is then how far the rim of the hole
+is rounded. The form stays in the workspace, listed with the bricks it
+would have had, and can be moved or reshaped like any other.
+
+```json
+{ "name": "add_form", "arguments": {
+    "settings": { "form": "cube", "points": [[0, 0, 0]], "radius": 5, "fill": true, "blend": 0, "carve": true },
+    "place": [2, 0, 18] } }
+```
 
 A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 `colours` written `#rrggbb`, the axis it `runs_along`, and a
