@@ -37,6 +37,8 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
+| Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
+| Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
 | Maze of 6 rings, radius 120, plain walls | 0.18 s (40 ms) | 1,122 | 3.4% |
 | The same with brick walls | 0.25 s (75 ms) | 25,045 | 3.4% |
 | The same with hedge walls 6 thick | 2.5 s (1.0 s) | 54,903 | 8.0% |
@@ -58,6 +60,13 @@ the slowest forms. Their
 times come from the test `where_the_time_goes` in
 [core/src/tree.rs](../core/src/tree.rs), run by name with `--ignored
 --nocapture` (see [Trees](#trees) below).
+
+The bookcases are not fitted or measured. Their bricks are written down
+from their size ([algorithm.md](algorithm.md), section 7.12), which is why
+a wall of them takes less time than the smallest arch. Their times come
+from the test `how_long_a_bookcase_takes` in
+[core/src/furniture/tests.rs](../core/src/furniture/tests.rs), run by name
+with `--release -- --ignored --nocapture`.
 
 Most of each time is the measurement of the result, not the fitting. Laying
 out a solid sphere of radius 80 takes about 7 ms, and measuring it takes

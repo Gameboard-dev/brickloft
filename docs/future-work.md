@@ -1,7 +1,7 @@
 # Future work
 
 What is planned and not yet built: more for Claude to do, and what
-remains for joined forms, the patterns and the plants. None of it changes
+remains for joined forms, the patterns, the plants and the furniture. None of it changes
 how forms are fitted today (see [algorithm.md](algorithm.md)).
 
 ## More for Claude to do through MCP
@@ -197,6 +197,32 @@ own method ([algorithm.md](algorithm.md), section 7.10). What remains:
   far, inside and near, with the processor deciding every near cell, was
   measured: four fifths of a tree's samples are in near cells, so the
   card could take a fifth at most (algorithm.md, section 7.10).
+
+## More furniture
+
+One kind of furniture is built, a bookcase, laid out board by board
+([algorithm.md](algorithm.md), section 7.12). What remains:
+
+- **Other kinds.** A table, a chair, a wall shelf, a cupboard with doors
+  and a chest of drawers are not written. Each is a function from a box
+  and the settings to boards, and the settings a form carries (a board
+  thickness, a count, a spacing, a seed) were named so that a new kind
+  needs no change to saves or to the tools Claude uses. A chair's raked
+  back and a table's turned legs need sloped or round parts, which the
+  bookcase does not.
+- **Shelves of different heights.** Every bay has the same shelves and
+  every opening is the same height to within a microbrick. A real
+  bookcase often has one tall opening at the bottom for large books.
+- **More on the shelves.** Books have no titles, bands or page edges, and
+  a book is one colour. There are three ornaments. Nothing is put on top
+  of the bookcase.
+- **A front facing any way.** The front is on the low Y side. Another
+  side is faced by a quarter turn of the whole form, which also turns its
+  dots.
+- **Doors and drawers.** A glazed door needs a translucent brick, which
+  the view does not draw.
+- **Joining.** A bookcase is joined to another form by cutting alone, as
+  a plant is, so it cannot be blended into a wall.
 
 Code under a licence the project cannot take was not ported and is not to
 be. That rules out the GPL generators (Veloren's `tree.rs`,

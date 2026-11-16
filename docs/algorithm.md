@@ -235,6 +235,7 @@ flowchart TD
     F -->|flat band, filled outline or cube| G[Outline fitter]
     F -->|sphere, ellipsoid, dome| H[Index-sum layout]
     F -->|pyramid| I[Pyramid layout]
+    F -->|furniture| I2[Laid out board by board]
     F -->|round tube lying flat| J[Pipe]
     F -->|profile spun about an axis| K[Stacked rings]
     F -->|band or tube lifted out of its plane| L[Columns between two surfaces]
@@ -242,6 +243,7 @@ flowchart TD
     G --> N[Bricks]
     H --> N
     I --> N
+    I2 --> N
     J --> N
     K --> N
     L --> N
@@ -3394,6 +3396,157 @@ Fewer bricks come from fewer rings.
   tangent to it, which lays that stretch as two thinner runs of bricks.
 - The room is one ring across and cannot be made larger, and there is
   one way in. A maze takes no added points and cannot be mirrored.
+
+### 7.12 Furniture
+
+Furniture is the one form whose bricks are worked out directly from its
+size and settings, with no solid to fit them to
+([core/src/furniture.rs](../core/src/furniture.rs)). There is one kind so
+far, a bookcase. It is boards and books, and each of those is a box on the
+lattice, so each can be written down as a brick as soon as its place is
+known. The build is therefore exact at every size. A wall of bookcases 400
+microbricks wide and 240 tall is 3,877 bricks and is laid in about
+0.3 ms.
+
+<img src="images/furniture-bookcase.png" width="330" alt="A bookcase in bricks: an oak carcass with a cornice and a skirting, four openings, and books of several colours standing in runs, with a pile lying flat and one book leaning"> <img src="images/furniture-walnut.png" width="330" alt="A wider bookcase in dark wood, divided by an upright into two bays, with books in dark reds, greens and tans">
+
+The cell-by-cell fitter of section 7.1 could have built a bookcase from a
+distance function, as it builds a tree. It was not used, because that
+fitter joins neighbouring cells into the largest boxes it can. Two books of
+one height standing side by side would become one brick, and a shelf would
+be joined to the side that carries it. A book has to be a brick of its own
+to have a colour of its own.
+
+#### The carcass
+
+The form gives a box, kept as a cube's is (section 7.2): a width, a depth
+and a height in whole microbricks. The carcass is built inside that box the
+way a joiner builds one. Two sides stand on the floor for the whole height,
+and the top lies over them. The bottom board sits between the sides, on the
+floor or lifted on a kick board that is set one microbrick back from the
+front. A back panel one microbrick thick closes it behind. Each board is
+one brick, unless it is longer than the longest brick allowed, in which
+case it is cut into as few lengths as that allows.
+
+The number of shelves follows from the height. Write $`t`$ for the
+thickness of a board, $`H`$ for the height inside (from the top of the
+bottom board to the underside of the top) and $`s`$ for the clear spacing
+asked for. The number of openings is
+
+```math
+n = \mathrm{round}\left(\frac{H + t}{s + t}\right)
+```
+
+In words: an opening and the shelf above it take $`s + t`$ microbricks,
+and the height has room for about $`n`$ of them once the top board is
+counted as the last shelf. The count is kept to at least 1, and to no more
+than leaves every opening 2 microbricks clear. The $`H - (n - 1)\,t`$
+microbricks of clear height are then shared equally among the openings.
+Any left over go one each to the lowest openings, where tall books are
+kept. For example, the usual bookcase is 60 tall with boards of 2 and a
+plinth of 3, so $`H = 60 - 3 - 2 - 2 = 53`$. With $`s = 11`$ that gives
+$`n = \mathrm{round}(55 / 13) = 4`$ openings and 3 shelves, and the 47
+clear microbricks are shared as 12, 12, 12 and 11.
+
+The uprights follow from the width in the same way. With $`W`$ for the
+width inside and $`b`$ for the widest bay allowed, the bookcase has the
+fewest bays that are no wider than $`b`$:
+
+```math
+m = \left\lceil \frac{W + t}{b + t} \right\rceil
+```
+
+The bays are equal to within a microbrick, and a bay that is one wider is
+put in the middle, where it looks intended. Each upright runs the whole
+height inside and the shelves run between the uprights, so every shelf of
+every bay is one board. A bookcase dragged taller therefore gains a shelf
+each time there is room for one, and between those heights its openings
+grow one microbrick at a time.
+
+Two limits keep the proportions of a small bookcase. A board is no thicker
+than a twelfth of the width or the height, and a plinth no taller than an
+eighth of the height. Without them, a bookcase set up at 60 tall and
+dragged down to 20 kept boards of 2, and half its height was wood. A box
+under 3 microbricks wide or tall is built as one block, so that a side
+dragged all the way in still builds something.
+
+#### Mouldings
+
+**Cornice and skirting** adds a chamfer under an overhanging top and
+another round the foot, on the front and both sides. Each is a ramp laid
+along the side, with a hip (a quarter of a square pyramid) at each front
+corner. The two strips therefore meet at the corner in a mitre, with no
+step. The mouldings stand out from the carcass by half a board, 3
+microbricks at most, and the carcass is set in by the same amount, so the
+form's size is the size of the whole piece. A curved profile such as an
+ogee was not attempted. The sloped bricks are flat from corner to corner
+of their box, and a curve stepped out of single cells would be rougher
+than the chamfer. Where sloped bricks are turned off, the mouldings are
+square bands.
+
+#### Books
+
+Each opening is filled from a run of random numbers of its own, seeded by
+the form's seed, the number of its bay and the number of its shelf from
+the bottom. One run for the whole bookcase would make every book after a
+change depend on that change, so dragging the top up by one microbrick
+would rearrange every shelf below. With a run for each opening, a shelf
+that keeps its size keeps its books while the bookcase is resized.
+
+**Books** sets how many microbricks of each shelf's width have something
+standing on them, varied by a fifth either way from shelf to shelf. Those
+microbricks are laid as one run of upright books against the left side of
+the bay, or one against the right, or one at each end. The room left over
+is then in one place, as it is when books are taken out and the rest are
+pushed along. Within a run, each book takes the height of the one before
+it, give or take a microbrick, and a new height begins one time in four,
+so the books stand in sets.
+
+A book's sizes come from its opening. It is as tall as the clear height
+less one microbrick, down to a little over half of that. It is 1 to 3
+microbricks thick, depending on the spacing, and thin books are the most
+common. It is as deep as the shelf less one microbrick, down to two thirds
+of that, and it is pushed to the back, so the spines stand at different
+depths.
+
+<img src="images/furniture-library.png" width="700" alt="A wall of bookcases in bricks, six bays wide and six openings tall: runs of books against the uprights with gaps between them, piles of books lying flat, leaning books and a few ornaments">
+
+A wall six bays wide. The shelves are about two thirds full.
+
+Some shelves also hold a book leaning on the end of a run, a pile of two
+to four books lying flat, or an ornament (a vase, a box or a picture
+frame). Their widths are taken out of the run. Added on top of it, as they
+first were, they made a shelf that was asked to be a fifth full two fifths
+full. A lying book is never longer or deeper than the one under it, and a
+leaning book is never taller than the book it leans on.
+
+A leaning book is a sheared box: a ramp under the face that overhangs, a
+box, and a ramp over the face that has leant away. That is three bricks,
+or two when the book leans as far as it is thick. A box turned to the true
+angle would have its corners off the lattice.
+
+No brick is tested against another after it is placed. Every book is given
+its own stretch of the shelf's width, and stands on the shelf or on the
+book under it. The tests in
+[core/src/furniture/tests.rs](../core/src/furniture/tests.rs) check the
+result instead: no two bricks share room, every book has a brick under
+each cell of its foot, and every book lies inside its opening.
+
+#### Colours and limits
+
+The bricks carry eight colour numbers: 0 for the wood, 1 for the back
+panel, and 2 to 7 for the books and ornaments. A book never takes the
+number of a book it touches at its side, because two neighbours of one
+colour read as one thick book.
+
+A form may be 2,000 microbricks each way, which at the closest spacing
+would be 400,000 openings. A bookcase of more than 12,000 openings, or
+with room for more than 60,000 books, is refused before anything is laid,
+and the message names what to change. The largest bookcase the dots can
+drag out, 800 wide and 800 tall, is 25,819 bricks and is laid in
+about 2 ms. **Brick size** and the brick budget do not apply to
+furniture. Its boards are whole microbricks thick, and on a coarser grid a
+board 2 thick would become 3 thick or vanish.
 
 ## 8. Changing a form: added points, mirror, turning, grids
 

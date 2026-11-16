@@ -119,7 +119,7 @@ The settings Claude can give:
 
 | Setting | Meaning |
 |---|---|
-| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`, `cube` or `tree` |
+| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`, `cube`, `tree` or `furniture` |
 | `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, a cube's middle, or the points of a curve or profile. A form added without points starts where the editor would start one. |
 | `radius`, `rise`, `thick`, `depth` | Sizes in microbricks |
 | `fill`, `tube`, `closed` | Solid or shell, round tube or flat band, closed loop |
@@ -128,6 +128,7 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
+| `furniture` | `[kind, seed, board, shelves, spacing, bay, plinth, back, moulding, books]` says which piece a `furniture` form is; only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` and then `0, depth` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
@@ -142,8 +143,8 @@ and a `blend`. The two are then fitted as one solid where they meet (see
 [features.md](features.md), "Joining forms"). A joined form must stand a
 whole number of microbricks from the form it joins along every axis, so one
 given a `place` half a microbrick off is moved by that half, and the
-workspace that comes back says where it stands. A pattern or a plant is
-joined by cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is
+workspace that comes back says where it stands. A pattern, a plant or a piece of
+furniture is joined by cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is
 refused.
 
 To cut a window or a hole, give the cutting form a `place` inside what it
@@ -194,6 +195,45 @@ spread `radius`. Added with neither, it is its usual size, a pine 140
 microbricks tall, and comes in its kind's own eight colours with the mode
 `pattern`. A tree is tens of thousands of bricks and takes up to a second
 to build, so a call that changes one takes that long to answer.
+
+`furniture` names the kind first, and `bookcase` is the one kind so far.
+Whatever follows it replaces that kind's usual settings in order:
+
+| Value | Meaning |
+|---|---|
+| `seed` | any whole number, each a different arrangement of books |
+| `board` | how thick the boards are, 1 to 8 (usually 2) |
+| `shelves` | how many shelves stand between the bottom and the top, 1 to 60, or 0 for as many as the height has room for at `spacing` |
+| `spacing` | the clear height wanted between shelves, 3 to 200 (usually 11) |
+| `bay` | the widest an opening may be before an upright divides it, 4 to 400 (usually 34), or 0 for no uprights |
+| `plinth` | how far the bottom board is lifted off the floor, 0 to 20 (usually 3) |
+| `back` | 1 for a back panel, 0 for none |
+| `moulding` | 1 for a cornice and a skirting of sloped bricks, 0 for none |
+| `books` | how full the shelves are, 0 to 100 (usually 85) |
+
+A bookcase fills the box that a cube of the same `radius` and `stretch`
+would fill, and its one point is the middle of that box. Its front is on
+the low y side, and `turned` faces it another way. Added with no `radius`
+or `stretch` it is 36 microbricks wide, 10 deep and 60 tall, and added
+with no `points` it stands on the floor. It comes in its own eight colours
+with the mode `pattern`: the wood, the back panel, and six that the books
+share. A value out of range is brought within it, and a name that is no
+kind of furniture is refused. For example, this call adds a bookcase 80
+wide, 10 deep and 60 tall with five shelves in one span, packed with
+books:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "furniture", "radius": 5, "stretch": [8, 1, 6], "points": [[0, 0, 30]], "furniture": ["bookcase", 4, 2, 5, 11, 0, 3, 1, 1, 100] }
+  }
+}
+```
+
+A bookcase has no discrepancy and answers at once. `thick`, `depth`,
+`fill`, `tube`, `rise`, `mirror`, `pulls`, `grain`, `mosaic` and `stones`
+do nothing to it, and it is joined to other forms by cutting alone.
 
 `mosaic` takes five values, and for bricks and cobblestone five more may
 follow. A form has `mosaic` or `stones`, and if both are given the stones

@@ -47,6 +47,7 @@ until you tick it.
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase. Width, depth and height in whole microbricks; board thickness, shelves, uprights, a plinth, a back panel, mouldings, how full of books it is, and a seed (see [Furniture](#furniture)). |
 | **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
 
 ### The cube
@@ -91,9 +92,9 @@ becomes a disc, and a round-tube ring a disc with a rounded rim.
 - **Drag a dot** to move a point or change a size. Dots snap to the grid.
 - **Dots move** (in the panel) chooses the plane a dragged point moves in:
   facing the camera, or with x, y or z held still.
-- **Ctrl + scroll** makes a circle, sphere, pyramid, cube or plant a
-  microbrick larger or smaller. A cube keeps its proportions as nearly as
-  whole microbricks allow.
+- **Ctrl + scroll** makes a circle, sphere, pyramid, cube, plant or piece
+  of furniture larger or smaller. A cube keeps its proportions as nearly
+  as whole microbricks allow, and so does furniture.
 - **Stretch** scales a form along each axis, up to 1000 times.
 - **Flip** mirrors the finished bricks along x, y or z: a dome becomes a bowl.
 - **Quarter turn X / Y / Z** turns the form a quarter turn within its grid.
@@ -593,6 +594,60 @@ short. A tree can be turned, flipped, moved, joined to other forms and
 put on a grid of its own like any form. It cannot be mirrored and takes no
 added points.
 
+## Furniture
+
+**Furniture** builds a piece of furniture from boards and boxes. A
+bookcase is the one kind so far. It is laid out from its size and not
+fitted to a shape, so it has no discrepancy at any size and is built at
+once. How it is made is in [algorithm.md](algorithm.md), section 7.12.
+
+<img src="images/furniture-bookcase.png" width="330" alt="A bookcase in bricks: an oak carcass with a cornice and a skirting, four openings, and books of several colours standing in runs, with a pile lying flat and one book leaning"> <img src="images/furniture-small.png" width="330" alt="A low black bookcase with two openings and books in bright colours: a gap on each shelf, and on the lower one a pile of books lying flat with a box on top">
+
+A bookcase has a dot on each of its six sides, as a cube has, and a
+**Width**, a **Depth** and a **Height** in whole microbricks. Dragging a
+side or moving a slider builds it again: a taller bookcase gains shelves, a
+wider one gains uprights, and the books are set out again on the shelves
+that changed size. The width and depth sliders change it about its middle
+and the height slider at its top, so it stays on the floor. Its front is on
+the low Y side, and a quarter turn about Z faces it another way.
+
+| Setting | What it does |
+|---|---|
+| **Board thickness** | How thick the sides, top, shelves and uprights are, 1 to 8 microbricks. Boards are made thinner on a small bookcase: no thicker than a twelfth of its width or height. |
+| **Shelves** | How many shelves stand between the bottom and the top. At the left end of the slider, **by spacing**: as many as the height has room for. |
+| **Shelf spacing** | The clear height wanted between one shelf and the next. The openings are equal to within a microbrick and as near this as the height allows. |
+| **Uprights where it is wide**, **Widest bay** | Divides a bookcase that is wider inside than the widest bay into equal bays. |
+| **Plinth height** | Lifts the bottom board off the floor on a recessed kick board. At 0 it stands on the floor. |
+| **Back panel** | A panel one microbrick thick, in the second wood colour. |
+| **Cornice and skirting** | A chamfered moulding under an overhanging top and another round the foot, made of sloped bricks. The carcass is set in by their depth, so the size is the size of the whole piece. |
+| **Books** | How full the shelves are, from bare to packed. |
+| **Seed**, **Another** | Which arrangement of books: any whole number, each a different one. |
+
+Books stand in runs against the sides of each bay, with the room left over
+in one place. Some shelves have a book leaning on the end of a run, a pile
+lying flat, or an ornament. Each book is one brick, and a leaning one is
+two or three. No book overlaps another, floats, or passes through a board.
+A shelf keeps its books while the bookcase is resized, as long as the
+shelf's own size does not change.
+
+<img src="images/furniture-library.png" width="700" alt="A wall of bookcases in bricks, six bays wide and six openings tall: runs of books against the uprights with gaps between them, piles of books lying flat, leaning books and a few ornaments">
+
+**Colours** offers four sets: oak with mixed spines, dark walnut with
+leather, white with pastels, and black with brights. A bookcase is
+coloured **As the pattern has it**. The first colour is the wood, the
+second the back panel, and the other six are shared among the books, so
+that no two books side by side have the same one. Change any of the eight
+under [Colour](#colour) to make a set of your own.
+
+A bookcase starts 36 microbricks wide, 10 deep and 60 tall, which is
+87 bricks. A low shelf 20 wide and 20 tall is 27,
+and a wall 400 wide and 240 tall is 3,877, laid in about 0.3
+ms. A bookcase of more than 12,000 openings or 60,000 books is refused,
+and the panel says what to change. **Brick size**, the brick budget,
+**Mirror** and added points do not apply to furniture. It can be turned,
+flipped, moved and put on a grid of its own like any form, and it is joined
+to another form by cutting alone.
+
 ## Mazes
 
 <img src="images/maze-theta.png" width="340" alt="A theta maze of six rings seen from above, with its way through marked by a yellow strip"> <img src="images/maze-hedge.png" width="340" alt="A theta maze with walls of clipped hedge on a brown floor">
@@ -743,7 +798,7 @@ passes a megabyte.
 | Ctrl+D | duplicate the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
 | Delete | remove the form being edited |
-| Ctrl + scroll | resize a circle, sphere, pyramid, cube or plant |
+| Ctrl + scroll | resize a circle, sphere, pyramid, cube, plant or piece of furniture |
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift + scroll | camera speed |

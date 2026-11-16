@@ -32,6 +32,7 @@ fn form_name(form: Form) -> String {
         Form::Pyramid => "pyramid".into(),
         Form::Cube => "cube".into(),
         Form::Tree => "tree".into(),
+        Form::Furniture => "furniture".into(),
         Form::Maze => "maze".into(),
     }
 }
@@ -101,6 +102,11 @@ pub fn spec_text(spec: &Spec) -> String {
     }));
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
     line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
+    // furniture: which kind, which arrangement of books, how thick its boards are, how many shelves (0 for as many as fit at the spacing), the spacing, the widest a bay may be (0 for no uprights), how tall its plinth is, whether it has a back and mouldings (1 or 0), and how full of books it is, 0 to 100
+    {
+        let f = &spec.furniture;
+        line("furniture", format!("{},{},{},{},{},{},{},{},{},{}", crate::furniture::KINDS[f.kind as usize].1, f.seed, f.board, f.shelves, f.spacing, f.bay, f.plinth, f.back as u8, f.moulding as u8, f.books));
+    }
     // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
     let m = &spec.maze;
     line("maze", format!("{},{},{},{},{},{},{},{},{}", crate::maze::KINDS[m.kind as usize].1, m.rings, m.divisions, m.grow, m.seed, m.entrance, m.floor, m.solution as u8, m.hedge as u8));
@@ -169,6 +175,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("cube", _) => Form::Cube,
                     // (a bush or a flower is a tree of another kind)
                     ("tree" | "plant", _) => Form::Tree,
+                    ("furniture", _) => Form::Furniture,
                     ("maze", _) => Form::Maze,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
@@ -342,6 +349,37 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     tree.extras = whole(extras)? != 0;
                 }
                 spec.tree = tree.clamped();
+            }
+            "furniture" => {
+                let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                // The kind, and then as many of the rest as are given, in
+                // order, as a tree is read: `bookcase` alone is the
+                // bookcase as it starts out.
+                if parts.len() > 10 {
+                    return Err(bad("expected `kind,seed,board,shelves,spacing,bay,plinth,back,moulding,books`, or the first few of them"));
+                }
+                let kind = crate::furniture::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of furniture: bookcase"))?.0;
+                let mut furniture = crate::furniture::Furniture::of(kind);
+                if let Some(seed) = parts.get(1) {
+                    furniture.seed = seed.parse().map_err(|_| bad("the seed is a whole number, not negative"))?;
+                }
+                // (numbers from a file, which may be anyone's: brought within what each may be by `clamped`, once they fit a number at all)
+                let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(-1, 100_000) as i32) };
+                for (at, field) in [&mut furniture.board, &mut furniture.shelves, &mut furniture.spacing, &mut furniture.bay, &mut furniture.plinth].into_iter().enumerate() {
+                    if let Some(given) = parts.get(2 + at) {
+                        *field = within(given)?;
+                    }
+                }
+                if let Some(back) = parts.get(7) {
+                    furniture.back = whole(back)? != 0;
+                }
+                if let Some(moulding) = parts.get(8) {
+                    furniture.moulding = whole(moulding)? != 0;
+                }
+                if let Some(books) = parts.get(9) {
+                    furniture.books = within(books)?;
+                }
+                spec.furniture = furniture.clamped();
             }
             "maze" => {
                 let parts: Vec<&str> = value.split(',').map(str::trim).collect();
@@ -1183,9 +1221,11 @@ mosaic = {values}
                 blend: Some(2.5),
                 carve: true,
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true },
+                furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100 },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
+            Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35 }, ..Spec::default() },
         ];
         // a save from before forms could be joined has no line for it, and one out of range is refused
         assert_eq!(parse_spec("form = sphere").unwrap().blend, None);
