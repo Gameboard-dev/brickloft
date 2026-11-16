@@ -2428,6 +2428,12 @@ those on the inside crowd. Laid along a straight line, a hedge is part for
 part the hedge it was before it could bend. Reeds stand along a line the
 same way.
 
+With **Sharp corners at its dots** the line runs straight from point to
+point. A straight hedge laid round a corner opens on the outside like a
+hinge, so a round post of the same tufts stands in each corner and closes
+it. Reeds inside a closed line fill it: each stem is thrown into the
+line's box until it lands inside.
+
 The line has a length of its own. At first the length was the thickness
 times a number, so making a hedge thicker made it longer too: a hedge 240
 long made 160 thick became 1,600 long and three quarters of a million
@@ -2591,6 +2597,35 @@ below the floor.
 The first version raised the ground by the reach all added points share,
 8 cells, and a touch was a spike. Each touch now has its own range.
 
+A push down may go below the level the lawn lies on, and a hollow dug
+deeper than the water stands is a pond. With the water $`w`$ below the
+lawn and the ground at the height $`h`$:
+
+| Ground | What is there |
+|---|---|
+| $`h > -w + 2`$ | grass as anywhere |
+| $`-w + 0.3 < h \le -w + 2`$ | grass thinning: a tuft is kept with the chance $`(h + w - 0.3) / 1.7`$ |
+| $`-w - 1.5 < h \le -w + 1.2`$ | the soil is sand |
+| $`h \le -w - 1.5`$ | the bed of the pond, with a stone on about one place in seventeen |
+| $`h < -w - 1`$ | water from the bed up to $`-w`$ |
+
+The water is upright eight-sided columns with flat tops, wide enough to
+run together, so it is fitted as boxes and joined into few. Reeds stand
+where the ground is within 2.6 of the water's level, as thickly as asked.
+Stones and reeds are placed by a number worked out from each spot of
+ground and not from the run of numbers the blades use, so digging a pond
+leaves the lawn round it as it was. A patch with a pond reaches as far
+below its own level as it was dug.
+
+In the game's file the water is the glass material at intensity 6 of 10,
+with all four of its collision flags off. The writer the editor uses
+knows no water brick or material. The view in the editor shows water as a
+plain blue: it does not draw anything translucent.
+
+A touch may also be a stroke: with Ctrl held while the button is down,
+the same touch is made again wherever the cursor has moved 0.4 of the
+brush's range along the ground. A patch takes 240 touches.
+
 The blades are in tufts on a grid shaken so that no rows show, two to four
 blades to a tuft, each of its own height and lean and one of three greens.
 They stand upright on the ground wherever it has been pushed to. A touch is
@@ -2602,8 +2637,85 @@ where everything a form keeps now is a few numbers a person can read.
 The game's file gives each brick a flag for what it stops: the player,
 weapons, interaction and physics. The bricks of the blades are written
 with the first, second and fourth off, so a player walks through the grass
-and stands on the soil. A brick counts as blade if its middle is more than
-two cells above the ground under and beside it.
+and stands on the soil. Which part a brick is, is asked of the plant
+itself, grown again from the form when the file is written.
+
+#### Trunks on the lattice
+
+A round trunk fitted cell by cell is ramps and steps that change from one
+layer to the next, because a circle crosses every cell differently. The
+trunks of the pine and of every broadleaf tree are now eight-sided and
+upright, in lengths each of one size all the way up. The size $`r`$ of a
+length is rounded to a whole number of cells and a half, which puts its
+four straight faces on the grid's own planes, since the trunk stands in
+the middle of a cell. Its four slanting faces lie where the distances out
+along x and y sum to the whole number nearest $`r\sqrt 2`$, so they run
+through cell corners. Every layer of a length is then the same, each face
+is one tall brick and each corner one tall ramp, and there is a step only
+where the trunk changes size. An oak's trunk between its roots and its
+fork was some hundreds of bricks and is under forty. The trunks no longer
+lean or crook by the fraction of a cell they did, which could not be seen
+as a lean and was a step every few cells. Limbs are still fitted cell by
+cell.
+
+#### More trees, bushes and flowers
+
+<img src="images/tree-willow.png" width="330" alt="A weeping willow in bricks: a short stout trunk, spreading limbs, and curtains of thin green strands hanging from every branch end nearly to the ground"> <img src="images/tree-scots-pine.png" width="330" alt="A Scots pine in bricks: a tall bare eight-sided trunk and at its top a flat broken crown of dark needles in plates on orange limbs">
+
+A birch, a willow and a Scots pine are the oak's rule of forking with
+other numbers, as the beech is, and each has something of its own.
+
+- **Birch** ([*Betula pendula*](https://en.wikipedia.org/wiki/Betula_pendula)):
+  a trunk half as thick as an oak's for its height that carries on to the
+  top, limbs that climb at 23 to 43 degrees from upright, small tufts,
+  and short hanging shoots at the branch ends. Its bark is white, and
+  smooth noise stretched sideways marks it with black bands.
+- **Willow** ([*Salix babylonica*](https://en.wikipedia.org/wiki/Salix_babylonica)):
+  from every branch end three to six strands of leaves go out a little
+  and then straight down, each for 45% to 97% of the way to the ground.
+  The tufts at the ends are small, so the curtain is the tree.
+- **Scots pine** ([*Pinus sylvestris*](https://en.wikipedia.org/wiki/Pinus_sylvestris)):
+  the trunk divides more than half way up, the limbs leave it nearly
+  level and wander, and the needles are plates a third as high as they
+  are wide on the ends of the branches only. It is grown by forking and
+  not by the pine's tiers because an old Scots pine has lost its tiers.
+- **Beech**: its tufts are now 0.42 as high as wide, and the smaller tufts
+  of a mass stand a quarter as far above and below its middle as an
+  oak's, so the leaves lie in level layers.
+- **Date palm** ([*Phoenix dactylifera*](https://en.wikipedia.org/wiki/Date_palm)):
+  the coconut palm in other proportions. The trunk is 1.55 times as
+  thick, upright, and steps out twice as far at each ring, for the stumps
+  of cut fronds. The fronds leave the crown at every angle from upright to
+  hanging, bend less than a third as much, and carry shorter leaflets held
+  up in a V.
+
+<img src="images/plant-yucca.png" width="330" alt="A yucca in bricks: a rosette of pointed sword leaves, upright in the middle and lying out at the edge, with a tall stalk of cream bells"> <img src="images/plant-bed.png" width="330" alt="A bed of mixed flowers in bricks: tulips, daffodils, daisies and peonies of different heights in pink and yellow">
+
+- **Cypress** ([*Cupressus sempervirens*](https://en.wikipedia.org/wiki/Cupressus_sempervirens)):
+  tufts set up a spindle by the golden angle, each stretched to 1.7 times
+  as tall as wide, so the outline is ribbed with upward strokes. The
+  spindle is widest three tenths of the way up and comes to a point.
+- **Yucca** ([*Yucca filamentosa*](https://en.wikipedia.org/wiki/Yucca_filamentosa)):
+  blades from one crown, a golden angle apart. The blade of age
+  $`\alpha`$ leans $`0.1 + 1.6\,\alpha^{0.8}`$ radians from upright, so
+  the youngest stand and the oldest lie out. A blade is two ribs that meet
+  at its tip. In flower it has a stalk of hanging bells as tall again.
+- **Daisy**: a sunflower's head made small and simple, with one row of 13
+  or 21 rays laid nearly flat and a disc a third of the head's width.
+- **Daffodil** ([*Narcissus pseudonarcissus*](https://en.wikipedia.org/wiki/Narcissus_pseudonarcissus)):
+  six petals in a flat star and a trumpet standing out of their middle,
+  facing sideways. The trumpet is a ring of ten ribs round an empty
+  middle that lean outwards at the mouth, with a heart of another colour
+  down it. At the usual size it is five cells across, and its hollow is
+  one cell.
+- **Bed of mixed flowers**: tulips, daffodils, daisies and peonies in
+  turn, scattered over a round bed by Vogel's model. Each is grown as it
+  is alone and set down in its place. They share the bed's colours part
+  for part, so a bed is a few colours that go together.
+
+A rose was considered again and left out. A rose head needs its petals
+in a tight spiral with each one curled, and at five to six cells across
+that is the ball with a heart that was taken out before.
 
 #### One colour for each part
 
@@ -2689,6 +2801,15 @@ block's middle, then perhaps its corners, then perhaps 64 samples in some
 of its cells, each answer deciding the next question. A card would have
 to answer every possible question in advance, most of which are never
 asked, or the fitter would have to be rewritten in rounds.
+
+The scheme that would keep the bricks identical was measured before
+anything was built: let the card sort cells into far, inside and near the
+surface, and let the processor decide every near cell. Of a pine's 9.2
+million samples, 7.5 million are the 64 inside a cell the surface
+crosses, which are the ones the processor would still have to take. For
+an oak it is 9.8 of 12.2 million, for a willow 6.3 of 8.0. The card could
+take the other fifth at most, and those are the cheap ones, a lookup in
+an empty bucket. It was not built.
 
 The speed was to be had on the processor, and it has been. The blocks of
 a fit are independent of one another, and the fitter now divides them
