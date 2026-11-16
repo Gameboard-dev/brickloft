@@ -24,7 +24,8 @@ fn threads(runs: usize) {
     let band = Spec { form: Form::Spline, points: wavy, thick: 20.0, depth: 2, ..Spec::default() };
     let floor = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 70.0, fill: true, depth: 3, ..Spec::default() };
     let stones = Some(Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-    let mosaic = |style: usize| Some(Mosaic { style, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: 50 });
+    let mosaic = |style: usize, bevel: bool| Some(Mosaic { style, size: 2, bevel, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [50; 2] });
+    let cube = Spec { form: Form::Cube, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, stretch: DVec3::new(1.0, 0.7, 0.4), fill: true, ..Spec::default() };
     let forms = [
         ("solid sphere, radius 40", sphere(40.0, true, 2.0)),
         ("solid sphere, radius 80", sphere(80.0, true, 2.0)),
@@ -39,11 +40,17 @@ fn threads(runs: usize) {
         ("round arch, span 320", Spec { form: Form::Arch(ArchType::Round), points: vec![at(-160.0, 0.0, 0.0), at(160.0, 0.0, 0.0)], thick: 3.0, depth: 4, ..Spec::default() }),
         ("stepping stones on that band", Spec { stones, ..band.clone() }),
         ("stepping stones on a disc, radius 70", Spec { stones, ..floor.clone() }),
-        ("medallions on that disc", Spec { mosaic: mosaic(0), ..floor.clone() }),
-        ("rug on that disc", Spec { mosaic: mosaic(1), ..floor.clone() }),
-        ("planks on that disc", Spec { mosaic: mosaic(2), ..floor.clone() }),
-        ("masonry on that disc", Spec { mosaic: mosaic(3), ..floor.clone() }),
-        ("masonry on the band", Spec { mosaic: mosaic(3), depth: 3, ..band }),
+        ("medallions on that disc", Spec { mosaic: mosaic(0, false), ..floor.clone() }),
+        ("rug on that disc", Spec { mosaic: mosaic(1, false), ..floor.clone() }),
+        ("planks on that disc", Spec { mosaic: mosaic(2, false), ..floor.clone() }),
+        ("bricks on that disc", Spec { mosaic: mosaic(3, false), ..floor.clone() }),
+        ("bevelled bricks on that disc", Spec { mosaic: mosaic(3, true), ..floor.clone() }),
+        ("cobblestone on that disc", Spec { mosaic: mosaic(4, false), ..floor.clone() }),
+        ("cobblestone on the band", Spec { mosaic: mosaic(4, false), depth: 3, ..band }),
+        ("rug on that disc with a rounded rim", Spec { tube: true, thick: 8.0, mosaic: mosaic(1, false), ..floor.clone() }),
+        ("cube 120 by 84 by 48", cube.clone()),
+        ("cobblestone on that cube, sides too", Spec { mosaic: mosaic(4, false), ..cube.clone() }),
+        ("bevelled bricks on that cube", Spec { mosaic: mosaic(3, true), ..cube }),
     ];
     let all = Threads::available();
     println!("least of {runs} builds; all threads: {}", all.count());

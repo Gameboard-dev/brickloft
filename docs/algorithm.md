@@ -1424,7 +1424,7 @@ The tile patterns of 7.9 do not use it either, for the reasons given
 ### 7.9 Tile patterns
 
 A flat band or a filled outline can also be laid as a pattern of coloured
-tiles: medallions, a rug, a snowflake, planks, bricks or slabs
+tiles: medallions, a rug, planks or masonry
 (`lay_mosaic` in [core/src/pattern.rs](../core/src/pattern.rs)). A tile is
 one cell. It is one colour, or it is cut along a diagonal into two
 triangles of two colours.
@@ -1472,14 +1472,21 @@ A tile could once be set larger than one cell, and wider than it was deep.
 That drew the same pattern coarser or stretched and did nothing else a
 player wanted, so a tile is now always one cell.
 
-The medallions, the rug and the snowflake are their own mirror images, and
-their tiles are set out from the middle of the floor. Set out on the
+A form with a tile pattern is also built at the finest brick
+size whatever the brick budget (section 9). The budget keeps a solid form
+from being more bricks than it needs, and a pattern needs every one of its
+bricks. A rug 240 cells by 160 is some twenty thousand bricks, and kept
+within a budget of 2,500 it was built three times coarser. A larger brick
+size can still be chosen by name.
+
+The medallions and the rug are their own mirror images, and their tiles
+are set out from the middle of the floor. Set out on the
 grid's own lines, a floor that did not lie evenly on them had a part row of
 tiles down one side and none down the other, and the pattern sat to one
 side. The middle is placed on a corner of the grid and not in the middle of
 a tile, because a figure about a corner is made of whole and half tiles. A
 floor an odd number of tiles across therefore has one row left over, which
-stays plain. Planks, bricks and slabs have no middle and are set out on the
+stays plain. Planks and masonry have no middle and are set out on the
 grid's lines.
 
 #### How a tile is decided from four samples
@@ -1579,151 +1586,300 @@ placed in that eighth, at the middle of the repeat, at its corner, at the
 middle of its side and at one place between. Folding makes every repeat its
 own mirror image eight ways from four figures.
 
-#### The snowflake: a branching rule
+#### The rug: a medallion carpet
 
-<img src="images/pattern-snowflake.png" width="420" alt="An eight-armed snowflake of bricks alone, its arms branching and the branches branching again, with no bricks between the arms">
+<img src="images/pattern-rug.png" width="640" alt="A rug 240 tiles by 160 in dark red, dark blue, gold and ivory: a chain of lozenges and a border with a swinging stem and flowers round the edge, a lobed medallion of four layers at the middle with a pendant at each end, a quarter figure in each corner, and coiling stems with flowers over the field">
 
-The snowflake is one flake at the middle of the floor. Its rule is the one
-a real flake grows by: an arm puts out side branches at a fixed angle,
-shorter towards its tip, and each branch puts out branches of its own.
-Such crystals are Nakaya's dendrites, which Libbrecht describes in "The
-physics of snow crystals" (*Reports on Progress in Physics* 68, 2005).
+The rug is set out as a medallion carpet of Tabriz or Kashan is, with each
+part on a ground of its own colour (`rug_garden`). One quarter of it is
+drawn and the other three are its mirror images. From the edge inwards it
+has these parts.
 
-The flake is made of these lines.
+| Part | What it is |
+|---|---|
+| Guard | a line, a chain of small lozenges, a line. A lozenge is two tiles across and made of four tiles cut on the diagonal, so the chain is exact on the grid and meets itself at a corner. |
+| Main border | on a dark ground, one stem swinging from side to side as a sine curve, a flower in every hollow of the stem on one side and the other by turns, and a small knot wherever the stem crosses the middle |
+| Second guard | as the first, and then the field |
+| Medallion | at the middle of the field, up to four layers one inside the next. Each layer has a ring of pointed lobes with round ones between them, an outline, a ground of its own and a bud in every pointed lobe. A flower is at the heart, and a pointed pendant and two lozenges hang from the medallion at each end of the rug's longer way. |
+| Corner pieces | a quarter of such a figure in each corner of the field |
+| Field | scrolls: a stem coiling in to a flower, with leaves along it. Small flowers fill what is left. |
 
-1. A heart at the middle: a lozenge, a square or an octagon.
-2. An arm along the grid, reaching to two tiles short of the nearer edge
-   of the floor, and a shorter arm along the diagonal. Each is two tiles
-   thick. Folding the floor onto one eighth repeats the pair as eight
-   arms.
-3. Branches off each arm, to both sides at 45 degrees. On a line of length
-   $`L`$, the branch that leaves it $`t`$ tiles from its start has the
-   length
+##### A layered figure
 
-   ```math
-   \ell(t) = c\,(L - t)
-   ```
+A layer of the medallion is the places within a round body or within one
+of the lobes that stand out from it. A round lobe is a disc. A pointed
+lobe is what two equal discs have in common, set a little to each side of
+the lobe's axis: two bows meeting in a point, the shape of a pointed arch
+(the [vesica piscis](https://en.wikipedia.org/wiki/Vesica_piscis)).
 
-   rounded to whole tiles, where $`c`$ is a share the seed draws between
-   0.40 and 0.60. A branch near the tip is therefore shorter than one near
-   the heart, which gives each arm its tapering outline.
-4. Branches off each branch, by the same formula with a share between 0.35
-   and 0.55, and no longer than keeps them clear of the branch beside
-   them. The branching stops there.
-5. A small filled lozenge at the tip of each arm and branch, and one or two
-   outlines about the heart that the arms pass through, like the ridges of
-   a flake's plate.
-
-The branches of an arm are spaced by the arm's length: a fifth to an eighth
-of it apart, and never under four tiles. A large flake therefore has as
-many branches as a small one. Set a fixed three tiles apart, the branches
-of a flake sixty tiles across filled it solid.
-
-The flake has eight arms where ice has six. A tile is cut only corner to
-corner, so the only lines that tiles draw cleanly run along the grid and
-along its diagonals, which are eight directions 45 degrees apart. Six arms
-60 degrees apart would have four of them drawn as staircases.
-
-A growth automaton was the alternative. Reiter's cellular model (2005) and
-Gravner and Griffeath's (2008) grow a flake cell by cell. Both work on a
-lattice of hexagons and give a shape of thousands of cells, which bricks on
-a square grid would show only as steps. The branching rule is therefore
-kept and the growing is left out. The branches are drawn directly as
-lines, in the directions the tiles have.
-
-A snowflake is laid as the flake alone. Where its pattern is bare ground no
-brick is laid, so it can be stood upright, or laid on a floor made from
-another form, with nothing round it or in the gaps between its arms.
-
-#### The rug
-
-The rug is being reworked to carry more ornament, so the list of its parts
-below describes the present version.
-
-<img src="images/pattern-rug.png" width="420" alt="A square rug: a border of small lozenges between two lines, a layered flower as the medallion at the middle with a smaller flower at each side, a piece in each corner, and small flowers joined by stems over the field">
-
-A rug in the Persian manner is made of a few large parts. From the edge
-inwards it has a border between two lines, with one small motif repeated
-along it, and then the field. At the middle of the field is the medallion,
-a flower of several layers one inside the next, with a smaller flower hung
-from it at each end. A quarter of another medallion fills each corner.
-Over the rest of the field small flowers are scattered, each with a leaf or
-two, and joined to their neighbours by stems. One quarter of the rug is
-drawn and the other three are its mirror images (`rug_garden`).
-
-A flower is one outline round a middle, further out where a petal is and
-nearer between two petals. Going round the middle by the angle
-$`\theta`$, a flower of size $`R`$ with $`n`$ petals, each standing proud
-by the share $`q`$ of the size, has its outline at the distance
+The lobes of a layer are all alike, so a place is first turned into one
+lobe's slice of the figure and asked about once. For a place $`p`$ at the
+distance $`r`$ from the middle, how far it is inside the layer's outline
+is
 
 ```math
-r(\theta) = R\left(1 - q + q\,\left\lvert \cos\frac{n\theta}{2} \right\rvert^{0.6}\right)
+d(p) = \max\Big(R_0 - r,\ \ \rho_1 - \lvert p - c_1\rvert,\ \ \rho_2 - \lvert p - c_2\rvert\Big)
 ```
 
-A place is in the flower when it is nearer the middle than $`r`$ at its
-angle. The outline is $`R`$ from the middle at the tip of a petal and
-$`R(1 - q)`$ at the notch between two. For example, with $`R = 10`$ and
-$`q = 0.3`$ the tips are 10 tiles out and the notches 7. This is the
-[rose curve](https://en.wikipedia.org/wiki/Rose_(mathematics)) of Guido
-Grandi with a constant added, so that the petals do not reach the middle.
-The power 0.6 makes a petal round at its tip and the notch between two
-petals sharp, as a drawn flower's are. Without it the outline is a wavy
-circle.
+Here $`R_0`$ is the size of the round body, $`c_1`$ and $`\rho_1`$ are
+the middle and size of the disc that bounds the pointed lobe on the far
+side of its axis from $`p`$, and $`c_2`$ and $`\rho_2`$ are those of the
+round lobe. Each term is how far inside one disc the place is, and the
+greatest of them is how far inside the three together. For example, a
+place 2 tiles inside the body and outside both lobes has $`d = 2`$.
 
-The medallion is several such outlines on one middle, each smaller than
-the last, with every other one turned by half a petal so that the petals
-of one layer show between those of the next. A leaf is two bows meeting in
-a point at each end. The seed chooses the number of layers and petals, the
-sizes, and where the field's flowers are. The flowers are placed by
-throwing darts and keeping those that land clear of the medallion, the
-corners and one another, as the stepping stones' points are found in 7.8.
+The outline is the band $`0 \le d < 1`$, the first tile in, and a second
+line is drawn further in where the layer is broad enough. Both follow every
+lobe, because both are bands of the one number $`d`$. This is the banding
+of a distance measure that the medallions use, applied to discs.
 
-The flowers could have been small pictures, drawn by hand and stamped over
-the field. A picture is one size, and a flower drawn in tiles for a rug
-forty tiles across is a blot on a rug two hundred across. An outline given
-as a formula is drawn afresh at whatever size the rug is, and every seed
-gives another flower.
+The first rug's medallion was a single rose curve, and its layers were the
+same flower drawn smaller. It read as a child's drawing of a flower. A
+woven medallion has lobes of two kinds by turns, with each layer turned
+half a lobe from the last so that the points of one show between the
+points of the next, and the layered figure is built to give that.
 
-#### Planks, bricks and slabs
+##### The field: packing circles
 
-<img src="images/pattern-planks.png" width="270" alt="A floor of boards laid end to end in rows, with the joins of one row falling anywhere against the next"> <img src="images/pattern-bricks.png" width="270" alt="A wall of bricks of one size in level courses with mortar between, each course shifted along by its own amount"> <img src="images/pattern-slabs.png" width="270" alt="A wall of squared stones of many sizes in courses of several depths, with mortar between and the corners of each stone cut off">
+The field is filled by the loop of Wong, Zongker and Salesin
+("[Computer-generated floral ornament](https://doi.org/10.1145/280814.280948)",
+SIGGRAPH 1998), which grows ornament into whatever space is empty. Find the
+largest empty circle left in the field, put a motif in it, and repeat until
+what is left is too small. The room at every tile is kept in a grid: how
+large a circle about that tile would touch the border, the medallion, a
+corner piece or a circle placed so far. Each new circle only lowers the
+room near it, so the grid is updated and never rebuilt.
 
-These three are floors and walls of rectangles, and the **Size** setting
-scales them. The sizes below are for the usual setting of 2.
+Two changes were made to the loop. The largest circle is not always taken:
+each tile's room is first lessened by a share of its own, up to a fifth,
+because with the strict rule every seed filled a field the same way. A
+circle is also limited in size, because without a limit the first one
+filled the whole of the field beside the medallion.
 
-| Style | What is laid | Size of a piece, in tiles | Numbers |
-|---|---|---|---|
-| Planks | boards end to end in rows, with no gap | 2 broad, 8 to 24 long | one of eight for each board, never the number of the board before it in its row |
-| Bricks | bricks of one size in level courses, with one tile of mortar between courses and between bricks | 8 long, 3 deep | 0 for the mortar, one of seven for each brick |
-| Slabs | squared stones in courses of several depths, with one tile of mortar between | 7 to 17 long, 4 to 9 deep | 0 for the mortar, one of seven for each stone |
+A circle found this way touches something, most often an earlier circle.
+Its stem then starts from that circle's stem and coils the opposite way,
+so the two run together where they meet, like two gears. This is how
+Hamekasi and Samavati join the scrolls of such patterns
+("[Designing Persian floral patterns using circle packing](https://doi.org/10.5220/0003850101350142)",
+GRAPP 2012). A stem is an
+[Archimedean spiral](https://en.wikipedia.org/wiki/Archimedean_spiral),
+which closes in by the same amount on every turn, so its coils stay evenly
+spaced.
 
-In all three the joins of one row fall where they will against the next.
-The first board of a row of planks is an offcut of any length, as a
-carpenter starts a row with what was left of the last. Each course of
-bricks is moved along by an amount of its own, so the upright joints fall
-anywhere against the course below, as in a wall laid without a bond in
-mind. Each course of slabs has its own depth and stones of many lengths.
+The first rug threw darts for its flowers and joined each to its nearest
+neighbour with a straight stem. Darts leave holes and crowds, and straight
+stems make a net where a rug has a vine.
 
-A slab may have its four corners cut off by the **Bevel** setting, in
-tiles. The cut runs at 45 degrees, so it is drawn with tiles cut in two,
-and it is the only part of these three styles that uses them.
+##### Small things are drawn on the grid
 
-A wall of stones of any shape at all, as opposed to squared ones, is the
-stepping stones of 7.8 with the gap at 0.
+A flower's size is how far it reaches from its middle. A flower of a size
+under five tiles is a lozenge and a square on one middle. Together they make an eight-pointed star whose edges are the grid's
+lines and diagonals, so it is drawn in whole tiles and tiles cut in two,
+exactly. A round outline that small comes out as a blot of steps. A flower
+under two and a half tiles is a lozenge alone.
+
+A larger flower is a
+[rose curve](https://en.wikipedia.org/wiki/Rose_(mathematics)) with a
+constant added, so that its petals do not reach the middle. Going round
+the middle by the angle $`\theta`$, a flower of size $`R`$ with $`n`$
+petals has its edge at the distance
+
+```math
+r(\theta) = R\left(0.58 + 0.42\,\left\lvert \cos\frac{n\theta}{2} \right\rvert^{0.6}\right)
+```
+
+The edge is $`R`$ from the middle at the tip of a petal and $`0.58R`$ at
+the notch between two. The power 0.6 makes a petal round at its tip and
+the notch sharp. Without it the outline is a wavy circle.
+
+##### Tones, not parts
+
+The rug's seven numbers are tones and not parts: 1 is every line (the
+outlines, the guard lines, the stems), 2 the dark ground, 3 the pale
+ground, 4 the petals, 5 the leaves, 6 the shaded half of a leaf and the
+ground of the corners, and 7 the hearts of flowers. Every part is made of
+several tones, and the same few come back all over the rug, which is what
+makes it read as one design. A flower is three tones: its petals, a smaller
+flower within them and a heart. The first rug gave each part one number,
+and each part came out one flat colour.
+
+The cost is that the rug needs its colours. With two colours every tone
+but the field's ground is the second colour, and the border, the medallion
+and the corners become solid blocks. The rug starts in sets of eight
+colours for this reason.
+
+##### What the size of the floor decides
+
+A figure given as a rule is drawn afresh at whatever size the rug is, and
+that is the reason the flowers are not small pictures stamped over the
+field. A picture is one size, and a flower drawn in tiles for a rug forty
+tiles across is a blot on one two hundred across.
+
+The rule also decides how much there is room to show, and a small rug
+shows little. A layer under five or six tiles broad is all outline, so the
+medallion has one layer where its points reach under 10 tiles from the
+middle, two from 10, three from 22 and four from 34. It may have twelve
+lobes only from a reach of 24, and has eight below it. The guards are
+single lines, with no lozenges, on a floor under 48 tiles on its shorter
+side.
+
+Worked through for a rug half as long again as it is broad, the medallion
+has three layers on a floor of about 90 tiles on its shorter side and four
+from about 130. A square rug needs more, because the medallion is kept to
+0.55 of the field's longer way. A rug is therefore best laid 100 tiles or
+more across. The picture above is 240 tiles by 160 and shows all four
+layers.
+
+The rug is its own mirror image tile for tile. A place and its mirror
+image reach the rule by different sums that can differ by a hair, so both
+are first put on the same sixth of a tile, where the four samples of a tile
+are taken.
+
+A place asks about the frame and the two figures by a few sums each, and
+about the scrolls only of its own square of four tiles by four, which are
+two or three. Asking every scroll at every place would be hundreds of
+them. The code's own measure is about 30 ms for a rug 250 tiles square.
+
+#### Planks
+
+<img src="images/pattern-planks.png" width="420" alt="A floor of boards laid end to end in rows, with the joins of one row falling anywhere against the next">
+
+Planks is a floor of boards laid end to end in rows, with no gap. The
+**Size** setting is how broad a board is, in tiles. At the usual size, 2,
+a board is 2 tiles broad and 8 to 24 long, and other sizes are in
+proportion. The first board of a row is an offcut of any length, as a
+carpenter starts a row with what was left of the last, so the joins of one
+row fall where they will against the next. Every board has one of eight
+numbers, never the number of the board before it in its row.
 
 Wave function collapse can lay a floor of planks too, from a sample of
 boards. A board's length is then whatever the sample's windows allow, which
 is a few fixed lengths, and the lengths are the whole look of a floor of
 planks. Drawing each length from the seed gives any length in the range.
 
+#### Masonry: bricks and stones from one measure
+
+<img src="images/pattern-masonry-bricks.png" width="270" alt="A wall of bricks all alike seen from the front, in a half-brick bond with mortar between"> <img src="images/pattern-masonry-bevelled.png" width="270" alt="The same wall seen at an angle with a bevel of one: the top of every brick slopes down to the mortar on all four sides"> <img src="images/pattern-masonry-stones.png" width="270" alt="A wall of uneven stones seen at an angle with a bevel of one: the stones differ in size and shape, their tops slope to the mortar, and the slopes are jagged at some corners">
+
+Masonry is a wall or a floor of pieces in courses: bricks all alike, or
+stones of uneven size and shape (`Masonry` in `pattern.rs`). Bricks and
+stones were two patterns at first. The difference between them is one of
+degree, how alike the pieces are, so there is now one pattern and a
+setting for that, **Uneven**.
+
+Every piece has a point, and a piece is the ground nearer its own point
+than any other's. This is the Voronoi diagram of the stepping stones in
+7.8. What **Uneven** changes is where the points stand and how "nearer" is
+measured. Write $`L`$ for a brick's length and $`D`$ for a course's depth,
+each with its mortar, and $`u`$ for **Uneven** as a number from 0 to 1.
+For a place $`p`$ and a piece's point $`c`$, the distances along and up
+are taken in units of half a brick,
+
+```math
+a = \frac{\lvert p_x - c_x\rvert}{L/2}, \qquad b = \frac{\lvert p_y - c_y\rvert}{D/2}
+```
+
+and how far the place is from the point is
+
+```math
+f(p, c) = (1 - u)\,\max(a, b) + u\,\sqrt{a^2 + b^2}
+```
+
+At $`u = 0`$ the points stand in rows, a brick's length apart, and $`f`$
+is the greater of along and up (the
+[Chebyshev distance](https://en.wikipedia.org/wiki/Chebyshev_distance)).
+Measured so, the ground nearest a point is a rectangle $`L`$ by $`D`$, and
+the wall is bricks exactly. As $`u`$ rises two things change together.
+Each point is moved from its place, by up to $`0.35u`$ of a brick each
+way, so the pieces differ in size. The measure goes over by degrees to the
+plain distance, so the pieces' edges leave the grid's lines and the pieces
+become stones of any shape. At the usual **Size** of 2 a brick is 8 tiles
+long and 3 deep, before its mortar.
+
+Slabs were first rectangles of many sizes, laid course by course from a
+list. That gave uneven sizes and nothing else. There was no way from a
+list of rectangles to a stone that is not square, and it left a second
+pattern beside the bricks with most of the same settings.
+
+##### Mortar, numbers and stagger
+
+How far inside its own outline a place is comes from the same measure.
+With $`f_1`$ for the distance to the piece's own point and $`f_2`$ for the
+distance to the next nearest point,
+
+```math
+h(p) = \tfrac{1}{2}\,(f_2 - f_1)\,w - \tfrac{m}{2}
+```
+
+Half the difference is how far the place is from the line between the two
+pieces, in the unit across that line, and $`w`$ takes it back into tiles:
+$`w`$ is $`L/2`$ when the other piece is in the same course and $`D/2`$
+when it is in the course above or below. $`m`$ is the mortar's width, 1
+tile or 0. For example, with bricks 9 tiles long with their mortar, a
+place 1 tile from the line between two bricks has $`a = 3.5/4.5`$ to its
+own point and $`5.5/4.5`$ to the other, so
+$`h = \tfrac{1}{2}\cdot\tfrac{2}{4.5}\cdot 4.5 - 0.5 = 0.5`$.
+
+A place with $`h \le 0`$ is mortar, which is the ground, 0. That is the
+half tile either side of the line between two pieces, so the mortar is one
+tile wide. With **Mortar between** off the pieces touch. Every piece has
+one of six numbers, odd and even by turns along a course, so two pieces
+side by side differ in shade even with no mortar between them.
+
+Each course is moved along from the one before. **Stagger** sets one share
+of a brick's length for every course: a half is the usual bond, and
+nothing stacks the bricks in columns. **Uneven stagger** moves every course
+by an amount of its own, so the upright joints fall anywhere, as in a wall
+laid without a bond in mind. **Courses upright** swaps the two directions,
+so the courses run up the floor and the stagger is from side to side.
+
+##### The bevel
+
+The bevel uses $`h`$ as a height. The top **Bevel** cells of a piece are
+not laid full. At its outline the piece stands that many cells short, and
+it rises one cell for every cell in from the outline, so its top slopes
+down to its edge all round. The mortar lies at the foot of the slope. A
+bevel can be no more than the form's **Depth** less one, so a wall one
+cell deep has none.
+
+The slope is laid cell by cell. For each cell of a piece, and each of the
+top layers, the piece is asked at the cell's eight corners whether it
+reaches that high there. Counting the top layers from 0, a corner at the
+bottom of layer $`k`$ is reached when $`h \ge k`$ and a corner at its top
+when $`h \ge k + 1`$. The corners that are reached name the brick, as
+they do everywhere else in the program (section 2).
+
+| Corners reached | What is laid |
+|---|---|
+| all eight | a whole cell, joined with its neighbours along the row |
+| the four below and two above | a sloped brick, along a side of the piece |
+| the four below and one above | a hipped brick, at a corner of the piece |
+| none | nothing |
+| a set that is no brick's shape | a whole cell or nothing, by whether the middle of the cell is reached |
+
+This is how the fitter of solid forms chooses a cell's brick (7.1). It is
+done by hand here, for a few layers, and the solid fitter is not called.
+A wall of stones is thousands of small solids, and that fitter is made
+for one large one.
+
+Bricks bevel cleanly, because their edges run along the grid and every
+corner is a right angle. Stones do not. Where two edges of a stone meet at
+an odd angle, the corners a cell reaches are no brick's shape, and the
+cell is laid whole or left out. The third picture above shows the result:
+the slopes along a stone's sides are clean and its corners are jagged.
+
+The first bevel belonged to the slabs and cut the four corners off each
+slab flat, in the plane of the wall. Masonry has no such cut, and a file
+that asks for it is read with a bevel of 0.
+
 #### Colours by feature
 
-<img src="images/pattern-snowflake-two-colours.png" width="320" alt="A snowflake with two colours chosen: the first is the ground, which a snowflake does not lay, so the whole flake is in the second colour"> <img src="images/pattern-snowflake-eight-colours.png" width="320" alt="The same snowflake with eight colours chosen: the arms, the diagonal arms, the branches, their own branches, the tips, the heart and the plates each have a colour of their own">
+<img src="images/pattern-medallions-two-colours.png" width="320" alt="A floor of medallions with two colours chosen: the whole pattern is in the second colour on a ground of the first"> <img src="images/pattern-medallions-five-colours.png" width="320" alt="The same floor with five colours chosen: each of the four figures of the repeat has a colour of its own">
 
 A pattern numbers its parts and not its colours. 0 is the ground, and each
-number from 1 to 7 is one feature of the pattern: a snowflake's arms, its
-branches or its tips, a rug's border lines or its leaves. The player
-chooses how many colours there are, from one to eight, and `colour_of`
+number from 1 to 7 is one feature of the pattern: one of the four figures
+of a medallions repeat, one of a rug's tones, one shade of brick. The
+player chooses how many colours there are, up to eight, and `colour_of`
 decides which colour a number takes. With $`s`$ for a brick's number and
 $`N`$ for the number of colours, counting the colours from 0,
 
@@ -1737,9 +1893,9 @@ colours. For example, with $`N = 4`$ the features 1 to 7 take the colours
 1, 2, 3, 1, 2, 3, 1.
 
 Two colours therefore give the whole pattern in one colour on the other,
-and every colour added picks one more feature out, until with eight each
-has its own. The two pictures above are one snowflake with two colours and
-with eight.
+and every colour added picks one more feature out, until each has its own.
+The two pictures above are one floor of medallions, which has four
+features, with two colours and with five.
 
 The first rule went round all the colours, the ground's among them. With
 fewer colours than features it painted some feature the colour of the
@@ -1749,23 +1905,23 @@ colour for the ground prevents that at any number of colours.
 Planks and stepping stones have no ground. A board or a stone numbered 0
 takes the first colour by the same formula, and the other numbers share the
 rest. The colour sets these two start in are shades of one material, so the
-first colour is one more shade among them.
+first colour is one more shade among them. In masonry the ground is the
+mortar.
 
-#### The edge: bricks of five cells at most
+#### The edge: the form's own
 
-Along a slanting edge the outline fitter lays sloped bricks twenty cells
-long. A sloped brick is one colour, so on a patterned floor those bricks
-stood in the pattern as bare triangles the size of a medallion.
+A pattern colours a form and does not reshape it. The floor is fitted
+exactly as it is with no pattern, so its outline and its figures for
+closeness are the same either way.
 
-The floor is therefore fitted with no brick longer than five cells
-(`EDGE_BRICK`). Only the sloped bricks of the edge are more numerous for it, since the
-whole cells are joined into long bricks again by colour. The price is paid
-at the edge, because a slant drawn in bricks of five cells follows the form
-a little less closely than one drawn in bricks of twenty. On a band 20
-cells wide curving through a third of a turn, 1.5% of its area is amiss
-with bricks of five cells against 0.6% with bricks of twenty. Shorter and
-longer limits were both worse. At three cells the edge was plainly ragged,
-and at eight the bare triangles were still plain to see.
+Along a slanting edge that fit lays sloped bricks up to twenty cells long.
+A sloped brick is one colour, and each takes the pattern's colour at the
+middle of its solid half. The floor was once fitted with no brick longer
+than five cells, so that the edge's bricks were small enough to carry the
+pattern. That changed the form: on a band 20 cells wide curving through a
+third of a turn, 1.5% of its area was amiss with bricks of five cells
+against 0.6% with the fit's own. A form whose outline moved when a pattern
+was chosen was the worse fault, and the limit was taken out.
 
 A sloped brick whose two sides share a divisor is also taken apart into
 that many smaller sloped bricks of the same slope, over a staircase of
@@ -1798,8 +1954,8 @@ faults of its floors follow from that.
   everywhere, where a drawn one has a middle and is its own mirror image.
 - A rug could not be made. Tried for a rug's field, the method gave the
   rug its scattered small motifs, which is a plain rug. What makes a rug
-  or a snowflake look like one is a few large figures that govern the
-  whole of it, and a rule a few tiles across places no such figure.
+  look like one is a few large figures that govern the whole of it, and a
+  rule a few tiles across places no such figure.
 - Lengths cannot vary freely. A board in a floor of planks has one of the
   few lengths the sample's windows allow.
 
@@ -1991,7 +2147,7 @@ also make every form on a grid one form to edit, where cutting bricks
 leaves each form its own dots and settings.
 
 A joined form is not pushed clear when a form it sits in is reshaped, and
-moving it without Shift sets it clear again. The mark is held by the
+moving it without Ctrl sets it clear again. The mark is held by the
 workspace alone. Undo rebuilds the forms from their settings, and a save
 holds only settings, colours and places, so neither brings the mark back.
 
@@ -2206,8 +2362,9 @@ grid has an outline the two-dimensional fitter can fill.
 
 A pattern needs a flat band or a filled outline. Stones fitted together
 with the gap at 0 keep seams between them, because each stone is fitted by
-itself (7.8). A snowflake has eight arms and not six, because a tile is cut
-only at 45 degrees (7.9).
+itself (7.8). The bevelled tops of masonry are clean on bricks and jagged
+at the corners of uneven stones, where two edges meet at an angle no brick
+has (7.9). A rug shows its full detail only on a large floor (7.9).
 
 ### Why no machine learning
 

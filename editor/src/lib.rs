@@ -96,7 +96,8 @@ fn d(p: Vec3) -> DVec3 {
 }
 
 pub fn run() {
-    run_form(0, false);
+    // (on a cube: the plainest form there is, and the one new forms are added as)
+    run_form(state::CUBE, false);
 }
 
 /// Open the editor on one of `state::FORMS`, by its place in that list.
@@ -355,6 +356,13 @@ pub fn run_form(form: usize, claude: bool) {
                         shot_keyed = Some(!modifiers.shift);
                         true
                     }
+                    // (D alone is a camera key, as A is: with Ctrl it is taken here first)
+                    Key::D if held => {
+                        state.record();
+                        state.add_copy();
+                        state.toast = Some(("Duplicated the form being edited".to_string(), None));
+                        true
+                    }
                     Key::Z if held => state.undo() || true,
                     Key::Y if held => state.redo() || true,
                     #[cfg(not(target_arch = "wasm32"))]
@@ -527,7 +535,7 @@ pub fn run_form(form: usize, claude: bool) {
                     Handle::Move | Handle::Slide(_) | Handle::Spin(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
-                    Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
+                    Handle::Radius | Handle::Rise | Handle::Side(_) => Srgba::new_opaque(70, 230, 240),
                 });
             }
             instances.colors = Some(colours);
