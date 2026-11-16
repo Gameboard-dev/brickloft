@@ -1969,8 +1969,13 @@ mod tests {
             let tiny = build(&Spec { radius: 0.5, rise: Some(0.5), ..spec(kind, 1) }).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(!tiny.bricks.is_empty(), "{name}");
         }
-        let vast = build(&Spec { radius: 900.0, rise: Some(900.0), ..spec(Kind::Pine, 1) });
+        // (at single microbricks, asked for by name; left to itself it is built at a larger size)
+        let vast = build(&Spec { grain: 1, radius: 900.0, rise: Some(900.0), ..spec(Kind::Pine, 1) });
         assert!(vast.is_err_and(|e| e.contains("too large")));
+        let at = std::time::Instant::now();
+        let vast = build(&Spec { grain: 0, radius: 900.0, rise: Some(900.0), ..spec(Kind::Pine, 1) }).unwrap();
+        println!("a pine 900 tall: grain {}, {} bricks, {:?}", vast.grain, vast.bricks.len(), at.elapsed());
+        assert!(vast.grain > 1);
     }
 
     /// The field is what the fitter is told it is: never more than the
