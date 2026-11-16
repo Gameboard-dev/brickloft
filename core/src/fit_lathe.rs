@@ -35,17 +35,32 @@
 //! air inside is the wall of a hollow. The same pieces serve both, since a
 //! hollow narrowing is solid growing inwards.
 //!
+//! Where an outer face and a hollow's wall end on one circle is a *crease*:
+//! the crest of a lip, where the solid between the two faces comes to an
+//! edge, or the bottom of a groove, where the air between them does. There
+//! a sliver between two outlines is not a ledge. The pieces of the two
+//! rings lie against each other all round the circle, and a sliver puts
+//! the boxes of one in the cells of the other, so that none of them fit;
+//! they were built as whole cells once, a ring of steps round every crease.
+//! The two rings of a crease are therefore built on one outline of its
+//! circle. Along a sloped side of that outline the pieces of both lie in
+//! one box, each on its own side of the diagonal, and share it. See
+//! `Crease` and `fit_lathe`.
+//!
 //! What is not done: a profile is not tried at several positions, and the
 //! circles are plain outlines, so a very thin wall, whose inner and outer
-//! pieces want the same cells, loses the inner ones there and stands a
-//! little thick. Where the layout cannot be made at all the caller fits the
-//! form cell by cell, as before.
+//! pieces want the same cells, loses the inner ones there and is built in
+//! whole cells along that face. The two rings of a crease share an outline
+//! fitted for the shallower of them, so the deeper one stands up to a cell
+//! proud just inside the crease. And two faces that end on one circle going
+//! the same way, a cusp, share nothing. Where the layout cannot be made at
+//! all the caller fits the form cell by cell, as before.
 
-use crate::fit_planar::{fit_planar, fit_planar_towards, Opts};
+use crate::fit_planar::{fit_planar, fit_planar_towards, Opts, Piece};
 use crate::fit_round::rest_of_box;
 use crate::fit_stack::{grow, Plan};
 use crate::fit_volume::merge;
-use crate::shapes::{shape_info, CellBrick, CUBE};
+use crate::shapes::{corners, inside_shape, shape_info, CellBrick, CUBE};
 use glam::DVec2;
 use std::collections::HashMap;
 
@@ -90,6 +105,82 @@ struct Band {
     outside: Plan,
     /// its sloped and three-cornered bricks
     pieces: Vec<CellBrick>,
+    /// For each piece, the shape it takes where it shares its box with a
+    /// piece of `partner`, the band it meets in a crease (see [`Crease`]).
+    halves: Vec<Option<u8>>,
+    partner: Option<usize>,
+}
+
+/// Where an outer face and the wall of a hollow end on the same circle: the
+/// crest of a lip (a ridge, solid between the two faces) or the bottom of a
+/// groove (air between them).
+struct Crease {
+    /// the side of each track that ends there, as (track, side): the outer
+    /// face's, then the hollow's
+    sides: [(usize, usize); 2],
+    /// the circle they share, and the reach its outline is fitted for
+    cells: i32,
+    reach: i32,
+    /// whether it is solid that lies between the two faces, and not air
+    ridge: bool,
+}
+
+impl Track {
+    /// Its top or bottom node, and the node next to that.
+    fn end(&self, top: bool) -> ((i32, i32), (i32, i32)) {
+        let n = self.nodes.len() - 1;
+        if top { (self.nodes[n], self.nodes[n - 1]) } else { (self.nodes[0], self.nodes[1]) }
+    }
+
+    /// Which of its sides that end is.
+    fn end_side(&self, top: bool) -> usize {
+        if top { self.nodes.len() - 2 } else { 0 }
+    }
+}
+
+/// Whether the ends of an outer face and of a hollow's wall, each as its
+/// end node and the node next to it, make a crease: they end at one node,
+/// and away from it one widens while the other narrows or stands upright.
+/// Two that go the same way meet in a cusp, which no one outline serves.
+fn meets(ends: [((i32, i32), (i32, i32)); 2]) -> bool {
+    let wider = ends.map(|(at, next)| (next.1 - at.1).signum());
+    ends[0].0 == ends[1].0 && wider[0] != wider[1] && wider[0] * wider[1] <= 0
+}
+
+/// Cut the taller of the two sides that meet in each crease, so that both
+/// go through the same layers.
+///
+/// The pieces of the two rings share boxes along the crease (see
+/// `fit_lathe`), and a box is shared only by pieces of one height. A wall is
+/// cut anywhere. A sloped side taller than its neighbour is one cell across
+/// (see `stepped`), so one part of it has to become a wall and the other
+/// keep the cell: whichever leaves the side nearer where it was. Cut in the
+/// middle it is the same either way, and the part at the crease keeps the
+/// cell, so that a lip's crest has a slope on both sides. And never a wall
+/// against a wall, which would be a crease between two upright faces with
+/// nothing to share.
+fn level_creases(tracks: &mut [Track]) {
+    for o in 0..tracks.len() {
+        for h in 0..tracks.len() {
+            for top in [false, true] {
+                if tracks[o].hollow || !tracks[h].hollow {
+                    continue;
+                }
+                let ends = [tracks[o].end(top), tracks[h].end(top)];
+                let tall = ends.map(|(at, next)| (next.0 - at.0).abs());
+                if !meets(ends) || tall[0] == tall[1] {
+                    continue;
+                }
+                let taller = (tall[1] > tall[0]) as usize;
+                let (at, next) = ends[taller];
+                let (short, other_is_wall) = (tall[1 - taller], ends[1 - taller].1 .1 == at.1);
+                let wall_at_crease = !other_is_wall && 2 * short < tall[taller];
+                let cut = (at.0 + if top { -short } else { short }, if wall_at_crease { at.1 } else { next.1 });
+                let nodes = &mut tracks[[o, h][taller]].nodes;
+                nodes.insert(if top { nodes.len() - 1 } else { 1 }, cut);
+            }
+        }
+    }
 }
 
 /// The bricks of `lathe`, or `None` where it cannot be laid out this way:
@@ -134,15 +225,16 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
     if section.pieces.is_empty() {
         return None;
     }
-    let tracks = tracks(&Plan::new(&section.pieces, 1));
+    let mut tracks = tracks(&Plan::new(&section.pieces, 1));
+    level_creases(&mut tracks);
     let radius = |cells: i32| cells as f64 + least;
     let widest = tracks.iter().flat_map(|t| t.nodes.iter().map(|n| n.1)).max()?;
 
     // 2. each track's circles, from where it is widest
     let centre = |x: f64, y: f64| (x - c.x).hypot(y - c.y);
     // a circle's outline is the same wherever it is wanted with the same reach
-    let mut fitted: HashMap<(i32, i32), Plan> = HashMap::new();
-    let mut circle = |cells: i32, reach: i32| -> Plan {
+    let mut fitted: HashMap<(i32, i32), Vec<Piece>> = HashMap::new();
+    let mut circle = |cells: i32, reach: i32| -> Vec<Piece> {
         fitted
             .entry((cells, reach))
             .or_insert_with(|| {
@@ -152,14 +244,60 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 // fitted knowing how far in the next circle is, where there is one: see `fit_planar_towards`
                 let narrower = |x: f64, y: f64| centre(x, y) - (r - reach as f64);
                 let fit = if reach > 0 { fit_planar_towards(&disc, lo, hi, &opts, Some((&narrower, reach))) } else { fit_planar(&disc, lo, hi, &opts) };
-                // kept as what is outside it, which is what grows as a circle shrinks
-                Plan::new(&fit.pieces, 2).complement()
+                fit.pieces
             })
             .clone()
     };
+    // what is outside a circle, which is what grows as the circle shrinks
+    let air = |pieces: &[Piece]| Plan::new(pieces, 2).complement();
+
+    // The creases. Each ring's wide outline is fitted for that ring, so two
+    // rings that end on one circle have two outlines of it, a sliver apart.
+    // Along one face that is a ledge too small to see. But where an outer
+    // face and a hollow's wall end on one circle, the pieces of the two
+    // rings lie against each other all the way round, and a sliver between
+    // their outlines puts a cell of one ring's boxes in the other's: every
+    // such piece then had to be left out and built as whole cells, a ring
+    // of steps round the crease. So the two rings share one outline there.
+    // A ring that narrows away from the crease is cut back from that
+    // outline as any ring is, a ring that widens away from it is grown
+    // outwards from the same outline (`grow` works either way), and a wall
+    // stands on it.
+    //
+    // The outline is fitted for the shallower of two sloped rings. Its
+    // sloped sides are then no deeper than either ring goes, so both rings
+    // can take every one of them; fitted for the deeper, the shallower
+    // could not, and would stand upright along those sides.
+    let mut creases: Vec<Crease> = Vec::new();
+    // the sides of tracks built on a crease's outline, with the reach it was fitted for
+    let (mut outwards, mut inwards, mut standing): (HashMap<(usize, usize), i32>, HashMap<(usize, usize), i32>, HashMap<(usize, usize), i32>) = Default::default();
+    for (o, outer) in tracks.iter().enumerate().filter(|(_, t)| !t.hollow) {
+        for (h, hollow) in tracks.iter().enumerate().filter(|(_, t)| t.hollow) {
+            for top in [false, true] {
+                let (ends, sides) = ([outer.end(top), hollow.end(top)], [(o, outer.end_side(top)), (h, hollow.end_side(top))]);
+                let wider = ends.map(|(at, next)| next.1 - at.1);
+                // A side is in one crease only: its other end is then
+                // whatever the growing left. And a crease on the axis
+                // itself has no circle.
+                let taken = sides.iter().any(|side| creases.iter().any(|c| c.sides.contains(side)));
+                if !meets(ends) || ends[0].1 .0 != ends[1].1 .0 || taken || (ends[0].0 .1 == 0 && least == 0.0) {
+                    continue;
+                }
+                let reach = wider.iter().map(|w| w.abs()).filter(|w| *w > 0).min().unwrap_or(0);
+                for (side, wider) in sides.iter().zip(wider) {
+                    let built = if wider > 0 { &mut outwards } else if wider < 0 { &mut inwards } else { &mut standing };
+                    built.insert(*side, reach);
+                }
+                // solid between the two faces if the outer face is the further out away from the crease
+                creases.push(Crease { sides, cells: ends[0].0 .1, reach, ridge: wider[0] > wider[1] });
+            }
+        }
+    }
 
     let mut bands: Vec<Band> = Vec::new();
-    for track in &tracks {
+    // which band each side of a track became
+    let mut band_of: HashMap<(usize, usize), usize> = HashMap::new();
+    for (number, track) in tracks.iter().enumerate() {
         let n = track.nodes.len() - 1;
         let r = |k: usize| track.nodes[k].1;
         for k in 0..n {
@@ -173,7 +311,8 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 // that the two meet edge to edge.
                 let above = (k + 2 <= n && r(k + 2) < r(k + 1)).then(|| r(k + 1) - r(k + 2));
                 let below = (k > 0 && r(k - 1) < r(k)).then(|| r(k) - r(k - 1));
-                let outside = circle(r(k), above.or(below).unwrap_or(0));
+                // Or on the outline of the crease it ends in.
+                let outside = air(&circle(r(k), standing.get(&(number, k)).copied().or(above).or(below).unwrap_or(0)));
                 // The circle's own triangles stand straight up: the solid is
                 // the half of each one's box inside the circle, or for a
                 // hollow the half outside it.
@@ -183,7 +322,9 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                     let mask = if track.hollow { p.mask } else { inside_half };
                     upright(&mut pieces, [p.x, p.y, p.w, p.h], mask, mask, false, false, low, high, limit)?;
                 }
-                bands.push(Band { hollow: track.hollow, low, high, radius: (radius(r(k)), radius(r(k))), outside, pieces });
+                let halves = vec![None; pieces.len()];
+                band_of.insert((number, k), bands.len());
+                bands.push(Band { hollow: track.hollow, low, high, radius: (radius(r(k)), radius(r(k))), outside, pieces, halves, partner: None });
             } else {
                 // A sloped ring, cut back from the outline of its wide end
                 // to its narrow end. What `grow` makes are pieces of whatever
@@ -192,14 +333,69 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 let wide_below = r(k) > r(k + 1);
                 let (wide, narrow) = if wide_below { (r(k), r(k + 1)) } else { (r(k + 1), r(k)) };
                 let to = radius(narrow);
-                let (feet, shrunk) = grow(&circle(wide, wide - narrow), &|x, y| to - centre(x, y), wide - narrow);
+                // From the outline of its narrow end outwards, where that
+                // end is a crease whose outline the other ring there is cut
+                // back from. What `grow` makes is then pieces of the inside
+                // of the circle: solid, or for a hollow the air.
+                let from_narrow = outwards.get(&(number, k)).copied();
+                let (feet, smallest) = match from_narrow {
+                    None => grow(&air(&circle(wide, inwards.get(&(number, k)).copied().unwrap_or(wide - narrow))), &|x, y| to - centre(x, y), wide - narrow),
+                    Some(reach) => {
+                        let shared = circle(narrow, reach);
+                        let (feet, _) = grow(&Plan::new(&shared, wide - narrow + 2), &|x, y| centre(x, y) - radius(wide), wide - narrow);
+                        (feet, air(&shared))
+                    }
+                };
                 let mut pieces = Vec::new();
                 for f in &feet {
-                    let (below, above) = if wide_below { (f.narrow, f.wide) } else { (f.wide, f.narrow) };
-                    upright(&mut pieces, [f.x, f.y, f.w, f.h], below, above, !track.hollow, f.valley, low, high, limit)?;
+                    // what it reaches where the circle is wide, and where it is narrow
+                    let (at_wide, at_narrow) = if from_narrow.is_some() { (f.wide, f.narrow) } else { (f.narrow, f.wide) };
+                    let (below, above) = if wide_below { (at_wide, at_narrow) } else { (at_narrow, at_wide) };
+                    upright(&mut pieces, [f.x, f.y, f.w, f.h], below, above, track.hollow == from_narrow.is_some(), f.valley, low, high, limit)?;
                 }
                 let ends = if wide_below { (radius(wide), to) } else { (to, radius(wide)) };
-                bands.push(Band { hollow: track.hollow, low, high, radius: ends, outside: shrunk, pieces });
+                let halves = vec![None; pieces.len()];
+                band_of.insert((number, k), bands.len());
+                bands.push(Band { hollow: track.hollow, low, high, radius: ends, outside: smallest, pieces, halves, partner: None });
+            }
+        }
+    }
+
+    // A sloped side of a crease's outline lies across a box, and the pieces
+    // of both rings are in that box: each is under its own face, and its
+    // face comes to the outline from its own side. Neither can be left out
+    // without a step. So the two share the box, each keeping to its own
+    // side of the diagonal, as the two halves of a folded cell do in
+    // `fit_ribbon`.
+    //
+    // In a groove the box holds what either ring holds, and the rings'
+    // pieces are on their own sides of the diagonal as they are made: two
+    // tetrahedra, or a tetrahedron and a wall's upright half. On a ridge
+    // the box holds only what both rings hold, and each ring's piece takes
+    // in the other's side: a cut cube, or a wall's upright half. So each is
+    // cut down to what both hold on its own side of the diagonal, which is
+    // a half outer corner under the ridge, or for a wall nothing at all.
+    for crease in &creases {
+        let (Some(&outer), Some(&hollow)) = (band_of.get(&crease.sides[0]), band_of.get(&crease.sides[1])) else { continue };
+        (bands[outer].partner, bands[hollow].partner) = (Some(hollow), Some(outer));
+        for p in circle(crease.cells, crease.reach).iter().filter(|p| p.mask != 15) {
+            let held = |band: &Band| band.pieces.iter().position(|b| b.min[..2] == [p.x, p.y] && b.ext[..2] == [p.w, p.h]);
+            let (Some(in_outer), Some(in_hollow)) = (held(&bands[outer]), held(&bands[hollow])) else { continue };
+            let (whole_outer, whole_hollow) = (corners(bands[outer].pieces[in_outer].mask), corners(bands[hollow].pieces[in_hollow].mask));
+            // the triangle inside the circle and the one outside it, each
+            // through the box from bottom to top, and the diagonal between them
+            let square = (!p.mask & 15).trailing_zeros() ^ 3;
+            let (within, beyond) = (levels(p.mask, p.mask), levels(15 & !(1 << square), 15 & !(1 << square)));
+            let diagonal = within & beyond;
+            // The outer face is the inner of the two in a groove, and the
+            // outer of the two on a ridge.
+            let (of_outer, of_hollow) = if crease.ridge { (whole_outer & whole_hollow & beyond, whole_outer & whole_hollow & within) } else { (whole_outer, whole_hollow) };
+            let kept = if crease.ridge { [(of_outer, beyond), (of_hollow, within)] } else { [(of_outer, within), (of_hollow, beyond)] };
+            // nothing, if it has come down to the diagonal itself; and never a shape no brick has
+            let shapes = kept.map(|(corners, side)| if corners & !diagonal == 0 { Some(0) } else { (corners & !side == 0 && shape_info(corners).is_some()).then_some(corners) });
+            if let [Some(for_outer), Some(for_hollow)] = shapes {
+                bands[outer].halves[in_outer] = Some(for_outer);
+                bands[hollow].halves[in_hollow] = Some(for_hollow);
             }
         }
     }
@@ -236,7 +432,10 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
         let (min, ext) = (b.min, b.ext);
         (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])))
     };
-    // 0 for nothing, 1 for a piece's box, CUBE for a whole cell
+    // 0 for nothing, 1 for a piece's box, 2 for a box holding the first of
+    // the two pieces that share it, CLEAR for a cell to be left empty, CUBE
+    // for a whole cell
+    const CLEAR: u8 = 3;
     let mut grid = vec![0u8; size[0] * size[1] * size[2]];
     let mut bricks: Vec<CellBrick> = Vec::new();
     // Outer faces first, so that where an outer face and a hollow's wall
@@ -244,28 +443,77 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
     //
     // A piece that cannot be placed, because another has a cell of its box
     // or because its box reaches past the face next out from it, is where
-    // two faces of the form run into each other: the bottom of a groove,
-    // the root of a lip. An outer face's piece is what the air leaves of
-    // its box, so leaving it out would leave a hole; its box is built whole
-    // instead, wherever it is free, which rounds the groove off with a
-    // little too much. A hollow's piece is simply left out: its cells are
-    // then not hollow, so they too are built whole where they are free.
+    // two faces of the form run into each other and share no outline: a
+    // wall so thin that the boxes of its two faces cross, or a rim a cell
+    // wide.
+    //
+    // A wall's piece, which stands upright through all the wall's layers,
+    // is then built cell by cell, wherever its box is free: a cell is whole
+    // if the piece would have filled three eighths of it or more, and is
+    // left empty otherwise. That is a staircase along the piece's upright
+    // face, half a cell off it at most. (Its whole box was built solid
+    // before, which stood as far out as the box is deep: a lump four cells
+    // high inside the neck of a bowl whose wall is three thick.) Three
+    // eighths and not a half, so that a cell the face cuts corner to
+    // corner, which samples as just under half, is whole: a bump there is
+    // better than a hole.
+    //
+    // A ring's piece is one sloped face through its box, and so in effect
+    // is the piece of a wall one layer high. An outer face's is what the
+    // air leaves of its box, so leaving it out would leave a hole; its box
+    // is built whole instead, wherever it is free, which rounds the place
+    // off with a little too much. A hollow's is simply left out: its cells
+    // are then not hollow, so they too are built whole where they are free.
+    // Cell by cell these were measured rougher: such a piece is mostly in a
+    // shallow dish in a flat top or a recess one layer deep, where a
+    // staircase one cell high is a row of teeth and the place is better
+    // left flat.
     for hollow in [false, true] {
         for (number, band) in bands.iter().enumerate().filter(|(_, b)| b.hollow == hollow) {
-            for piece in &band.pieces {
-                // every cell of its box wholly inside the face next out from it, at every layer
+            for (piece, half) in band.pieces.iter().zip(&band.halves) {
+                // the second piece into a box two share
+                if let Some(mask) = half.filter(|_| cells(piece).all(|[x, y, z]| index(x, y, z).is_some_and(|i| grid[i] == 2))) {
+                    cells(piece).for_each(|[x, y, z]| grid[index(x, y, z).unwrap()] = 1);
+                    if mask != 0 {
+                        bricks.push(CellBrick { mask, ..*piece });
+                    }
+                    continue;
+                }
+                // Every cell of its box wholly inside the face next out from
+                // it, at every layer. A box shared with that face's own
+                // piece is on the outline the two faces share, not inside it.
                 let enclosed = cells(piece).all(|[x, y, z]| {
                     let through = &layers[(z - origin[2]) as usize];
                     match through.iter().position(|b| *b == number) {
                         Some(0) => true,
-                        Some(place) => inside(&bands[through[place - 1]], x, y),
+                        Some(place) => (half.is_some() && band.partner == Some(through[place - 1])) || inside(&bands[through[place - 1]], x, y),
                         None => false,
                     }
                 });
                 let free = cells(piece).all(|[x, y, z]| index(x, y, z).is_some_and(|i| grid[i] == 0));
                 if enclosed && free {
-                    cells(piece).for_each(|[x, y, z]| grid[index(x, y, z).unwrap()] = 1);
-                    bricks.push(*piece);
+                    // The first into a shared box takes its half at once:
+                    // the other ring has a piece for every such box, and
+                    // nothing else can take a box so marked.
+                    cells(piece).for_each(|[x, y, z]| grid[index(x, y, z).unwrap()] = if half.is_some() { 2 } else { 1 });
+                    if *half != Some(0) {
+                        bricks.push(CellBrick { mask: half.unwrap_or(piece.mask), ..*piece });
+                    }
+                } else if piece.mask & 15 == piece.mask >> 4 && band.high - band.low > 1 {
+                    let shape = shape_info(piece.mask)?;
+                    for [x, y, z] in cells(piece) {
+                        if let Some(i) = index(x, y, z).filter(|i| grid[*i] == 0) {
+                            // 16 points of the cell, in the piece's own box; it is the same all the way up
+                            let held = (0..16).filter(|k| {
+                                let t = [(x, k % 4, 0), (y, k / 4, 1)].map(|(cell, part, axis)| (cell as f64 + (part as f64 + 0.5) / 4.0 - piece.min[axis] as f64) / piece.ext[axis] as f64);
+                                inside_shape(shape, t[0], t[1], 0.5)
+                            });
+                            // A hollow's cell that is not to be hollow is
+                            // left for the faces further out to settle:
+                            // where the box reaches past them it is air.
+                            grid[i] = if held.count() < 6 { CLEAR } else if hollow { 0 } else { CUBE };
+                        }
+                    }
                 } else if !hollow {
                     for [x, y, z] in cells(piece) {
                         if let Some(i) = index(x, y, z).filter(|i| grid[*i] == 0) {
@@ -367,6 +615,12 @@ fn stepped(nodes: &[(i32, i32)]) -> Vec<(i32, i32)> {
     out
 }
 
+/// The corners of a box that are `below` at its bottom and `above` at its
+/// top (each as bits `cx | cy << 1`).
+fn levels(below: u8, above: u8) -> u8 {
+    (0..8u8).fold(0u8, |m, corner| m | ((if corner >> 2 == 0 { below } else { above }) >> (corner & 3) & 1) << corner)
+}
+
 /// Add the brick that fills box `[x, y, w, h]` through layers `low..high`,
 /// reaching the corners `below` of the box at its bottom and `above` at its
 /// top (bits `cx | cy << 1`); or, with `rest`, the brick that fills what
@@ -376,7 +630,7 @@ fn upright(pieces: &mut Vec<CellBrick>, [x, y, w, h]: [i32; 4], below: u8, above
     if w > limit || h > limit {
         return None;
     }
-    let mut mask = (0..8u8).fold(0u8, |m, corner| m | ((if corner >> 2 == 0 { below } else { above }) >> (corner & 3) & 1) << corner);
+    let mut mask = levels(below, above);
     if valley {
         mask = crate::fit_stack::valley(mask, 2);
     }
@@ -468,6 +722,57 @@ mod tests {
                 assert!(solid(&bricks, [c * middle, s * middle, level]), "no wall at level {level}, turn {turn}");
                 assert!(!solid(&bricks, [c * (middle - 3.0), s * (middle - 3.0), level]), "the hollow is filled at level {level}, turn {turn}");
                 assert!(!solid(&bricks, [c * (middle + 3.0), s * (middle + 3.0), level]), "something outside the wall at level {level}, turn {turn}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_crease_is_sloped_pieces_and_no_whole_cells() {
+        // A ring that comes to a ridge 6 up, at radius 12, sloping down both
+        // ways to the ground; and a block with a groove cut in its top, 6
+        // deep, its bottom at radius 12. In each, an outer face and the wall
+        // of a hollow end on the circle of radius 12.
+        let ridge = |out: f64, up: f64| (up - (6.0 - (out - 12.0).abs())).max(-up);
+        let groove = |out: f64, up: f64| (up - (out - 12.0).abs()).max(up - 6.0).max(-2.0 - up).max(out - 18.0);
+        let forms: [(&dyn Fn(f64, f64) -> f64, f64, i32); 2] = [(&ridge, 0.0, 5), (&groove, -2.0, 0)];
+        for (number, (section, low, crease_layer)) in forms.into_iter().enumerate() {
+            for short_sides in [false, true] {
+                let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section, far: 18.0, low, high: 6.0, brick_cost: 0.0, short_sides, max_ext: 80 };
+                let bricks = fit_lathe(&lathe).unwrap();
+                assert!(bricks.iter().all(|b| b.ext.iter().all(|e| (1..=80).contains(e)) && shape_info(b.mask).is_some()));
+                // No whole cell in the layer next to the crease, within a
+                // cell of its circle: the pieces of the two rings all fit.
+                // (Each ring had its own outline of that circle once, and
+                // every piece of one that crossed the other's was built as
+                // its whole box.)
+                for b in bricks.iter().filter(|b| b.mask == CUBE && b.min[2] <= crease_layer && crease_layer < b.min[2] + b.ext[2]) {
+                    for y in 0..b.ext[1] {
+                        for x in 0..b.ext[0] {
+                            let from_axis = (b.min[0] as f64 + x as f64 + 0.5).hypot(b.min[1] as f64 + y as f64 + 0.5);
+                            assert!((from_axis - 12.0).abs() >= 1.0, "form {number}, short sides {short_sides}: a whole cell {from_axis} from the axis, in {b:?}");
+                        }
+                    }
+                }
+                // Along a sloped side of that circle's outline the two rings
+                // share a box: two half outer corners under a ridge.
+                if number == 0 {
+                    assert!(count(&bricks, Kind::HalfOuter) >= 8, "{} half outer corners", count(&bricks, Kind::HalfOuter));
+                }
+                // No point in two bricks, though a box may hold two; close
+                // to the form everywhere; and the same in all four quarters.
+                for i in 0..54 * 54 * 20 {
+                    let p = [(i % 54) as f64 * 0.7 - 18.57, (i / 54 % 54) as f64 * 0.7 - 18.57, (i / 2916) as f64 * 0.45 - 2.3];
+                    let holding = bricks.iter().filter(|b| {
+                        let t = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+                        t.iter().all(|v| (0.0..1.0).contains(v)) && inside_shape(shape_info(b.mask).unwrap(), t[0], t[1], t[2])
+                    });
+                    let built = holding.count();
+                    assert!(built <= 1, "form {number}: {built} bricks hold {p:?}");
+                    let d = section(p[0].hypot(p[1]), p[2]);
+                    assert!(!(built == 1 && d > 1.5) && !(built == 0 && d < -1.5), "form {number}, short sides {short_sides}: {p:?} is {d} from the surface and {}", if built == 1 { "built" } else { "not built" });
+                    assert_eq!(built == 1, solid(&bricks, [-p[0], p[1], p[2]]), "not the same mirrored in x at {p:?}");
+                    assert_eq!(built == 1, solid(&bricks, [p[1], p[0], p[2]]), "not the same with x and y exchanged at {p:?}");
+                }
             }
         }
     }

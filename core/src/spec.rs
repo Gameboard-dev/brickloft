@@ -2556,17 +2556,31 @@ mod tests {
         let built = &build(spec).unwrap_or_else(|e| panic!("{spec:?}: {e}"));
         assert!(!built.bricks.is_empty());
         let solver = Solver::new(&Models::default());
-        let mut seen = HashSet::new();
+        // No room in two bricks. Two may share a cell and no room: the two
+        // halves of a box cut along its diagonal, as along the crease of a
+        // spun profile. So a cell two bricks share is sampled, at 27 points
+        // clear of its faces and of the diagonals, and none may be in both.
+        let holds = |b: &CellBrick, p: [f64; 3]| {
+            let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+            crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+        };
+        let mut seen: std::collections::HashMap<[i32; 3], Vec<&CellBrick>> = std::collections::HashMap::new();
         for b in &built.bricks {
             assert!(b.ext.iter().all(|&e| (1..=80).contains(&e)), "{b:?}");
             assert!(solver.place(b).is_some(), "{b:?} has no orientation");
             for z in 0..b.ext[2] {
                 for y in 0..b.ext[1] {
                     for x in 0..b.ext[0] {
-                        assert!(
-                            seen.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z]),
-                            "{b:?} overlaps another brick"
-                        );
+                        let cell = [b.min[0] + x, b.min[1] + y, b.min[2] + z];
+                        let there = seen.entry(cell).or_default();
+                        for other in there.iter() {
+                            let shared = (0..27).any(|k| {
+                                let p = [cell[0] as f64 + (k % 3) as f64 / 3.0 + 0.17, cell[1] as f64 + (k / 3 % 3) as f64 / 3.0 + 0.15, cell[2] as f64 + (k / 9) as f64 / 3.0 + 0.19];
+                                holds(b, p) && holds(other, p)
+                            });
+                            assert!(!shared, "{b:?} overlaps {other:?}");
+                        }
+                        there.push(b);
                     }
                 }
             }
@@ -3361,7 +3375,8 @@ mod tests {
         };
         let bell = Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, fill: false, simplify: 0.25, ..Spec::default() };
         let (built, steps) = stepped(&bell);
-        assert!(steps < 0.15, "the bell is {steps} steps");
+        // (0.118 while the lip's crest and the groove inside it were whole cubes)
+        assert!(steps < 0.08, "the bell is {steps} steps");
         for kind in [Kind::Ramp, Kind::Tet, Kind::Cut] {
             assert!(built.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == kind), "no {kind:?}");
         }
@@ -3383,7 +3398,15 @@ mod tests {
         // cubes alone are still the staircase, and an axis between the two grids is still fitted cell by cell
         let (_, cubes) = stepped(&Spec { wedges: false, ..bell.clone() });
         assert!(cubes > 0.4, "cubes {cubes}");
-        check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell });
+        check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell.clone() });
+        // Shells with creases: a bowl with a lip turned outwards, and a
+        // vase with a neck and a flared mouth. The crest of each lip, where
+        // the outer face and the hollow's wall end on one circle, was a ring
+        // of whole cubes until the two shared an outline there (9.5% and
+        // 6.0% stepped).
+        let (_, bowl) = stepped(&Spec { points: vec![at(0.0, 0.0, 4.0), at(14.0, 0.0, 6.0), at(22.0, 0.0, 14.0), at(21.0, 0.0, 22.0), at(26.0, 0.0, 25.0)], thick: 3.0, ..bell.clone() });
+        let (_, vase) = stepped(&Spec { points: vec![at(0.0, 0.0, 3.0), at(9.0, 0.0, 3.0), at(17.0, 0.0, 18.0), at(8.0, 0.0, 30.0), at(6.0, 0.0, 35.0), at(13.0, 0.0, 42.0)], thick: 3.0, ..bell });
+        assert!(bowl < 0.085 && vase < 0.05, "bowl {bowl}, vase {vase}");
     }
 
     #[test]
