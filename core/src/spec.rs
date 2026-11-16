@@ -16,6 +16,10 @@ use crate::shapes::{CellBrick, CUBE, UPRIGHT};
 use glam::{DVec2, DVec3};
 use std::f64::consts::PI;
 
+// In a file of its own, as the newest form and one that shares nothing with
+// the others but the flat outline it ends as.
+mod rectangle;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Form {
     /// 3 points: the circular arc through them (`closed`: the whole circle)
@@ -37,6 +41,10 @@ pub enum Form {
     /// 1 point, the middle of its base: a pyramid `radius` to each side of
     /// it (scaled by `stretch` along x and y) and `rise` tall
     Pyramid,
+    /// 1 point, its middle: a rectangle `radius` to each side of it (scaled
+    /// by `stretch` along the two axes of its plane), facing axis `plane`.
+    /// A square until it is stretched.
+    Rectangle,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -65,7 +73,7 @@ pub struct Spec {
     /// different widths laid side by side, each standing proud of the next,
     /// instead of as a pipe with its edges chamfered round.
     pub protrude: bool,
-    /// Circle and Torus: the axis (0, 1, 2) the ring faces
+    /// Circle, Torus and Rectangle: the axis (0, 1, 2) the form faces
     pub plane: usize,
     /// Sphere: keep only heights `lo..hi` relative to its centre. A dome is
     /// `(0, ∞)`; a segment has both ends finite.
@@ -1107,6 +1115,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
+        Form::Rectangle => rectangle::rectangle(spec, need(1)?[0]),
         Form::Revolve => {
             let p = need(2)?;
             let axis = p[0].truncate();
