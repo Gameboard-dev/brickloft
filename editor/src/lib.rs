@@ -23,6 +23,7 @@ pub mod paint;
 pub mod panel;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod places;
+pub mod programs;
 pub mod ruler;
 pub mod send;
 pub mod state;
@@ -277,7 +278,10 @@ pub fn run_form(form: usize, claude: bool) {
     window.render_loop(move |mut frame| {
         #[cfg(not(target_arch = "wasm32"))]
         for path in dropped.take() {
-            state.drop_mesh(&path);
+            // (a rule program's file is brought in as one; any other is opened as a mesh)
+            if !state.drop_file(&path) {
+                state.drop_mesh(&path);
+            }
         }
         camera.set_viewport(frame.viewport);
         let mut asked = panel::Asked::default();
@@ -567,6 +571,8 @@ pub fn run_form(form: usize, claude: bool) {
             state.moving = moving;
             state.scene += 1;
         }
+        // (a rule program being watched moves on a few turns, which is a change to its form like any other: see `state::grow`)
+        state.grow_frame(now_ms());
         // (a form slow to build is built on another thread, where there are threads: see `State::refresh_behind`)
         #[cfg(not(target_arch = "wasm32"))]
         let rebuilt = state.refresh_behind(now_ms);

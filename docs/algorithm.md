@@ -236,6 +236,7 @@ flowchart TD
     F -->|sphere, ellipsoid, dome| H[Index-sum layout]
     F -->|pyramid| I[Pyramid layout]
     F -->|furniture| I2[Laid out board by board]
+    F -->|rule program| I3[Grown on a grid by rewrite rules,<br/>each cell then a block]
     F -->|round tube lying flat| J[Pipe]
     F -->|profile spun about an axis| K[Stacked rings]
     F -->|band or tube lifted out of its plane| L[Columns between two surfaces]
@@ -244,6 +245,7 @@ flowchart TD
     H --> N
     I --> N
     I2 --> N
+    I3 --> N
     J --> N
     K --> N
     L --> N
@@ -4669,6 +4671,170 @@ alone, so a save opens after the original file has moved, and a form can
 never name a file outside that folder: a name of that shape has nothing
 in it that a path could be made of.
 
+#### Holes, thin sheets and pieces on a thread
+
+The three shortcuts of the scanned route hold for a closed mesh. A mesh
+made by a network from a picture is rarely closed: of 29 such meshes
+(made by TripoSR, run by Lux3D on the author's machine) every one had
+open edges, between 120 and 776 of them. Four kinds of mesh were made by
+rule to stand for what such meshes have (`core/src/mesh/made.rs`): a ball
+with two holes 53 and 25 cells wide, the figure from the chest up with
+nothing underneath, a bowl and a plate a third of a cell thick, and a
+ball with a lump hanging off it by a rod. Overlapping shells (three balls
+run together, and the house) were already built correctly, since the
+winding number counts a point inside two shells as inside.
+
+**Holes.** At the rim of a hole the winding number is not a whole
+number. It runs smoothly from its value on one side of the surface to
+its value on the other, and the solid is taken to be wherever it is over
+one half. That draws a skin across the hole, flat if the rim lies in a
+plane. The skin passes through cells no triangle touches, so a run of
+such cells can be part inside and part outside, and settling the run by
+one number painted the whole of it one or the other. The mesh now knows
+its open edges (an edge only one triangle has), and a mesh with any is
+scanned with two changes. A run of untouched cells is tried at its two
+ends and three places between. If those are all near one whole number
+it is settled as before. If not, the winding number is worked out at the
+corners of each of its cells: a cell with all eight corners inside is
+full, and a cell with some in and some out is a cell of the skin, with
+its 64 samples read off its corners and a piece fitted to them as to any
+cell of the surface. Stretched pieces are then laid along the skin like
+any other face. A cell that holds a triangle of a rim has the number
+worked out at each of its samples, since near a rim it changes within
+the cell by more than the triangles crossed account for.
+
+**Thin sheets.** A cell takes the unit piece that agrees with most of
+its samples, and for a sheet a third of a cell thick that piece is
+nothing. So a cell left empty, or with only a tetrahedron in it, is
+looked at again along the axis the surface most nearly faces. If the
+line through the cell's middle goes into the solid and comes out again
+within a cell's thickness, through faces that are nearly opposite, and
+the middle of the two crossings is in this cell, the cell is filled with
+a cube, and no stretched piece is laid over it afterwards. Each column
+of cells across the sheet has one such cell. Two things were tried first
+and are in the code's comments: judging the sheet straight in from the
+nearest point of the surface left holes in a curved sheet, and filling
+every such cell whatever piece it held made a sheet over half a cell
+thick, which ramps fit well, rougher than before. The faces must be
+within 18 degrees of opposite, so that the eave of a roof, whose two
+faces meet at 27 degrees, stays a ramp.
+
+**Pieces on a thread.** Loose pieces were already dropped by size. A
+scrap that hangs on the model by a thread is not loose. With the
+outermost layer of cells taken off everything, a neck two cells through
+or less is gone, and what it joined falls apart into the body, which is
+the piece of the most cells, and lumps. A lump smaller than the size
+set is dropped with its layer. A part that is thin all along, such as a
+chair's leg, has nothing left with its layer off and so is no lump: it
+stays with what it is joined to. A mesh that looks made by a network
+starts with pieces under 12 microbricks dropped.
+
+<img src="images/mesh/holes-before.png" width="340" alt="A ball with a wide hole in its top, before: the hole is closed by a flat lid with a ragged edge, and a second hole in its side by streaks"> <img src="images/mesh/holes-after.png" width="340" alt="The same ball after: both holes are closed by a smooth skin of sloped pieces">
+
+<img src="images/mesh/sheets-before.png" width="340" alt="A bowl and a plate a third of a cell thick, before: the bowl is scattered crumbs and the plate four strips"> <img src="images/mesh/sheets-after.png" width="340" alt="The same after: the bowl and the plate are whole, one cell thick, in steps">
+
+| Mesh | Size | | Bricks | Discrepancy | Bare surface | Steps per surface cell | ms, 1 thread | Peak memory |
+|---|---|---|---|---|---|---|---|---|
+| Ball with two holes | 96 | before | 7,616 | 10.00% | 0.00% | 0.086 | 2,012 | 31 MB |
+| | | after | 7,511 | 0.71% | 0.00% | 0.074 | 7,740 | 33 MB |
+| The same, in blocks | 96 | before | 3,954 | 10.81% | 0.04% | 0.438 | 463 | 19 MB |
+| | | after | 3,409 | 1.53% | 0.00% | 0.435 | 8,457 | 18 MB |
+| Figure from the chest up | 100 | before | 2,567 | 2.51% | 0.00% | 0.116 | 743 | 21 MB |
+| | | after | 2,589 | 2.41% | 0.00% | 0.108 | 3,533 | 21 MB |
+| Sheets 0.6 thick | 117 | before | 5,114 | 40.77% | 0.00% | 0.248 | 1,101 | 14 MB |
+| | | after | 5,640 | 44.15% | 0.00% | 0.282 | 717 | 15 MB |
+| Sheets 0.3 thick | 117 | before | 1,466 | 87.73% | 16.43% | 0.164 | 1,098 | 13 MB |
+| | | after | 4,201 | 182.65% | 0.00% | 0.631 | 848 | 15 MB |
+| Three balls run together | 77 | before and after | 3,269 | 1.70% | 0.00% | 0.075 | 708 | 15 MB |
+| Figure, closed | 100 | before and after | 4,462 | 1.81% | 0.00% | 0.078 | 1,792 | 29 MB |
+
+Discrepancy is measured against the solid the winding number defines,
+asked for at every sample with no shortcut. Bare surface is the share of
+the mesh's surface with no brick in the cell a point of it is in or in
+the 26 cells round that one. It is what shows a thin part left out: the
+sheets a third of a cell thick had a sixth of their surface bare and are
+now whole, at the price of a volume three times their own, which is why
+their discrepancy rises. A mesh with holes takes three to four times as
+long as it did, because its runs are tried at five places and its skins
+at every corner; a closed mesh takes the same time and gives the same
+bricks as before. The times were taken with the processor at 90 to 100%
+from other work.
+
+**Which way is up.** A file's kind says little about which way is up:
+the program that makes most of the meshes opened here writes z up in
+its `.glb` files, against the glTF text. So it is guessed when a file is
+opened ([`editor/src/import.rs`](../editor/src/import.rs)). A mesh that
+is coloured by its points and lies within 0.6 of the origin every way,
+at least half a unit long, is taken to be made by a network, and z is
+up: all 29 of the files above are told so. Any other mesh is looked at
+for a flat underside: the axis along which the most of its surface lies
+within a two-hundredth of its height of its lowest point. Tried on the
+same 29 files with nothing else to go by, that put 17 the right way up,
+7 on their sides and gave no answer for 5, so it is the second guess
+and not the first. The setting stays in the panel for when both are
+wrong.
+
+#### Meshes a network made: what was tried on them
+
+Five of the 29 real meshes were fitted 60 long in twelve colours: a
+cottage, a chair, a dragon, a car and a barrel. Their bricks are rough.
+The cottage's roof is one slope in the picture it was made from and a
+field of mixed pieces as built, at 0.16 of a cell face of step for each
+cell of surface, twice the made figure's 0.078. Three things were tried
+against that, and measured.
+
+**Smoothing the surface.** The mesh's points are moved towards the
+middle of their neighbours and a little further back out, so many times
+over (Taubin 1995,
+[doi:10.1145/218380.218473](https://doi.org/10.1145/218380.218473)),
+which takes bumps a few points across off a surface without shrinking
+it. The bricks are fitted to the smoothed surface and judged against
+the surface the file gave. It gained little:
+
+| Cottage, 60 long, 12 colours | Bricks | Discrepancy | Steps per surface cell |
+|---|---|---|---|
+| as the file has it | 8,095 | 2.31% | 0.160 |
+| smoothed 5 times over | 7,989 | 2.35% | 0.157 |
+| 20 times | 7,879 | 2.39% | 0.151 |
+| 40 times | 7,757 | 2.43% | 0.148 |
+| 150 times | 7,656 | 2.56% | 0.145 |
+| 400 times | 7,935 | 2.97% | 0.151 |
+
+Forty times over is 4% fewer bricks and 8% less step, and no amount
+does much better. The roughness is therefore not the mesh's small bumps.
+It is the fitter choosing each stretched piece by the face nearest it,
+on a surface whose faces all differ a little, which is what the made
+lumpy ball showed too. Smoothing is kept as a setting, at 0 to begin
+with.
+
+**Colours.** The same cottage is 4,964 bricks with no colours and 8,095
+with twelve: a painted surface changes colour from point to point
+within what the eye sees as one colour, a brick takes its colour at one
+point, and a box is cut wherever two specks meet. A cell whose colour
+fewer than three of the coloured cells round it share now takes the
+commonest colour among them. A feature three cells across keeps its
+colour. Nothing about the shape changes:
+
+| Mesh, 60 long, 12 colours | Bricks before | Bricks after |
+|---|---|---|
+| Cottage | 8,095 | 7,187 |
+| Chair | 2,050 | 1,894 |
+| Dragon | 4,997 | 4,362 |
+| Car | 4,891 | 4,551 |
+| Barrel | 4,490 | 3,944 |
+
+**A price on bricks.** Simplify at 0.25 takes the cottage without
+colours from 4,964 bricks to 2,721, at 4.06% discrepancy in place of
+2.31% and 0.172 of step in place of 0.160. It is the largest lever on
+the brick count there is, and it spends closeness.
+
+What would make such a roof one slope is still to be built: finding the
+near-flat regions of the mesh and giving each one plane and one layout
+of pieces, with the hip and ridge bricks where two meet, and laying a
+curved region as one patch. Neither was begun. Nor were the two changes
+to speed: the search for stretched pieces still tries every placement
+of every size, and laying them is still on one thread.
+
 #### What it does not do
 
 - A plane that is not on the lattice is not moved onto it. The house at
@@ -4679,10 +4845,13 @@ in it that a path could be made of.
 - A ridge or a hip where two slopes meet is left to unit pieces. The
   hip and inner-corner bricks of section 2 are not offered.
 - A curved surface gets no layout of its own.
-- A hole in the mesh is closed by the winding number where it falls to
-  one half. The scanned route settles a run of untouched cells by one
-  number, so the skin over a hole wider than a cell is stepped. The runs
-  that cross such a skin are still to be found and their cells sampled.
+- A sheet with one side only (a flag drawn as a single layer of
+  triangles) is not built: nothing is inside it. A closed sheet thinner
+  than a cell is built a cell thick, in cubes.
+- A piece that hangs on the model by a neck more than two cells through
+  stays, whatever it is, and so does a thread that is thin all along.
+- The skin drawn over a hole takes its colour from the nearest triangle,
+  since it has none of its own.
 - The winding number uses the arctangent, which not every system's
   library computes alike to the last digit. A sample would be decided
   differently only where the number is within that digit of one half.
@@ -4695,6 +4864,320 @@ in it that a path could be made of.
   as light. The two give the same answer whenever either is white, which
   is the usual case.
 - Changing which way is up reads and indexes the file again.
+
+### 7.14 Rule programs
+
+<img src="images/rule-program-flats.png" width="340" alt="A block of flats built of bricks: floors on thin columns, red wall panels, and flights of stairs built as slopes"> <img src="images/rule-program-growing.gif" width="340" alt="The same block of flats growing: a plan of paths, then floors and stairs appearing a tile at a time, then columns, walls and grass">
+
+**Rule program** is the one form that is grown. Its bricks come from a
+small program that starts with an empty grid of cells and changes the
+grid a little each turn until a building stands in it. The language of
+these programs, and the seven that come with the editor, are from
+[MarkovJunior](https://github.com/mxgmn/MarkovJunior) by Maxim Gumin
+(MIT licence). This section says how such a program is run, how its
+grid becomes bricks, and how a thing that runs for a thousand turns fits
+an editor whose forms are built from their settings.
+
+#### The language
+
+A grid is a box of cells, and each cell holds one value, written as a
+letter: `B` for black (which here means empty), `W` for white, and so
+on. A rule finds a small pattern of letters in the grid and writes
+another in its place. The whole of one well-known maze program is the
+rule `WBB` becomes `WAW`: a white cell with two black cells beyond it
+reaches over them. Applied wherever it fits, once a turn, at a place
+chosen at random, it draws a maze with no loops.
+
+A program is a tree of nodes, kept in an XML file. The leaves change
+the grid, and the branches decide which leaf has the next turn. This
+interpreter ([core/src/rewrite/nodes.rs](../core/src/rewrite/nodes.rs))
+runs these:
+
+| Node | What one turn of it does |
+|---|---|
+| `one` | Applies one of its rules at one place where it matches, chosen at random. |
+| `all` | Applies its rules at every place they match, leaving out matches that overlap one already taken. |
+| `prl` | Applies its rules at every place they match, all at once. |
+| `path` | Draws a shortest path from one set of cells to another through cells of the kinds it may cross. |
+| `convolution` | Changes each cell by how many of its neighbours hold given values, as a cellular automaton does. |
+| `sequence` | Gives the turn to its first child that still has something to do. |
+| `markov` | Gives the turn to its first child that can do something, starting from the first child every turn. |
+| `map` | Makes a new grid, often larger, by rewriting each small block of the old one. Its children then run on the new grid. |
+| `wfc` | Makes a new grid by wave function collapse: it fills the grid with tiles from a tileset so that every tile agrees with its neighbours. Its children then run on the new grid. |
+
+A rule node may also carry `field` elements, which lead its rules
+towards or away from cells of some kind, and a grid may name `union`
+letters that stand for several values at once. The interpreter follows
+the original's C# source turn for turn, since a program is written
+against what the original does. The four buildings on the list are
+`wfc` programs: a few rules draw a plan on a small grid, the `wfc` node
+builds a tile for each cell of the plan (so a plan 8 cells a side
+becomes a grid 40 a side), and several hundred more rules add columns,
+windows, railings and grass.
+
+Four parts of the language are not run: `convchain`, `wfc` from a
+sample picture in place of a tileset, `observe` (which searches for a
+run that reaches a given end state) and rules kept in `.png` pictures.
+A program that uses one is refused with a message that names the part
+and its line.
+
+The two readers are written here. Programs are XML and their tiles are
+MagicaVoxel `.vox` files, and each reader is about two hundred lines
+([xml.rs](../core/src/rewrite/xml.rs), [vox.rs](../core/src/rewrite/vox.rs)),
+which is less than either crate that would do it costs to compile, and
+reads only the part of each format these files use.
+
+#### The same building on every computer
+
+A seed chooses which building a program makes. The same program, grid
+size and seed must give the same cells on every computer, because a
+save keeps those three things and no bricks. Two parts of a run could
+differ between computers, and both are fixed.
+
+The random numbers come from the program's own generator
+(SplitMix64, as the patterns use), seeded from the form's seed. The
+original draws its numbers from .NET's library, whose method belongs to
+that library. A seed here therefore gives a different building from the
+same seed in the original, of the same kind.
+
+The `wfc` node chooses its next cell by an entropy, which needs a
+logarithm, and some rules use a temperature, which needs a power. The
+standard library's `ln` and `exp` may differ in their last digit from
+one processor or system to another, and one digit is enough to change
+which of two nearly equal cells is taken first, and so the whole
+building. Both are therefore worked out by sums and products alone
+(`ln` and `exp` in [nodes.rs](../core/src/rewrite/nodes.rs)), which
+every computer does alike.
+
+#### From a grid to bricks
+
+A finished grid is written out by
+[core/src/rewrite/bricks.rs](../core/src/rewrite/bricks.rs). Every cell
+that is not the grid's first value becomes a cube, as many microbricks
+across as **Cell size** says, and cubes of one value are joined into the
+largest boxes. That is the **Plain cells** finish.
+
+A rule can only say that a cell holds a value, so a program's stairs
+and roofs are steps one cell high. Brickadia has sloped pieces, which a
+grid of cells cannot ask for. The **With wedges** finish reads the grid
+for the steps that stand for a slope and fills them in:
+
+- A **notch** is an empty cell with a solid cell under it, an empty
+  cell over it, and a step beside it: a solid cell on one side whose
+  top is open, with the opposite side open too.
+- A notch belongs to a **flight** if the cell one step up or one step
+  down the same way is a notch too. A flight's notches are each filled
+  with a ramp, so the flight becomes one slope that a player walks up
+  without jumping.
+- A notch with steps on two sides that meet takes an inner corner
+  piece (a valley). An empty cell with no step beside it but one
+  diagonally, between two flights, takes a hip piece (the corner of a
+  pyramid).
+- The underside of a flight is closed the same way, with the same
+  pieces upside down.
+
+<img src="images/rule-program-plain.png" width="340" alt="The block of flats with the plain finish: every stair is a row of square steps"> <img src="images/rule-program-flats.png" width="340" alt="The same building with wedges: every stair is a slope">
+
+No cell is removed. The other reading would cut each step down to a
+ramp, which gives a thinner flight, but some of those cells carry a
+colour that means something (a landing, a window sill) and the grid
+does not say which cells are only steps. A single step is left square,
+because a single step is also the edge of every slab that lies on a
+floor.
+
+Ramps in a row up a flight are joined into one. A row of ramps is the
+ramps side by side across a flight on one step. A row takes the rows
+above it into itself while each is the same width in the same place and
+stands on solid cells of the ramp's own colour all the way down to the
+foot of the run. Three ramps and the three cells under them are then
+one brick where they were six, and the bricks fill exactly what they
+filled. A flight one cell thick has nothing under its second step but
+that step, so it goes two steps to a ramp. Rows of different widths are
+not joined, because the side of a stepped pyramid is rows that shorten
+as they rise, and joined column by column its middle became long ramps
+and its ends short ones that joined to nothing.
+
+| Program | Grid, cells | Turns | Bricks, plain | Bricks, with wedges | With a ramp to each step |
+|---|---|---|---|---|---|
+| Apartemazements | 40 × 40 × 40 | 269 | 833 | 933 | 1,630 |
+| CarmaTower | 48 × 48 × 72 | 3,231 | 1,937 | 1,987 | 1,994 |
+| ModernHouse | 51 × 51 × 24 | 609 | 557 | 560 | 697 |
+| SeaVilla | 95 × 95 × 24 | 1,286 | 1,105 | 1,257 | not measured at this cell size |
+| PillarsOfEternity | 45 × 45 × 45 | 109 | 391 | 411 | 1,037 |
+| Escher | 40 × 40 × 40 | 100 | 989 | 1,032 | 1,220 |
+| StrangeDungeon | 29 × 29 × 29 | 154 | 1,151 | 1,211 | 1,221 |
+
+Each row is the first seed from 1 that can be finished, at the
+program's usual size (`the_bricks_of_the_bundled_programs_counted` in
+[tests.rs](../core/src/rewrite/tests.rs)). The last column is the count
+before ramps were joined up a flight.
+
+Wedges are read only from a grid the program has finished with. While a
+run is still under way its grid is built plain, whatever finish is
+chosen: a flight is told by its neighbours two steps off, so while a
+staircase is being drawn its ramps would come and go with every cell.
+
+Each brick takes the colour of its cell's letter. The form's colours
+are numbered by the letters of all the program's grids, those of its
+last grid first, so a cell keeps its colour when a `map` or `wfc` node
+moves the run to a grid with other letters. They start as the colours
+MarkovJunior's palette gives those letters, and can be changed like any
+form's. A form has 32 colours at most. ModernHouse's grids have 45
+letters between them, and the letters past the thirty-second, which
+only its plan uses, share the last colour.
+
+#### A run as a setting
+
+Every other form's bricks follow from its settings alone, and the
+editor relies on that: a save keeps settings and no bricks, undo keeps
+settings, and a form is built again on another computer from the same
+text. A rule program is a process that someone watches. It fits because
+how far the run has got is one of the settings
+([core/src/rewrite/form.rs](../core/src/rewrite/form.rs)):
+
+```rust
+pub struct Program {
+    pub name: String,
+    pub imported: bool,
+    /// the grid it starts on, in cells along x, y and z
+    pub size: [i32; 3],
+    /// microbricks to a cell
+    pub cell: i32,
+    pub seed: u64,
+    pub finish: Finish,
+    /// the most turns a run may take before it is stopped
+    pub limit: u32,
+    /// how many turns have been taken, or none for a run left to reach its end
+    pub stop: Option<u32>,
+}
+```
+
+A program, a size, a seed and a number of turns are one grid, wherever
+it is worked out. A run that is playing is therefore a form whose `stop`
+goes up each frame, and nothing else in the editor needs to know that
+it is a run. Paused at turn 312, the form says turn 312 in its settings,
+the bricks on screen are what is copied and saved, and a save of it
+opened anywhere builds the same bricks. In a save the settings are one
+line, such as `program = ModernHouse,9,9,4,3,5,wedges,50000,end`.
+
+The other design keeps a running machine as the form. A save must then
+either write the grid out, which no other form does, or run the program
+again when it is opened anyway, and undo, copy and paste would each need
+to learn of a form that cannot be rebuilt from its text.
+
+Built from its settings, a run paused at turn 3,000 would be 3,000
+turns taken again for every change of colour. So the grid a run comes
+to is remembered under exactly the settings it follows from, and a
+build looks there first. This changes no answer: with nothing
+remembered the same grid is worked out again, which a test checks
+(`a_run_remembered_is_the_run_worked_out`). The turns of a run being
+watched are taken on a second thread
+([editor/src/state/grow.rs](../editor/src/state/grow.rs)). That thread
+leaves each frame's grid in the same memory and tells the frame which
+turn it is, and the frame builds the form from the grid already there,
+by the same code that builds a form opened from a save. There is one
+way from a grid to bricks, and no second copy of it to disagree.
+
+A second thread is needed because one turn can be long. The first turn
+of a `wfc` node tries seeds until one fills the grid, which took up to
+3 seconds for PillarsOfEternity, and a turn of CarmaTower's largest
+node took half a second. Taken in a frame, each would stop the window
+for as long. With the thread the window goes on drawing what it has,
+and the panel says the run is working on a long turn.
+
+A frame of a run costs the editor the writing of the grid as bricks.
+Measured at each program's usual size (`how_long_a_frame_of_a_run_takes`
+in [grow.rs](../editor/src/state/grow.rs)):
+
+Writing the grid out took between 1 and 4 ms a frame on average, and
+20 ms at the most. The slowest was CarmaTower, whose grid part way
+through its run is nearly all solid cells and comes to 6,800 bricks:
+3.6 ms a frame on average. Finding which tiles of ground had changed,
+which the view does next so as to give the graphics card only those
+(see [performance.md](performance.md)), took 0.05 ms. The cells are
+handed to the joiner as rows along x and not one at a time, which
+brought CarmaTower's frame from 10 ms to 3.6.
+
+A program that has never been run is not run in a frame either. The
+form being edited is built behind the window, as any slow form is
+(`State::refresh_behind`), and the other forms of a save that has just
+been opened stand empty until a thread has run them, one at a time.
+
+#### Seeds that cannot be finished
+
+Some seeds of some programs come to nothing. There are two ways.
+
+A `wfc` node may find no arrangement of its tiles. ModernHouse's did
+for 9 of the seeds 1 to 30, each time because the plan drawn before it
+left some cell no tile. The interpreter reports this as a fault.
+
+A program may also fail by its own rules. SeaVilla sometimes draws a
+flight of stairs it cannot use, and it has a rule for that case, which
+its author marked "fail on wrong stair turn": the rule floods the grid a
+cell at a time. The run then ends some 36,000 turns later with a few
+columns standing in the sea, or does not end. This happened for 5 of
+the seeds 1 to 30. No fault is raised, since the program did what it
+says. The editor tells such a run by its turns. A run of SeaVilla that
+works ended within 1,400 turns in every case measured, so a run still
+going at 6,000 has failed and is given up there. The grid offers no
+better test: the failed runs fill as much of it as the good ones do.
+
+In either case the run begins again from the next seed, up to 16 seeds,
+and the panel says which seeds were passed over and why the first could
+not be finished. A run being watched is seen to begin again, and the
+**Seed** box then shows the seed that is on screen.
+
+Whether the original fails on the same share of seeds was not checked.
+Its random numbers differ, so no seed can be compared with the same
+seed there, and .NET, which the original needs, was not on the computer
+this was written on. SeaVilla's failures are the program's own by its
+text. ModernHouse's are reported by the `wfc` node before it places a
+tile, from the plan alone, and a mistake in this interpreter's `path`
+or rule nodes that drew a wrong plan would look the same.
+
+#### Limits and faults
+
+A program may be anyone's file, so every size it gives is held to a
+limit before anything is allocated
+(`Limits::USUAL` in [fault.rs](../core/src/rewrite/fault.rs)):
+
+| What | The most allowed |
+|---|---|
+| A program or tileset file | 1 MB |
+| A `.vox` file | 4 MB |
+| Cells along one side of the starting grid | 128 |
+| Cells in any one grid | 4,000,000 |
+| Rules in one node, counting turned and mirrored copies | 4,096 |
+| Nodes in a program, and nodes one inside another | 4,000, and 64 deep |
+| Tiles in a tileset, counting turned and mirrored copies | 512 |
+| Bricks written | 400,000 |
+| Turns in a run | the form's **Step limit**: 50,000 unless changed, and 5,000,000 at the most |
+
+The largest program that comes with the original, ModernHouse, is
+several times inside each. A run that reaches its step limit is stopped
+and keeps what it made: the bricks stand, and a message where a form's
+problem is shown says that it stopped early and that the limit can be
+raised. A run asked for by something that waits for it (a save's line
+read by a script, or Claude changing a seed) is given up after 20
+seconds with nothing built, and the message says to press Play, which
+runs it on the second thread for as long as it takes.
+
+Every way a program can fail is one value of one type, `Fault`, and the
+words a person reads are written once, in its `Display`. A rule program
+can fail in some thirty ways across four kinds of file that a stranger
+wrote. A message built at each of those places would be thirty wordings
+to keep alike, and none that a test could match on. Each fault carries
+what is known (the file, the line, the figure and its limit), and its
+message ends with what to do. It becomes text only where the rest of
+the editor takes a form's problem as text, and is shown where any
+form's problem is shown.
+
+Files a program names are read by plain name from the folder the
+program is in and a `resources` folder there, and then from the files
+that come with the editor. A name that is not plain letters, digits and
+`_ - .` is refused, and so is a link inside the folder that leads out
+of it, so no name in a program reaches a parent folder or another
+drive.
 
 ## 8. Changing a form: added points, mirror, turning, grids
 

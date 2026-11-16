@@ -9,7 +9,7 @@ change happen in the editor's window.
 
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers seventeen tools. Claude Code, or
+offers. The editor is the MCP server and offers twenty tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -82,6 +82,7 @@ file, the entry is a server of type `http` with the URL above.
 | `get_workspace` | Lists every form: its settings, colour, grid angle, position, the box its bricks fill, its brick count and its discrepancy. |
 | `add_form` | Adds a form of a given kind with given settings, colour and position. The camera turns to face it. |
 | `update_form` | Changes one form's settings, colour or position. Only what is given changes. |
+| `run_program` | Plays, pauses, steps, restarts or finishes the run of the rule program being edited. |
 | `remove_form` | Takes a form out of the workspace. |
 | `select_form` | Makes a form the one being edited, so its dots and settings show, and turns the camera to face it. |
 | `measure_between` | Gives the offset and distance between two forms' centres and the gap between their boxes along each axis. |
@@ -96,6 +97,7 @@ file, the entry is a server of type `http` with the URL above.
 | `move_pull_point` | Changes how far an added point pulls the form. |
 | `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
 | `line_up_arch` | Gives an arch that stands at an angle to its grid a grid of its own, turned to line it up, so that it is fitted smoothly. Its feet stay where they are. |
+| `list_programs` | Lists the rule programs a `program` form can name: the seven that come with the editor and those you have imported. |
 | `list_meshes` | Lists the mesh files in the editor's imports folder by name and size. These are the only files an `imported` form can be built from. |
 
 ### Forms and their settings
@@ -370,8 +372,8 @@ wide, or whose walls or hedge are more than may be built, is refused
 with the reason and what to change.
 
 A model from a file is the form `imported`, and its own settings are one
-line of text, `import`: `name,up,fitter,loose,colours`, of which only
-the name is needed. The name is one that `list_meshes` gives. A mesh
+line of text, `import`: `name,up,fitter,loose,colours,smooth`, of which
+only the name is needed. The name is one that `list_meshes` gives. A mesh
 file gets into that list when you open it in the editor, by typing its
 path in the panel or dropping it on the window, which copies it into the
 editor's imports folder under a name made from its content. Claude
@@ -395,10 +397,53 @@ file and `z` for a `.ply`. `fitter` is `smoothed` or `blocks`. `loose`
 leaves out pieces of the build smaller than that many microbricks that
 touch no other piece, and 0 keeps everything. `colours` is how many
 colours the mesh's own are reduced to, 12 if left out, and 0 leaves them
-out. The form's `radius` is half the length of the mesh's longest side
+out. `smooth` is how many times over the surface is smoothed before it
+is fitted, 0 to 60, 0 if left out. The form's `radius` is half the length of the mesh's longest side
 (24 if left out), its one point is its foot, `fill` false leaves a shell
 `thick` through, and `simplify` above 0 trades closeness for fewer
 bricks. A mesh added with no `colour` comes in its own colours.
+
+A rule program is the form `program`, and its own settings are one line
+of text, `program`: `name,x,y,z,cell,seed,finish,limit,stop`, of which
+only the name is needed. The name is one of the programs that come with
+the editor (`Apartemazements`, `CarmaTower`, `ModernHouse`, `SeaVilla`,
+`PillarsOfEternity`, `Escher`, `StrangeDungeon`) or `imported:` and the
+name of a program you have brought in through the panel, and
+`list_programs` gives both lists. `x,y,z` is the
+grid in cells, `cell` the microbricks to a cell, `finish` is `wedges` or
+`plain`, `limit` the most turns a run may take, and `stop` the number of
+turns the run has taken, or `end`. This call adds a ModernHouse of seed 7
+and runs it to its end before it answers:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "program", "program": "ModernHouse,9,9,4,3,7" }
+  }
+}
+```
+
+A form's bricks are those of its grid at the turn `stop` says. A `stop`
+of `end`, the usual, runs the whole program before the call answers,
+which takes from a tenth of a second for Apartemazements to ten seconds
+for CarmaTower, and the window waits for it. A `stop` of `0` adds the
+form at once with nothing built. `run_program` with `"action": "play"`
+then runs it on a second thread while the editor goes on answering, and
+`get_workspace` reports the run under `program_run`: the turn, whether
+there are more turns to take, whether it is playing, the node whose turn
+is next, the seed shown, any seeds that were passed over, and whether it
+was stopped early at its step limit. To record a building growing, call
+`start_gif`, then `run_program` with `restart`, ask `get_workspace`
+until `more_turns_to_take` is false, and call `stop_gif`.
+
+A program is named and never given as a path. Claude can name a program
+that comes with the editor or one already in
+`Documents/brickloft/programs/`, and there is no tool that imports a
+file: a program is brought in by the person at the editor (see
+[features.md](features.md#importing-a-program)). A name that is not
+plain letters, digits, spaces and `_ -` is refused, as is the name of a
+program that is not there.
 
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to

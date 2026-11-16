@@ -197,6 +197,14 @@ pub fn scattered() -> Mesh {
 /// from; a tetrahedron has three cases and needs no table, and what comes
 /// out differs only in how the triangles are cut.
 pub fn surface_of(solid: impl Fn(DVec3) -> f64, colour: impl Fn(DVec3) -> [u8; 3], lo: DVec3, hi: DVec3, n: usize) -> Mesh {
+    let (points, triangles, colours) = surface_parts(solid, colour, lo, hi, n);
+    // (which way each triangle faces is put right where the mesh is made: see `oriented`)
+    Mesh::new(&points, &triangles, &colours).expect("a surface")
+}
+
+/// [`surface_of`], as points, triangles and colours: for a mesh that is to
+/// have some of its triangles taken out before it is made.
+fn surface_parts(solid: impl Fn(DVec3) -> f64, colour: impl Fn(DVec3) -> [u8; 3], lo: DVec3, hi: DVec3, n: usize) -> (Vec<[f32; 3]>, Vec<[u32; 3]>, Vec<[u8; 3]>) {
     use std::collections::HashMap;
     let step = (hi - lo).max_element() / n as f64;
     let counts = ((hi - lo) / step).ceil().to_array().map(|v| v as usize + 1);
@@ -245,8 +253,7 @@ pub fn surface_of(solid: impl Fn(DVec3) -> f64, colour: impl Fn(DVec3) -> [u8; 3
             }
         }
     }
-    // (which way each triangle faces is put right where the mesh is made: see `oriented`)
-    Mesh::new(&points, &triangles, &colours).expect("a surface")
+    (points, triangles, colours)
 }
 
 /// A little figure standing on a disc: a head, a body, two arms and two
@@ -254,6 +261,96 @@ pub fn surface_of(solid: impl Fn(DVec3) -> f64, colour: impl Fn(DVec3) -> [u8; 3
 /// toy is, with a colour for each part shaded as if lit from one side.
 /// 100 tall; `n` is how fine the grid it is drawn on is (see [`surface_of`]).
 pub fn figure(n: usize) -> Mesh {
+    let (points, triangles, colours) = figure_parts(n);
+    Mesh::new(&points, &triangles, &colours).expect("a figure")
+}
+
+/// The figure from the chest up with nothing underneath: every triangle
+/// that reaches below 45 of its 100 is left out, so the mesh ends in a
+/// ragged open edge round the chest and the arms. A scan of a statue from
+/// the front and above is like this, and so is a model whose maker cut it
+/// off at the edge of its box.
+pub fn bust(n: usize) -> Mesh {
+    let (points, triangles, colours) = figure_parts(n);
+    let kept: Vec<[u32; 3]> = triangles.into_iter().filter(|t| t.iter().all(|v| points[*v as usize][2] > 45.0)).collect();
+    Mesh::new(&points, &kept, &colours).expect("a bust")
+}
+
+/// A ball with two holes in it, each far wider than a cell at any size it
+/// is built at: the cap within 35 degrees of its top is gone, and a patch
+/// within 15 degrees of one point on its side.
+pub fn holed_ball(n: usize) -> Mesh {
+    let (points, triangles) = sphere_parts(n);
+    let towards = |t: &[u32; 3], way: DVec3| t.iter().map(|v| { let p = points[*v as usize]; DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) }).sum::<DVec3>().normalize().dot(way);
+    let kept: Vec<[u32; 3]> = triangles.into_iter().filter(|t| towards(t, DVec3::Z) < 35f64.to_radians().cos() && towards(t, DVec3::X) < 15f64.to_radians().cos()).collect();
+    Mesh::new(&points, &kept, &[]).expect("a ball with holes")
+}
+
+/// Three balls that pass through each other, one on top of the next, and
+/// a stick through the middle one for arms: four closed shells that
+/// overlap, as a model put together from parts is and as a model made by
+/// a network sometimes is where two of its lobes meet.
+pub fn snowman() -> Mesh {
+    let mut parts = (Vec::new(), Vec::new());
+    add_ball(&mut parts, 24, DVec3::new(0.0, 0.0, 20.0), 40.0);
+    add_ball(&mut parts, 20, DVec3::new(0.0, 0.0, 48.0), 28.0);
+    add_ball(&mut parts, 16, DVec3::new(0.0, 0.0, 68.0), 18.0);
+    add_box(&mut parts, DVec3::new(-28.0, -1.5, 47.0), DVec3::new(28.0, 1.5, 50.0), |p| p);
+    Mesh::new(&parts.0, &parts.1, &[]).expect("a snowman")
+}
+
+/// A ball 40 across with a lump 12 across hanging off its side by a rod
+/// `neck` thick and 8 long: one piece, as a scrap of ground is that a
+/// model made from a picture trails behind it. 60 along its longest side.
+pub fn tethered(neck: f64) -> Mesh {
+    let mut parts = (Vec::new(), Vec::new());
+    add_ball(&mut parts, 20, DVec3::new(0.0, 0.3, 0.4), 40.0);
+    add_ball(&mut parts, 10, DVec3::new(34.0, 0.3, 0.4), 12.0);
+    add_box(&mut parts, DVec3::new(19.0, 0.3 - neck / 2.0, 0.4 - neck / 2.0), DVec3::new(29.0, 0.3 + neck / 2.0, 0.4 + neck / 2.0), |p| p);
+    Mesh::new(&parts.0, &parts.1, &[]).expect("a ball and a lump on a rod")
+}
+
+/// Two thin closed sheets, each `thick` through: a bowl that is a part of
+/// a ball's skin 80 across, standing on its rim's opposite side, and a
+/// flat plate 40 by 30 leaning at 30 degrees beside it. About 117 along
+/// its longest side, so that built 117 long its sheets are `thick` cells
+/// through. A cloak, a leaf, a wing or an ear is such a sheet.
+pub fn thin(thick: f64) -> Mesh {
+    let mut parts: Parts = (Vec::new(), Vec::new());
+    // the bowl: the part of a ball's skin within 70 degrees of straight down, outside and inside, joined round the rim
+    let (rings, around, radius) = (24usize, 96usize, 40.0);
+    let at = |ring: usize, turn: usize, r: f64| {
+        let (polar, round) = (70f64.to_radians() * ring as f64 / rings as f64, 2.0 * PI * turn as f64 / around as f64);
+        DVec3::new(r * polar.sin() * round.cos(), r * polar.sin() * round.sin(), radius - r * polar.cos())
+    };
+    for r in [radius, radius - thick] {
+        parts.0.push(point(at(0, 0, r)));
+        for ring in 1..=rings {
+            parts.0.extend((0..around).map(|turn| point(at(ring, turn, r))));
+        }
+    }
+    let each = 1 + rings * around;
+    let index = |side: usize, ring: usize, turn: usize| (side * each + if ring == 0 { 0 } else { 1 + (ring - 1) * around + turn % around }) as u32;
+    for turn in 0..around {
+        // (the outside as it is, the inside the other way round, so that both face out of the sheet)
+        parts.1.push([index(0, 0, 0), index(0, 1, turn + 1), index(0, 1, turn)]);
+        parts.1.push([index(1, 0, 0), index(1, 1, turn), index(1, 1, turn + 1)]);
+        for ring in 1..rings {
+            parts.1.push([index(0, ring, turn), index(0, ring, turn + 1), index(0, ring + 1, turn + 1)]);
+            parts.1.push([index(0, ring, turn), index(0, ring + 1, turn + 1), index(0, ring + 1, turn)]);
+            parts.1.push([index(1, ring, turn), index(1, ring + 1, turn + 1), index(1, ring, turn + 1)]);
+            parts.1.push([index(1, ring, turn), index(1, ring + 1, turn), index(1, ring + 1, turn + 1)]);
+        }
+        parts.1.push([index(0, rings, turn), index(0, rings, turn + 1), index(1, rings, turn + 1)]);
+        parts.1.push([index(0, rings, turn), index(1, rings, turn + 1), index(1, rings, turn)]);
+    }
+    // the plate, leaning
+    let (s, c) = 30f64.to_radians().sin_cos();
+    add_box(&mut parts, DVec3::new(-20.0, -15.0, -thick / 2.0), DVec3::new(20.0, 15.0, thick / 2.0), |p| DVec3::new(62.0 + p.x * c - p.z * s, p.y, 14.0 + p.x * s + p.z * c));
+    Mesh::new(&parts.0, &parts.1, &[]).expect("thin sheets")
+}
+
+fn figure_parts(n: usize) -> (Vec<[f32; 3]>, Vec<[u32; 3]>, Vec<[u8; 3]>) {
     // distance from the line between two points, less a radius: a limb
     let limb = |p: DVec3, a: DVec3, b: DVec3, r: f64| {
         let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
@@ -296,7 +393,7 @@ pub fn figure(n: usize) -> Mesh {
         let light = 0.62 + 0.38 * facing.dot(DVec3::new(-0.4, -0.6, 0.7).normalize()).max(0.0);
         base.map(|v| (v * light).round().clamp(0.0, 255.0) as u8)
     };
-    surface_of(solid, colour, DVec3::new(-36.0, -32.0, -1.0), DVec3::new(40.0, 32.0, 101.0), n)
+    surface_parts(solid, colour, DVec3::new(-36.0, -32.0, -1.0), DVec3::new(40.0, 32.0, 101.0), n)
 }
 
 /// A mesh of about `count` triangles, for timing: the lumpy ball cut finer.
