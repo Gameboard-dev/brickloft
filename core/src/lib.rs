@@ -9,6 +9,7 @@
 //!   builds spheres and ellipsoids as one faceted solid, and [`fit_stack`]
 //!   round tubes as stacked outlines joined by sloped pieces
 //! - [`pattern`] fills a flat region with stepping stones in place of solid brick
+//! - [`tree`] grows a pine, a palm or an oak as one solid of many parts
 //! - [`wfc`] fills a grid with tiles that agree with their neighbours (wave function collapse)
 //! - [`spec`] ties them together: a [`spec::Spec`] in, bricks out
 //! - [`orient`] maps each brick to a game asset, orientation and size
@@ -30,6 +31,7 @@ pub mod sdf;
 pub mod shapes;
 pub mod spec;
 pub mod surface;
+pub mod tree;
 pub mod wfc;
 
 pub use glam::{DVec2, DVec3};

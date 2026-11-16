@@ -37,6 +37,9 @@ pub enum Form {
     /// 1 point, the middle of its base: a pyramid `radius` to each side of
     /// it (scaled by `stretch` along x and y) and `rise` tall
     Pyramid,
+    /// 1 point, the foot of its trunk: the tree `tree` describes, `rise`
+    /// tall and reaching `radius` to each side
+    Tree,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -133,6 +136,8 @@ pub struct Spec {
     /// (see [`crate::pattern`]). `None` for none. If `stones` is set too,
     /// the stones are laid.
     pub mosaic: Option<crate::pattern::Mosaic>,
+    /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
+    pub tree: crate::tree::Tree,
 }
 
 impl Default for Spec {
@@ -164,6 +169,7 @@ impl Default for Spec {
             pull_reach: 8.0,
             stones: None,
             mosaic: None,
+            tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -357,6 +363,13 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     if spec.mosaic.is_some() {
         return build_at(spec, 1, measured);
     }
+    // So is a tree, for the same reason: its boughs, twigs and leaflets
+    // are a cell or two thick, and at a coarser size they are gone and
+    // what is left is a trunk in a cloud. A tree is tens of thousands of
+    // bricks; fewer come from a smaller tree or a brick size asked for.
+    if spec.form == Form::Tree {
+        return build_at(spec, 1, measured);
+    }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
     // g cubed fewer cells to look at, so every size tried on the way down
@@ -413,7 +426,7 @@ impl Spec {
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -1006,6 +1019,17 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let (solid, path) = volume(field.clone(), lo, hi, Vec::new())?;
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
+        }
+        Form::Tree => {
+            let foot = need(1)?[0];
+            let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
+            let (height, spread) = (spec.rise.unwrap_or(usual), spec.radius);
+            // refused by its size before it is grown: a tree's parts are
+            // as many as its size has room for
+            check_size(&[(2.0 * spread + height) as i64 + 8, (2.0 * spread + height) as i64 + 8, height as i64 * 2 + 8])?;
+            let tree = std::sync::Arc::new(crate::tree::Model::new(&spec.tree, foot, height, spread));
+            let (lo, hi) = tree.bounds();
+            volume(Field::Tree(tree), lo, hi, Vec::new())
         }
         Form::Revolve => {
             let p = need(2)?;
@@ -2379,14 +2403,19 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 stretch: true,
             };
             let fit = fit_volume(&|p| field.eval(p), *min, *max, &opts);
+            // a tree's bricks each have the colour of the part they are of
+            let (bricks, shades) = match field {
+                Field::Tree(tree) => tree.colour(fit.bricks, spec.max_ext),
+                _ => (fit.bricks, Vec::new()),
+            };
             Built {
-                bricks: fit.bricks,
+                bricks,
                 solid: fit.solid,
                 error: fit.error,
                 path,
                 grain: 1,
                 unmeasured: false,
-                shades: Vec::new(),
+                shades,
             }
         }
         Solid::Lathe { field, min, max, .. } => {

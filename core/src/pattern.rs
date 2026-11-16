@@ -66,7 +66,7 @@ pub const LEAST_GAP: f64 = 0.0;
 /// do for scattering stones; this one is a dozen lines with no state beyond
 /// a number, where the `rand` crate would be a dependency for it.
 /// https://prng.di.unimi.it/splitmix64.c
-struct Numbers(u64);
+pub(crate) struct Numbers(pub(crate) u64);
 
 impl Numbers {
     fn next(&mut self) -> u64 {
@@ -78,7 +78,7 @@ impl Numbers {
     }
 
     /// From 0 up to, not including, 1.
-    fn unit(&mut self) -> f64 {
+    pub(crate) fn unit(&mut self) -> f64 {
         (self.next() >> 11) as f64 / (1u64 << 53) as f64
     }
 }

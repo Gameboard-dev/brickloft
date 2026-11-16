@@ -29,6 +29,7 @@ fn form_name(form: Form) -> String {
         Form::Torus => "torus".into(),
         Form::Revolve => "revolve".into(),
         Form::Pyramid => "pyramid".into(),
+        Form::Tree => "tree".into(),
     }
 }
 
@@ -88,6 +89,8 @@ pub fn spec_text(spec: &Spec) -> String {
     // stepping stones: how far apart, the gap, how uneven, and which scattering
     // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along, across and in depth
     line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},{}", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1], m.uneven[2])));
+    // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
+    line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -150,6 +153,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("torus", _) => Form::Torus,
                     ("revolve", _) => Form::Revolve,
                     ("pyramid", _) => Form::Pyramid,
+                    ("tree", _) => Form::Tree,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -272,6 +276,14 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     // (sizes from a file, which may be anyone's: kept to what the sliders allow)
                     Some(crate::pattern::Mosaic { style, size: (whole(size)?.clamp(1, 16)) as i32, bevel: (whole(bevel)?.clamp(0, 8)) as i32, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, mortar, stagger, upright, uneven })
                 }
+            }
+            "tree" => {
+                let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                let [kind, seed, fullness, count, bend, extras] = parts.as_slice() else { return Err(bad("expected `kind,seed,fullness,count,bend,extras`")) };
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == *kind).ok_or_else(|| bad("unknown kind of tree"))?.0;
+                // (numbers from a file, which may be anyone's: kept to what the sliders allow)
+                let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };
+                spec.tree = crate::tree::Tree { kind, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, fullness: within(fullness)?, count: within(count)?, bend: within(bend)?, extras: whole(extras)? != 0 }.clamped();
             }
             "stones" => {
                 spec.stones = if value == "none" {

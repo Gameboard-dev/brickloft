@@ -11,7 +11,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 7] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid"];
+pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Tree"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -23,6 +23,7 @@ pub const BEZIER: usize = 3;
 pub const SPHERE: usize = 4;
 pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
+pub const TREE: usize = 7;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -144,6 +145,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Sphere => SPHERE,
         Form::Revolve => REVOLVE,
         Form::Pyramid => PYRAMID,
+        Form::Tree => TREE,
     }
 }
 
@@ -1039,6 +1041,7 @@ impl State {
             BEZIER => Form::Bezier,
             SPHERE => Form::Sphere,
             PYRAMID => Form::Pyramid,
+            TREE => Form::Tree,
             _ => Form::Revolve,
         };
         // a curve through an arch's points is open, whatever a spline left behind
