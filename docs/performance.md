@@ -537,6 +537,55 @@ place, and a build is the same bricks as on a desktop.
 | The boards of planks | 0.03 ms | Each board starts where the last one ended. |
 | Finding the flat faces and the sides a pattern is laid on (`pattern_flat_faces` and `pattern_side_faces` in `spec.rs`) | 20 to 30 ms for a cube 120 by 84 by 48, less the tiles | The faces are found from the finished bricks and laid one after another onto one list of them. The tiles drawn on each face are shared out, which took cobblestone on that cube from 120 ms to under 50. |
 
+## Meshes
+
+Fitting a mesh made by another program is on trial
+([algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs)),
+and these are the trial's times. They were taken with
+`cargo run --release -p brickloft-editor --example mesh_trial` on a
+Ryzen 7 5800X3D (16 threads) while other builds were using every core,
+so each is an upper bound and the speed-ups are lower than a quiet
+machine would give.
+
+The route that asks a distance function everywhere (guided) against the
+route that reads the triangles (scanned), which lay the same bricks but
+for a few pieces:
+
+| Mesh | Size | Guided, 1 thread | Guided, 16 | Scanned, 1 thread | Scanned, 16 |
+|---|---|---|---|---|---|
+| Box turned 20 degrees | 96 | 4,989 ms | 737 ms | 297 ms | 118 ms |
+| Gem | 77 | 941 ms | 138 ms | 212 ms | 51 ms |
+| House | 56 | 3,912 ms | 728 ms | 161 ms | 53 ms |
+| Sphere, 9,024 triangles | 96 | 164,675 ms | 14,694 ms | 2,555 ms | 584 ms |
+| Torus | 128 | 107,442 ms | 19,154 ms | 3,825 ms | 1,077 ms |
+| Lumpy ball | 96 | 82,827 ms | 8,793 ms | 3,377 ms | 1,157 ms |
+
+A mesh of 499,848 triangles fitted 200 microbricks across is 44,161
+bricks. Its hierarchy is built in 1.1 seconds on one thread, once for a
+file. Each part of the fit after that:
+
+| Part | 1 thread | 16 threads | Shared out |
+|---|---|---|---|
+| Triangles laid into cells | 292 ms | 510 ms | yes, then sorted on one |
+| Samples of the surface's cells | 5,373 ms | 1,306 ms | yes |
+| Runs of cells inside | 706 ms | 1,073 ms | yes |
+| Stretched pieces found | 8,857 ms | 2,281 ms | yes |
+| Stretched pieces laid | 1,629 ms | 3,091 ms | no |
+| Boxes joined | 48 ms | 81 ms | no |
+| All | 16.9 s | 8.4 s | |
+
+The parts that came out slower on 16 threads than on one were measured
+while the machine was full, and are not evidence that threads cost
+anything there. The laying of the stretched pieces is the largest part
+on one thread whatever the machine is doing: it sorts every piece found
+and takes them in order, each by what is already taken.
+
+The process's peak memory for that fit was 132 to 139 MB. The mesh and
+its hierarchy are 46 MB of it, shared by every thread and never copied.
+The rest is the list of which triangles are in which cell, the pieces
+found, and one byte for each of the 8.6 million cells in the box, which
+is the only part that grows with the volume.
+
 ## The editor
 
 A dragged form is not measured. While the mouse button is down, forms that

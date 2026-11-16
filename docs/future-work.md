@@ -239,6 +239,12 @@ is one of the editor's forms, so each needs a way in, and both then need
 fitting with bricks. The plan below is not built. It was written on
 2026-11-16 from each project's public page and licence file, read that day.
 
+One part of it has since been tried: fitting a mesh. Four ways of doing
+it were built far enough to measure, and
+[algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs)
+has what each gave and which is to be built into the editor. Reading
+mesh files, the Imported form itself and its colours are not built.
+
 ### What the two need in common
 
 A new form, **Imported**, holds what another program made: a grid of

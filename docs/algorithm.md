@@ -3582,6 +3582,196 @@ about 2 ms. **Brick size** and the brick budget do not apply to
 furniture. Its boards are whole microbricks thick, and on a coarser grid a
 board 2 thick would become 3 thick or vanish.
 
+### 7.13 Meshes made by other programs
+
+A triangle mesh from a file is the one form here that arrives with no
+formula. This section records how fitting one was chosen, with the
+measurements, because the first idea for it was the wrong one. The code
+is [`core/src/mesh.rs`](../core/src/mesh.rs) and the three files under
+[`core/src/mesh/`](../core/src/mesh/). It is a trial: the editor does
+not open mesh files yet.
+
+#### What must not be lost
+
+Most programs that turn a mesh into toy bricks first fill a grid of
+cells and then join the cells into bricks. Testuz, Schwartzburg and Pauly
+(2013, [doi:10.2312/conf/EG2013/short/081-084](https://doi.org/10.2312/conf/EG2013/short/081-084))
+describe that order: voxelise, merge voxels into larger bricks, repair
+what would not hold together. Luo and others (2015, "Legolization",
+[doi:10.1145/2816795.2818091](https://doi.org/10.1145/2816795.2818091))
+work on which layout of bricks is strong enough to stand, which matters
+for plastic and not here, since a brick in the game does not fall. Both
+were read in their abstracts only. For bricks that are all boxes the
+order is harmless, because a box can show nothing a filled cell cannot.
+Brickadia's wedges stretch to any whole-number rise and run, so here the
+grid throws away the one thing those wedges are for: a filled cell does
+not say which way the surface through it faced, and a roof becomes
+stairs that no later step can turn back into a roof.
+
+Zhou, Chen and Xu (2019, [doi:10.1111/cgf.13603](https://doi.org/10.1111/cgf.13603))
+are the exception among the papers looked at. Their abstract says the
+system keeps an architectural model's repeats, details and planarity,
+deforms the mesh so that it agrees with where bricks can stand, and uses
+sloping bricks as well as boxes. Only the abstract could be opened, so
+what is taken from it is the aim and not a method.
+
+The rule adopted is that the mesh stays in hand until the last brick is
+chosen. Every sample that decides a brick is answered by the triangles,
+and the direction of a sloped brick comes from the triangle it lies on.
+
+#### The four routes tried
+
+| Route | What it does |
+|---|---|
+| Blocks | Cubes alone, joined into boxes: what fill-then-join gives. The baseline. |
+| Plain | The mesh as a distance function (nearest triangle, signed by the winding number) given to the fitter of section 7.1 unchanged: the best unit piece for each cell, then ramps stretched one way, one cell high. |
+| Guided | The same unit pieces. Then each cell the surface crosses is offered the stretched pieces whose sloped face lies the way the nearest triangle faces, to within 3 degrees: a ramp of any whole rise and run up to 12 where the surface runs along an axis, a stretched tetrahedron or cut cube up to 6 each way where it slopes along all three. A piece is laid if it disagrees with the mesh no more than the unit pieces it replaces. |
+| Scanned | Guided, with the cells and their samples found from the triangles directly and not by asking a distance function (below). |
+
+Two other approaches were considered and not built. Cutting the mesh
+into near-flat regions first (growing regions over neighbouring triangles
+by their normals, or the variational shape approximation of Cohen-Steiner,
+Alliez and Desbrun 2004,
+[doi:10.1145/1015706.1015817](https://doi.org/10.1145/1015706.1015817))
+would give each region one plane, and so one size of piece and one
+lattice for the whole of it. The guided route reaches the same result
+for flat faces without the regions, by ranking whole layouts (below).
+Regions remain the way to do what it cannot: moving a large plane onto
+the lattice. Laying a curved region out as one patch, as the sphere and
+the spun profile are laid out (sections 7.3 and 7.6), needs the region
+to be a known kind of surface, and a mesh's curved parts are not.
+
+#### Layouts, not single pieces
+
+Stretched pieces of one size facing one way tile a flat face if they all
+stand on one lattice of boxes. Taken one at a time by what each saves,
+pieces from different lattices landed on the same face and blocked each
+other, and a flat facet came out as scattered pieces with unit ones
+between. So the pieces found are grouped by size, direction and lattice,
+the groups are ranked by what all their pieces save and cover together,
+and a whole group is laid before the next is looked at. On the gem at
+size 77 that took 1,142 bricks to 1,030 and the steps for each cell of
+surface from 0.028 to 0.022, and the house at size 56 went from 18
+bricks to 10. On curved meshes it is neither better nor worse on
+balance: the sphere at 96 lost 16% of its bricks and a quarter of its
+closeness, and the torus gained 5% in bricks.
+
+#### Where the time goes, and the scanned route
+
+The plain and guided routes ask the distance function at every corner of
+every block of cells near the surface and at 64 places in every cell the
+surface may cross. For a mesh each question is two searches of a
+hierarchy of boxes: one for the nearest triangle and one for the winding
+number. A house of 22 triangles, 56 cells long, took 2.7 to 4 seconds on
+one thread, and a sphere 96 across took 85 to 165 seconds. That is well
+tuned code doing work it need not do.
+
+The scanned route gets the same answers from the triangles:
+
+1. A cell is crossed by the surface exactly when a triangle overlaps its
+   box, so each triangle is laid into the cells it overlaps (the
+   separating-axis test of Akenine-Möller 2001,
+   [doi:10.1080/10867651.2001.10487535](https://doi.org/10.1080/10867651.2001.10487535)).
+2. The winding number changes by exactly one across a triangle and
+   nowhere else. It is worked out through the hierarchy once for a cell,
+   near its middle, and each of the cell's 64 samples and 8 corners is
+   that number plus or minus one for every triangle of the cell that the
+   line from the middle to the sample passes through.
+3. A cell no triangle touches is all inside or all outside, and so is
+   the run of such cells between two that are touched: one winding
+   number settles a run.
+
+With $`T`$ triangles, $`S`$ cells on the surface and $`V`$ cells in the
+box, the plain route makes about $`70 S`$ searches of the hierarchy and
+the scanned route about $`2 S`$, with $`72 S`$ tests of a line against
+the few triangles of one cell. Nothing is asked of a cell inside the
+form: the inside is runs of cubes, written into the one byte a cell that
+the fitter of section 7.1 already keeps, which is the only thing whose
+size goes by $`V`$.
+
+A test (`scanning_the_triangles_gives_the_bricks_that_asking_the_distance_everywhere_gives`)
+holds the two to the same unit piece in every cell of a house, a gem, a
+torus and a lumpy ball. They may differ only in a cell with a corner
+lying exactly on the surface, which either may count as in or out.
+
+#### What was measured
+
+Bricks are measured from the bricks alone (`mesh::trial::measure`).
+Discrepancy is the volume where bricks and mesh disagree, as a share of
+the mesh's volume. The gap is how far the outer faces of the bricks
+stand from the surface, in microbricks. Steps are the area of faces
+between two cells with brick on one side and none on the other where the
+mesh is the same on both, for each cell the surface crosses, which is
+how the roughness of a seam between joined forms is measured too. The
+meshes are made by rule (`mesh::made`): a box turned 20 degrees about
+the upright, the same box tilted 25 degrees as well, a sphere of 9,024
+triangles, a torus, a gem of eight flat faces that each slope along all
+three axes (in whole numbers at size 48), a house with a roof at 1 in 2
+(on the lattice at size 56), and a lumpy ball with no flat face.
+
+| Mesh | Size | Route | Bricks | Discrepancy | Worst gap | Steps per surface cell | Unit sloped bricks |
+|---|---|---|---|---|---|---|---|
+| Box turned 20° | 96 | Blocks | 79 | 2.97% | 0.54 | 0.306 | 0 |
+| | | Plain | 288 | 1.66% | 0.67 | 0.089 | 15 |
+| | | Scanned | 182 | 1.81% | 0.67 | 0.097 | 106 |
+| Box turned and tilted | 96 | Blocks | 2,265 | 2.91% | 0.50 | 0.418 | 0 |
+| | | Plain | 5,722 | 1.12% | 0.82 | 0.076 | 1,056 |
+| | | Scanned | 3,545 | 0.90% | 0.82 | 0.051 | 1,715 |
+| Gem | 48 | Blocks | 320 | 7.42% | 0.28 | 0.432 | 0 |
+| | | Plain | 1,794 | 3.52% | 0.33 | 0.116 | 1,472 |
+| | | Scanned | 133 | 0.00% | 0.00 | 0.000 | 0 |
+| Gem | 77 | Plain | 5,684 | 2.17% | 0.59 | 0.125 | 3,875 |
+| | | Scanned | 1,030 | 0.32% | 0.59 | 0.022 | 390 |
+| House | 56 | Blocks | 21 | 1.67% | 0.22 | 0.141 | 0 |
+| | | Plain | 40 | 0.00% | 0.00 | 0.000 | 0 |
+| | | Scanned | 10 | 0.00% | 0.00 | 0.000 | 0 |
+| House | 90 | Plain | 167 | 2.46% | 0.69 | 0.094 | 8 |
+| | | Scanned | 65 | 2.75% | 0.69 | 0.110 | 14 |
+| Sphere | 96 | Blocks | 3,431 | 1.46% | 0.54 | 0.430 | 0 |
+| | | Plain | 16,912 | 0.60% | 0.65 | 0.109 | 9,920 |
+| | | Scanned | 7,642 | 0.58% | 0.64 | 0.063 | 3,084 |
+| | | The editor's own sphere | 2,426 | 1.13% | 0.70 | 0.019 | 0 |
+| Torus | 128 | Plain | 14,854 | 1.07% | 0.64 | 0.108 | 8,088 |
+| | | Scanned | 10,287 | 1.14% | 0.68 | 0.090 | 4,365 |
+| | | The editor's own torus | 235 | 11.04% | 5.89 | 0.122 | 0 |
+| Lumpy ball | 96 | Plain | 15,259 | 1.05% | 0.73 | 0.122 | 9,094 |
+| | | Scanned | 10,388 | 0.95% | 1.31 | 0.087 | 4,602 |
+
+A flat face at a whole-number slope comes out exact: the gem at size 48
+is 133 stretched corner pieces lying in its eight faces, and the house
+at 56 is ten bricks. A flat face at an awkward slope comes out as the
+nearest whole-number pieces in courses, with unit pieces where the
+courses slip: the turned box is 182 bricks against 288, with ramps 8 by
+3 in runs the height of the wall. On curved meshes the guided pieces
+take a third to a half off the brick count and a sixth to two fifths off
+the steps, and are about as close.
+
+The editor's own sphere is still three times smoother than a sphere
+brought in as a mesh, in a third of the bricks, at twice the
+discrepancy: it is laid out as one design, and a mesh's curved surface
+is fitted piece by piece. Its own torus is 235 bricks and an octagon in
+section, 11% from the round tube.
+
+Times and memory are in [performance.md](performance.md).
+
+#### What it does not do
+
+- A plane that is not on the lattice is not moved onto it. The house at
+  size 90 has walls and eaves between cells, and is 2.75% out with a
+  slot along its ridge. Moving large planes to the nearest lattice plane
+  first, the deformation Zhou, Chen and Xu's abstract describes, is not
+  built.
+- A ridge or a hip where two slopes meet is left to unit pieces. The
+  hip and inner-corner bricks of section 2 are not offered.
+- A curved surface gets no layout of its own.
+- A hole in the mesh is closed by the winding number where it falls to
+  one half. The scanned route settles a run of untouched cells by one
+  number, so the skin over a hole wider than a cell is stepped. The runs
+  that cross such a skin are still to be found and their cells sampled.
+- The winding number uses the arctangent, which not every system's
+  library computes alike to the last digit. A sample would be decided
+  differently only where the number is within that digit of one half.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points
