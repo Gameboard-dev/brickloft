@@ -149,14 +149,14 @@ pub(crate) fn form_index(form: Form) -> usize {
     }
 }
 
-/// The points a form of kind `form` (one of `ARCH` to `PYRAMID`) starts
+/// The points a form of kind `form` (one of `ARCH` to `TREE`) starts
 /// from, and a Bezier curve's weights: where the editor sets one down, and
 /// what a form added from outside gets if it is given none of its own.
 pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
-        CIRCLE | PYRAMID => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        CIRCLE | PYRAMID | TREE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
         BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
         // resting on the floor
@@ -572,7 +572,7 @@ impl State {
     /// pyramid. Returns whether it is. By whole cells, so that a radius that
     /// ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | TREE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -818,6 +818,11 @@ impl State {
     /// the radius, or an arch's rise.
     fn tunable(&self, only: Option<Handle>) -> Vec<Tune> {
         let mut all = Vec::new();
+        // A tree has nothing to tune: it fits no better a cell to one
+        // side, and each try would be a second's building.
+        if self.form == TREE {
+            return all;
+        }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
         for i in 0..self.spec.points.len() {
             for axis in 0..3 {
@@ -1012,11 +1017,34 @@ impl State {
                 s.radius = s.radius.floor() + 0.5;
                 s.fill = true;
             }
+            TREE => {
+                let kind = s.tree.kind;
+                self.usual_tree(kind);
+            }
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
             self.lock = Lock::Axis(1);
         }
+    }
+
+    /// Make the form the tree of `kind` as it starts out: its settings, its
+    /// usual size, and its own colours. The seed is kept, so that going
+    /// from kind to kind and back finds the same tree.
+    ///
+    /// The colours come with it because a tree in the one colour a form
+    /// starts in is a grey shape: its parts are told apart by colour.
+    pub fn usual_tree(&mut self, kind: brickloft_core::tree::Kind) {
+        use brickloft_core::tree::{Tree, KINDS};
+        let (height, spread) = Tree::usual_size(kind);
+        self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
+        (self.spec.radius, self.spec.rise) = (spread, Some(height));
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+    }
+
+    /// A tree's height.
+    pub fn tree_height(&self) -> f64 {
+        self.spec.rise.unwrap_or(brickloft_core::tree::Tree::usual_size(self.spec.tree.kind).0)
     }
 
     /// Whether the form is an arch on its two feet alone, which has a kind
@@ -1226,6 +1254,13 @@ impl State {
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
             CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            // a tree: one dot at its top for its height, and one at its
+            // side, half way up, for its spread
+            TREE if !p.is_empty() => {
+                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
+                all.push((Handle::Radius, foot + self.radius_dir() * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
+            }
             _ => {}
         }
         // where they are in the workspace, which is where they are drawn and dragged
@@ -1544,6 +1579,10 @@ impl State {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
+            Handle::Rise if self.form == TREE => {
+                let height = snap(hit.z - self.spec.points[0].z.floor()).round();
+                self.spec.rise = Some(height.clamp(brickloft_core::tree::LEAST_HEIGHT, HANDLE_LIMIT));
+            }
             Handle::Rise => {
                 let mid = (self.spec.points[0] + self.spec.points[1]) / 2.0;
                 self.spec.rise = Some(snap(hit.z - mid.z).clamp(0.5, HANDLE_LIMIT));
@@ -1561,7 +1600,8 @@ impl State {
     /// Whether points can be added to the form to pull it out of shape.
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
-        true
+        // (but a tree, which is grown and not drawn)
+        self.form != TREE
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a

@@ -279,11 +279,32 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             }
             "tree" => {
                 let parts: Vec<&str> = value.split(',').map(str::trim).collect();
-                let [kind, seed, fullness, count, bend, extras] = parts.as_slice() else { return Err(bad("expected `kind,seed,fullness,count,bend,extras`")) };
-                let kind = crate::tree::KINDS.iter().find(|k| k.1 == *kind).ok_or_else(|| bad("unknown kind of tree"))?.0;
+                // The kind, and then as many of the rest as are given, in
+                // order: `oak` alone is the oak as it starts out, and
+                // `oak,7` the seventh of them.
+                if parts.len() > 6 {
+                    return Err(bad("expected `kind,seed,fullness,count,bend,extras`, or the first few of them"));
+                }
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of tree: pine, palm or oak"))?.0;
+                let mut tree = crate::tree::Tree::of(kind);
                 // (numbers from a file, which may be anyone's: kept to what the sliders allow)
                 let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };
-                spec.tree = crate::tree::Tree { kind, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, fullness: within(fullness)?, count: within(count)?, bend: within(bend)?, extras: whole(extras)? != 0 }.clamped();
+                if let Some(seed) = parts.get(1) {
+                    tree.seed = seed.parse().map_err(|_| bad("the seed is a whole number, not negative"))?;
+                }
+                if let Some(fullness) = parts.get(2) {
+                    tree.fullness = within(fullness)?;
+                }
+                if let Some(count) = parts.get(3) {
+                    tree.count = within(count)?;
+                }
+                if let Some(bend) = parts.get(4) {
+                    tree.bend = within(bend)?;
+                }
+                if let Some(extras) = parts.get(5) {
+                    tree.extras = whole(extras)? != 0;
+                }
+                spec.tree = tree.clamped();
             }
             "stones" => {
                 spec.stones = if value == "none" {

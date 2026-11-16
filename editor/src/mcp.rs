@@ -774,6 +774,17 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 return Err("settings needs at least `form`: the kind of form to add".into());
             }
             let mut spec = changed(&Spec::default(), settings)?;
+            let tree = (spec.form == brickloft_core::spec::Form::Tree).then_some(spec.tree.kind);
+            if let Some(kind) = tree {
+                // a tree given no size is the size the editor starts one at, not a form's usual radius: a tree 8 across is a twig
+                let (height, spread) = brickloft_core::tree::Tree::usual_size(kind);
+                if !settings.contains_key("radius") {
+                    spec.radius = spread;
+                }
+                if !settings.contains_key("rise") {
+                    spec.rise = Some(height);
+                }
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
                 let (points, weights) = crate::state::usual_points(crate::state::form_index(spec.form), spec.radius);
@@ -788,7 +799,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.record();
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
-            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name));
+            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1));
             state.add_form(spec);
             if let Some(paint) = paint {
                 state.paint = paint;

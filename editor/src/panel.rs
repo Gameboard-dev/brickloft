@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -250,6 +250,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             .response
         });
         if state.form != before {
+            // a tree's colours are for a tree's parts: they go when it does
+            if before == TREE && state.paint.mode == Mode::Pattern {
+                state.paint = crate::paint::Paint::default();
+            }
             state.preset();
         }
         if helped(ui, help("reset_form"), |ui| ui.button("Reset this form")).clicked() {
@@ -277,6 +281,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.separator();
 
         let arch_feet = state.has_rise();
+        if state.form == TREE {
+            tree(ui, state, largest);
+        }
         let s = &mut state.spec;
         let is_curve = state.form <= BEZIER;
         match state.form {
@@ -390,6 +397,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             PYRAMID => {
                 helped(ui, help("solid_pyramid"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)"));
             }
+            // a tree is neither filled nor hollow, and has no wall
+            TREE => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -408,7 +417,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any)
-        if !(state.form == PYRAMID && s.fill) {
+        if !(state.form == PYRAMID && s.fill) && state.form != TREE {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve && !s.tube {
@@ -542,13 +551,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 }
             });
         }
-        ui.horizontal(|ui| {
-            ui.label("Mirror").on_hover_text(help("mirror"));
-            for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-                ui.checkbox(&mut s.mirror[axis], *name);
-            }
-            hint(ui, help("mirror"));
-        });
+        // (not a tree, which is no one's mirror image; it can still be flipped)
+        if state.form != TREE {
+            ui.horizontal(|ui| {
+                ui.label("Mirror").on_hover_text(help("mirror"));
+                for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
+                    ui.checkbox(&mut s.mirror[axis], *name);
+                }
+                hint(ui, help("mirror"));
+            });
+        }
         // (There was a second tickbox here, to make the bricks of a form that
         // was already symmetric mirror images of each other. It did nothing
         // that could be seen on most forms and was not understood, and a
@@ -699,6 +711,74 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 }
 
 /// How the form being edited is coloured.
+/// The controls of a tree: its kind, its size, the three settings each
+/// kind has under its own names, and which tree of the kind it is.
+fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
+    use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
+    let titled = |kind: Kind| ["Pine", "Palm", "Oak"][kind as usize];
+    let before = state.spec.tree.kind;
+    let mut kind = before;
+    helped(ui, help("tree_kind"), |ui| {
+        ComboBox::from_label("Kind").selected_text(titled(kind)).show_ui(ui, |ui| {
+            for (k, _) in KINDS {
+                ui.selectable_value(&mut kind, k, titled(k));
+            }
+        })
+        .response
+    });
+    if kind != before {
+        state.usual_tree(kind);
+    }
+    let named = KINDS[kind as usize].1;
+    // which of the kind's sets of colours, if it is in one of them
+    let (sets, names) = (crate::paint::palettes(named), crate::paint::tree_palette_names(named));
+    let now = sets.iter().position(|set| state.paint.mode == Mode::Pattern && state.paint.colours == *set);
+    let mut choice = now;
+    helped(ui, help("tree_colours"), |ui| {
+        ComboBox::from_label("Colours").selected_text(now.map_or("Your own", |n| names[n])).show_ui(ui, |ui| {
+            for (n, name) in names.iter().enumerate() {
+                ui.selectable_value(&mut choice, Some(n), *name);
+            }
+        })
+        .response
+    });
+    if let Some(n) = choice.filter(|_| choice != now) {
+        (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets[n].to_vec());
+    }
+    let s = &mut state.spec;
+    let mut height = s.rise.unwrap_or(Tree::usual_size(kind).0);
+    if helped(ui, help("tree_height"), |ui| ui.add(Slider::new(&mut height, LEAST_HEIGHT..=largest.max(LEAST_HEIGHT)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Height"))).changed() {
+        s.rise = Some(height);
+    }
+    helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(if kind == Kind::Palm { "Frond length" } else { "Spread" })));
+    let (fullness, count, bend) = match kind {
+        Kind::Pine => ("Fullness", "Tiers of boughs", "Droop"),
+        Kind::Palm => ("Leaflet length", "Fronds", "Lean"),
+        Kind::Oak => ("Foliage", "Main limbs", "Gnarl"),
+    };
+    let (least, most) = Tree::count_range(kind);
+    helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+    helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
+    helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
+    match kind {
+        Kind::Pine => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "A star and baubles"));
+        }
+        Kind::Palm => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
+        }
+        Kind::Oak => {}
+    }
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
+        ui.label("Seed");
+        if ui.button("Another").clicked() {
+            s.tree.seed = s.tree.seed.wrapping_add(1);
+        }
+        hint(ui, help("tree_seed"));
+    });
+}
+
 fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
     let paint = &mut state.paint;

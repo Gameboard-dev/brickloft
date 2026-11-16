@@ -151,6 +151,16 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
     }
 }
 
+/// What each of a tree's sets of colours is called, in the order
+/// [`palettes`] has them, for the list they are chosen from.
+pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "pine" => &["Spruce green", "Under snow", "Blue spruce", "In frost"],
+        "palm" => &["Coconut palm", "Dusty", "At sunset"],
+        _ => &["Summer", "Early autumn", "Late autumn", "Spring"],
+    }
+}
+
 /// The colours a mosaic of a style starts in.
 pub fn palette(style: &str) -> &'static [[u8; 3]] {
     palettes(style)[0]
