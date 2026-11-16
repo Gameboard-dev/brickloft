@@ -1,7 +1,7 @@
 //! Moving the view: the camera is flown. Right-drag turns it where it
 //! stands, a middle click turns it to face whatever the cursor is on,
 //! W A S D move it the way it looks and sideways, Space or E raise it,
-//! Q lowers it, and Shift with the scroll wheel sets how fast it goes.
+//! Q lowers it, and Shift held makes it go faster.
 //!
 //! It can be tilted right over backwards. Its direction is kept as a
 //! heading about the upright and a tilt from level, and its own "up" is
@@ -13,10 +13,14 @@
 //! further with the wheel, which made its speed depend on how far off that
 //! point happened to be, and left the point behind when the forms were
 //! moved. Now there is no such point: the camera turns about itself and is
-//! brought nearer by moving it. The wheel, with nothing to zoom, sets the
-//! speed instead, while Shift is held: one speed is too slow across a large build and too fast
-//! beside a small one, and a key held to go faster gave only two. (With
-//! Ctrl the wheel still resizes the form being edited.)
+//! brought nearer by moving it.
+//!
+//! It has two speeds: its usual one, and a faster one while Shift is
+//! held, as the game's own fly mode has. For a while the wheel set the
+//! speed, with Shift held, to any of a range: finer, but a setting to be
+//! kept in mind and put back, where a key held is fast for as long as it
+//! is wanted and no longer. (With Ctrl the wheel still resizes the form
+//! being edited.)
 //!
 //! three-d's own `FlyControl` turns on a plain left-drag, which is the
 //! button the handles are dragged with, and has no keys. This uses the
@@ -28,8 +32,8 @@ use three_d::*;
 pub struct Controls {
     /// W, A, S, D, up (Space or E), down (Q): whether each is held down
     held: [bool; 7],
-    /// microbricks a second
-    speed: f32,
+    /// whether Shift is held, which is the faster of its two speeds
+    fast: bool,
     /// which way it looks: round the upright from +x, and up from level.
     /// The tilt is not kept within a quarter turn: past it, the camera is
     /// on its back.
@@ -37,14 +41,10 @@ pub struct Controls {
     tilt: f32,
 }
 
-/// The speed to start with, and the slowest and fastest the wheel can set.
+/// Its usual speed, in microbricks a second, and how many times faster it
+/// goes with Shift held: across a large build in a few seconds.
 const SPEED: f32 = 80.0;
-const SLOWEST: f32 = 5.0;
-const FASTEST: f32 = 2000.0;
-/// How much faster one notch of the wheel is: a notch is about 100 of the
-/// wheel's units on a mouse, and far fewer at a time on a touchpad, so the
-/// change is by how far it turned and not by how many times it was heard.
-const PER_UNIT: f32 = 0.0025;
+const FAST: f32 = 4.0;
 /// Radians turned for each point the mouse moves.
 const TURN: f32 = 0.005;
 
@@ -59,7 +59,7 @@ impl Controls {
     /// For a camera that is the right way up.
     pub fn new(camera: &Camera) -> Controls {
         let view = camera.view_direction();
-        Controls { held: [false; 7], speed: SPEED, heading: view.y.atan2(view.x), tilt: view.z.clamp(-1.0, 1.0).asin() }
+        Controls { held: [false; 7], fast: false, heading: view.y.atan2(view.x), tilt: view.z.clamp(-1.0, 1.0).asin() }
     }
 
     /// Turn the camera, where it stands, to look along `towards`: the way
@@ -90,10 +90,8 @@ impl Controls {
     /// Apply this frame's events. Events already used by the panel or by a
     /// handle are marked `handled` and left alone. `elapsed_ms` is the time
     /// since the last frame, so that speed does not depend on frame rate.
-    /// `typing` is whether a text box has the keyboard. Returns the speed
-    /// if the wheel changed it, to be shown.
-    pub fn update(&mut self, camera: &mut Camera, events: &mut [Event], elapsed_ms: f64, typing: bool) -> Option<f32> {
-        let mut changed = None;
+    /// `typing` is whether a text box has the keyboard.
+    pub fn update(&mut self, camera: &mut Camera, events: &mut [Event], elapsed_ms: f64, typing: bool) {
         for event in events.iter_mut() {
             match event {
                 Event::MouseMotion { delta, button: Some(MouseButton::Right), handled, .. } if !*handled => {
@@ -110,15 +108,14 @@ impl Controls {
                     self.aim(camera);
                     *handled = true;
                 }
-                // Only with Shift held: the wheel alone scrolls the panel,
-                // and changed the speed as it did. (With Shift, some systems
-                // report the wheel as turning sideways.)
-                Event::MouseWheel { delta, modifiers, handled, .. } if !*handled && modifiers.shift => {
-                    self.speed = faster(self.speed, if delta.1 != 0.0 { delta.1 } else { delta.0 });
-                    changed = Some(self.speed);
-                    *handled = true;
+                // (Shift, whenever it is pressed or let go, and as every key
+                // pressed reports it: a window that loses the keyboard with
+                // Shift down may never hear it come up)
+                Event::ModifiersChange { modifiers } => self.fast = modifiers.shift,
+                Event::KeyPress { kind, modifiers, handled, .. } if !*handled => {
+                    self.fast = modifiers.shift;
+                    self.key(*kind, true)
                 }
-                Event::KeyPress { kind, handled, .. } if !*handled => self.key(*kind, true),
                 // a release always counts, or a key let go while the panel
                 // had the keyboard would stay "held" and the view drift away
                 Event::KeyRelease { kind, .. } => self.key(*kind, false),
@@ -129,14 +126,18 @@ impl Controls {
         if typing {
             // a key released into a text box must not stay held
             self.held = [false; 7];
-            return changed;
+            return;
         }
         let [w, a, s, d, space, e, q] = self.held.map(|h| h as i32 as f32);
-        let step = step(camera.view_direction(), camera.right_direction(), [w - s, d - a, (space + e).min(1.0) - q], self.speed, elapsed_ms);
+        let step = step(camera.view_direction(), camera.right_direction(), [w - s, d - a, (space + e).min(1.0) - q], self.speed(), elapsed_ms);
         if step != Vec3::zero() {
             camera.translate(step);
         }
-        changed
+    }
+
+    /// How fast it goes now, in microbricks a second.
+    fn speed(&self) -> f32 {
+        SPEED * if self.fast { FAST } else { 1.0 }
     }
 
     /// Whether a key is held, so the view needs redrawing every frame.
@@ -159,12 +160,6 @@ impl Controls {
     }
 }
 
-/// The speed after the wheel has turned by `wheel`: up for faster. By a
-/// share of what it was, so that each notch feels the same at any speed.
-fn faster(speed: f32, wheel: f32) -> f32 {
-    (speed * (wheel * PER_UNIT).clamp(-1.0, 1.0).exp()).clamp(SLOWEST, FASTEST)
-}
-
 /// How far the camera moves in a frame: `ahead`, `aside` and `up` are each
 /// -1, 0 or 1. Ahead is the way the camera looks, tilt and all, so that
 /// looking at something and holding W goes to it; up is straight up.
@@ -183,7 +178,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_wheel_sets_the_speed_and_nothing_held_goes_nowhere() {
+    fn shift_held_is_the_faster_of_two_speeds_and_nothing_held_goes_nowhere() {
         let (view, right) = (vec3(0.6, 0.0, -0.8), vec3(0.0, -1.0, 0.0));
         assert_eq!(step(view, right, [0.0; 3], SPEED, 16.0), Vec3::zero());
         // a second's worth, in ten frames of a tenth
@@ -197,14 +192,19 @@ mod tests {
         // and a stalled frame is not a leap
         assert!(step(view, right, [1.0, 0.0, 0.0], SPEED, 5000.0).magnitude() <= SPEED * 0.1 + 1e-3);
 
-        // a notch up is faster by the same share at any speed, a notch down undoes it
-        let up = faster(SPEED, 100.0);
-        assert!(up > SPEED * 1.2 && (faster(up, -100.0) - SPEED).abs() < 1e-3);
-        assert!((faster(4.0 * SPEED, 100.0) / (4.0 * SPEED) - up / SPEED).abs() < 1e-4);
-        // within bounds however far it is turned, and one wild reading is not a leap
-        assert_eq!(faster(SLOWEST, -100.0), SLOWEST);
-        assert!((0..200).fold(SPEED, |s, _| faster(s, 100.0)) == FASTEST && (0..200).fold(SPEED, |s, _| faster(s, -100.0)) == SLOWEST);
-        assert!(faster(SPEED, 1.0e6) < SPEED * 3.0);
+        // Shift held is the faster speed, and let go the usual one again;
+        // the wheel, with or without Shift, changes neither
+        let mut controls = Controls { held: [false; 7], fast: false, heading: 0.0, tilt: 0.0 };
+        assert_eq!(controls.speed(), SPEED);
+        let shift = |down: bool| Event::ModifiersChange { modifiers: Modifiers { shift: down, ..Default::default() } };
+        let mut camera = Camera::new_perspective(Viewport::new_at_origo(100, 100), vec3(0.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), degrees(45.0), 0.1, 100.0);
+        controls.update(&mut camera, &mut [shift(true)], 16.0, false);
+        assert_eq!(controls.speed(), SPEED * FAST);
+        let mut wheel = [Event::MouseWheel { delta: (0.0, 300.0), position: PhysicalPoint { x: 0.0, y: 0.0 }, modifiers: Modifiers { shift: true, ..Default::default() }, handled: false }];
+        controls.update(&mut camera, &mut wheel, 16.0, false);
+        assert!(controls.speed() == SPEED * FAST && matches!(wheel[0], Event::MouseWheel { handled: false, .. }));
+        controls.update(&mut camera, &mut [shift(false)], 16.0, false);
+        assert_eq!(controls.speed(), SPEED);
 
         // Looking any way at all, up is square to the view and of length
         // one, with no way of looking where it is not: straight up, on its

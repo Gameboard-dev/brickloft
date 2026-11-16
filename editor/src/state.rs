@@ -2751,9 +2751,12 @@ mod tests {
         assert_eq!((state.spec.radius, state.spec.maze.rings), (USUAL_SIZE.0 + 30.0, Maze::default().rings));
         assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
         assert_eq!(far(&state), (USUAL_SIZE.0 + 30.0 + USUAL_SIZE.1 / 2.0) as i32);
-        // dragged in until its corridors are too narrow, it is not built and says why; the last maze stands
-        let bricks = state.built.bricks.len();
+        // dragged in until its walls no longer fit, they are built thinner (see `brickloft_core::maze::Layout::new`)
         state.spec.radius = 30.0;
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // and further, until no wall leaves a corridor, it is not built and says why; the last maze stands
+        let bricks = state.built.bricks.len();
+        state.spec.radius = 18.0;
         state.refresh(|| 0.0);
         assert!(state.problem.as_deref().is_some_and(|why| why.contains("corridors")), "{:?}", state.problem);
         assert_eq!(state.built.bricks.len(), bricks);

@@ -214,7 +214,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Brickloft");
         ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Ctrl + drag a form moves it into another form and joins the two. Alt + click on a form adds a point there to pull it out of shape, and Alt + right-click takes one off; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
-        ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
+        ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, and Shift held flies faster.");
         ui.separator();
 
         // settings of the view, not of any one form: above everything that changes with the form
@@ -905,6 +905,13 @@ fn maze(ui: &mut Ui, state: &mut State, largest: f64) {
     // The dot on the rim drags the radius, which widens every corridor.
     let across = |rings: i32| if s.maze.kind == Kind::Grid { rings as f64 - 0.5 } else { rings as f64 };
     let mut gap = (s.radius / across(s.maze.rings) * 2.0).round() / 2.0;
+    // (Walls are built no thicker than the rings leave room for, see
+    // `brickloft_core::maze::Layout::new`: the setting is brought to what
+    // is built, so that the slider does not sit at a thickness the maze
+    // does not have.)
+    if s.thick > (gap - LEAST_PASSAGE).floor().max(1.0) {
+        s.thick = (gap - LEAST_PASSAGE).floor().max(1.0);
+    }
     let mut rings = s.maze.rings;
     let ringed = helped(ui, help("maze_rings"), |ui| ui.add(Slider::new(&mut rings, RINGS.0..=RINGS.1).text("Rings"))).changed();
     let least = s.thick.round().max(1.0) + LEAST_PASSAGE;
