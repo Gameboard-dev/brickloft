@@ -36,5 +36,6 @@ pub mod spec;
 pub mod surface;
 pub mod tree;
 pub mod wfc;
+mod wrap;
 
 pub use glam::{DVec2, DVec3};
