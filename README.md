@@ -74,15 +74,17 @@ Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and
 combined with others in one workspace.
 
-A flat band or a filled outline can be laid as a pattern in place of solid
-brick: stepping stones, stones fitted together, medallions, a rug, planks,
-or masonry of bricks or stones with bevelled tops. Each pattern is
-generated from a seed and takes up to eight colours (see
+A cube or a curve can be laid as a pattern in place of plain brick:
+stepping stones, medallions, a rug, planks, bricks or cobblestone.
+Stepping stones cut a flat form into separate stones. The other five
+colour the form and leave its shape as it was, except that bricks can
+have their tops bevelled. Each pattern is generated from a seed and takes
+up to eight colours (see
 [docs/features.md](docs/features.md#patterns)).
 
 <img src="docs/images/pattern-rug.png" width="700" alt="A floor laid as a Persian rug: borders with flowers on a swinging stem, a lobed medallion at the middle, corner pieces, and coiling stems with flowers over the field">
 
-<img src="docs/images/stepping-stones.png" width="345" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-masonry-bevelled.png" width="345" alt="A wall of bricks seen at an angle, the top of each brick bevelled down to the mortar">
+<img src="docs/images/stepping-stones.png" width="345" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-box-sides.png" width="345" alt="A box laid as bricks: the top of each brick on its upper face is bevelled down to the mortar, and the four sides carry the same pattern flat">
 
 ## How good the result is
 
@@ -120,7 +122,8 @@ by hand.
 
 ## Use it
 
-1. Pick a form from the menu and drag its dots.
+1. The editor opens with a cube. Pick another form from the menu if you
+   want one, and drag its dots.
 2. Press **Ctrl+C**.
 3. In Brickadia, paste.
 
@@ -138,7 +141,7 @@ colours, saved forms, the camera and every key.
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
-| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, blending forms, what remains for the patterns, and trees |
+| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns and the plants |
 
 ## Layout
 

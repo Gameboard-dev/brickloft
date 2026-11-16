@@ -232,7 +232,7 @@ flowchart TD
     C --> D[Apply added points, then mirror]
     D --> E[Solid: a distance function,<br/>plus a layout the fitter can use]
     E --> F{Which fitter?}
-    F -->|flat band or filled outline| G[Outline fitter]
+    F -->|flat band, filled outline or cube| G[Outline fitter]
     F -->|sphere, ellipsoid, dome| H[Index-sum layout]
     F -->|pyramid| I[Pyramid layout]
     F -->|round tube lying flat| J[Pipe]
@@ -738,6 +738,60 @@ measured slightly closer and left a step wherever two triangles' ends did
 not happen to meet, and patching those afterwards never fully worked. That
 is why continuity is now built into the structure, as one outline, instead
 of repaired afterwards.
+
+#### A cube is an outline with square corners
+
+A cube has no fitter of its own
+([core/src/spec/cube.rs](../core/src/spec/cube.rs)). It is a rectangle
+pushed through the box's shortest length, fitted by the outline fitter
+like a band or a filled curve. An outline that runs along lattice lines
+is all whole cells to that fitter, which joins them into the largest
+boxes it can. A solid cube no longer than the longest brick is therefore
+one brick, and a cube is built with no discrepancy. Laying the boxes out
+directly would have been a few lines of code. The outline was used so
+that stepping stones, tile patterns and added points, which are all laid
+on a flat outline, work on a cube with nothing further written.
+
+Each pair of sides is put on lattice lines a whole number of cells apart.
+With $`r`$ for the cube's half side, $`s_k`$ for its stretch along axis
+$`k`$ and $`c_k`$ for its middle, the length and the two sides are
+
+```math
+\ell_k = \max\big(1,\ \text{round}(2\,r\,s_k)\big), \qquad a_k = \big\lceil c_k - \tfrac{\ell_k}{2} - \tfrac{1}{2} \big\rceil, \qquad b_k = a_k + \ell_k
+```
+
+For example, a cube with $`r = 8.5`$ and its middle at 0.5 has
+$`\ell = 17`$, $`a = \lceil -8.5 \rceil = -8`$ and $`b = 9`$, which is
+centred on 0.5. A length that cannot be centred on the middle, an even
+one about the middle of a cell or an odd one about a
+lattice line, lies half a cell to the low side.
+
+The axis the rectangle is pushed through is the one the cube is shortest
+along, and of two as short as each other the later one, so that a cube
+with all sides equal is built through its height (`through`). A pattern
+is pushed through the same axis, so it shows on the largest face.
+
+The outline is the rectangle itself, from its four corners. A curve's
+band is everything within half its thickness of a path, which rounds the
+outside of every corner, and a frame drawn that way came out with its
+corners cut off.
+
+A hollow cube is one of two things, by its size:
+
+| The hollow cube | What is built |
+|---|---|
+| its walls would meet in the middle | a solid cube |
+| too short for a hollow between a floor and a lid | a frame: the rectangle less a smaller one inside it, open through its shortest length |
+| anything larger | closed on all six sides, as three outlines stacked: a slab, a frame and a slab |
+
+Walls on four sides only, as a hollow pyramid is open underneath, would
+have left a room without a floor or a tower without a shaft, depending on
+which length happened to be shortest.
+
+A cube one cell each way is laid directly as one brick, because the
+outline fitter loses a square cell that stands alone. A cube with points
+added to it is no longer a box and is handed on as a closed curve. A
+cube is never a round tube.
 
 ### 7.3 Spheres, ellipsoids and domes
 
@@ -1423,11 +1477,14 @@ The tile patterns of 7.9 do not use it either, for the reasons given
 
 ### 7.9 Tile patterns
 
-A flat band or a filled outline can also be laid as a pattern of coloured
-tiles: medallions, a rug, planks or masonry
+A form can also be laid as a pattern of coloured tiles: medallions, a
+rug, planks, bricks or cobblestone
 (`lay_mosaic` in [core/src/pattern.rs](../core/src/pattern.rs)). A tile is
 one cell. It is one colour, or it is cut along a diagonal into two
-triangles of two colours.
+triangles of two colours. This section describes the pattern on a flat
+band, a filled outline or a cube, where the tiles run through the form.
+[Further on](#forms-that-are-not-flat-all-over-and-the-sides-of-a-box) it
+is laid on the flat part of other forms and on the sides of a box.
 
 Every style is drawn by a rule. The rule is a function that gives a number
 for any place on the floor: 0 for the ground, and 1 to 7 for the parts of
@@ -1446,7 +1503,7 @@ pattern then only colours the result, in four steps.
 1. The region is cut into tiles of one cell. A tile is decided by the
    pattern only if the fit made its cell a whole cell. Where the edge cuts
    into a cell there is a sloped brick, which is one colour and is dealt
-   with last (see [The edge](#the-edge-bricks-of-five-cells-at-most)). A
+   with last (see [The edge](#the-edge-the-forms-own)). A
    tile within the **Border** setting of the edge is plain ground.
 2. The style's rule decides every tile (see the next section).
 3. A tile cut into two triangles becomes two sloped bricks of one cell
@@ -1486,8 +1543,8 @@ tiles down one side and none down the other, and the pattern sat to one
 side. The middle is placed on a corner of the grid and not in the middle of
 a tile, because a figure about a corner is made of whole and half tiles. A
 floor an odd number of tiles across therefore has one row left over, which
-stays plain. Planks and masonry have no middle and are set out on the
-grid's lines.
+stays plain. Planks, bricks and cobblestone have no middle and are set
+out on the grid's lines.
 
 #### How a tile is decided from four samples
 
@@ -1757,120 +1814,169 @@ boards. A board's length is then whatever the sample's windows allow, which
 is a few fixed lengths, and the lengths are the whole look of a floor of
 planks. Drawing each length from the seed gives any length in the range.
 
-#### Masonry: bricks and stones from one measure
+#### Bricks and cobblestone
 
-<img src="images/pattern-masonry-bricks.png" width="270" alt="A wall of bricks all alike seen from the front, in a half-brick bond with mortar between"> <img src="images/pattern-masonry-bevelled.png" width="270" alt="The same wall seen at an angle with a bevel of one: the top of every brick slopes down to the mortar on all four sides"> <img src="images/pattern-masonry-stones.png" width="270" alt="A wall of uneven stones seen at an angle with a bevel of one: the stones differ in size and shape, their tops slope to the mortar, and the slopes are jagged at some corners">
+<img src="images/pattern-bricks.png" width="270" alt="A floor of bricks all alike seen from above, in a half-brick bond with mortar between"> <img src="images/pattern-bricks-bevelled.png" width="270" alt="The same floor seen at an angle with the bricks bevelled: the top of every brick slopes down to the mortar on all four sides"> <img src="images/pattern-cobblestone.png" width="270" alt="A floor of cobblestone seen from above: grey stones of many shapes fitted together, with a tile of dark mortar between them and edges drawn as whole and diagonally cut tiles">
 
-Masonry is a wall or a floor of pieces in courses: bricks all alike, or
-stones of uneven size and shape (`Masonry` in `pattern.rs`). Bricks and
-stones were two patterns at first. The difference between them is one of
-degree, how alike the pieces are, so there is now one pattern and a
-setting for that, **Uneven**.
+Bricks and cobblestone are a wall or a floor of pieces with mortar between
+them (`Masonry` in `pattern.rs`). Bricks are rectangles in courses.
+Cobbles are stones of any shape.
 
-Every piece has a point, and a piece is the ground nearer its own point
-than any other's. This is the Voronoi diagram of the stepping stones in
-7.8. What **Uneven** changes is where the points stand and how "nearer" is
-measured. Write $`L`$ for a brick's length and $`D`$ for a course's depth,
-each with its mortar, and $`u`$ for **Uneven** as a number from 0 to 1.
-For a place $`p`$ and a piece's point $`c`$, the distances along and up
-are taken in units of half a brick,
+The two were one pattern for a while, with one setting between them. That
+setting moved the bricks' points about and bent the measure of nearness
+from one that makes rectangles to the plain distance. Halfway along it
+gave neither: bricks with their corners sheared off at a slant that no
+brick is cut at. A wall of bricks and a floor of cobbles are also wanted
+in different colours, so each is now a pattern of its own, drawn its own
+way.
+
+##### Bricks: courses and joints
+
+A wall of bricks is two sets of lines: the lines between courses, and in
+each course the joints between bricks. Write $`s`$ for the **Size**
+setting and $`m`$ for the mortar's width, 1 tile or 0. A brick's length
+and a course's depth, each with its mortar, are
 
 ```math
-a = \frac{\lvert p_x - c_x\rvert}{L/2}, \qquad b = \frac{\lvert p_y - c_y\rvert}{D/2}
+L = 4s + m, \qquad D = \text{round}(1.5\,s) + m
 ```
 
-and how far the place is from the point is
+At the usual size of 2 a brick is 8 tiles long and 3 deep before its
+mortar.
+
+Course $`r`$ begins at the line $`y_r`$, and brick $`k`$ of that course at
+the joint $`x_{r,k}`$:
 
 ```math
-f(p, c) = (1 - u)\,\max(a, b) + u\,\sqrt{a^2 + b^2}
+y_r = rD + \text{round}\big(0.9\,u_2\,(n_r - \tfrac{1}{2})\,(D - m - 1)\big)
 ```
 
-At $`u = 0`$ the points stand in rows, a brick's length apart, and $`f`$
-is the greater of along and up (the
-[Chebyshev distance](https://en.wikipedia.org/wiki/Chebyshev_distance)).
-Measured so, the ground nearest a point is a rectangle $`L`$ by $`D`$, and
-the wall is bricks exactly. As $`u`$ rises two things change together.
-Each point is moved from its place, by up to $`0.35u`$ of a brick each
-way, so the pieces differ in size. The measure goes over by degrees to the
-plain distance, so the pieces' edges leave the grid's lines and the pieces
-become stones of any shape. At the usual **Size** of 2 a brick is 8 tiles
-long and 3 deep, before its mortar.
+```math
+x_{r,k} = kL - o_r + \text{round}\big(0.9\,u_1\,(n_{r,k} - \tfrac{1}{2})\,(L - m - 1)\big)
+```
 
-Slabs were first rectangles of many sizes, laid course by course from a
-list. That gave uneven sizes and nothing else. There was no way from a
-list of rectangles to a stone that is not square, and it left a second
-pattern beside the bricks with most of the same settings.
+$`u_1`$ and $`u_2`$ are **Uneven along** and **Uneven across** as numbers
+from 0 to 1. $`n_r`$ and $`n_{r,k}`$ are numbers from 0 to 1 that belong
+to the course and to the brick, worked out from the seed. $`o_r`$ is how
+far the course is moved along (see the stagger below). A place belongs to
+the course whose two lines it lies between, and in it to the brick whose
+two joints it lies between.
+
+With both settings at 0 the lines are evenly spaced and the bricks are all
+alike. As a setting rises, each line moves by an amount of its own.
+$`L - m - 1`$ is what a brick has to spare over one tile of brick, and a
+line moves by less than half of that, so no brick is squeezed to nothing.
+Every line is rounded to a whole tile, so every brick stays a rectangle of
+whole tiles whatever the settings. For example, at size 2 with mortar,
+$`L = 9`$ and $`D = 4`$. A joint has 7 tiles to spare and moves by up to 3
+at $`u_1 = 1`$. A course line has 2 to spare and moves by 1 at most, and
+by nothing while $`u_2`$ is under about 0.56, because the product rounds
+to 0.
+
+##### Cobblestone: one point to a square
+
+Cobbles are a Voronoi diagram, as the stepping stones of 7.8 are, with
+the points placed differently. The points stand one to a square of a grid,
+$`2s + 3 + m`$ tiles a side. Each point is moved from the middle of its
+square by up to $`0.4\,u_1`$ of the square along and $`0.4\,u_2`$ across.
+Every other row is moved along by half a square, so four stones never
+meet at one corner. A cobble is the ground nearer its own point than any
+other's.
+
+A point never leaves its square, so the nearest point to a place is one
+of the 25 in its own row and the two rows either side, two squares along
+each way. Only those are compared. The stepping stones scatter their
+points by throwing darts, which needs every point kept in a list and a
+search through it. A grid gives the same irregular stones with nothing
+kept.
+
+With both settings at 0 the points are a regular grid and the cobbles are
+squares in staggered rows, so the pattern starts with both at 60%.
 
 ##### Mortar, numbers and stagger
 
-How far inside its own outline a place is comes from the same measure.
-With $`f_1`$ for the distance to the piece's own point and $`f_2`$ for the
-distance to the next nearest point,
+For either pattern the rule also gives how far inside its own outline a
+place is, $`h`$. For a brick it is the least of the distances to its four
+sides, less half the mortar:
 
 ```math
-h(p) = \tfrac{1}{2}\,(f_2 - f_1)\,w - \tfrac{m}{2}
+h = \min\big(x - x_{r,k},\; x_{r,k+1} - x,\; y - y_r,\; y_{r+1} - y\big) - \tfrac{m}{2}
 ```
 
-Half the difference is how far the place is from the line between the two
-pieces, in the unit across that line, and $`w`$ takes it back into tiles:
-$`w`$ is $`L/2`$ when the other piece is in the same course and $`D/2`$
-when it is in the course above or below. $`m`$ is the mortar's width, 1
-tile or 0. For example, with bricks 9 tiles long with their mortar, a
-place 1 tile from the line between two bricks has $`a = 3.5/4.5`$ to its
-own point and $`5.5/4.5`$ to the other, so
-$`h = \tfrac{1}{2}\cdot\tfrac{2}{4.5}\cdot 4.5 - 0.5 = 0.5`$.
+For a cobble it is the least of the distances $`e_t`$ to the lines half
+way to its neighbours' points (the formula in 7.8), less the same half.
 
 A place with $`h \le 0`$ is mortar, which is the ground, 0. That is the
-half tile either side of the line between two pieces, so the mortar is one
-tile wide. With **Mortar between** off the pieces touch. Every piece has
-one of six numbers, odd and even by turns along a course, so two pieces
-side by side differ in shade even with no mortar between them.
+half tile either side of a line, so the mortar is one tile wide. Every
+place is first moved by half a tile, so that the tile of mortar is one
+whole tile of the grid and not half of one and half of the next. For
+example, with a joint at $`x = 9`$, a place a quarter of a tile past it
+has $`h = 0.25 - 0.5 = -0.25`$ and is mortar, and a place one tile past it
+has $`h = 0.5`$ and is brick. With **Mortar between** off, $`m = 0`$ and
+the pieces touch.
 
-Each course is moved along from the one before. **Stagger** sets one share
-of a brick's length for every course: a half is the usual bond, and
-nothing stacks the bricks in columns. **Uneven stagger** moves every course
-by an amount of its own, so the upright joints fall anywhere, as in a wall
-laid without a bond in mind. **Courses upright** swaps the two directions,
-so the courses run up the floor and the stagger is from side to side.
+Every brick has one of six numbers, odd and even by turns along a course,
+so two bricks side by side differ in shade even with no mortar between
+them. Every cobble has one of seven.
 
-##### The bevel
+Each course of bricks is moved along from the one before. **Stagger** sets
+one share $`t`$ of a brick's length for every course, so that
+$`o_r = \text{round}(r\,L\,t)`$: a half is the usual bond, and nothing
+stacks the bricks in columns. **Uneven stagger** moves every course by an
+amount of its own, so the upright joints fall anywhere, as in a wall laid
+without a bond in mind. **Courses upright** swaps the two directions, so
+the courses run up the floor and the stagger is from side to side.
 
-The bevel uses $`h`$ as a height. The top **Bevel** cells of a piece are
-not laid full. At its outline the piece stands that many cells short, and
-it rises one cell for every cell in from the outline, so its top slopes
-down to its edge all round. The mortar lies at the foot of the slope. A
-bevel can be no more than the form's **Depth** less one, so a wall one
-cell deep has none.
+The tiles are then decided from four samples as for every style. A
+brick's sides lie on the grid's lines, so every tile of a wall of bricks
+is a whole tile. A cobble's sides run at any angle and are drawn as the
+nearest run of whole and cut tiles.
 
-The slope is laid cell by cell. For each cell of a piece, and each of the
-top layers, the piece is asked at the cell's eight corners whether it
-reaches that high there. Counting the top layers from 0, a corner at the
-bottom of layer $`k`$ is reached when $`h \ge k`$ and a corner at its top
-when $`h \ge k + 1`$. The corners that are reached name the brick, as
-they do everywhere else in the program (section 2).
+##### The bevel of a brick
+
+**Bevelled** uses $`h`$ as a height. It applies to bricks alone, it is on
+or off, and it is one cell deep. The top cell of every brick is not laid
+full. At its outline the brick stands a cell short of the wall's face,
+and one cell in from the outline it is whole, so its top slopes down to
+its edge all round. The mortar lies at the foot of the slope, one cell
+below the face. The form must be 2 cells or more deep, and a wall one
+cell deep is laid flat.
+
+The slope is found cell by cell (`lay_tiles`). For each cell of a brick
+in the top layer, the brick is asked at the cell's eight corners whether
+it reaches that high there. A corner at the bottom of the layer is
+reached when $`h \ge 0`$ and a corner at its top when $`h \ge 1`$. The
+corners that are reached name the brick, as they do everywhere else in
+the program (section 2).
 
 | Corners reached | What is laid |
 |---|---|
-| all eight | a whole cell, joined with its neighbours along the row |
-| the four below and two above | a sloped brick, along a side of the piece |
-| the four below and one above | a hipped brick, at a corner of the piece |
-| none | nothing |
-| a set that is no brick's shape | a whole cell or nothing, by whether the middle of the cell is reached |
+| all eight | a whole cell |
+| the four below and two above | a sloped brick, along a side of the brick |
+| the four below and one above | a hipped brick, at a corner of the brick |
 
 This is how the fitter of solid forms chooses a cell's brick (7.1). It is
-done by hand here, for a few layers, and the solid fitter is not called.
-A wall of stones is thousands of small solids, and that fitter is made
-for one large one.
+done by hand here, for one layer, and the solid fitter is not called. A
+wall is hundreds of small solids, and that fitter is made for one large
+one.
 
-Bricks bevel cleanly, because their edges run along the grid and every
-corner is a right angle. Stones do not. Where two edges of a stone meet at
-an odd angle, the corners a cell reaches are no brick's shape, and the
-cell is laid whole or left out. The third picture above shows the result:
-the slopes along a stone's sides are clean and its corners are jagged.
+The cells are then joined into the longest bricks that fill the same room
+(`joined` in `pattern.rs`). Two bricks join when they are the same shape
+and colour, lie end to end with the same extent across, and the shape is
+the same all the way along the direction of joining. A sloped brick may
+therefore be lengthened along its ridge and not across its slope, which
+would change the slope. The top of one brick of the wall comes out as
+nine bricks: a sloped one the length of each side, four hipped corners and
+a block between them. At the usual size that is 9 bricks where the cells
+alone would be 24.
 
-The first bevel belonged to the slabs and cut the four corners off each
-slab flat, in the plane of the wall. Masonry has no such cut, and a file
-that asks for it is read with a bevel of 0.
+The bevel was once as many cells deep as the player asked. Cobbles had it
+too, and each piece could stand a cell or more short of the wall's face.
+A cobble's sides run at any angle, and a slope along a side that is not
+on the grid or its diagonals came out as a heap of odd single cells.
+Deeper bevels and uneven heights read as clutter at one cell to a tile.
+What is left is the one case that comes out exactly: a brick, whose sides
+are on the grid, with one cell of slope.
 
 #### Colours by feature
 
@@ -1878,7 +1984,7 @@ that asks for it is read with a bevel of 0.
 
 A pattern numbers its parts and not its colours. 0 is the ground, and each
 number from 1 to 7 is one feature of the pattern: one of the four figures
-of a medallions repeat, one of a rug's tones, one shade of brick. The
+of a medallions repeat, one of a rug's tones, one shade of brick or cobble. The
 player chooses how many colours there are, up to eight, and `colour_of`
 decides which colour a number takes. With $`s`$ for a brick's number and
 $`N`$ for the number of colours, counting the colours from 0,
@@ -1905,8 +2011,8 @@ colour for the ground prevents that at any number of colours.
 Planks and stepping stones have no ground. A board or a stone numbered 0
 takes the first colour by the same formula, and the other numbers share the
 rest. The colour sets these two start in are shades of one material, so the
-first colour is one more shade among them. In masonry the ground is the
-mortar.
+first colour is one more shade among them. For bricks and cobblestone the
+ground is the mortar.
 
 #### The edge: the form's own
 
@@ -1937,6 +2043,51 @@ way in from its square corner, unless that place is within the border.
 Left plain, the edge of a pattern with no border was a row of bare
 triangles.
 
+#### Forms that are not flat all over, and the sides of a box
+
+<img src="images/pattern-rounded-disc.png" width="330" alt="A disc with a rounded rim laid as medallions: the pattern covers the flat top, and the sloped bricks of the rim are in the plain ground colour"> <img src="images/pattern-box-sides.png" width="330" alt="A box 60 cells by 44 and 24 tall laid as bricks: bevelled bricks on its top face, and the same bricks laid flat on its sides">
+
+A tile pattern is tiles pushed straight through a form, so it can be laid
+wherever the form is whole bricks from one face to the other. Two passes
+over the finished bricks use that, after the form has been fitted at
+brick size 1 (`pattern_flat_faces` and `pattern_side_faces` in
+[core/src/spec.rs](../core/src/spec.rs)).
+
+The first is for a form that is not flat all over, such as a disc with a
+rounded rim or a round tube broad enough to have a flat top. The bricks
+are looked at along each of the three axes in turn. A column of cells is
+flat if unsloped bricks fill it from the form's lowest cell to its
+highest along that axis. The axis with the most flat columns is chosen,
+and fewer than 16 of them is a seam and not a face. The bricks of those
+columns are taken out and the pattern is laid in their place
+(`lay_mosaic_on` in `pattern.rs`), and a brick that lies partly in them is
+cut down to the columns that are not flat. Everything else, which is the
+sloped bricks of the rim and whatever lies over or under them, stays as
+it was fitted, in the ground colour.
+
+The pattern is not wrapped onto the curved part. A sloped brick is one
+colour and often many cells long, so a pattern there would need the
+surface cut into bricks one cell across. That is many times the bricks,
+and it gives up the smooth fit the sloped bricks are there for.
+
+The second pass is for the sides of a box. Tiles pushed through a form
+show on its sides only as their ends, which are stripes. On a floor a
+cell or two deep that is all a side is. On a box with some height the
+sides are faces of their own. A side is taken as a face when the form's
+outermost layer of cells that way is whole bricks open to the air over at
+least half the form's length each way, and over at least 4 cells. That
+layer is taken off and the pattern is laid there one cell deep, seen from
+that side. The form must be 6 cells or more through, because the top and
+bottom cells are left to the pattern that runs through it, so that a
+side does not overwrite the top face's own edge. A cell in a corner, open
+two ways, goes to whichever side is taken first.
+
+A box has four such sides and a disc has none. A disc's rim is a curve,
+and the short flat steps a curve is built of each passed a simpler test,
+which made the rim a patchwork. Which cells are open to the air is asked
+of a grid with one entry for every cell of the form's box. A form whose
+box is over $`2^{26}`$ cells keeps its sides as they are.
+
 #### Why not wave function collapse for the tile patterns
 
 Wave function collapse was built and used for the first tile patterns, and
@@ -1944,8 +2095,8 @@ then replaced. The solver is in
 [core/src/wfc.rs](../core/src/wfc.rs). It learns which tiles may sit side by
 side from a small sample picture, whose every small window becomes a tile,
 and fills the floor so that neighbouring tiles agree. The first styles were
-small samples of chevrons, stars, a weave and other motifs, and the solver
-strewed each sample's motifs over the floor.
+small sample pictures of repeated motifs, and the solver strewed each
+sample's motifs over the floor.
 
 The method knows only what may sit beside what, a few tiles across, and the
 faults of its floors follow from that.
@@ -1971,7 +2122,7 @@ larger than a few tiles, is the case it still suits (see
 A plant is one solid, fitted cell by cell (section 7.1) and coloured part
 by part ([core/src/tree.rs](../core/src/tree.rs)). The solid is the union
 of several thousand simple parts: tapered round branches, the eight-sided
-lengths of a palm's trunk, and balls of leaves. There are three trees (a
+lengths of a palm's trunk, and balls of leaves. There are four trees (a
 pine, a palm, an oak and a beech), three bushes (a boxwood, a hedge of it
 and a hydrangea), four flowers (a peony, a sunflower, a tulip and
 petunias) and a stand of reeds. Each is grown by a method of its own,
@@ -2507,11 +2658,11 @@ At the usual sizes:
 | Peonies, three | 56 tall | 1,057 | 3,751 | 0.19 s | 0.06 s |
 | Petunias | 20 tall, 52 across | 387 | 5,756 | 0.11 s | 0.03 s |
 | Reeds, 24 stems | 84 tall | 432 | 8,368 | 0.24 s | 0.07 s |
-| Sunflowers, three | 90 tall | 659 | 8,581 | 0.23 s | 0.06 s |
+| Sunflowers, three | 90 tall | 659 | 8,965 | 0.23 s | 0.06 s |
 | Tulips, five | 64 tall | 551 | 5,880 | 0.30 s | 0.10 s |
 
-At 100 tall the three trees take 0.58, 0.27 and 0.55 seconds on one
-thread. The time is nearly
+At 100 tall the pine, the palm and the oak take 0.58, 0.27 and 0.55
+seconds on one thread. The time is nearly
 all distance samples: 9.2 million of them for the pine, at about 100
 nanoseconds each. Growing the tree and filing its parts takes 50
 milliseconds and colouring the bricks 20.
@@ -2525,6 +2676,13 @@ A tree is always fitted at brick size 1 when the brick size is automatic,
 whatever the budget, as a tile pattern is (section 9). At a coarser size
 the shoots and leaflets are thinner than a brick and vanish, and what is
 left is a trunk in a cloud.
+
+A plant too large to be fitted at brick size 1 is over the limit on the
+number of cells a build may span. It is then fitted at the finest brick
+size that is within the limit (`build_upright` in `spec.rs`). Refused
+instead, the plant stopped growing: past some height the slider moved
+and the last plant that could be built stood there unchanged. A plant
+that large has parts thick enough to come through at the coarser size.
 
 ## 8. Changing a form: added points, mirror, turning, grids
 
@@ -2892,9 +3050,11 @@ was no longer being built. The search goes from coarse to fine because a fit
 $`g`$ times coarser has about $`g^3`$ fewer cells to look at, so every size
 tried on the way costs less than the one finally kept.
 
-A tile pattern and a tree are fitted at brick size 1 whatever the budget.
+A tile pattern and a plant are fitted at brick size 1 whatever the budget.
 Their detail is a cell or two across, and at a coarser size it is gone
-(7.9, 7.10). A larger brick can still be chosen by name.
+(7.9, 7.10). A larger brick can still be chosen by name. The one
+exception is a plant too large to be built at brick size 1 at all, which
+is fitted at the finest size that can be built (7.10).
 
 ### Where a form fits cleanly
 
@@ -3078,11 +3238,12 @@ The leaves of an oak are balls of clusters and not leaves, and a pine's
 needles are the shoots that carry them. A tree is not its own mirror
 image and takes no added points.
 
-A pattern needs a flat band or a filled outline. Stones fitted together
-with the gap at 0 keep seams between them, because each stone is fitted by
-itself (7.8). The bevelled tops of masonry are clean on bricks and jagged
-at the corners of uneven stones, where two edges meet at an angle no brick
-has (7.9). A rug shows its full detail only on a large floor (7.9).
+Stepping stones need a flat band, a filled outline or a cube. Laid with
+the gap at 0 they keep seams between them, because each stone is fitted by
+itself (7.8). A tile pattern is laid only where a form is flat: it is not
+wrapped onto a curved surface, and the curved part of a patterned form
+stays plain (7.9). Only bricks are bevelled, by one cell, and cobblestone
+is flat. A rug shows its full detail only on a large floor (7.9).
 
 ### Why no machine learning
 

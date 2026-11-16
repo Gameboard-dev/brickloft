@@ -1,11 +1,19 @@
-//! Patterns that fill a flat region in place of solid brick: so far, a path
-//! of stepping stones.
+//! Patterns laid on a form in place of plain brick: stepping stones, and
+//! the tile patterns (medallions, a rug, planks, bricks and cobblestone).
 //!
-//! A flat form is fitted as one outline (see `fit_planar`). A pattern cuts
-//! the same region into many small outlines first and fits each as its own,
-//! so the pieces of a pattern have the sloped, continuous edges every flat
-//! form has, and a pattern follows whatever region the form gives it: the
-//! band along a curved path, a ring, a disc, a filled outline.
+//! A flat form is fitted as one outline (see `fit_planar`). Stepping stones
+//! cut the same region into many small outlines first and fit each as its
+//! own ([`lay_stones`]), so every stone has the sloped, continuous edges a
+//! flat form has, and the stones follow whatever region the form gives
+//! them: the band along a curved path, a ring, a disc, a filled outline.
+//!
+//! A tile pattern does not reshape the form. The region is fitted as the
+//! one outline it is, and the pattern then colours that fit a cell at a
+//! time ([`lay_mosaic`], [`lay_tiles`]). The same tiles are laid on the
+//! flat faces of a form that is not flat all over and on the sides of a
+//! box ([`lay_mosaic_on`], called from `spec::pattern_flat_faces` and
+//! `spec::pattern_side_faces`). Each style is drawn by a rule of its own
+//! (see [`Drawn`]).
 //!
 //! ## Stepping stones
 //!
@@ -18,8 +26,9 @@
 //! The patterns were asked for under the name of wave function collapse,
 //! which fills a grid with tiles that agree with their neighbours:
 //! https://github.com/mxgmn/WaveFunctionCollapse
-//! That suits a pattern made of repeated motifs, and a floor mosaic or a
-//! rug will use it. It does not suit stones. Its rules are local, a few
+//! That suits a pattern made only of small repeated motifs. The tile
+//! patterns were first made with it and are now drawn by rule (see
+//! [`Style`]). It does not suit stones. Its rules are local, a few
 //! cells across, and nothing local says how large a stone has grown: the
 //! tiles that make a stone's inside can be laid for ever. Its output is
 //! also the grid's own squares, where a stone wants an outline at any
@@ -224,9 +233,11 @@ fn in_piece(mask: u8, u: f64, v: f64) -> bool {
 }
 
 /// Fit the stones of a region and push them through cells `w0..w0 + depth`
-/// across `axis`, onto `bricks`. Returns the sum of the stones' fits: the
-/// area of the stones themselves and the area where their bricks disagree
-/// with them.
+/// across `axis`, onto `bricks`, with each brick's number (0 to 7) onto
+/// `shades`: the bricks of one stone share a number, which whoever paints
+/// them turns into a colour (see [`colour_of`]). Returns the sum of the
+/// stones' fits: the area of the stones themselves and the area where
+/// their bricks disagree with them.
 ///
 /// Each stone is fitted by itself, so that every edge of every stone gets
 /// the sloped bricks an outline of its own gets. Fitted all at once as one
@@ -239,7 +250,11 @@ fn in_piece(mask: u8, u: f64, v: f64) -> bool {
 /// share cells, and both are kept, since what the two bricks fill does not
 /// meet: the gap runs between them. Only where what they fill would meet
 /// (each fit may stray half a cell from its stone, and the gap may be
-/// nothing) is the later stone fitted again a little smaller.
+/// nothing) is the later stone fitted again a little smaller: drawn in by
+/// half a cell, and then by a whole one. A piece that meets a laid stone
+/// even then is left out. With the gap at 0 the stones are fitted
+/// together and every stone meets its neighbours, so this is what leaves
+/// the narrow seams between them.
 ///
 /// The stones are fitted on `opts.threads`, and laid on one. A stone's
 /// first fit is of the stone as it is and depends on no other stone, and
@@ -341,8 +356,9 @@ pub fn lay_stones(region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Stones, axi
 pub struct Mosaic {
     /// which of [`STYLES`]
     pub style: usize,
-    /// how large the boards, bricks or slabs of a style that has them
-    /// are: 2 is the usual, 1 half that, 4 twice it
+    /// how large the boards, bricks or cobbles of a style that has them
+    /// are: 2 is the usual, 1 half that, 4 twice it (medallions and the
+    /// rug take no notice of it)
     pub size: i32,
     /// whether the top cell of each brick slopes down to its edge, all
     /// round it (bricks only: see [`Masonry`])
@@ -1204,60 +1220,70 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
     })
 }
 
-/// A style drawn by rule, as a grid of tiles: a dense pattern of outlined
-/// lozenges, octagons, hexagons, squares and bars, ring within ring, whose
-/// outlines run into one another where the figures meet, and which is its
-/// own mirror image from side to side and from end to end.
+/// A style drawn by its rule, as a grid of tiles `across` by `down`.
 ///
-/// ## How it is drawn
+/// Every style is a rule that gives a number for any place on the floor:
+/// 0 for the ground or the mortar, and 1 to 7 for the parts of the
+/// pattern. Three styles have a rule of their own elsewhere and are only
+/// handed on from here: boards by [`planks`], and bricks and cobblestone
+/// by [`Masonry`], which are set out on the grid's own lines. The rug's
+/// rule is [`rug_garden`]. The rest of this function is the medallions,
+/// and the setting out that the medallions and the rug share.
+///
+/// ## Medallions
+///
+/// Medallions are a dense pattern of outlined lozenges, squares and
+/// octagons, ring within ring, whose outlines run into one another where
+/// the figures meet, and which is its own mirror image from side to side
+/// and from end to end.
 ///
 /// Every figure is a way of measuring how far a place is from the figure:
 /// across plus along for a lozenge, the greater of the two for a square,
-/// and mixtures of the two for an octagon, a hexagon and a bar. The measure
-/// is nothing on the figure's outline, below nothing inside it, and grows
-/// steadily away from it. One number is worked out for every place: the
-/// least of all the figures' measures there. The floor is coloured by that
-/// number in bands a tile wide.
+/// and both limits together for an octagon. The measure is nothing on the
+/// figure's outline, below nothing inside it, and grows steadily away from
+/// it. One number is worked out for every place: the least of all the
+/// figures' measures there. The floor is coloured by that number in bands
+/// a tile wide.
 ///
-/// Medallions turn the bands on and off by a short repeating run, so each
+/// The bands are turned on and off by a short repeating run, so each
 /// figure is ringed inside and out by bands of its own shape, and where
 /// the bands of two figures meet they join into one outline round both,
 /// which is what gives the crowded, interlocked look. It is how a
 /// distance function joins two solids into one (see `sdf`), used flat.
 ///
-/// ## Colours
-///
-/// A band that is on takes the number of the figure nearest it, by what
-/// part of the pattern that figure is: a rug's medallion, its straps, the
-/// figures of its odd rows. A band that
-/// is off is the ground, 0. The numbers go up to 7, and whoever paints the
-/// bricks shares them out among however many colours there are: with two
-/// colours the whole pattern is one colour on the other, and each colour
-/// added picks another part of it out.
+/// A band that is on takes the number of the figure nearest it, 1 to 4:
+/// the figure at the middle of a repeat, the one at its corners, the one
+/// at the middle of its sides, and one between. A band that is off is the
+/// ground, 0. Whoever paints the bricks shares the numbers out among
+/// however many colours there are (see [`colour_of`]): with two colours
+/// the whole pattern is one colour on the other, and each colour added
+/// picks another figure out.
 ///
 /// ## Why not wave function collapse
 ///
-/// The patterns were asked for under that name, and the sampled mosaics
-/// use it. It was tried for a rug's field and gave a rug its scattered
-/// small motifs, which is a plain rug. What makes a rug
-/// look like one is a few large figures that govern the whole of it, and
-/// wave function collapse knows only what may sit beside what, a few tiles
+/// The patterns were asked for under that name, and the first styles used
+/// it (see [`Style`]). It was tried for a rug's field and gave a rug its
+/// scattered small motifs, which is a plain rug. What makes a rug look
+/// like one is a few large figures that govern the whole of it, and wave
+/// function collapse knows only what may sit beside what, a few tiles
 /// across.
 ///
 /// ## The tiles
 ///
 /// The number is taken at four places in every tile, one in each of the
-/// quarters its two diagonals cut it into. Where all four are one colour
-/// the tile is that colour. Where the two quarters on one side of a
-/// diagonal are one colour and the two on the other side another, the tile
-/// is cut along that diagonal. Every measure used here changes by whole
-/// tiles along the grid's lines and its diagonals, so those are the only
-/// two cases but for a few tiles where several figures' bands meet, which
-/// take the colour at their middle.
+/// quarters its two diagonals cut it into (see [`tile_at`]). Where all
+/// four are one colour the tile is that colour. Where the two quarters on
+/// one side of a diagonal are one colour and the two on the other side
+/// another, the tile is cut along that diagonal. The medallions' measures
+/// change by whole tiles along the grid's lines and its diagonals, so
+/// those are the only two cases but for a few tiles where several
+/// figures' bands meet, which take the colour at their middle.
 ///
-/// `unbroken` says which tiles are whole tiles of the floor. The pattern
-/// is set out about the middle of the rectangle of tiles that takes them
-/// all in.
+/// `unbroken` says which tiles are whole tiles of the floor. The
+/// medallions and the rug are set out about the middle of the rectangle
+/// of tiles that takes them all in, and the tiles outside that rectangle
+/// stay plain. The other three styles take no notice of `unbroken`: they
+/// fill the whole grid, and [`lay_tiles`] makes plain what is not whole.
 ///
 /// The tiles are drawn on `threads`: a tile's colours are asked of the
 /// pattern at its own place and depend on no other tile. (Not the boards
@@ -1401,23 +1427,33 @@ const BEVELLED_CELLS_A_THREAD: usize = 1_600;
 /// asked as far from the region's edge.
 const PLACES_A_THREAD: usize = 4_000;
 
-/// Fit a mosaic over a region and push it through cells `w0..w0 + depth`
-/// across `axis`, onto `bricks`, with each brick's colour (0 to 7) onto
-/// `shades`. Returns the fit of the region.
+/// Colour a fitted region as a mosaic and push it through cells
+/// `w0..w0 + depth` across `axis`, onto `bricks`, with each brick's number
+/// (0 to 7) onto `shades`. Returns `fit` as it was given.
 ///
-/// The region is fitted first as the one solid it is, so that its edge is
-/// as smooth as any flat form's. Then it is coloured. It is cut into
-/// tiles, `tile` cells across and `tall` deep, on the brick grid, and wave
-/// function collapse gives each tile one of the style's tiles: one colour,
-/// or two triangles of two colours either side of a diagonal.
+/// `fit` is the region already fitted as the one solid it is (by
+/// [`lay_mosaic`]), so that its edge is as smooth as any flat form's, or a
+/// set of whole cells taken as they stand (by [`lay_mosaic_on`]). Here it
+/// is only coloured. It is cut into tiles of one cell on the brick grid,
+/// and the style's rule gives each tile its colours (see [`drawn`]): one
+/// colour, or two triangles of two colours either side of a diagonal.
 ///
-/// A tile cut into triangles is two sloped bricks, each a tile across and
-/// a tile deep, which for a tile wider than it is deep is a long ramp. The
+/// A tile cut into triangles is two sloped bricks of one cell each. The
 /// two fill one box between them, as the two halves of a sloped pair do
-/// anywhere else. Everything else the fit made is whole cells, and those
-/// are sorted by their tile's colour and joined again into the largest
-/// bricks of one colour, so that tiles of a colour side by side are one
-/// brick and not a brick each.
+/// anywhere else. Everything else the fit made whole is whole cells, and
+/// those are sorted by their tile's colour and joined again into bricks
+/// of one colour, so that tiles of a colour side by side are one brick
+/// and not a brick each.
+///
+/// The fit's own sloped bricks, along a slanting edge, stay where they
+/// are. One whose two sides share a divisor is taken apart into smaller
+/// ones of the same slope over whole cells, and each that remains takes
+/// the pattern's colour at the middle of its solid half.
+///
+/// Bevelled bricks, in a form two or more cells deep, have their top cell
+/// laid apart from the rest: a sloped brick along each side of a brick of
+/// the wall, a hipped one at each corner and a block between. Those are
+/// found a cell at a time and joined into long pieces by [`joined`].
 ///
 /// The colours were first fitted one at a time, each colour's tiles as a
 /// solid of its own. The outline fitter is made to prefer a slope to a

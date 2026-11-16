@@ -58,12 +58,13 @@ is, so a floor already laid against a wall stays against it. The yellow dot
 in the middle moves the whole cube. **Size along X / Y / Z** in the panel
 sets each length about the middle instead.
 
-Made short along one axis, a cube is a rectangular floor, wall or slab.
+Made short along one axis, a cube is a rectangular floor or wall.
 A **Pattern** (see [Patterns](#patterns)) is laid through the cube's
 shortest length, so it shows on the largest face: the top of a floor, or
 the face of a wall. When two lengths are equally short, the pattern goes
 through the height before the depth, and through the depth before the
-width.
+width. A cube 6 microbricks or more through its shortest length has a
+tile pattern on its four sides too.
 
 Unticking **Solid** makes the cube hollow, with walls as thick as **Wall
 thickness** on all six sides. A hollow cube that is too short to have room
@@ -131,7 +132,7 @@ feet alike. A point added on either side appears on both.
 
 ## The workspace
 
-Several forms can be worked on together.
+Several forms can be worked on together. The editor opens with one cube.
 
 - **Click a form** in the view, or its line in the list, to edit it.
 - **Drag a form by its bricks** to move it. It moves one unit at a time and
@@ -236,7 +237,7 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 ### Saved forms
 
 **Save** under **Saved forms** keeps the whole workspace: every form, with
-its colours, where it stands and the grid it is on. Saves are kept in
+its colours (up to eight), where it stands and the grid it is on. Saves are kept in
 folders (`arches`, `domes`, or your own) under `Documents/brickloft/forms`
 in your home folder, the same on Windows, macOS and Linux.
 
@@ -255,12 +256,12 @@ one form's settings, are still listed and opened.
 
 ## Patterns
 
-**Pattern**, on a cube or on any curve built as a flat band, lays the cube,
-the band or the filled outline as a pattern in place of solid brick. The
-list starts at **none**, and a form has one pattern at most. A cube made
-short one way gives a rectangular floor or wall, a filled circle a round
-one, and a curved band a path. How each pattern is made, and why that way,
-is in [algorithm.md](algorithm.md), sections 7.8 and 7.9.
+**Pattern**, on a cube or on any curve, lays the form as a pattern in
+place of plain brick. The list starts at **none**, and a form has one
+pattern at most. A cube made short one way gives a rectangular floor or
+wall, a filled circle a round one, and a curved band a path. How each
+pattern is made, and why that way, is in [algorithm.md](algorithm.md),
+sections 7.8 and 7.9.
 
 | Pattern | What it lays |
 |---|---|
@@ -268,32 +269,50 @@ is in [algorithm.md](algorithm.md), sections 7.8 and 7.9.
 | **medallions** | a few ringed figures repeated over the whole floor |
 | **rug** | a Persian carpet: nested borders, a lobed medallion with pendants, corner pieces, and scrolling stems with flowers and leaves |
 | **planks** | a floor of boards |
-| **masonry** | a wall or floor of bricks all alike, or of stones as uneven as you ask, in courses, with or without mortar, and with their tops bevelled if you like |
+| **bricks** | courses of bricks, every one a rectangle, with or without mortar, and with their tops bevelled if you like |
+| **cobblestone** | stones of any shape fitted together, with or without mortar |
 
-<img src="images/stepping-stones.png" width="340" alt="A curved path laid as stepping stones"> <img src="images/pattern-stones-fitted.png" width="340" alt="A square floor of stones fitted together with the gap at 0">
+<img src="images/stepping-stones.png" width="340" alt="A curved path laid as stepping stones"> <img src="images/pattern-stones-fitted.png" width="340" alt="A square floor of stepping stones fitted together with the gap at 0">
 
 <img src="images/pattern-medallions.png" width="340" alt="A floor of medallions: ringed squares, lozenges and octagons repeated in rows"> <img src="images/pattern-planks.png" width="340" alt="A floor of boards of many lengths laid in rows">
 
 <img src="images/pattern-rug.png" width="690" alt="A rug 240 microbricks by 160: borders with a swinging stem and flowers, a lobed medallion at the middle with a pendant at each end, corner pieces, and coiling stems with flowers over the field">
 
-<img src="images/pattern-masonry-bricks.png" width="225" alt="A wall of bricks all alike with mortar between, seen from the front"> <img src="images/pattern-masonry-bevelled.png" width="225" alt="The same wall at an angle with its bricks' tops bevelled down to the mortar"> <img src="images/pattern-masonry-stones.png" width="225" alt="A wall of uneven stones at an angle, their tops bevelled, with jagged slopes at some corners">
+<img src="images/pattern-bricks.png" width="225" alt="A floor of bricks all alike in a half-brick bond with mortar between, seen from above"> <img src="images/pattern-bricks-bevelled.png" width="225" alt="The same floor at an angle with Bevelled ticked: the top of every brick slopes down to the mortar on all four sides"> <img src="images/pattern-cobblestone.png" width="225" alt="A floor of cobblestone seen from above: grey stones of many shapes fitted together with dark mortar between">
 
-Stepping stones follow the curve, so a spline drawn across the ground
+### Where a pattern is laid
+
+Stepping stones need a flat form: a floor or wall made from a cube, a
+flat band or a filled outline. They follow the curve, so a spline drawn across the ground
 becomes a winding stone path as wide as the band's **Thickness**. Stones
 fitted together with the gap at 0 still show narrow seams, because each
 stone is fitted with bricks by itself.
 
-The other four patterns are made of tiles one microbrick across. A tile is
+The other five patterns are made of tiles one microbrick across. A tile is
 one colour, or it is cut along a diagonal into two triangles of two
-colours. Medallions and the rug are their own mirror images and are set
-out from the middle of the floor. The floor's edge keeps the sloped bricks
-any flat form has, unchanged, and each takes the pattern's colour at
-its middle. A pattern never changes a form's outline.
+colours. A tile pattern colours a form and never reshapes it. The form is
+fitted exactly as it would be with no pattern, and its bricks then take
+the pattern's colours. The sloped bricks along the form's edge stay where
+they are, and each takes the pattern's colour at its middle.
 
-These four are laid at single microbricks whatever the **Brick budget**
-says, because a tile is one brick and a pattern's detail is its brick
-count. A rug 240 by 160 is some twenty thousand bricks, and held to a
-budget of 2,500 it was built three times coarser, with every flower a
+| The form | Where the tiles go |
+|---|---|
+| flat: a cube, a flat band, a filled outline | through the form, so the pattern shows on both of its faces |
+| flat in part: a disc with a rounded rim, a round tube broad enough to have a flat top | on the flat part. The rest keeps its bricks, in the pattern's first colour. |
+| a box 6 microbricks or more through its shortest length | on its four sides as well, one microbrick deep |
+
+<img src="images/pattern-box-sides.png" width="340" alt="A box 60 microbricks by 44 and 24 tall laid as bricks: bevelled bricks on its top, and the same bricks flat on its sides"> <img src="images/pattern-rounded-disc.png" width="340" alt="A disc with a rounded rim laid as medallions: the pattern covers its flat top, and the sloped bricks of the rim are plain">
+
+A side takes the pattern only where it is a flat face. The rim of a disc
+is a curve built of short flat steps, so it stays plain.
+
+Medallions and the rug are their own mirror images and are set out from
+the middle of the floor.
+
+A tile pattern is laid at single microbricks whatever the **Brick
+budget** says, because a tile is one brick and a pattern's detail is its
+brick count. A rug 240 by 160 is some twenty thousand bricks, and held to
+a budget of 2,500 it was built three times coarser, with every flower a
 blot. Make the form larger for more detail, or set a **Brick size** by
 name for less.
 
@@ -302,29 +321,41 @@ given, and a small rug has little room to show them: a medallion of one or
 two layers and plain lines for its guards. Lay it 100 microbricks or more
 across. The picture above is 240 by 160.
 
+### The settings of a pattern
+
 Each pattern shows the settings it has a use for.
 
 | Setting | Patterns | What it does |
 |---|---|---|
-| **Stone size** | stepping stones | about how far apart the middles of neighbouring stones are. A stone is a little under this across. |
-| **Gap** | stepping stones | how wide the space between stones is. 0 fits them together. |
+| **Stone size** | stepping stones | about how far apart the middles of neighbouring stones are, from 3 microbricks. A stone is a little under this across. |
+| **Gap** | stepping stones | how wide the space between stones is, 0 to 8 microbricks. 0 fits them together. |
 | **Uneven** | stepping stones | 0 for stones as alike as scattered stones can be, 1 for small ones crowded among large |
-| **Size** | planks, masonry | how large the boards, bricks or stones are. 2 is the usual size, 1 half of it and 4 twice. |
-| **Uneven** | masonry | how far the pieces are from bricks all alike. At 0% every one is the same rectangle. As it rises they differ more in size and their edges leave the straight, until at 100% they are stones of any shape. |
-| **Mortar between** | masonry | a microbrick of mortar between one piece and the next. Without it the pieces touch and are told apart by their shades alone, so give the pattern several colours. |
-| **Bevel** | masonry | how many microbricks of each piece's top slope down to its edge, all round it. 0 leaves the tops flat. |
-| **Uneven stagger** | masonry | moves each course along by an amount of its own, so the upright joints fall anywhere. Untick it to set one **Stagger** for every course. |
-| **Stagger** | masonry | how far each course is moved along from the one before, as a share of a brick's length. 50% is the usual half-brick bond and 0% stacks the bricks in columns. |
-| **Courses upright** | masonry | runs the courses up the floor instead of across it, so the bricks stand on end |
-| **Border** | medallions, rug | how many microbricks of plain ground are left round the edge |
+| **Size** | planks, bricks, cobblestone | how large the boards, bricks or cobbles are, 1 to 8. 2 is the usual size, 1 half of it and 4 twice. |
+| **Uneven along** | bricks, cobblestone | how unlike one another the pieces are along the courses, 0 to 100%. For bricks it moves the joints, so the bricks differ in length and stay rectangles. For cobblestone it moves each stone from side to side. |
+| **Uneven across** | bricks, cobblestone | the same across the courses. For bricks it moves the lines between courses, so the courses differ in depth. For cobblestone it moves each stone up and down. |
+| **Mortar between** | bricks, cobblestone | a microbrick of mortar between one piece and the next. Without it the pieces touch and are told apart by their shades alone, so give the pattern several colours. |
+| **Bevelled** | bricks | slopes the top microbrick of every brick down to its edge, all round it |
+| **Uneven stagger** | bricks | moves each course along by an amount of its own, so the upright joints fall anywhere. Untick it to set one **Stagger** for every course. |
+| **Stagger** | bricks | how far each course is moved along from the one before, 0 to 50% of a brick's length. 50% is the usual half-brick bond and 0% stacks the bricks in columns. |
+| **Courses upright** | bricks | runs the courses up the floor instead of across it, so the bricks stand on end |
+| **Border** | medallions, rug | how many microbricks of plain ground are left round the edge, 0 to 6 |
 | **Seed** | all | which one of the pattern: each whole number is a different one. **Another** takes the next number and the next of the pattern's sets of colours. |
 
-A bevel is real depth: the top of each brick or stone is built of sloped
-bricks along its sides and hipped ones at its corners. It needs room, so
-it can be no more than the form's **Depth** less one. Give the form a
-**Depth** of 2 or more. Bricks bevel cleanly. Uneven stones have clean
-slopes along their sides and jagged ones at some corners, where two edges
-meet at an angle no brick has.
+Bricks start all alike, with both **Uneven** settings at 0% and an uneven
+stagger. Cobblestone starts at 60% both ways, because cobbles all alike
+are a grid of squares. At the usual **Size** of 2 a course of bricks is 3
+microbricks deep, which leaves the lines between courses one microbrick
+to move, so **Uneven across** changes nothing below about 60%. A larger
+**Size** gives it room.
+
+**Bevelled** is real depth. The top microbrick of each brick is built of
+a sloped brick along each side and a hipped one at each corner, with the
+mortar at the foot of the slope. The sloped pieces along a side are joined
+into one long brick, so the top of a brick is nine bricks: four slopes,
+four corners and a block between them. The bevel needs a form 2 microbricks or more deep and does nothing to a
+shallower one. It is cut into one face only, the top of a floor, and the
+sides of a box are laid flat. Cobblestone has no bevel, because a
+cobble's sides run at any angle and no brick slopes along them cleanly.
 
 ### The colours of a pattern
 
@@ -335,8 +366,8 @@ kept when you change to another pattern. **Another** always moves to the
 pattern's next set of colours.
 
 A pattern numbers its parts, and the colours are shared among the parts.
-The first colour is the ground, or the mortar of masonry, and it is used
-for nothing else. The other colours go to the pattern's parts in turn.
+The first colour is the ground, or the mortar of bricks and cobblestone,
+and it is used for nothing else. The other colours go to the pattern's parts in turn.
 With two colours the whole pattern is one colour on the other. Each colour
 you add with **+** picks one more part out, up to eight colours.
 
@@ -435,8 +466,10 @@ size and a small one has room for little else. At that size a tree is
 17,000 to 40,000 bricks and a bush or a clump of flowers 6,000 to 9,000. A
 tree builds in about a fifth of a second on a desktop's cores and in up to
 a second on one core or in the browser. **Brick size**
-left on **Automatic** always builds a tree at 1 microbrick, whatever the
-budget. A tree can be turned, flipped, moved, joined to other forms and
+left on **Automatic** builds a plant at 1 microbrick, whatever the
+budget. A plant too large to be built at 1 microbrick is built at the
+finest brick size that fits, so the **Height** slider never stops
+short. A tree can be turned, flipped, moved, joined to other forms and
 put on a grid of its own like any form. It cannot be mirrored and takes no
 added points.
 
@@ -456,10 +489,6 @@ one away. Right-click a colour and choose **Copy colour**, then right-click
 another and choose **Paste colour**, to make the two the same. The copied
 colour is kept inside the editor, so a form copied with Ctrl+C stays on the
 clipboard. Each brick is one colour.
-
-Earlier versions had two more colourings, a speckled blend and a colour for
-each separate piece. A save that used them opens as a blend and as the
-pattern's colours.
 
 ## Fit and brick count
 
@@ -496,7 +525,8 @@ form** lowers the floor so a form can be looked at from underneath.
 pictures folder (`Pictures/brickloft` in your home folder on Windows,
 macOS and Linux). On Windows the picture is also put on the clipboard,
 ready to paste, which replaces a form copied there with Ctrl+C.
-**Shift+F12** leaves the panel out and takes the view alone. The browser
+**Shift+F12** leaves the panel out and takes the view alone, and copies
+it the same way. The browser
 page cannot write files, so it has neither.
 
 ## Reports
@@ -540,5 +570,5 @@ passes a megabyte.
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift + scroll | camera speed |
-| F12, Shift+F12 | save a screenshot, with or without the panel |
+| F12, Shift+F12 | save a screenshot and copy it to the clipboard, with or without the panel |
 | Enter or Escape | close a message |
