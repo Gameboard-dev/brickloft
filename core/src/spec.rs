@@ -1289,21 +1289,15 @@ fn curve(
 /// `plane` along `axis` (`path` being the curve where the pipe was laid): the
 /// bricks of the flat pipe `laid` wherever the
 /// curve is still in the plane, and columns between the tube's under side
-/// and its top wherever it has left it (see `fit_ribbon::columns`).
-///
-/// The lifted part has the flat pipe's eight-sided section, moved straight
-/// up with the curve: a level top, a chamfer at 45 degrees each side, and
-/// an upright wall. It was first given a round section. A round section's
-/// top falls away ever more steeply towards its sides, and a surface
-/// steeper than one cell up per cell across cannot be made of bricks one
-/// cell square: the sides came out as tall slivers standing proud of one
-/// another. On a tube 11 across, pulled up 25, a fifteenth of the outside
-/// was stepped faces that way and a twentieth is this way.
+/// and its top wherever it has left it (see `tube_columns`).
 ///
 /// The ground is shared out a cell at a time: a cell under a lifted part of
 /// the curve is rebuilt from top to bottom, and so is every cell under a
 /// sloped brick of the pipe that reaches into one, since such a brick
 /// cannot be cut. The rest of the pipe stands as it was.
+///
+/// The columns stand along `axis` wherever the curve climbs gently. Where it
+/// climbs steeply they lie on their sides (see `steep_stretches`).
 ///
 /// It was first fitted cell by cell where it was lifted, from the tube's
 /// distance function, on the argument that bricks cannot make a round tube
@@ -1317,102 +1311,22 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
     }
     // the middle of the flat pipe along the axis, which its curve runs through
     let centre = (laid.iter().map(|b| b.min[axis]).min().unwrap() + laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap()) as f64 / 2.0;
-    // How far along the curve each of its points is, measured over the
-    // ground. A curve pulled about can pass over the same ground twice, at
-    // two heights: a loop seen from above. The tube is then two tubes
-    // there, one above the other, and each has to be built from its own
-    // stretch of the curve. Taken from whichever stretch was nearer, corner
-    // by corner, a cell where the two cross got some corners from each and
-    // was joined from the height of one to the height of the other: a
-    // blade the whole way between them. So a stretch is named by how far
-    // along the curve it is, and looked for only that near.
-    let mut along_at = vec![0.0];
-    for pair in path.windows(2) {
-        along_at.push(along_at.last().unwrap() + DVec2::new(pair[1][ua] - pair[0][ua], pair[1][va] - pair[0][va]).length());
-    }
-    let whole = *along_at.last().unwrap();
+    // the curve where the bricks are: the pipe's middle may be half a cell off the plane
+    let curve: Vec<DVec3> = path
+        .iter()
+        .map(|p| {
+            let mut q = *p;
+            q[axis] += centre - plane;
+            q
+        })
+        .collect();
     let closed = path.len() > 2 && path[0].distance(path[path.len() - 1]) < 1e-6;
-    // how far apart along the curve two places on it are, the short way round
-    let apart = |a: f64, b: f64| {
-        let d = (a - b).abs();
-        if closed { d.min(whole - d) } else { d }
-    };
-    // further apart than this along the curve, two places over one cell are two passes
-    let same_pass = 3.0 * radius + 4.0;
-    // the part of the curve nearest a point of the ground, within reach of
-    // `about` along it if that is given: how far off, how high, how steep,
-    // and how far along; and the lowest and highest the curve is anywhere
-    // over the tube's width of the point
-    let near_about = |u: f64, v: f64, about: Option<f64>| {
-        let at = DVec2::new(u, v);
-        let mut best = (f64::INFINITY, 0.0, 0.0, 0.0);
-        let mut heights = (f64::INFINITY, f64::NEG_INFINITY);
-        for (i, pair) in path.windows(2).enumerate() {
-            if about.is_some_and(|s| apart(s, (along_at[i] + along_at[i + 1]) / 2.0) > same_pass) {
-                continue;
-            }
-            let (a, b) = (DVec2::new(pair[0][ua], pair[0][va]), DVec2::new(pair[1][ua], pair[1][va]));
-            let along = b - a;
-            let length = along.length();
-            let t = if length > 1e-9 { ((at - a).dot(along) / (length * length)).clamp(0.0, 1.0) } else { 0.0 };
-            let off = (a + along * t).distance(at);
-            if off < radius + 1.0 {
-                for end in pair {
-                    heights = (heights.0.min(end[axis] - plane), heights.1.max(end[axis] - plane));
-                }
-            }
-            if off < best.0 {
-                let rise = pair[1][axis] - pair[0][axis];
-                best = (off, pair[0][axis] + rise * t - plane, if length > 1e-9 { rise / length } else { 0.0 }, along_at[i] + length * t);
-            }
-        }
-        (best.0, best.1, best.2, best.3, heights)
-    };
-    // each pass of the curve within the tube's wall of a point of the
-    // ground, as how far along the curve it comes nearest
-    let passes = |u: f64, v: f64| {
-        let at = DVec2::new(u, v);
-        let mut found: Vec<(f64, f64)> = Vec::new(); // (how far along, how far off), nearest of each pass
-        for (i, pair) in path.windows(2).enumerate() {
-            let (a, b) = (DVec2::new(pair[0][ua], pair[0][va]), DVec2::new(pair[1][ua], pair[1][va]));
-            let along = b - a;
-            let length = along.length();
-            let t = if length > 1e-9 { ((at - a).dot(along) / (length * length)).clamp(0.0, 1.0) } else { 0.0 };
-            let off = (a + along * t).distance(at);
-            if off >= radius {
-                continue;
-            }
-            let here = along_at[i] + length * t;
-            match found.iter_mut().find(|f| apart(f.0, here) <= same_pass) {
-                Some(pass) if off < pass.1 => *pass = (here, off),
-                Some(_) => {}
-                None => found.push((here, off)),
-            }
-        }
-        found.into_iter().map(|f| f.0).collect::<Vec<f64>>()
-    };
     // the flat pipe's section: as tall as it was laid, its chamfer the
     // regular octagon's (see `chamfer_of` where the pipe is laid out)
     let count = (2.0 * radius).round() as i32;
     let chamfer = ((count as f64 * (1.0 - std::f64::consts::FRAC_1_SQRT_2)).round() as i32).min((count - 1) / 2) as f64;
     let half_tall = (laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap() - laid.iter().map(|b| b.min[axis]).min().unwrap()) as f64 / 2.0;
-    // Under side and top. Across the tube the top is level as far as the
-    // chamfer, falls one for one across it, and from the wall outwards
-    // stays at the wall's top, so that a cell at the wall has all four of
-    // its corners at the wall's height and not one of them at nothing. The
-    // tube's section stands square to its curve, so
-    // where the curve climbs it is that much taller measured straight up.
-    // That holds while the curve keeps climbing for the tube's whole width.
-    // Where it turns straight up for a short way, the rule alone makes the
-    // tube as tall as the climb is steep, a blade far above and below the
-    // curve: so the tube is never taken further than its own half height
-    // past the lowest and highest the curve is over that ground.
-    let span = |u: f64, v: f64, about: f64| {
-        let (off, lift, slope, _, (lowest, highest)) = near_about(u, v, Some(about));
-        let tall = (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt();
-        let (lowest, highest) = if lowest <= highest { (lowest.min(lift), highest.max(lift)) } else { (lift, lift) };
-        (centre + (lift - tall).max(lowest - half_tall), centre + (lift + tall).min(highest + half_tall))
-    };
+    let section = Section { radius, chamfer, half_tall };
     let ground = |b: &CellBrick| {
         let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
         (0..wv).flat_map(move |j| (0..wu).map(move |i| (u + i, v + j)))
@@ -1420,7 +1334,16 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
     // the ground under the lifted part, a cell beyond the tube's own width each way
     let reach = radius.ceil() as i32 + 2;
     let mut lifted: HashSet<(i32, i32)> = HashSet::new();
-    for pair in path.windows(2).filter(|p| (p[0][axis] - plane).abs() > 1e-6 || (p[1][axis] - plane).abs() > 1e-6) {
+    // (and under every stretch built lying down, as far as its seams reach:
+    // none of the pipe may be left standing where those columns go)
+    let parts = stretches(&curve, axis, radius);
+    let mut length = vec![0.0];
+    for pair in curve.windows(2) {
+        length.push(length.last().unwrap() + pair[0].distance(pair[1]));
+    }
+    let lying_at = |i: usize| parts.iter().any(|s| s.axis != axis && length[i] >= s.along.0 && length[i] <= s.along.1);
+    for (i, pair) in path.windows(2).enumerate().filter(|(i, p)| (p[0][axis] - plane).abs() > 1e-6 || (p[1][axis] - plane).abs() > 1e-6 || lying_at(*i) || lying_at(*i + 1)) {
+        let _ = i;
         for p in pair {
             let (u, v) = (p[ua].floor() as i32, p[va].floor() as i32);
             for dv in -reach..=reach {
@@ -1464,17 +1387,419 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
             }
         }
     }
+    let mut lifted: Vec<(i32, i32)> = lifted.into_iter().collect();
+    lifted.sort();
+    // upright columns over the lifted ground, and columns lying along each
+    // level axis over the ground they lie across, each for its own stretches
+    for lying in 0..3 {
+        if !parts.iter().any(|s| s.axis == lying) {
+            continue;
+        }
+        let (ub, vb) = plane_axes(lying);
+        let within = |cell: (i32, i32), at: f64| parts.iter().any(|s| s.axis == lying && s.holds(&|c| if c == ub { cell.0 } else { cell.1 }, at));
+        let cells = if lying == axis {
+            lifted.clone()
+        } else {
+            let mut cells: Vec<(i32, i32)> = Vec::new();
+            // (every other point of the curve: its points are closer together than the reach)
+            for (_, p) in curve.iter().enumerate().filter(|(i, _)| i % 2 == 0 && parts.iter().any(|s| s.axis == lying && length[*i] >= s.along.0 && length[*i] <= s.along.1)) {
+                let (u, v) = (p[ub].floor() as i32, p[vb].floor() as i32);
+                cells.extend((-reach..=reach).flat_map(|dv| (-reach..=reach).map(move |du| (u + du, v + dv))));
+            }
+            cells.sort();
+            cells.dedup();
+            cells
+        };
+        let (pieces, blocks) = tube_columns(&curve, closed, lying, &section, &cells, &within, spec.max_ext);
+        bricks.extend(crate::fit_ribbon::in_rows(pieces, spec.max_ext));
+        whole.extend(blocks);
+    }
+    // No room in two bricks. The stretches are each built to keep to their
+    // own ground, but where columns lying one way meet columns standing, in
+    // a tight turn of the curve, the two do not agree to the cell on where
+    // the tube's surface is, and a few bricks of one were found inside the
+    // other. Each brick is taken in turn, the pipe's own first, and one
+    // that shares room with a brick already taken is left out. Two bricks may share a
+    // cell and no room (the two halves of a cell folded along its diagonal,
+    // one of them often taller than the other), so sharing a cell is not
+    // the test: each cell two bricks share is sampled, and they share room
+    // if a sample is inside both. What is lost is a brick's worth of the
+    // surface in a place that was wrong either way; what the game would do
+    // with two bricks in one place is not known.
+    {
+        let mut at: std::collections::HashMap<[i32; 3], Vec<usize>> = std::collections::HashMap::new();
+        let cells = |b: &CellBrick| {
+            let (min, ext) = (b.min, b.ext);
+            (0..ext[0] * ext[1] * ext[2]).map(move |k| [min[0] + k % ext[0], min[1] + k / ext[0] % ext[1], min[2] + k / (ext[0] * ext[1])])
+        };
+        // whether a point is inside a brick
+        let holds = |b: &CellBrick, p: [f64; 3]| {
+            let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+            crate::shapes::shape_info(b.mask).is_some_and(|info| crate::shapes::inside_shape(info, u[0], u[1], u[2]))
+        };
+        // The whole cells are taken first. A sloped brick found inside one
+        // is the one that is out of place: taking the whole cell out for it
+        // instead opened a pocket in the tube's side on some forms.
+        let solid: std::collections::HashSet<[i32; 3]> = whole.iter().copied().collect();
+        let mut kept: Vec<CellBrick> = Vec::with_capacity(bricks.len());
+        for b in bricks.drain(..) {
+            if b.mask != CUBE && cells(&b).any(|c| solid.contains(&c) && (0..27).any(|k| holds(&b, [c[0] as f64 + (k % 3) as f64 / 3.0 + 0.17, c[1] as f64 + (k / 3 % 3) as f64 / 3.0 + 0.15, c[2] as f64 + (k / 9) as f64 / 3.0 + 0.19]))) {
+                continue;
+            }
+            let clashes = cells(&b).any(|c| {
+                at.get(&c).is_some_and(|others| {
+                    // 27 points of the cell, clear of its faces
+                    (0..27).any(|k| {
+                        let p = [c[0] as f64 + (k % 3) as f64 / 3.0 + 0.17, c[1] as f64 + (k / 3 % 3) as f64 / 3.0 + 0.15, c[2] as f64 + (k / 9) as f64 / 3.0 + 0.19];
+                        holds(&b, p) && others.iter().any(|o| holds(&kept[*o], p))
+                    })
+                })
+            });
+            if clashes {
+                continue;
+            }
+            for c in cells(&b) {
+                at.entry(c).or_default().push(kept.len());
+            }
+            kept.push(b);
+        }
+        let kept_is_cube: Vec<bool> = kept.iter().map(|b| b.mask == CUBE).collect();
+        bricks = kept;
+        // (a whole cell the pipe's own cube already fills is said once)
+        whole.retain(|c| !at.get(c).is_some_and(|there| there.iter().any(|o| kept_is_cube[*o])));
+    }
+    if !whole.is_empty() {
+        whole.sort();
+        whole.dedup();
+        let lo = [0, 1, 2].map(|k| whole.iter().map(|c| c[k]).min().unwrap());
+        let n = [0, 1, 2].map(|k| (whole.iter().map(|c| c[k]).max().unwrap() + 1 - lo[k]) as usize);
+        if (n[0] * n[1] * n[2]) as i64 <= MAX_CELLS {
+            let mut grid = vec![0u8; n[0] * n[1] * n[2]];
+            for c in &whole {
+                grid[(c[0] - lo[0]) as usize + n[0] * ((c[1] - lo[1]) as usize + n[1] * (c[2] - lo[2]) as usize)] = CUBE;
+            }
+            bricks.extend(fit_volume::merge(grid, n, spec.max_ext.max(1) as usize).into_iter().map(|b| CellBrick { mask: CUBE, min: [b.min[0] + lo[0], b.min[1] + lo[1], b.min[2] + lo[2]], ext: b.ext }));
+        } else {
+            bricks.extend(whole.iter().map(|c| CellBrick { mask: CUBE, min: *c, ext: [1; 3] }));
+        }
+    }
+    bricks
+}
+
+/// The eight-sided section of a pipe: half its width, how far its chamfer
+/// reaches in from each side, and half its height.
+struct Section {
+    radius: f64,
+    chamfer: f64,
+    half_tall: f64,
+}
+
+/// Where two stretches of a tube built along different axes meet: a lattice
+/// plane at `at` across the axis `across`, which the curve goes through
+/// `length` along its own length. Within `reach` of that along the curve, a
+/// stretch keeps to its own side of the plane.
+#[derive(Clone, Copy)]
+struct Seam {
+    across: usize,
+    at: i32,
+    length: f64,
+    reach: f64,
+    /// whether the stretch this belongs to is on the low side of the plane
+    below: bool,
+}
+
+/// A stretch of a lifted tube built in columns along `axis`: the part of
+/// the curve from `along.0` to `along.1` of its length, cut off at each end
+/// where the next stretch takes over.
+struct Stretch {
+    axis: usize,
+    along: (f64, f64),
+    ends: Vec<Seam>,
+}
+
+impl Stretch {
+    /// Whether a column belongs to this stretch, given the cell it stands
+    /// over (as its place along each axis of the ground) and how far along
+    /// the curve's length the pass it is built from is.
+    fn holds(&self, cell: &dyn Fn(usize) -> i32, length: f64) -> bool {
+        length >= self.along.0 && length <= self.along.1 && self.ends.iter().all(|s| (length - s.length).abs() > s.reach || (cell(s.across) < s.at) == s.below)
+    }
+}
+
+/// How much less of the curve's way must go along another axis than along
+/// the one its columns lie along now before the columns are turned: a
+/// change of axis is a seam, and is not worth making for a small gain.
+const LEAN: f64 = 0.3;
+
+/// How steeply.
+const STEEP: f64 = 0.85;
+
+/// The curve of a lifted tube in stretches, each built in columns along the
+/// axis the curve is most nearly square to there.
+///
+/// A tube built in columns is a top and an under side over the ground the
+/// columns stand on. Where its curve climbs along the columns more than a
+/// cell per cell, those two surfaces are steeper than any brick one cell
+/// square can follow smoothly: on upright columns alone, a tube climbing
+/// four cells in three came out as a comb of tall fins. But a curve cannot
+/// run steeply along all three axes at once. Along the axis it runs least
+/// along it climbs at most seven cells in ten, so the columns are laid
+/// along that axis, and a tube rising in a plane of the grid is built from
+/// the side, as the level tube it is seen from there.
+///
+/// Columns along two axes share the third. Where one stretch gives way to
+/// the next, both are cut off square at a lattice plane across that third
+/// axis, which the curve is then running mostly along, and each keeps to
+/// its own side of it. That needs the tube to cross the plane once: a
+/// seam the curve does not get clear of, or a stretch too short to get
+/// clear of both of its seams, is given up and the two stretches built as
+/// one.
+fn stretches(curve: &[DVec3], axis: usize, radius: f64) -> Vec<Stretch> {
+    let n = curve.len();
+    let everything = |axis: usize| vec![Stretch { axis, along: (f64::NEG_INFINITY, f64::INFINITY), ends: Vec::new() }];
+    if n < 3 {
+        return everything(axis);
+    }
+    let mut length = vec![0.0];
+    for pair in curve.windows(2) {
+        length.push(length.last().unwrap() + pair[0].distance(pair[1]));
+    }
+    // which way the curve runs at each point, over a few cells so that a kink between two points does not count
+    let ways: Vec<DVec3> = (0..n)
+        .map(|i| {
+            let (mut a, mut b) = (i, i);
+            while a > 0 && length[i] - length[a] < 2.0 {
+                a -= 1;
+            }
+            while b + 1 < n && length[b] - length[i] < 2.0 {
+                b += 1;
+            }
+            (curve[b] - curve[a]).normalize_or_zero()
+        })
+        .collect();
+    let mut lying = vec![axis; n];
+    let mut now = axis;
+    for i in 0..n {
+        let run = ways[i].abs();
+        let least = (0..3).min_by(|a, b| run[*a].total_cmp(&run[*b])).unwrap();
+        if run[least] < run[now] - LEAN {
+            now = least;
+        }
+        lying[i] = now;
+    }
+    // clear of a seam's plane: further from it than the tube reaches, climbing as steeply as it may
+    let clear = 1.3 * radius + 2.0;
+    for _ in 0..n {
+        // runs of one axis, as their first and last points
+        let mut runs: Vec<(usize, usize)> = Vec::new();
+        for i in 0..n {
+            match runs.last_mut() {
+                Some(run) if lying[run.0] == lying[i] => run.1 = i,
+                _ => runs.push((i, i)),
+            }
+        }
+        // A stretch lying down costs a seam at each end, where the two ways
+        // of building do not meet to the cell. It is worth that only where
+        // upright columns would do badly: where the curve climbs steeply.
+        if let Some(run) = runs.iter().find(|run| lying[run.0] != axis && (run.0..=run.1).map(|i| ways[i][axis].abs()).fold(0.0, f64::max) < STEEP) {
+            for i in run.0..=run.1 {
+                lying[i] = axis;
+            }
+            continue;
+        }
+        let mut seams: Vec<Seam> = Vec::new();
+        let mut given_up = None;
+        for k in 1..runs.len() {
+            let (before, after) = (runs[k - 1], runs[k]);
+            let (a, b) = (lying[before.0], lying[after.0]);
+            let across = 3 - a - b;
+            let at = curve[after.0][across].round() as i32;
+            let sign = ways[after.0][across].signum();
+            // how far the curve is past the plane, the way it is going
+            let past = |i: usize| sign * (curve[i][across] - at as f64);
+            // the nearest points either side from which the rest of each run is clear of the plane
+            // The nearest point either side from which the curve stays clear
+            // of the plane for a tube's width more. Columns along two axes
+            // do not agree to the cell on how far along the curve a part of
+            // the tube is, so where a stretch's hold on its side of the
+            // plane ends, the tube has to be well on that side already.
+            let window = 2.0 * radius + 2.0;
+            let stays = |i: usize, back: bool| (0..n).filter(|j| if back { *j <= i && length[i] - length[*j] <= window } else { *j >= i && length[*j] - length[i] <= window }).all(|j| if back { past(j) <= -clear } else { past(j) >= clear });
+            let back = (before.0..=before.1).rev().find(|i| stays(*i, true));
+            let on = (after.0..=after.1).find(|i| stays(*i, false));
+            match (back, on) {
+                (Some(back), Some(on)) if ways[after.0][across].abs() >= 0.3 => {
+                    let reach = (length[after.0] - length[back]).max(length[on] - length[after.0]) + window / 2.0;
+                    seams.push(Seam { across, at, length: length[after.0], reach, below: sign > 0.0 });
+                }
+                _ => {
+                    given_up = Some(k);
+                    break;
+                }
+            }
+        }
+        if let Some(k) = given_up {
+            // The stretch lying down is stood up again: upright columns are
+            // what the rest of the tube is built in, so they can always take
+            // over. Between two stretches lying along different axes, the
+            // shorter is.
+            let (before, after) = (runs[k - 1], runs[k]);
+            let shorter = if length[before.1] - length[before.0] < length[after.1] - length[after.0] { before } else { after };
+            let up = if lying[before.0] == axis { after } else if lying[after.0] == axis { before } else { shorter };
+            for i in up.0..=up.1 {
+                lying[i] = axis;
+            }
+            continue;
+        }
+        if std::env::var("ARCS_DEBUG").is_ok() { for (k, run) in runs.iter().enumerate() { eprintln!("run {k}: points {}..{} axis {} length {:.1}..{:.1} steepest {:.2}", run.0, run.1, lying[run.0], length[run.0], length[run.1], (run.0..=run.1).map(|i| ways[i][axis].abs()).fold(0.0, f64::max)); } }
+        return runs
+            .iter()
+            .enumerate()
+            .map(|(k, run)| {
+                let mut ends = Vec::new();
+                let mut along = (f64::NEG_INFINITY, f64::INFINITY);
+                if k > 0 {
+                    let seam = seams[k - 1];
+                    ends.push(Seam { below: !seam.below, ..seam });
+                    along.0 = seam.length - seam.reach;
+                }
+                if k < seams.len() {
+                    let seam = seams[k];
+                    ends.push(seam);
+                    along.1 = seam.length + seam.reach;
+                }
+                Stretch { axis: lying[run.0], along, ends }
+            })
+            .collect();
+    }
+    everything(axis)
+}
+
+/// Columns of a round tube along `curve`, lying along `axis`, over the cells
+/// `cells` of the plane across it (see `fit_ribbon::Ground`). `wanted` says
+/// whether to build the column over a cell for a pass of the curve, given
+/// how far along the curve's length that pass is.
+///
+/// The tube has the flat pipe's eight-sided section, moved straight along
+/// the axis with the curve: a level top, a chamfer at 45 degrees each side,
+/// and an upright wall. It was first given a round section. A round section's
+/// top falls away ever more steeply towards its sides, and a surface
+/// steeper than one cell up per cell across cannot be made of bricks one
+/// cell square: the sides came out as tall slivers standing proud of one
+/// another. On a tube 11 across, pulled up 25, a fifteenth of the outside
+/// was stepped faces that way.
+fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, cells: &[(i32, i32)], wanted: &dyn Fn((i32, i32), f64) -> bool, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+    use std::collections::HashSet;
+    let (ua, va) = plane_axes(axis);
+    let Section { radius, chamfer, half_tall } = *section;
+    // How far along the curve each of its points is, measured over the
+    // ground. A curve pulled about can pass over the same ground twice, at
+    // two heights: a loop seen from above. The tube is then two tubes
+    // there, one above the other, and each has to be built from its own
+    // stretch of the curve. Taken from whichever stretch was nearer, corner
+    // by corner, a cell where the two cross got some corners from each and
+    // was joined from the height of one to the height of the other: a
+    // blade the whole way between them. So a stretch is named by how far
+    // along the curve it is, and looked for only that near.
+    let mut along_at = vec![0.0];
+    let mut length = vec![0.0];
+    for pair in curve.windows(2) {
+        along_at.push(along_at.last().unwrap() + DVec2::new(pair[1][ua] - pair[0][ua], pair[1][va] - pair[0][va]).length());
+        length.push(length.last().unwrap() + pair[0].distance(pair[1]));
+    }
+    let whole = *along_at.last().unwrap();
+    // how far apart along the curve two places on it are, the short way round
+    let apart = |a: f64, b: f64| {
+        let d = (a - b).abs();
+        if closed { d.min(whole - d) } else { d }
+    };
+    // how far along the curve's own length a place that far along it over the ground is
+    let length_at = |about: f64| {
+        let i = along_at.partition_point(|a| *a <= about).clamp(1, along_at.len() - 1);
+        let span = along_at[i] - along_at[i - 1];
+        length[i - 1] + (length[i] - length[i - 1]) * if span > 1e-9 { ((about - along_at[i - 1]) / span).clamp(0.0, 1.0) } else { 0.0 }
+    };
+    // further apart than this along the curve, two places over one cell are two passes
+    let same_pass = 3.0 * radius + 4.0;
+    // the part of the curve nearest a point of the ground, within reach of
+    // `about` along it if that is given: how far off, how high, how steep,
+    // and how far along; and the lowest and highest the curve is anywhere
+    // over the tube's width of the point
+    let near_about = |u: f64, v: f64, about: Option<f64>| {
+        let at = DVec2::new(u, v);
+        let mut best = (f64::INFINITY, 0.0, 0.0, 0.0);
+        let mut heights = (f64::INFINITY, f64::NEG_INFINITY);
+        for (i, pair) in curve.windows(2).enumerate() {
+            if about.is_some_and(|s| apart(s, (along_at[i] + along_at[i + 1]) / 2.0) > same_pass) {
+                continue;
+            }
+            let (a, b) = (DVec2::new(pair[0][ua], pair[0][va]), DVec2::new(pair[1][ua], pair[1][va]));
+            let along = b - a;
+            let length = along.length();
+            let t = if length > 1e-9 { ((at - a).dot(along) / (length * length)).clamp(0.0, 1.0) } else { 0.0 };
+            let off = (a + along * t).distance(at);
+            if off < radius + 1.0 {
+                for end in pair {
+                    heights = (heights.0.min(end[axis]), heights.1.max(end[axis]));
+                }
+            }
+            if off < best.0 {
+                let rise = pair[1][axis] - pair[0][axis];
+                best = (off, pair[0][axis] + rise * t, if length > 1e-9 { rise / length } else { 0.0 }, along_at[i] + length * t);
+            }
+        }
+        (best.0, best.1, best.2, best.3, heights)
+    };
+    // each pass of the curve within the tube's wall of a point of the
+    // ground, as how far along the curve it comes nearest
+    let passes = |u: f64, v: f64| {
+        let at = DVec2::new(u, v);
+        let mut found: Vec<(f64, f64)> = Vec::new(); // (how far along, how far off), nearest of each pass
+        for (i, pair) in curve.windows(2).enumerate() {
+            let (a, b) = (DVec2::new(pair[0][ua], pair[0][va]), DVec2::new(pair[1][ua], pair[1][va]));
+            let along = b - a;
+            let length = along.length();
+            let t = if length > 1e-9 { ((at - a).dot(along) / (length * length)).clamp(0.0, 1.0) } else { 0.0 };
+            let off = (a + along * t).distance(at);
+            if off >= radius {
+                continue;
+            }
+            let here = along_at[i] + length * t;
+            match found.iter_mut().find(|f| apart(f.0, here) <= same_pass) {
+                Some(pass) if off < pass.1 => *pass = (here, off),
+                Some(_) => {}
+                None => found.push((here, off)),
+            }
+        }
+        found.into_iter().map(|f| f.0).collect::<Vec<f64>>()
+    };
+    // Under side and top. Across the tube the top is level as far as the
+    // chamfer, falls one for one across it, and from the wall outwards
+    // stays at the wall's top, so that a cell at the wall has all four of
+    // its corners at the wall's height and not one of them at nothing. The
+    // tube's section stands square to its curve, so
+    // where the curve climbs it is that much taller measured straight up.
+    // That holds while the curve keeps climbing for the tube's whole width.
+    // Where it turns straight up for a short way, the rule alone makes the
+    // tube as tall as the climb is steep, a blade far above and below the
+    // curve: so the tube is never taken further than its own half height
+    // past the lowest and highest the curve is over that ground.
+    let span = |u: f64, v: f64, about: f64| {
+        let (off, lift, slope, _, (lowest, highest)) = near_about(u, v, Some(about));
+        let tall = (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt();
+        let (lowest, highest) = if lowest <= highest { (lowest.min(lift), highest.max(lift)) } else { (lift, lift) };
+        ((lift - tall).max(lowest - half_tall), (lift + tall).min(highest + half_tall))
+    };
     // The tube stands over the cells whose middles are within its wall,
     // once for each pass of the curve over them. Two passes at heights that
     // meet are the tube running through itself: the lower one is built and
     // the other left out there, since no cell can be in two bricks.
-    let mut lifted: Vec<(i32, i32)> = lifted.into_iter().collect();
-    lifted.sort();
     let mut over: std::collections::HashMap<(i32, i32), Vec<f64>> = std::collections::HashMap::new();
-    for &(u, v) in &lifted {
+    for &(u, v) in cells {
         let (mid_u, mid_v) = (u as f64 + 0.5, v as f64 + 0.5);
         let mut found: Vec<(f64, f64, f64)> = passes(mid_u, mid_v)
             .into_iter()
+            .filter(|about| wanted((u, v), length_at(*about)))
             .map(|about| {
                 let (under, top) = span(mid_u, mid_v, about);
                 (under, top, about)
@@ -1495,11 +1820,26 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
     }
     let mut cells: Vec<(i32, i32)> = over.keys().copied().collect();
     cells.sort();
-    for &cell in &cells {
-        for &about in &over[&cell] {
-            let (pieces, blocks) = crate::fit_ribbon::columns(&[cell], &|u, v| span(u, v, about), axis, spec.max_ext);
-            bricks.extend(pieces);
-            whole.extend(blocks);
+    // The ground of the lifted part, its cells sharing their corners (see
+    // `fit_ribbon::Ground`). Where the curve passes twice there are two
+    // tubes over one corner, so a corner is known by its place and by how
+    // far along the curve the pass over it is.
+    let mut ground = crate::fit_ribbon::Ground { at: Vec::new(), wanted: Vec::new(), squares: Vec::new(), halves: Vec::new() };
+    let mut numbered: std::collections::HashMap<(i32, i32), Vec<(f64, usize)>> = std::collections::HashMap::new();
+    let mut corner = |ground: &mut crate::fit_ribbon::Ground, p: (i32, i32), about: f64| -> usize {
+        let known = numbered.entry(p).or_default();
+        if let Some(k) = known.iter().find(|k| apart(k.0, about) <= same_pass) {
+            return k.1;
+        }
+        ground.at.push(p);
+        ground.wanted.push(span(p.0 as f64, p.1 as f64, about));
+        known.push((about, ground.at.len() - 1));
+        ground.at.len() - 1
+    };
+    for &(u, v) in &cells {
+        for &about in &over[&(u, v)] {
+            let corners = [(u, v), (u + 1, v), (u, v + 1), (u + 1, v + 1)].map(|p| corner(&mut ground, p, about));
+            ground.squares.push((corners, span(u as f64 + 0.5, v as f64 + 0.5, about)));
         }
     }
     // The wall. Whole cells give it the outline of a staircase wherever the
@@ -1509,107 +1849,35 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
     // filled with half a cell: a ramp standing on end, its sloped face
     // closing the notch. A staircase of one across and one along becomes a
     // flat wall at 45 degrees, and a shallower one loses its inside
-    // corners. The half cell's top and under side are the wall's, and
-    // where its three corners are not at one height they are joined by the
-    // one brick that can do it, if there is one.
-    {
-        let inside: HashSet<(i32, i32)> = cells.iter().copied().collect();
-        let mut notches: Vec<(i32, i32)> = cells.iter().flat_map(|&(u, v)| [(u + 1, v), (u - 1, v), (u, v + 1), (u, v - 1)]).filter(|c| !inside.contains(c)).collect();
-        notches.sort();
-        notches.dedup();
-        let level = |u: i32, v: i32, about: f64| {
-            let (under, top) = span(u as f64, v as f64, about);
-            (under.round() as i32, top.round() as i32)
-        };
-        let world = |local: u8| (0..8u8).filter(|c| local >> c & 1 == 1).fold(0u8, |m, c| m | 1 << ((c & 1) << ua | (c >> 1 & 1) << va | (c >> 2) << axis));
-        for (u, v) in notches {
-            for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
-                if !(inside.contains(&(u + sx, v)) && inside.contains(&(u, v + sy)) && !inside.contains(&(u - sx, v)) && !inside.contains(&(u, v - sy))) {
-                    continue;
-                }
-                // (where the curve passes twice there are two walls, one over
-                // the other, and a notch of one need not be a notch of the
-                // other: those are left as they are)
-                let (&[about], &[other]) = (over[&(u + sx, v)].as_slice(), over[&(u, v + sy)].as_slice()) else { continue };
-                if apart(about, other) > same_pass {
-                    continue;
-                }
-                let (ox, oy) = ((sx > 0) as u8, (sy > 0) as u8);
-                // the half cell's corners on the ground: where the tube's two
-                // sides meet, then the far end of each of them
-                let plan = [(ox, oy), (1 - ox, oy), (ox, 1 - oy)];
-                let bit = |p: (u8, u8), z: u8| 1u8 << (p.0 | p.1 << 1 | z << 2);
-                let heights = plan.map(|p| level(u + p.0 as i32, v + p.1 as i32, about));
-                let (tops, unders) = (heights.map(|h| h.1), heights.map(|h| h.0));
-                let (low_top, high_under) = (*tops.iter().min().unwrap(), *unders.iter().max().unwrap());
-                if low_top <= high_under {
-                    continue;
-                }
-                let mut put = |local: u8, from: i32, to: i32| {
-                    let mask = world(local);
-                    if to <= from || crate::shapes::shape_info(mask).is_none() {
-                        return;
-                    }
-                    let mut at = from;
-                    while at < to {
-                        let run = (to - at).min(spec.max_ext.max(1));
-                        let (mut min, mut ext) = ([0; 3], [0; 3]);
-                        (min[ua], min[va], min[axis]) = (u, v, at);
-                        (ext[ua], ext[va], ext[axis]) = (1, 1, run);
-                        bricks.push(CellBrick { mask, min, ext });
-                        at += run;
-                    }
-                };
-                let base = |z: u8| plan.iter().fold(0u8, |m, p| m | bit(*p, z));
-                put(base(0) | base(1), high_under, low_top);
-                // A cap: the corners that stand clear of the rest by one height.
-                // One brick makes it when that is one corner (a tetrahedron or
-                // a half inner corner) or the two far ends (a half outer
-                // corner). The meeting corner with one far end has none.
-                let cap = |h: [i32; 3], flat: i32| -> Option<(u8, i32)> {
-                    let high: Vec<usize> = (0..3).filter(|k| h[*k] != flat).collect();
-                    let tall = (h[*high.first()?] - flat).abs();
-                    let allowed = matches!(high.as_slice(), [0] | [1] | [2] | [1, 2]);
-                    (allowed && high.iter().all(|k| (h[*k] - flat).abs() == tall)).then_some((high.iter().fold(0u8, |m, k| m | 1 << k), tall))
-                };
-                if let Some((which, tall)) = cap(tops, low_top) {
-                    let local = base(0) | (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(plan[k], 1));
-                    let mask = world(local);
-                    if crate::shapes::shape_info(mask).is_some() {
-                        let (mut min, mut ext) = ([0; 3], [0; 3]);
-                        (min[ua], min[va], min[axis]) = (u, v, low_top);
-                        (ext[ua], ext[va], ext[axis]) = (1, 1, tall);
-                        bricks.push(CellBrick { mask, min, ext });
-                    }
-                }
-                if let Some((which, tall)) = cap(unders, high_under) {
-                    let local = base(1) | (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(plan[k], 0));
-                    let mask = world(local);
-                    if crate::shapes::shape_info(mask).is_some() {
-                        let (mut min, mut ext) = ([0; 3], [0; 3]);
-                        (min[ua], min[va], min[axis]) = (u, v, high_under - tall);
-                        (ext[ua], ext[va], ext[axis]) = (1, 1, tall);
-                        bricks.push(CellBrick { mask, min, ext });
-                    }
-                }
-                break;
+    // corners. The half cell's corners are corners of the whole cells
+    // beside it, so its top and its under side are the wall's.
+    let inside: HashSet<(i32, i32)> = cells.iter().copied().collect();
+    let mut notches: Vec<(i32, i32)> = cells.iter().flat_map(|&(u, v)| [(u + 1, v), (u - 1, v), (u, v + 1), (u, v - 1)]).filter(|c| !inside.contains(c)).collect();
+    notches.sort();
+    notches.dedup();
+    for (u, v) in notches {
+        for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            if !(inside.contains(&(u + sx, v)) && inside.contains(&(u, v + sy)) && !inside.contains(&(u - sx, v)) && !inside.contains(&(u, v - sy))) {
+                continue;
             }
+            // (where the curve passes twice there are two walls, one over
+            // the other, and a notch of one need not be a notch of the
+            // other: those are left as they are)
+            let (&[about], &[other]) = (over[&(u + sx, v)].as_slice(), over[&(u, v + sy)].as_slice()) else { continue };
+            // (nor is a cell the caller keeps for other columns filled from here)
+            if apart(about, other) > same_pass || !wanted((u, v), length_at(about)) {
+                continue;
+            }
+            let (ox, oy) = ((sx > 0) as i32, (sy > 0) as i32);
+            // the half cell's corners on the ground: where the tube's two
+            // sides meet, then the far end of each of them
+            let plan = [(u + ox, v + oy), (u + 1 - ox, v + oy), (u + ox, v + 1 - oy)];
+            let corners = plan.map(|p| corner(&mut ground, p, about));
+            ground.halves.push(corners);
+            break;
         }
     }
-    if !whole.is_empty() {
-        let lo = [0, 1, 2].map(|k| whole.iter().map(|c| c[k]).min().unwrap());
-        let n = [0, 1, 2].map(|k| (whole.iter().map(|c| c[k]).max().unwrap() + 1 - lo[k]) as usize);
-        if (n[0] * n[1] * n[2]) as i64 <= MAX_CELLS {
-            let mut grid = vec![0u8; n[0] * n[1] * n[2]];
-            for c in &whole {
-                grid[(c[0] - lo[0]) as usize + n[0] * ((c[1] - lo[1]) as usize + n[1] * (c[2] - lo[2]) as usize)] = CUBE;
-            }
-            bricks.extend(fit_volume::merge(grid, n, spec.max_ext.max(1) as usize).into_iter().map(|b| CellBrick { mask: CUBE, min: [b.min[0] + lo[0], b.min[1] + lo[1], b.min[2] + lo[2]], ext: b.ext }));
-        } else {
-            bricks.extend(whole.iter().map(|c| CellBrick { mask: CUBE, min: *c, ext: [1; 3] }));
-        }
-    }
-    bricks
+    ground.lay(axis, max_ext)
 }
 
 /// A flat band whose curve has been pulled out of the plane it lay in, at
@@ -2948,8 +3216,10 @@ mod tests {
         let pulled = Spec { pulls: vec![(DVec3::new(-18.5, -8.5, 0.5), DVec3::new(3.5, -7.0, 25.0))], pull_reach: 40.0, ..ring };
         let built = build(&pulled).unwrap();
         let survey = crate::surface::survey(&Probe::new(&pulled, built.grain).unwrap(), &built).unwrap();
-        // with a round section where it is lifted, 6.7% was stepped
-        assert!(survey.stepped / survey.area < 0.055, "{} stepped", survey.stepped / survey.area);
+        // with a round section where it is lifted, 6.7% was stepped; with each cell rounding its own corners, 4.9%
+        assert!(survey.stepped / survey.area < 0.04, "{} stepped", survey.stepped / survey.area);
+        // (and 4071 bricks, before the ramps side by side were joined)
+        assert!(built.bricks.len() < 3800, "{} bricks", built.bricks.len());
         assert!(built.error < 0.16 * built.solid, "{} wrong of {}", built.error, built.solid);
     }
 
@@ -2966,12 +3236,49 @@ mod tests {
             (DVec3::new(42.68, 11.19, 0.5), DVec3::new(14.5, 0.0, -24.5)),
             (DVec3::new(33.78, 33.45, 4.64), DVec3::new(-35.5, 0.0, -64.0)),
         ];
-        let built = build(&Spec { pulls, pull_reach: 40.0, ..ring }).unwrap();
+        let spec = Spec { pulls, pull_reach: 40.0, ..ring };
+        let built = build(&spec).unwrap();
         // no brick further above or below the curve than the tube is thick:
         // it stood 120 above it and 60 below
         let (low, high) = built.path.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
         let (bottom, top) = (built.bricks.iter().map(|b| b.min[2]).min().unwrap() as f64, built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() as f64);
         assert!(top <= high + 8.0 && bottom >= low - 8.0, "bricks from {bottom} to {top}, the curve from {low} to {high}");
+        // Where the curve climbs steeply the tube is built in columns lying
+        // on their sides. In upright columns throughout, 17.9% of it was wrong.
+        assert!(built.error < 0.16 * built.solid, "{} wrong of {}", built.error, built.solid);
+        // The stretches built one way and the other meet without sharing
+        // any room and without a gap: no point is in two bricks, and every
+        // point well inside the tube is in one.
+        let mut held_by: std::collections::HashMap<[i32; 3], Vec<usize>> = std::collections::HashMap::new();
+        for (n, b) in built.bricks.iter().enumerate() {
+            for k in 0..b.ext[0] * b.ext[1] * b.ext[2] {
+                held_by.entry([b.min[0] + k % b.ext[0], b.min[1] + k / b.ext[0] % b.ext[1], b.min[2] + k / (b.ext[0] * b.ext[1])]).or_default().push(n);
+            }
+        }
+        let probe = Probe::new(&spec, built.grain).unwrap();
+        let (lo, hi) = (built.bricks.iter().fold([i32::MAX; 3], |a, b| [0, 1, 2].map(|k| a[k].min(b.min[k]))), built.bricks.iter().fold([i32::MIN; 3], |a, b| [0, 1, 2].map(|k| a[k].max(b.min[k] + b.ext[k]))));
+        let (mut inside, mut empty) = (0, 0);
+        let n = 56;
+        for k in 0..n * n * n {
+            let t = [(k % n) as f64 + 0.31, (k / n % n) as f64 + 0.47, (k / (n * n)) as f64 + 0.29].map(|v| v / n as f64);
+            let p = [0, 1, 2].map(|i| lo[i] as f64 + t[i] * (hi[i] - lo[i]) as f64);
+            let held = held_by.get(&p.map(|v| v.floor() as i32)).map_or(0, |bricks| {
+                bricks
+                    .iter()
+                    .filter(|n| {
+                        let b = &built.bricks[**n];
+                        let u = [0, 1, 2].map(|i| (p[i] - b.min[i] as f64) / b.ext[i] as f64);
+                        crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+                    })
+                    .count()
+            });
+            assert!(held <= 1, "{held} bricks hold {p:?}");
+            if probe.distance(DVec3::from_array(p)) < -2.5 {
+                inside += 1;
+                empty += (held == 0) as i32;
+            }
+        }
+        assert!(inside > 1500 && empty * 200 <= inside, "{empty} of {inside} points well inside the tube are in no brick");
     }
 
     #[test]
