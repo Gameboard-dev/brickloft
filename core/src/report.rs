@@ -86,6 +86,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("grain", spec.grain.to_string());
     line("budget", spec.budget.to_string());
     line("max_ext", spec.max_ext.to_string());
+    // whether it is joined to the forms it stands in, and how far the fillet between them reaches
+    line("blend", spec.blend.map_or("none".into(), number));
     // stepping stones: how far apart, the gap, how uneven, and which scattering
     // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The last was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused.)
     line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},0", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1])));
@@ -237,6 +239,14 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             "grain" => spec.grain = whole(value)? as i32,
             "budget" => spec.budget = whole(value)?.max(0) as usize,
             "max_ext" => spec.max_ext = whole(value)? as i32,
+            // (a file from before forms could be joined has no such line, and its form stands clear)
+            "blend" => {
+                spec.blend = if value == "none" {
+                    None
+                } else {
+                    Some(num(value).ok().filter(|k| (0.0..=crate::blend::MAX_BLEND).contains(k)).ok_or_else(|| bad("expected `none`, or a blend from 0 to 6"))?)
+                }
+            }
             "mosaic" => {
                 spec.mosaic = if value == "none" {
                     None

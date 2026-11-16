@@ -142,6 +142,16 @@ pub struct Spec {
     /// (see [`crate::pattern`]). `None` for none. If `stones` is set too,
     /// the stones are laid.
     pub mosaic: Option<crate::pattern::Mosaic>,
+    /// Whether the form is joined to the other forms on its grid, and how
+    /// far the fillet where they meet reaches along each of them, in cells:
+    /// `Some(0.0)` is a plain union with a sharp crease, `None` a form that
+    /// stands clear of the others. It changes nothing about the form's own
+    /// bricks, so no fitter reads it: only what puts several forms together
+    /// does (see [`crate::blend`]). It is kept here and not beside the form's
+    /// place because everything that remembers a form (undo, a save, the
+    /// clipboard) remembers its spec, and a join that undo forgot was the
+    /// fault this replaced.
+    pub blend: Option<f64>,
 }
 
 impl Default for Spec {
@@ -173,6 +183,7 @@ impl Default for Spec {
             pull_reach: 8.0,
             stones: None,
             mosaic: None,
+            blend: None,
             simplify: 0.0,
             grain: 1,
             budget: 2500,
