@@ -331,8 +331,11 @@ impl Walls {
     /// a joint a cell wide, it takes the colour of the brick beside the
     /// joint. A sloped piece is often a dozen cells long, and one that
     /// happened to have its middle on a joint was a slab of mortar that
-    /// long in the wall's face. Cells of one colour are then joined into
-    /// bricks again.
+    /// long in the wall's face. So does a cell where a wall is seen end
+    /// on, at the corner where two walls of a grid cross: the pattern
+    /// goes through a wall's thickness, and a joint there was mortar as
+    /// wide as the wall is thick on the face round the corner. Cells of
+    /// one colour are then joined into bricks again.
     ///
     /// So a course of bricks runs along a wall and bends round a ring
     /// with it, and the line between two courses is level and unbroken
@@ -360,19 +363,20 @@ impl Walls {
         let top = self.low + self.floor;
         let limit = opts.max_ext.max(1) as usize;
         // the sheet's colour at a place, and for a sloped piece the colour beside a joint it lies on: the nearest within two cells along that is not the ground's
-        let shade = |along: usize, z: usize, sloped: bool| {
+        let shade = |along: usize, z: usize, unjointed: bool| {
             let here = sheet[along * tall + z];
-            if here != FLOOR || !sloped {
+            if here != FLOOR || !unjointed {
                 return here;
             }
             [1, -1, 2, -2].into_iter().filter_map(|by: isize| along.checked_add_signed(by).filter(|s| *s < long)).map(|s| sheet[s * tall + z]).find(|shade| *shade != FLOOR).unwrap_or(FLOOR)
         };
         // a column of the sheet as bricks: a run of cells of one colour is one brick
-        let column = |mask: u8, x: i32, y: i32, w: i32, h: i32, along: usize, out: &mut Vec<(CellBrick, u8)>| {
+        let column = |mask: u8, x: i32, y: i32, w: i32, h: i32, (along, end_on): (usize, bool), out: &mut Vec<(CellBrick, u8)>| {
+            let unjointed = mask != CUBE || end_on;
             let mut from = 0;
             while from < tall {
-                let first = shade(along, from, mask != CUBE);
-                let run = (from..tall).take(limit).take_while(|z| shade(along, *z, mask != CUBE) == first).count();
+                let first = shade(along, from, unjointed);
+                let run = (from..tall).take(limit).take_while(|z| shade(along, *z, unjointed) == first).count();
                 out.push((CellBrick { mask, min: [x, y, top + from as i32], ext: [w, h, run as i32] }, first));
                 from += run;
             }

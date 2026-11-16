@@ -534,7 +534,14 @@ impl Layout {
     ///
     /// Where a spoke meets a ring wall the place is the ring wall's, if it
     /// is within the wall's thickness of that circle.
-    pub fn along(&self, p: DVec2) -> usize {
+    ///
+    /// Also whether the place is where a wall is seen end on: in the
+    /// square where two lines of a grid's walls cross, or in the end of a
+    /// spoke that runs on through a ring wall's place where no arc
+    /// stands. The pattern goes through a wall's thickness, so on such a
+    /// face a joint a cell wide would show as wide as the wall is thick
+    /// (see `walls::Walls::patterned`, which leaves joints out there).
+    pub fn along(&self, p: DVec2) -> (usize, bool) {
         let q = p - self.centre;
         let spoke_long = self.spoke_long();
         match self.kind {
@@ -551,10 +558,10 @@ impl Layout {
                 let on_arc = (r - j as f64 * gap).abs() <= self.half && self.standing[self.arc(j, d)];
                 if on_arc || !self.standing[self.spoke(ring, spoke)] {
                     let round = (TAU * j as f64 * gap).ceil() as usize;
-                    self.strips[j - 1] + ((angle * j as f64 * gap) as usize).min(round - 1)
+                    (self.strips[j - 1] + ((angle * j as f64 * gap) as usize).min(round - 1), false)
                 } else {
                     let out = r * (angle - nearest * TAU / n as f64).cos() - (ring as f64 * gap - self.half);
-                    self.strips[rings + ring - 1] + spoke * spoke_long + (out.max(0.0) as usize).min(spoke_long - 1)
+                    (self.strips[rings + ring - 1] + spoke * spoke_long + (out.max(0.0) as usize).min(spoke_long - 1), (r - j as f64 * gap).abs() <= self.half)
                 }
             }
             Kind::Grid => {
@@ -563,10 +570,11 @@ impl Layout {
                 let line = |v: f64| ((v / gap).round().max(0.0) as usize).min(side);
                 let place = |v: f64| ((v + self.half).max(0.0) as usize).min(spoke_long - 1);
                 // (an upright wall's if it is within one, and otherwise a level one's)
-                if (p.x - line(p.x) as f64 * gap).abs() <= self.half {
-                    line(p.x) * spoke_long + place(p.y)
+                let within = |v: f64| (v - line(v) as f64 * gap).abs() <= self.half;
+                if within(p.x) {
+                    (line(p.x) * spoke_long + place(p.y), within(p.y))
                 } else {
-                    (side + 1 + line(p.y)) * spoke_long + place(p.x)
+                    ((side + 1 + line(p.y)) * spoke_long + place(p.x), false)
                 }
             }
         }

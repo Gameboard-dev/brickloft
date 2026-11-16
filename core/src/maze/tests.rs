@@ -328,6 +328,40 @@ fn courses_of_bricks_run_level_round_every_ring() {
 }
 
 #[test]
+fn where_two_walls_of_a_grid_cross_no_joint_is_smeared_across_the_corner() {
+    let bricks = crate::pattern::STYLES.iter().position(|s| s.name == "bricks").unwrap();
+    let mosaic = Mosaic { style: bricks, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: 50, upright: false, uneven: [0; 2] };
+    let m = maze(Kind::Grid, 4, 3);
+    let built = build(&Spec { mosaic: Some(mosaic), thick: 4.0, rise: Some(16.0), ..spec(m, 84.0) }).unwrap();
+    let layout = laid(&m, 84.0, 4.0);
+    // The squares where a line of walls each way cross: 4 cells by 4 at
+    // every corner of every cell. A wall's pattern goes through its
+    // thickness, so a joint that fell there showed as a slab of mortar
+    // the wall's whole thickness wide on the face round the corner. In
+    // a course of bricks (any layer but the first and every fourth after, which are mortar
+    // all round) no cell of such a square is mortar.
+    let (gap, low) = (layout.gap(), layout.centre() - DVec2::splat(3.5 * layout.gap()));
+    let near = |v: f64| ((v / gap).round() * gap - v).abs() <= 2.0;
+    let (mut crossing, mut elsewhere) = (0, 0);
+    for (brick, shade) in built.bricks.iter().zip(&built.shades) {
+        for x in brick.min[0]..brick.min[0] + brick.ext[0] {
+            for y in brick.min[1]..brick.min[1] + brick.ext[1] {
+                let at = DVec2::new(x as f64 + 0.5, y as f64 + 0.5) - low;
+                let courses = (brick.min[2]..brick.min[2] + brick.ext[2]).filter(|z| z % 4 != 0).count();
+                if near(at.x) && near(at.y) {
+                    crossing += courses;
+                    assert!(*shade != FLOOR || courses == 0, "mortar through a corner at {x}, {y}, from {} up {}", brick.min[2], brick.ext[2]);
+                } else if *shade == FLOOR {
+                    elsewhere += courses;
+                }
+            }
+        }
+    }
+    // (and along the walls between the corners the joints are there)
+    assert!(crossing > 2000 && elsewhere > 500, "{crossing} cells of brick in the corners, {elsewhere} of mortar in joints elsewhere");
+}
+
+#[test]
 fn a_floor_and_the_way_through_are_laid_when_asked() {
     let bare = build(&spec(maze(Kind::Theta, 4, 2), 64.0)).unwrap();
     let full = build(&spec(Maze { floor: 2, solution: true, ..maze(Kind::Theta, 4, 2) }, 64.0)).unwrap();
