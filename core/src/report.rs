@@ -327,7 +327,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 // (the rose bush is gone: read as the flower nearest it, the peony)
                 let named = if parts[0] == "rose" { "peony" } else { parts[0] };
-                let kind = crate::tree::KINDS.iter().find(|k| k.1 == named).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, beech, boxwood, hedge, peony, sunflower, tulip, hydrangea, petunia, reeds, grass, birch, willow, datepalm, scotspine, cypress, yucca, daisy, daffodil or bed"))?.0;
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == named).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, beech, boxwood, hedge, peony, sunflower, tulip, hydrangea, petunia, reeds, grass, birch, willow, datepalm, scotspine, cypress, yucca, daisy, daffodil, bed or cherry"))?.0;
                 // (a rose's own numbers meant canes and blooms, and are no peony's: it comes as a peony starts out, of the same seed)
                 let parts = if parts[0] == "rose" { &parts[..parts.len().min(2)] } else { &parts[..] };
                 let mut tree = crate::tree::Tree::of(kind);

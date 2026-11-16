@@ -166,7 +166,7 @@ gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
 `tree` names the kind first: `pine`, `palm`, `oak`, `beech`, `boxwood`,
-`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds`, `grass`, `birch`, `willow`, `datepalm`, `scotspine`, `cypress`, `yucca`, `daisy`, `daffodil` or `bed`
+`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia`, `reeds`, `grass`, `birch`, `willow`, `datepalm`, `scotspine`, `cypress`, `yucca`, `daisy`, `daffodil`, `bed` or `cherry`
 (`rose`, a kind that is gone, is read as `peony`). Whatever follows it replaces that kind's usual
 settings in order: the seed, how full (0 to 100), how many (a pine's
 tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, the plants
@@ -185,8 +185,9 @@ amount]`, with `flatten` 0 for a push (a negative amount pushes down) and
 points. Grass's `count` is how far below it water stands (0 for none): a
 touch with a negative amount digs, and a hollow deeper than that is a
 pond. Its `depth` less 1 is how thickly reeds stand round the water, 0 to
-10. Grass takes 240 touches. `fill` true freezes a grass's pond (ice, with collision), and `tube`
-true on any other plant writes its greenery to be walked through. A grass's `extras` of 1
+10. Grass takes 240 touches. `fill` true freezes a grass's pond (ice, with collision). `tube` true on grass gives its water two levels, with a
+stream from each pond on raised ground down to the nearest lower one, and `tube`
+true on any other plant writes its greenery to be walked through. `closed` true on a cherry scatters fallen petals under it. A grass's `extras` of 1
 makes its blades solid in the game; at 0 they are written to be walked
 through. The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
 `"tree": ["palm", 3]` the third palm. A tree's height is `rise` and its

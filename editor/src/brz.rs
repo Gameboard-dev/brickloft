@@ -142,7 +142,8 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
             (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
             (Kind::Grass, _) => Stuff::Solid,
             (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
-            (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm, tree::STAR) => Stuff::Solid,
+            // (and the bands on a cherry's bark)
+            (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm | Kind::Cherry, tree::STAR) => Stuff::Solid,
             _ => Stuff::Blade,
         }
     })
@@ -397,6 +398,16 @@ mod tests {
         let ice: Vec<&Brick> = frozen.bricks.iter().zip(&dug.shades).filter(|(_, s)| **s == brickloft_core::tree::WATER).map(|(b, _)| b).collect();
         assert_eq!(ice.len(), water.len());
         assert!(ice.iter().all(|b| b.collision.player && b.collision.physics && b.collision.weapon && b.material == brdb::assets::materials::GLASS && b.material_intensity == 3));
+
+        // Two levels: a stream's water is water like a pond's, and ice with it when frozen.
+        let touch = |x: f64, range: f64, amount: f64| (DVec3::new(x + 0.5, 0.5, 0.5), DVec3::new(range, 0.0, amount));
+        let hilly = Spec { points: vec![DVec3::new(-55.5, 0.5, 0.5), DVec3::new(55.5, 0.5, 0.5)], radius: 30.0, tube: true, pulls: vec![touch(-25.0, 34.0, 16.0), touch(-25.0, 16.0, -14.0), touch(30.0, 20.0, -10.0)], ..grass.clone() };
+        let stepped = build(&hilly).unwrap();
+        let bricks: Vec<Painted> = stepped.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+        let of = |spec: Spec| -> Vec<Brick> { prefab(&bricks, &[(spec, Paint::default(), [0; 3])]).unwrap().bricks.into_iter().zip(&stepped.bricks).zip(&stepped.shades).filter(|((_, c), s)| **s == brickloft_core::tree::WATER && c.min[0] > -10 && c.min[0] + c.ext[0] < 8).map(|((b, _), _)| b).collect() };
+        let (running, still) = (of(hilly.clone()), of(Spec { fill: true, ..hilly.clone() }));
+        assert!(running.len() > 5 && running.iter().all(|b| !b.collision.player && b.material == brdb::assets::materials::GLASS && b.material_intensity == 6), "{} bricks of stream", running.len());
+        assert!(still.len() == running.len() && still.iter().all(|b| b.collision.player && b.material_intensity == 3));
         let back = Brz::read_slice(&frozen.to_brz_vec().unwrap()).unwrap().into_reader();
         let data = back.read_global_data().unwrap();
         let read: Vec<Brick> = back.brick_chunk_index(1).unwrap().into_iter().flat_map(|chunk| back.brick_chunk_soa(1, chunk.index).unwrap().iter_bricks(chunk.index, data.clone()).map(|b| b.unwrap()).collect::<Vec<_>>()).collect();

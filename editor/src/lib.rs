@@ -158,6 +158,14 @@ pub fn run_form(form: usize, claude: bool) {
     // meshes are a second set and not more instances of the first: a mesh
     // is drawn with one material, and glass is drawn after everything solid.
     let mut ghost_meshes: Vec<Gm<InstancedMesh, ColorMaterial>> = masks.iter().map(|&mask| Gm::new(InstancedMesh::new(&context, &Instances::default(), &shape_of(mask)), ColorMaterial::new_transparent(&context, &CpuMaterial { albedo: Srgba::new(255, 255, 255, 255), ..Default::default() }))).collect();
+    // The water and ice of ponds (`State::waters`): seen through, so that
+    // the basin shows under them. A third set, made as the ghosts' is and
+    // drawn with them after everything solid: tested against the depth of
+    // the solid bricks and leaving none of their own, so what is under
+    // water shows and what stands in front of it still hides it. They are
+    // few large bricks, so the set is made again with the ghosts on every
+    // change of the scene and costs one pass over the bricks.
+    let mut water_meshes: Vec<Gm<InstancedMesh, ColorMaterial>> = masks.iter().map(|&mask| Gm::new(InstancedMesh::new(&context, &Instances::default(), &shape_of(mask)), ColorMaterial::new_transparent(&context, &CpuMaterial { albedo: Srgba::new(255, 255, 255, 255), ..Default::default() }))).collect();
     let mut handle_mesh = Gm::new(
         InstancedMesh::new(&context, &Instances::default(), &CpuMesh::sphere(16)),
         ColorMaterial::new_opaque(&context, &CpuMaterial { albedo: Srgba::WHITE, ..Default::default() }),
@@ -532,6 +540,25 @@ pub fn run_form(form: usize, claude: bool) {
                 instances.colors = Some(colours);
                 object.geometry.set_instances(&instances);
             }
+            // each form's water: its colour and how solid it is drawn
+            let waters = state.waters();
+            let is_water = |colour: &Option<[u8; 3]>, form: usize| waters.get(form).copied().flatten().filter(|w| Some(w.0) == *colour);
+            for (object, &mask) in water_meshes.iter_mut().zip(&masks) {
+                let mut instances = Instances::default();
+                let mut colours = Vec::new();
+                for (b, colour, form, place) in bricks.iter().filter(|b| b.0.mask == mask) {
+                    let Some(([r, g, blue], solid)) = is_water(colour, *form) else { continue };
+                    let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
+                    let on_lattice = Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32);
+                    instances.transformations.push(match grids.get(*form).copied().flatten() {
+                        Some(turn) => turn * on_lattice,
+                        None => on_lattice,
+                    });
+                    colours.push(Srgba::new(r, g, blue, solid));
+                }
+                instances.colors = Some(colours);
+                object.geometry.set_instances(&instances);
+            }
             // The form being edited is drawn from where it stands: its
             // bricks are placed as if it stood at the origin of a level
             // grid, and its whole set is then moved there and turned.
@@ -554,6 +581,10 @@ pub fn run_form(form: usize, claude: bool) {
                 // (each brick is put with the others of its shape in one pass over them all)
                 let mut sorted: Vec<(Instances, Vec<Srgba>, Vec<usize>)> = (0..masks.len()).map(|_| (Instances::default(), Vec::new(), Vec::new())).collect();
                 for (b, colour, form, place) in bricks.iter().filter(|b| (b.2 == 0) == own) {
+                    // (water is in its own set, and so casts no shadow on its bed and is not what a click lands on)
+                    if is_water(colour, *form).is_some() {
+                        continue;
+                    }
                     let Some((instances, colours, owner)) = place_of.get(&b.mask).map(|&n| &mut sorted[n]) else { continue };
                     // the mesh is a unit box at the origin: scale it to the
                     // brick's extent, then move it to the brick's corner
@@ -638,6 +669,7 @@ pub fn run_form(form: usize, claude: bool) {
         screen.clear(ClearState::color_and_depth(0.17, 0.19, 0.23, 1.0, 1.0));
         screen.render(&camera, &ground, &lights);
         screen.render(&camera, brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
+        screen.render(&camera, water_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &[]);
         screen.render(&camera, ghost_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &[]);
         if let Some((middle, wide)) = state.rings().filter(|_| state.show_rings) {
             // the ring's mesh lies about z, one wide: turned to face its axis and grown to clear the form

@@ -2987,7 +2987,8 @@ fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), 
     use crate::tree::{Kind, Lay, Tree};
     let level = |p: DVec3| DVec3::new(p.x, p.y, foot.z);
     if !Tree::lies_along(spec.tree.kind) {
-        return Ok((Lay::default(), Vec::new()));
+        // (a cherry's `closed`, which a tree has no other use for, is whether its fallen petals lie under it)
+        return Ok((Lay { closed: spec.tree.kind == Kind::Cherry && spec.closed, ..Lay::default() }, Vec::new()));
     }
     let mut path: Vec<DVec3> = if spec.points.len() < 2 {
         let long = spec.radius * spec.stretch.x.clamp(1.0, MAX_SPAN);
@@ -3007,7 +3008,7 @@ fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), 
     let mounds = if grass { grass_touches(spec, foot) } else { Vec::new() };
     // (grass: water stands `count` below it, 0 for none; and `depth`, which a plant has no other use for, is how thickly reeds stand round it: one more than so many tenths, since a depth is 1 at least)
     let water = (grass && spec.tree.count > 0).then(|| -(spec.tree.count as f64));
-    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, mounds };
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, levels: if grass && spec.tube { 2 } else { 1 }, mounds };
     Ok((lay, path))
 }
 

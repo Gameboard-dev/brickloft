@@ -182,8 +182,11 @@ own method ([algorithm.md](algorithm.md), section 7.10). What remains:
   twigs once more. Half-size bricks do not exist, and a wedge is a cell
   wide at its foot, so thinner twigs would be drawn with gaps.
 - **Grass.** Its blades are one cell thick, so a lawn is coarse tufts
-  close up. The view does not draw water translucent. A pond's patch
-  hangs below the level it was laid on.
+  close up. A pond's patch hangs below the level it was laid on. Water
+  has two levels at most, every raised pond shares one height, and a
+  stream is four to six cells of water across where two were asked for:
+  the soil is laid on a grid 2.4 apart and a narrower channel closes
+  over.
 - **Speed.** A tree takes about a fifth of a second on a desktop's cores
   and up to a second on one, nearly all of it distance samples. Colouring
   is shared over threads. Growing a plant is one run of random numbers and

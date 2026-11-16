@@ -61,7 +61,12 @@ fn main() {
         let set = &sets[parts.next().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0).min(sets.len() - 1)];
         Some(set.iter().map(|c| c.map(f64::from)).collect())
     });
-    for (n, brick) in built.bricks.iter().enumerate() {
+    // a pond's water last and seen through, as the editor draws it (ice more solid)
+    let pond = spec.form == brickloft_core::spec::Form::Tree && spec.tree.kind == brickloft_core::tree::Kind::Grass;
+    let water = |n: usize| pond && built.shades.get(n) == Some(&brickloft_core::tree::WATER);
+    let order = (0..built.bricks.len()).filter(|n| !water(*n)).chain((0..built.bricks.len()).filter(|n| water(*n)));
+    for (n, brick) in order.map(|n| (n, &built.bricks[n])) {
+        canvas.solid = if !water(n) { 1.0 } else if spec.fill { 0.75 } else { 0.41 };
         if let Some(shade) = built.shades.get(n) {
             canvas.brick = match &own {
                 Some(set) => set[brickloft_core::pattern::colour_of(*shade, set.len())],

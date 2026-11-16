@@ -2743,8 +2743,57 @@ below its own level as it was dug.
 
 In the game's file the water is the glass material at intensity 6 of 10,
 with all four of its collision flags off. The writer the editor uses
-knows no water brick or material. The view in the editor shows water as a
-plain blue: it does not draw anything translucent.
+knows no water brick or material. The view in the editor draws water and
+ice after every solid brick, blended over what is behind them, tested
+against the depth of the solid bricks and leaving none of their own. The
+basin then shows through the water, and whatever stands in front of the
+water still hides it. Ice is drawn more solid than water.
+
+With **Pond levels** at 2, water stands at two heights
+([core/src/tree.rs](../core/src/tree.rs), `Waters`). The ground is
+flooded from the edge of the patch inwards with a priority flood
+([Barnes, Lehman and Mulla 2014](https://arxiv.org/abs/1511.04463)),
+which gives each place its spill height: the height water would reach
+there before it ran off the patch. A hollow is a connected set of places
+lying under their spill height. With the rim of a hollow at the height
+$`s`$ and the water $`w`$ below the lawn, the hollow's own level is
+
+```math
+\ell = \lfloor s - w \rfloor
+```
+
+and a hollow with $`s > 1.5`$ that is deeper than $`w + 1`$ is a raised
+pond. All raised ponds stand at the lowest $`\ell`$ among them, so there
+are two levels and none overflows. The lower level is $`-w`$ as before,
+and a patch with no raised hollow builds the same bricks at 2 as at 1.
+
+A stream leaves each raised pond for the nearest water at the lower
+level. Its way is the cheapest over the grid of the ground by Dijkstra's
+search, where a step of length $`d`$ onto ground at height $`h`$ costs
+
+```math
+d\,\bigl(1 + 3\max(0,\; h - \ell)\bigr)
+```
+
+so it goes round a rise sooner than through it. A way that climbs more
+than 1 over the pond's own rim is refused, and that pond has no stream.
+The way is smoothed, then swung to each side by up to 2.4 on a sine 28
+long whose phase comes from the seed, with no swing at either end. Along
+it, a cell at a time, the water's level is
+
+```math
+z_k = \max\bigl(-w,\; \min(z_{k-1},\; \lfloor b_k - 0.5 \rfloor)\bigr)
+```
+
+where $`b_k`$ is the lowest ground within 4.4 to either side over the
+next three cells, and $`z_0 = \ell`$ until the stream is out through the
+rim. The level never rises, it is a whole number, and it lies under both
+banks, so the water is flat reaches with a step down between them. The
+channel is cut 2.8 under the water over a width of 4.4, with banks that
+lie back further where the cut is deep. Its bed is sand, it has a third
+as many reeds as a pond's margin, and its water is the pond's water in
+the game's file, ice with it when frozen. Eight streams are made at
+most, and a patch over 400,000 places of ground keeps one level.
 
 A touch may also be a stroke: with Ctrl held while the button is down,
 the same touch is made again wherever the cursor has moved 0.4 of the
@@ -2782,6 +2831,25 @@ lean or crook by the fraction of a cell they did, which could not be seen
 as a lean and was a step every few cells. Limbs are still fitted cell by
 cell.
 
+Where one length is wider than the next above it, its top slopes in to
+the narrower size over five cells of height for each cell of width, or
+over the whole length if that is shorter. A broadleaf trunk of thickness
+$`g`$ at height $`z`$ has the size
+
+```math
+g\,\bigl(1 + 0.36\,\rho\,e^{-z / 2.2g}\bigr)
+```
+
+with $`\rho`$ the kind's share of roots, so it widens to its foot by a
+third at most, over about twice its own thickness of height. Buttress
+roots are ridges 0.3 of the trunk thick that run down that flare from no
+higher than half way to the fork, and a kind with $`\rho < 0.7`$ has
+none. A tree that keeps its stem narrows to 0.78 of $`g`$ at its fork,
+and the limbs there share that section by da Vinci's rule. Before this
+the sizes met in square steps and the buttresses were stout cones that
+ended against a trunk that had hardly widened, which read as a post in a
+collar.
+
 #### More trees, bushes and flowers
 
 <img src="images/tree-willow.png" width="330" alt="A weeping willow in bricks: a short stout trunk, spreading limbs, and curtains of thin green strands hanging from every branch end nearly to the ground"> <img src="images/tree-scots-pine.png" width="330" alt="A Scots pine in bricks: a tall bare eight-sided trunk and at its top a flat broken crown of dark needles in plates on orange limbs">
@@ -2790,10 +2858,28 @@ A birch, a willow and a Scots pine are the oak's rule of forking with
 other numbers, as the beech is, and each has something of its own.
 
 - **Birch** ([*Betula pendula*](https://en.wikipedia.org/wiki/Betula_pendula)):
-  a trunk half as thick as an oak's for its height that carries on to the
-  top, limbs that climb at 23 to 43 degrees from upright, small tufts,
-  and short hanging shoots at the branch ends. Its bark is white, and
-  smooth noise stretched sideways marks it with black bands.
+  a stem a third as thick as an oak's for its height that runs to three
+  fifths of the tree's height, narrowing to half its thickness, and only
+  there divides in three. Its limbs leave the stem one after another
+  from about a third of the way up, each turned from the last by the
+  golden angle and half as thick as the stem where it leaves. They climb
+  at 23 to 43 degrees from upright and end in small tufts with short
+  hanging shoots. The bark is white on the stem and on every limb more
+  than a cell thick, and smooth noise stretched sideways marks it with
+  black bands.
+- **Cherry** ([*Prunus serrulata*](https://en.wikipedia.org/wiki/Prunus_serrulata)):
+  a short trunk that forks at 15% to 20% of the height into limbs that
+  leave at 57 to 80 degrees from upright and turn up only a little, in a
+  crown wider than it is tall. It carries no masses of leaves. Every
+  branch under 5.5 thick has a loose cloud of small balls of blossom
+  round it, each 1.6 to 2.7 in radius and scattered up to twice a leaf
+  mass away, flattened to 0.45 in height. Of twenty balls nine are the
+  middle pink, five white, four the deep pink, one a dark bud and one a
+  bronze young leaf. Every third layer of the trunk is a pale band, broken
+  by noise, for the lenticels of cherry bark. Fallen petals are flat
+  drifts on the ground, thickest under the middle of the crown.
+
+<img src="images/tree-cherry.png" width="330" alt="A cherry in blossom in bricks: a short dark banded trunk forking low into wide limbs, small pink and white clusters along the dark branches with gaps between them, and petals scattered on the ground"> <img src="images/tree-birch.png" width="330" alt="A birch in bricks: a slender white stem marked with black, white limbs leaving it at intervals, and small tufts of leaves with hanging shoots in a tall narrow crown">
 - **Willow** ([*Salix babylonica*](https://en.wikipedia.org/wiki/Salix_babylonica)):
   from every branch end three to six strands of leaves go out a little
   and then straight down, each for 45% to 97% of the way to the ground.

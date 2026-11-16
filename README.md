@@ -68,7 +68,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Revolve | a profile spun about an upright axis: vases, bells, bowls |
 | Pyramid | a base and a height: solid, or a hollow tent |
 | Cube | a box with a length along each axis: a block, a floor, a wall, or a hollow room |
-| Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a birch, a willow, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds |
+| Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a birch, a willow, a cherry in blossom, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds and streams |
 | Furniture | a bookcase that rebuilds itself at any size: shelves and uprights follow from its height and width, and its shelves are filled with books from a seed |
 | Maze | a maze to walk through, in rings or in squares, grown from a seed: one way in, a room in the middle, walls plain, of brick, stone or planks, or of hedge |
 
