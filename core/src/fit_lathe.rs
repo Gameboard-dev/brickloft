@@ -156,7 +156,7 @@ fn level_creases(tracks: &mut [Track]) {
                 let taller = (tall[1] > tall[0]) as usize;
                 let (at, next) = ends[taller];
                 let (short, other_is_wall) = (tall[1 - taller], ends[1 - taller].1 .1 == at.1);
-                let wall_at_crease = !other_is_wall && 2 * short <= tall[taller];
+                let wall_at_crease = !other_is_wall && 2 * short < tall[taller];
                 let cut = (at.0 + if top { -short } else { short }, if wall_at_crease { at.1 } else { next.1 });
                 let nodes = &mut tracks[[o, h][taller]].nodes;
                 nodes.insert(if top { nodes.len() - 1 } else { 1 }, cut);
