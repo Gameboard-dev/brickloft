@@ -742,7 +742,7 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
     let furthest = spec.pulls.iter().map(|(_, by)| by.length()).fold(0.0, f64::max);
     // each pull stretches space by up to its length over half its reach, a quarter turn of the cosine
     let stretch: f64 = spec.pulls.iter().map(|(_, by)| by.length() * PI / (2.0 * reach)).sum();
-    let mut field = Field::Warp { inner: Box::new(field), pulls: spec.pulls.clone(), reach, scale: 1.0 / (1.0 + stretch) };
+    let mut field = Field::Warp { inner: Box::new(field), pulls: folded_pulls(spec), reach, scale: 1.0 / (1.0 + stretch) };
     for axis in (0..3).filter(|a| spec.mirror[*a]) {
         if let Some(plane) = mirror_plane(spec, axis) {
             field = Field::Mirror { inner: Box::new(field), axis, plane };
@@ -812,7 +812,7 @@ fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after:
     }
     // and wherever a point was pulled to, which may be clear of every brick there was
     let margin = spec.pull_reach + 2.0;
-    let mut places: Vec<DVec3> = spec.pulls.iter().flat_map(|(at, by)| [*at, *at + *by]).collect();
+    let mut places: Vec<DVec3> = folded_pulls(spec).iter().flat_map(|(at, by)| [*at, *at + *by]).collect();
     // and their mirror images, where the form is mirrored
     for axis in (0..3).filter(|a| spec.mirror[*a]) {
         if let Some(plane) = mirror_plane(spec, axis) {
@@ -1027,6 +1027,27 @@ fn mirror_plane(spec: &Spec, axis: usize) -> Option<f64> {
     lo.is_finite().then(|| snap((lo + hi) / 2.0))
 }
 
+/// A form's added points as they act once it is mirrored: one added on the
+/// high side of a mirror is carried over to the low side, where it does
+/// what it would have done, and the mirror then shows it on both.
+///
+/// Mirroring keeps the low side of a form and replaces the high side with
+/// its image. A point added on the high side used to be replaced with the
+/// rest of that side, and so did nothing at all (report 33): whoever adds a
+/// point to a mirrored form means it to count, whichever side they added
+/// it on.
+pub fn folded_pulls(spec: &Spec) -> Vec<(DVec3, DVec3)> {
+    let mut pulls = spec.pulls.clone();
+    for axis in (0..3).filter(|a| spec.mirror[*a]) {
+        let Some(plane) = mirror_plane(spec, axis) else { continue };
+        for (at, by) in pulls.iter_mut().filter(|(at, _)| at[axis] > plane) {
+            at[axis] = 2.0 * plane - at[axis];
+            by[axis] = -by[axis];
+        }
+    }
+    pulls
+}
+
 /// A curve made its own mirror image along `axis` about the plane at
 /// `plane`: the part of it on the low side is kept, and followed by its
 /// mirror image back the other way.
@@ -1160,7 +1181,7 @@ fn curve(
         (path, normal)
     } else {
         let in_plane = normal.is_some_and(|n| spec.pulls.iter().all(|(_, by)| by.dot(n).abs() < 1e-9));
-        (pulled(&path, closed, &spec.pulls, spec.pull_reach), normal.filter(|_| in_plane))
+        (pulled(&path, closed, &folded_pulls(spec), spec.pull_reach), normal.filter(|_| in_plane))
     };
     // then made its own mirror image, along each axis asked for
     let mut path = path;
@@ -2674,6 +2695,19 @@ mod tests {
         let belly = Spec { pulls: vec![(at(6.0, 0.0, 10.0), DVec3::new(5.0, 0.0, 0.0))], pull_reach: 6.0, ..vase.clone() };
         let (slim, wide) = (reach(&build(&vase).unwrap()), reach(&check(&belly)));
         assert!(wide.1 >= slim.1 + 2 && wide.0 <= slim.0 - 2, "slim {slim:?}, pulled {wide:?}");
+
+        // A point added on the high side of a mirror counts as much as one on
+        // the low side: the ring bulges on both sides either way, and the same.
+        let high = Spec { pulls: vec![(at(20.0, 0.0, 0.0), DVec3::new(5.0, 0.0, 0.0))], mirror: [true, false, false], ..ring.clone() };
+        let low = Spec { mirror: [true, false, false], ..ring.clone() };
+        let (from_high, from_low) = (build(&high).unwrap(), build(&low).unwrap());
+        let key = |b: &Built| {
+            let mut all: Vec<(u8, [i32; 3], [i32; 3])> = b.bricks.iter().map(|k| (k.mask, k.min, k.ext)).collect();
+            all.sort();
+            all
+        };
+        assert_eq!(key(&from_high), key(&from_low));
+        assert!(reach(&from_high).1 > one.1 + 3);
 
         // the curve itself: an open one kept from whichever end is low, a closed one round its low side
         let open = [DVec3::new(-4.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 3.0), DVec3::new(2.0, 0.0, 5.0), DVec3::new(6.0, 0.0, 9.0)];
