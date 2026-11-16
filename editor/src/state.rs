@@ -2119,6 +2119,25 @@ mod tests {
     }
 
     #[test]
+    fn stepping_stones_can_be_chosen_on_every_curve_as_it_starts() {
+        // as the panel does it: the form as the editor starts it, then the pattern, then the colours
+        for form in 0..4 {
+            for (fill, busy) in [(false, false), (true, false), (false, true)] {
+                let mut state = State::new();
+                state.form = form;
+                state.refresh(|| 0.0);
+                state.spec.fill = fill;
+                state.spec.stones = Some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
+                state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette("stepping stones").to_vec(), axis: 2, width: 2 };
+                state.busy = busy;
+                state.refresh(|| 0.0);
+                let painted = state.painted();
+                assert!(state.problem.is_some() || !painted.is_empty(), "{}: nothing laid", FORMS[form]);
+            }
+        }
+    }
+
+    #[test]
     fn a_path_of_stones_is_coloured_a_stone_at_a_time() {
         let mut state = State::new();
         state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 30.0, thick: 16.0, depth: 2, stones: Some(brickloft_core::pattern::Stones { size: 7.0, gap: 1.5, uneven: 0.5, seed: 2 }), ..Spec::default() };

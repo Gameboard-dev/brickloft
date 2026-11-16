@@ -8,6 +8,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod brz;
 pub mod camera;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash;
 pub mod icon;
 pub mod material;
 #[cfg(not(target_arch = "wasm32"))]

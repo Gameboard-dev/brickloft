@@ -44,7 +44,7 @@
   "remove_form": "Take the form being edited out of the workspace.",
   "reset_form": "Put the dots, sizes, stretch, flips and other choices back to how this form starts out. How it is fitted and coloured is left alone.",
   "round_tube": "Builds the curve as a round tube, which for a circle is a torus. Unticked it is a flat band with a thickness and a depth.",
-  "save_report": "Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong. Reports go in the folder brickloft in the system's temporary folder.",
+  "save_report": "Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong. Reports go in the folder brickloft in the system's temporary folder. If the editor ever closes by itself, brickloft-crash.txt in that folder says why.",
   "save_screenshot": "Saves a picture of the window in Pictures/brickloft and puts it on the clipboard. F12 does the same, and Shift+F12 leaves this panel out of the picture.",
   "saved_add": "Add its forms to the workspace, beside the form being edited and on its grid.",
   "saved_delete": "Delete this saved form. You are asked first.",

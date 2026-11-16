@@ -352,6 +352,11 @@ bricks and form together. It can be rebuilt and re-measured from the command
 line (see [development.md](development.md)), which is how fits are compared
 before and after a change.
 
+If the editor ever closes by itself, it writes what went wrong to
+`brickloft-crash.txt` in the same folder before it goes. The file names the
+fault and the line of the program it happened on, and nothing about what
+was being built. It is the thing to send with a report of a crash.
+
 ## Every key and mouse action
 
 | | |

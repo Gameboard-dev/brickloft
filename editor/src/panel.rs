@@ -434,7 +434,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
             if choice != before {
                 s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                s.mosaic = (choice >= 2).then_some(brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
+                // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
+                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
                 // A pattern is its colours, and each has colours of its
                 // own to start in (a rug's reds and golds, a floor of
                 // planks' browns). They are brought in with the pattern
@@ -785,6 +786,37 @@ fn dropped_form(ui: &mut Ui, state: &mut State) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    #[test]
+    fn the_panel_draws_every_pattern_on_every_curve_without_panicking() {
+        // the panel drawn with no window, as it is every frame, for each form with each pattern chosen
+        let styles = brickloft_core::pattern::STYLES.len();
+        for form in 0..4 {
+            for choice in 0..styles + 2 {
+                let mut state = State::new();
+                state.form = form;
+                state.preset();
+                state.refresh(|| 0.0);
+                state.spec.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
+                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
+                if choice != 0 {
+                    state.paint.mode = Mode::Pattern;
+                    state.paint.colours = crate::paint::palette(if choice == 1 { "stepping stones" } else { brickloft_core::pattern::STYLES[choice - 2].name }).to_vec();
+                }
+                let context = egui::Context::default();
+                for _ in 0..3 {
+                    state.refresh(|| 0.0);
+                    let _ = context.run(egui::RawInput::default(), |context| {
+                        egui::SidePanel::left("panel").show(context, |ui| {
+                            show(ui, &mut state);
+                        });
+                    });
+                    let _ = state.painted();
+                }
+            }
+        }
+    }
+
     use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
