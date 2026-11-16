@@ -175,6 +175,18 @@ What remains:
 - **More plants still.** A lily, a fern, a cactus and a bamboo have rules
   of their own that are not written. A hedge still cannot fork or meet
   another at a tee.
+- **Hedge on other forms.** An arch can be built as hedge, grown over
+  its distance function ([algorithm.md](algorithm.md), section 7.10). A
+  spline, a Bézier curve, a circle and a sphere have distance functions
+  too. The curves need one line in `Spec::hedged` and the panel's list,
+  and then looking at. A circle and a sphere are laid out by other
+  fitters and need a branch each.
+- **An arch of hedge to walk through.** A plant's leaves can be written
+  with their collision off. An arch's cannot yet: the plant's tickbox is
+  kept in the setting that makes an arch a round tube.
+- **A thin arch of hedge.** At the least size, 6 by 6, the tufts are as
+  large as the band and are cut level on every side, so it is a ragged
+  strand more than a clipped hedge.
 - **More single flowers.** A rose, a water lily and a gerbera are built
   from one kind of petal. A dahlia was built from it and taken out: sixty
   petals four cells wide were confetti from above at 48 cells across. It

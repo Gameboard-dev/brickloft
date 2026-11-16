@@ -49,6 +49,8 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 mod bloom;
 pub use bloom::{Bloom, Flower, FLOWERS, MOST_TILT};
+mod over;
+pub use over::{Over, PROUD};
 
 /// The golden angle, in radians: the turn between one leaf and the next
 /// that never lines two leaves up, so each has the most light (Vogel 1979).
@@ -584,6 +586,8 @@ pub struct Model {
     clear: Vec<f32>,
     /// the numbers the patches of light on leaves are blended from (see [`LATTICE`])
     lattice: Vec<f32>,
+    /// A solid the plant is cut off at, [`PROUD`] outside it: for hedge grown over a form (see [`over`]). Asked where the plant is, not from its foot.
+    within: Option<std::sync::Arc<dyn Fn(DVec3) -> f64 + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Model {
@@ -658,6 +662,19 @@ impl Model {
     /// each wall, each built on its own, would have been bricks laid
     /// twice over wherever two walls meet.
     pub fn laid_all(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay]) -> Model {
+        Model::grown(tree, base, height, spread, lays, None)
+    }
+
+    /// Hedge grown over a solid, which is given from `base` as a plant's
+    /// parts are (see [`over`]). `tree` gives its density, its looseness,
+    /// its berries and its seed, whatever kind it says it is.
+    pub fn over(tree: &Tree, base: DVec3, over: &Over) -> Model {
+        Model::grown(&Tree { kind: Kind::Hedge, ..*tree }, base, over.hi.z, over.half, &[], Some(over))
+    }
+
+    /// What [`Model::laid_all`] and [`Model::over`] both are: the plant
+    /// grown, moved to where it stands, and filed.
+    fn grown(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay], over: Option<&Over>) -> Model {
         let none = Lay::default();
         let lay = lays.first().unwrap_or(&none);
         let tree = tree.clamped();
@@ -707,6 +724,7 @@ impl Model {
             Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK, false),
             Kind::Cherry => broadleaf(&mut grown, &tree, height, spread, &CHERRY, lay.closed),
             Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH, false),
+            Kind::Hedge if over.is_some() => over::hedge(&mut grown, &tree, over.unwrap()),
             Kind::Hedge | Kind::Reeds => {
                 // grown straight, then laid along its line (see [`Grown::lay_along`]); of several lines, each line's after the last's
                 let runs: Vec<Run> = lays.iter().map(Run::new).collect();
@@ -862,7 +880,10 @@ impl Model {
         let clear = steps.iter().map(|s| NEAR.max(((*s).clamp(1, far + 1) - 1) as f64 * bucket * COARSE as f64) as f32).collect();
         let seed = tree.seed as u32 ^ 0x5EED;
         let lattice = (0..LATTICE * LATTICE * LATTICE).map(|n| hash((n % LATTICE) as i32, (n / LATTICE % LATTICE) as i32, (n / (LATTICE * LATTICE)) as i32, seed) as f32).collect();
-        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, per_bucket: 1.0 / bucket, dims, coarse, start, items, clear, lattice }
+        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, per_bucket: 1.0 / bucket, dims, coarse, start, items, clear, lattice, within: over.map(|over| {
+            let solid = over.solid.clone();
+            std::sync::Arc::new(move |p: DVec3| solid(p - stand)) as std::sync::Arc<dyn Fn(DVec3) -> f64 + Send + Sync>
+        }) }
     }
 
     /// The box the tree fills.
@@ -912,6 +933,10 @@ impl Model {
             // nothing listed is near: how clear the bucket is of everything else
             let wide = c.x as usize / COARSE + self.coarse[0] * (c.y as usize / COARSE + self.coarse[1] * (c.z as usize / COARSE));
             best = best.min(self.clear[wide] as f64);
+        }
+        // (cut off where the solid it is grown over ends, a little outside it; asked only near the plant, where it can change the answer)
+        if let Some(within) = self.within.as_ref().filter(|_| best < NEAR) {
+            best = best.max(within(p) - PROUD);
         }
         (best.max(under), which)
     }
@@ -1978,6 +2003,27 @@ fn berries(g: &mut Grown, at: DVec3, r: f64, from: DVec3) {
     }
 }
 
+/// One tuft of a hedge's leaves, on a face that looks `outward`, at `at`
+/// on that face: a ball of leaves of about the size `mass`, with berries
+/// on about one in three if the hedge has them.
+///
+/// It is set back from the face by its own size, by `back` more, and by
+/// more again the looser the hedge. `keep` then has the last word on where
+/// it is, given its place and its size: a hedge holds it inside its box.
+/// Shared by the hedge laid along a line and the hedge grown over a solid
+/// (see [`over`]), so that the two are one hedge.
+#[allow(clippy::too_many_arguments)]
+fn tuft(g: &mut Grown, mass: f64, loose: f64, berried: bool, at: DVec3, outward: DVec3, back: f64, keep: &dyn Fn(DVec3, f64) -> DVec3) {
+    let r = mass * g.between(0.8, 1.15);
+    let at = at - outward * (r * 0.75 + back + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
+    let at = keep(at, r);
+    g.leaves(at, DVec3::new(r, r, r * 0.8));
+    // (as many to an area on a thin hedge, whose tufts are small and many, as on a thick one)
+    if berried && g.unit() < 0.35 * (mass / 4.5).powi(2).min(1.0) {
+        berries(g, at, r * 0.8, at - outward * mass);
+    }
+}
+
 /// A hedge: box clipped to a wall, as long as it is asked to be.
 ///
 /// The same plant as the boxwood and the same tufts of leaves, held to
@@ -2028,18 +2074,13 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64, closed
     // the tufts: rows along the top and down each side
     let step = mass * 1.15;
     let along = ((2.0 * long / step).ceil() as usize).max(1);
-    // (`outward` is the way the face it is on looks: it is set back from the face by its own size, and by more the looser the hedge)
+    // (kept inside the hedge's size, its clusters of leaves and all)
+    let extras = tree.extras;
     let tuft = |g: &mut Grown, at: DVec3, outward: DVec3| {
-        let r = mass * g.between(0.8, 1.15);
-        let at = at - outward * (r * 0.75 + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
-        // (kept inside the hedge's size, its clusters of leaves and all)
-        let (far, wide) = (if closed { long } else { (long - r - 1.7).max(0.0) }, (spread - r - 1.7).max(0.0));
-        let at = DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8));
-        g.leaves(at, DVec3::new(r, r, r * 0.8));
-        // (as many to an area on a thin hedge, whose tufts are small and many, as on a thick one)
-        if tree.extras && g.unit() < 0.35 * (mass / 4.5).powi(2).min(1.0) {
-            berries(g, at, r * 0.8, at - outward * mass);
-        }
+        tuft(g, mass, loose, extras, at, outward, 0.0, &|at, r| {
+            let (far, wide) = (if closed { long } else { (long - r - 1.7).max(0.0) }, (spread - r - 1.7).max(0.0));
+            DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8))
+        })
     };
     let across = ((2.0 * half(height) / step).ceil() as usize).max(1);
     let up = (((height - foot) / step).ceil() as usize).max(1);
