@@ -306,6 +306,9 @@ pub struct State {
     /// it is dragged, into other forms if that is where, and is not set
     /// down clear of them: the two are to be one build.
     pub merge: bool,
+    /// the blend of the form being edited when the view was last told of
+    /// it: a change of blend builds nothing (see `refresh`)
+    blend_shown: Option<f64>,
     /// The bricks of the workspace's joined forms as last put together,
     /// with what they were put together from (see `pieces`).
     joins: std::cell::RefCell<Option<(Vec<JoinKey>, std::rc::Rc<Vec<Piece>>)>>,
@@ -462,6 +465,7 @@ impl State {
             busy: false,
             lift: false,
             merge: false,
+            blend_shown: None,
             joins: std::cell::RefCell::new(None),
             follow: 0.5,
             spin_from: None,
@@ -762,6 +766,28 @@ impl State {
     /// them (see `painted`). Moving it without Ctrl sets it clear again.
     pub fn joined(&self) -> bool {
         self.spec.blend.is_some()
+    }
+
+    /// Why the form being edited, if it is joined, is cut where it meets
+    /// another form and not fitted afresh with it: said in the panel under
+    /// the blend, which would otherwise seem to do nothing. `None` if it is
+    /// not joined, or blends with every form on its grid.
+    ///
+    /// The reasons are `brickloft_core::blend`'s: a join is fitted on the
+    /// cells the two forms share, and a pattern's bricks are not its form.
+    pub fn unblended(&self) -> Option<&'static str> {
+        if !self.joined() {
+            return None;
+        }
+        if !self.built.shades.is_empty() {
+            return Some("A form laid as a pattern is joined by cutting alone: the blend does nothing to it.");
+        }
+        let half_off = |place: [i32; 3]| (0..3).any(|k| (place[k] - self.place[k]).rem_euclid(2) == 1);
+        let mut others = self.others.iter().filter(|o| self.in_my_way(&o.spec));
+        if others.clone().any(|o| half_off(o.place)) {
+            return Some("A form on this grid stands half a microbrick off this one, so their bricks do not line up and the two are joined by cutting alone. Move either by half a microbrick to blend them.");
+        }
+        others.any(|o| !o.built.shades.is_empty()).then_some("A form laid as a pattern is joined by cutting alone: the blend does nothing where this form meets one.")
     }
 
     /// The workspace's bricks before they are coloured: each form's own,
@@ -1160,6 +1186,13 @@ impl State {
 
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
+        // A change of blend changes no brick of the form itself, so nothing
+        // is built for it, but the join is other bricks and the view must
+        // draw them.
+        if self.blend_shown != self.spec.blend {
+            self.blend_shown = self.spec.blend;
+            self.scene += 1;
+        }
         // (the angle of its grid changes nothing about how a form is fitted, nor does what it is joined to)
         let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured

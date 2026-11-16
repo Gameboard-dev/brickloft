@@ -1108,15 +1108,9 @@ mosaic = {values}
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
         ];
         // a save from before forms could be joined has no line for it, and one out of range is refused
-        assert_eq!(parse_spec("form = sphere
-").unwrap().blend, None);
-        assert_eq!(parse_spec("blend = 0
-").unwrap().blend, Some(0.0));
-        assert!(parse_spec("blend = 7
-").is_err() && parse_spec("blend = -1
-").is_err() && parse_spec("blend = inf
-").is_err() && parse_spec("blend = nan
-").is_err());
+        assert_eq!(parse_spec("form = sphere").unwrap().blend, None);
+        assert_eq!(parse_spec("blend = 0").unwrap().blend, Some(0.0));
+        assert!(["blend = 7", "blend = -1", "blend = inf", "blend = nan", "blend = round"].iter().all(|line| parse_spec(line).is_err()));
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

@@ -336,3 +336,19 @@ fn an_ordinary_join_is_put_together_in_a_few_milliseconds() {
 }
 
 
+
+#[test]
+fn a_plant_or_a_pattern_is_joined_by_cutting_alone() {
+    // its bricks are leaves and stones, each with a colour of its own, and not the solid its distance describes
+    let plant = Spec { form: Form::Tree, points: vec![DVec3::ZERO], radius: 16.0, rise: Some(40.0), ..Spec::default() };
+    let floor = Spec { form: Form::Cube, points: vec![DVec3::new(0.0, 0.0, 1.0)], radius: 16.0, stretch: DVec3::new(1.0, 1.0, 1.0 / 16.0), fill: true, mosaic: Some(crate::pattern::Mosaic { style: 3, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }), ..Spec::default() };
+    for (name, form, place) in [("a plant", plant, [0.0, 0.0, 6.0]), ("a patterned floor", floor, [4.0, 0.0, 16.0])] {
+        let scene = Scene::new(&[(cube(), [0.0; 3]), (form, place)], 3.0);
+        assert!(!scene.built[1].shades.is_empty(), "{name} has no colours of its own any more: it could be blended");
+        let pieces = scene.pieces();
+        assert!(shares_room(&scene, &pieces).is_none(), "{name}: two bricks share room");
+        assert!(pieces.iter().all(|p| p.from.is_some()), "{name}: a brick was fitted afresh");
+        assert_eq!(pieces.iter().filter(|p| p.member == 0).count(), 1, "{name}: the cube was cut");
+        assert!(pieces.iter().filter(|p| p.member == 1).count() > 20, "{name}: next to nothing is left of it");
+    }
+}
