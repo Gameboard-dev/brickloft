@@ -188,7 +188,7 @@ pub enum Handle {
     Move,
     /// moves the whole form along x, y or z alone: one of its three arrows
     Slide(usize),
-    /// a point added to a curve with Shift + click, which pulls the curve
+    /// a point added to a curve with Alt + click, which pulls the curve
     /// out of shape where it was added
     Pull(usize),
     /// one of the three rings, which turn the form's own grid about x, y or z
@@ -515,7 +515,7 @@ impl State {
     }
 
     /// Pick another form to be copied along with the one being edited, or
-    /// let it go if it is picked already: Ctrl + click.
+    /// let it go if it is picked already: Shift + click.
     pub fn toggle_pick(&mut self, other: usize) {
         if let Some(item) = self.others.get_mut(other) {
             item.picked = !item.picked;
@@ -615,6 +615,10 @@ impl State {
         }
         let shares: Vec<bool> = self.others.iter().map(|o| !o.joined && self.in_my_way(&o.spec)).collect();
         let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
+        // (most rebuilds touch nothing, and then there is nothing more to do)
+        if !self.others.iter().zip(&shares).any(|(o, shares)| *shares && settled[0].meets(cells_of(&o.built.bricks), o.place)) {
+            return;
+        }
         let touched: Vec<bool> = self.others.iter().zip(&shares).map(|(o, shares)| *shares && settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
         for ((other, _), _) in self.others.iter().zip(&touched).zip(&shares).filter(|((_, t), shares)| !**t && **shares) {
             settled.push(Standing::new(&other.built.bricks, other.place));
@@ -773,31 +777,81 @@ impl State {
             let Some((lo, hi)) = bounds else { continue };
             let patterned = paint.mode == crate::paint::Mode::Pattern && built.shades.len() == built.bricks.len();
             let colour_of = |n: usize, brick: &CellBrick| if patterned { paint.shade(built.shades[n]) } else { paint.colour(brick, lo, hi) };
-            // the forms this one gives room up to
-            let before: Vec<Standing> = if joined { forms.iter().enumerate().filter(|(n, other)| *n != form && same_grid(spec, other.5) && (!other.4 || *n < form)).map(|(_, other)| Standing::new(&other.0.bricks, other.3)).collect() } else { Vec::new() };
-            let shared = |cells: &[CellBrick]| before.iter().any(|other| other.meets(cells_of(cells), place));
+            // The forms this one gives room up to, as the boxes of their
+            // bricks in units, each with the box of them all. A brick's
+            // room is its box, as the game judges it, so boxes are all
+            // that need be compared, and a brick nowhere near another
+            // form is passed in one comparison.
+            type Box3 = ([i32; 3], [i32; 3]);
+            let in_units = |min: [i32; 3], ext: [i32; 3], place: [i32; 3]| -> Box3 { ([0, 1, 2].map(|k| 2 * min[k] + place[k]), [0, 1, 2].map(|k| 2 * (min[k] + ext[k]) + place[k])) };
+            let meet = |a: &Box3, b: &Box3| (0..3).all(|k| a.0[k] < b.1[k] && b.0[k] < a.1[k]);
+            let before: Vec<(Box3, Vec<Box3>)> = if joined {
+                forms
+                    .iter()
+                    .enumerate()
+                    .filter(|(n, other)| *n != form && same_grid(spec, other.5) && (!other.4 || *n < form) && !other.0.bricks.is_empty())
+                    .map(|(_, other)| {
+                        let boxes: Vec<Box3> = other.0.bricks.iter().map(|b| in_units(b.min, b.ext, other.3)).collect();
+                        let all = boxes.iter().fold(boxes[0], |all, b| ([0, 1, 2].map(|k| all.0[k].min(b.0[k])), [0, 1, 2].map(|k| all.1[k].max(b.1[k]))));
+                        (all, boxes)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            // the cells left of bricks that were cut, each with the number of its colour, to be joined up again
+            let mut loose: Vec<(CellBrick, u8)> = Vec::new();
+            let mut tones: Vec<Option<[u8; 3]>> = Vec::new();
             for (n, brick) in built.bricks.iter().enumerate() {
                 let colour = colour_of(n, brick);
-                if before.is_empty() || !shared(std::slice::from_ref(brick)) {
+                let whole = in_units(brick.min, brick.ext, place);
+                let hits: Vec<&Box3> = before.iter().filter(|(all, _)| meet(all, &whole)).flat_map(|(_, boxes)| boxes.iter().filter(|other| meet(other, &whole))).collect();
+                if hits.is_empty() {
                     all.push((*brick, colour, form, place));
-                } else if brick.mask == 0xff {
-                    // the cells of it that share no room, joined along x into rows
-                    for z in 0..brick.ext[2] {
-                        for y in 0..brick.ext[1] {
-                            let mut run: Option<CellBrick> = None;
-                            for x in 0..brick.ext[0] {
-                                let cell = CellBrick { mask: 0xff, min: [brick.min[0] + x, brick.min[1] + y, brick.min[2] + z], ext: [1, 1, 1] };
-                                if shared(std::slice::from_ref(&cell)) {
-                                    all.extend(run.take().map(|row| (row, colour, form, place)));
-                                } else {
-                                    run = Some(run.map_or(cell, |row| CellBrick { ext: [row.ext[0] + 1, 1, 1], ..row }));
-                                }
+                    continue;
+                }
+                if brick.mask != 0xff {
+                    continue;
+                }
+                // The part of the brick the other forms' bricks reach, in
+                // its own cells. Outside it the brick is whole: it comes
+                // off as slabs, up to six, and only the part within is
+                // gone through cell by cell.
+                let (mut low, mut high) = (brick.min, [0, 1, 2].map(|k| brick.min[k] + brick.ext[k]));
+                for k in 0..3 {
+                    let from = hits.iter().map(|hit| (hit.0[k] - place[k]).div_euclid(2)).min().unwrap().max(low[k]);
+                    let to = hits.iter().map(|hit| (hit.1[k] - place[k] + 1).div_euclid(2)).max().unwrap().min(high[k]);
+                    for (start, end) in [(low[k], from), (to, high[k])] {
+                        if end > start {
+                            let (mut min, mut ext) = (low, [0, 1, 2].map(|j| high[j] - low[j]));
+                            (min[k], ext[k]) = (start, end - start);
+                            all.push((CellBrick { mask: 0xff, min, ext }, colour, form, place));
+                        }
+                    }
+                    (low[k], high[k]) = (from, to);
+                }
+                let tone = tones.iter().position(|known| *known == colour).unwrap_or_else(|| {
+                    tones.push(colour);
+                    tones.len() - 1
+                });
+                for z in low[2]..high[2] {
+                    for y in low[1]..high[1] {
+                        for x in low[0]..high[0] {
+                            let cell = in_units([x, y, z], [1; 3], place);
+                            if !hits.iter().any(|hit| meet(hit, &cell)) {
+                                loose.push((CellBrick { mask: 0xff, min: [x, y, z], ext: [1; 3] }, (tone % 256) as u8));
                             }
-                            all.extend(run.map(|row| (row, colour, form, place)));
                         }
                     }
                 }
             }
+            // What is left of the cut bricks, joined into the largest
+            // blocks of one colour. (Left as the rows they were found
+            // in, a cube moved into a cube was a stack of single rows.
+            // A form of more colours than a byte can number is not
+            // joined: two colours would share a number.)
+            let loose = if tones.len() <= 256 { brickloft_core::pattern::joined(loose, spec.max_ext.max(1)) } else { loose };
+            all.extend(loose.into_iter().map(|(cell, tone)| (cell, tones[tone as usize], form, place)));
         }
         all
     }
@@ -1741,16 +1795,30 @@ impl State {
     }
 }
 
-/// A form's bricks where they stand: the cells of their boxes, and the
-/// form's place in units.
+/// A form's bricks where they stand: its place in units, the box that
+/// holds them all, and the cells of their boxes.
+///
+/// The cells are listed only when something is asked about that comes
+/// inside the box. Listing them is the costly part (a sphere of radius 40
+/// has a quarter of a million), and it was done for every form on the grid
+/// each time the form being edited was rebuilt or moved, whether or not
+/// anything was near: a cube being resized beside a large sphere listed
+/// the sphere's cells many times a second, to find each time that the two
+/// were apart.
 struct Standing {
-    cells: std::collections::HashSet<[i32; 3]>,
+    bricks: Vec<CellBrick>,
+    cells: std::cell::OnceCell<std::collections::HashSet<[i32; 3]>>,
+    /// the box of all its bricks, in cells
+    low: [i32; 3],
+    high: [i32; 3],
     place: [i32; 3],
 }
 
 impl Standing {
     fn new(bricks: &[CellBrick], place: [i32; 3]) -> Standing {
-        Standing { cells: cells_of(bricks).collect(), place }
+        let low = [0, 1, 2].map(|k| bricks.iter().map(|b| b.min[k]).min().unwrap_or(0));
+        let high = [0, 1, 2].map(|k| bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap_or(0));
+        Standing { bricks: bricks.to_vec(), cells: std::cell::OnceCell::new(), low, high, place }
     }
 
     /// Whether any of `cells`, of a form standing at `place`, overlaps this one.
@@ -1765,9 +1833,14 @@ impl Standing {
         let off = [0, 1, 2].map(|k| place[k] - self.place[k]);
         cells.any(|c| {
             let low = [0, 1, 2].map(|k| 2 * c[k] + off[k]);
+            // (outside the box of this form: no need to know its cells)
+            if (0..3).any(|k| low[k] + 2 <= 2 * self.low[k] || low[k] >= 2 * self.high[k]) {
+                return false;
+            }
+            let mine = self.cells.get_or_init(|| cells_of(&self.bricks).collect());
             let first = low.map(|u| u.div_euclid(2));
             let more = low.map(|u| u.rem_euclid(2));
-            (0..=more[2]).any(|z| (0..=more[1]).any(|y| (0..=more[0]).any(|x| self.cells.contains(&[first[0] + x, first[1] + y, first[2] + z]))))
+            (0..=more[2]).any(|z| (0..=more[1]).any(|y| (0..=more[0]).any(|x| mine.contains(&[first[0] + x, first[1] + y, first[2] + z]))))
         })
     }
 }
@@ -1789,7 +1862,7 @@ fn way_out(mine: &[[i32; 3]], place: [i32; 3], taken: &[Standing], by: [i32; 3])
     }
     // no further, in units, than would lift or slide it clear of everything
     let span = |k: usize| {
-        let theirs = taken.iter().flat_map(|t| t.cells.iter().map(move |c| 2 * c[k] + t.place[k]));
+        let theirs = taken.iter().flat_map(|t| [2 * t.low[k] + t.place[k], 2 * (t.high[k] - 1) + t.place[k]]);
         let all = theirs.chain(mine.iter().map(|c| 2 * c[k] + place[k] + by[k]));
         let (lo, hi) = all.fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
         hi - lo + 4
@@ -2241,6 +2314,48 @@ mod tests {
                 assert!(state.problem.is_some() || !painted.is_empty(), "{}: nothing laid", FORMS[form]);
             }
         }
+    }
+
+    #[test]
+    fn a_cube_joined_to_a_cube_is_cut_into_a_few_blocks_and_not_into_cells() {
+        let mut state = State::new();
+        state.form = CUBE;
+        state.preset();
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        // moved a third of the way into the other, off its lines by an odd unit each way
+        let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        state.merge = true;
+        state.move_by([towards[0] * 2 / 3 + 1, towards[1] * 2 / 3 + 1, 11], DVec3::ZERO);
+        assert!(state.joined);
+        let all = state.painted();
+        let mine: Vec<&Painted> = all.iter().filter(|b| b.2 == 0).collect();
+        // what is left of a cube with a corner taken out is a handful of blocks, and most of the cube
+        let cells: i32 = mine.iter().map(|b| b.0.ext.iter().product::<i32>()).sum();
+        assert!(cells > 17 * 17 * 17 / 2 && cells < 17 * 17 * 17, "{cells} cells left");
+        assert!(mine.len() <= 12, "{} bricks for a cube with a corner out", mine.len());
+        assert!(mine.iter().any(|b| b.0.ext.iter().product::<i32>() > 500), "no large block is left");
+        // no two bricks of the two cubes share room, and the other cube is whole
+        let unit_box = |b: &Painted| ([0, 1, 2].map(|k| 2 * b.0.min[k] + b.3[k]), [0, 1, 2].map(|k| 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k]));
+        for (n, a) in all.iter().enumerate() {
+            let a_box = unit_box(a);
+            assert!(all[n + 1..].iter().all(|b| { let b_box = unit_box(b); (0..3).any(|k| a_box.1[k] <= b_box.0[k] || b_box.1[k] <= a_box.0[k]) }), "two bricks share room");
+        }
+        assert_eq!(all.iter().filter(|b| b.2 == 1).count(), 1);
+    }
+
+    #[test]
+    fn a_form_far_from_another_is_not_compared_with_it_cell_by_cell() {
+        // a cube beside a large sphere: the sphere's cells are never listed while the cube is resized clear of it
+        let mut state = State::new();
+        state.load_spec(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 30.0)], radius: 30.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        let sphere = Standing::new(&state.built.bricks, state.place);
+        let cube = [CellBrick { mask: 0xff, min: [0, 0, 0], ext: [17, 17, 17] }];
+        assert!(!sphere.meets(cells_of(&cube), [200, 0, 0]) && sphere.cells.get().is_none(), "the sphere's cells were listed for a cube nowhere near it");
+        // touching its box is enough to look, and inside it they meet
+        assert!(sphere.meets(cells_of(&cube), [0, 0, 40]) && sphere.cells.get().is_some());
     }
 
     #[test]

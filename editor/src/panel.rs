@@ -213,7 +213,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Brickloft");
-        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Ctrl + drag the form being edited moves it into another form and joins the two. Shift + click on a form adds a point there to pull it out of shape; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
+        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Ctrl + drag a form moves it into another form and joins the two. Alt + click on a form adds a point there to pull it out of shape, and Alt + right-click takes one off; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
         ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
 
@@ -597,7 +597,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
 
         // (There were Add point and Remove point buttons here, for the dots a
-        // form is drawn through. Shift + click and Shift + right-click on the
+        // form is drawn through. Alt + click and Alt + right-click on the
         // form add and remove a point on any form, and are the one way now.)
 
         ui.separator();
@@ -718,7 +718,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
             state.activate(k);
         }
     }
-    ui.label("Ctrl+C copies the form being edited and any marked +. Ctrl + click a form to mark it, Ctrl+A for all. Ctrl+V pastes what was copied onto this grid. Ctrl+D duplicates the form being edited.");
+    ui.label("Shift + click a form to pick it as well as the one being edited (it is marked +), and again to let it go; Ctrl+A picks all. Ctrl+C copies the form being edited and any marked +. Ctrl+V pastes what was copied onto this grid. Ctrl+D duplicates the form being edited.");
     ui.horizontal(|ui| {
         if ui.button("Add to this grid").on_hover_text(help("add_to_this_grid")).clicked() {
             state.add_cube();
@@ -756,6 +756,11 @@ fn colours(ui: &mut Ui, state: &mut State) {
             Mode::Pattern => crate::paint::MOST_COLOURS,
             _ => 4,
         };
+        // (A form that had a pattern's eight colours and is set to blend or stripes keeps the first four: the rest would be blended through and could not be seen or changed here.)
+        // (One colour shows the first and keeps the rest, for when the form is set back.)
+        if most > 1 {
+            paint.colours.truncate(most);
+        }
         // A colour is made the same as another by copying one and pasting
         // it on the other, from the menu a right click on either opens.
         // The copied colour is kept in the panel's own memory and not on

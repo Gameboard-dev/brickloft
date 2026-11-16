@@ -90,7 +90,7 @@ file, the entry is a server of type `http` with the URL above.
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
 | `set_view` | Switches the rulers, rings, arrows and dots on and off, and lowers the floor. |
 | `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
-| `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Shift + click and a drag do. |
+| `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Alt + click and a drag do. |
 | `move_pull_point` | Changes how far an added point pulls the form. |
 | `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
 | `line_up_arch` | Gives an arch that stands at an angle to its grid a grid of its own, turned to line it up, so that it is fitted smoothly. Its feet stay where they are. |

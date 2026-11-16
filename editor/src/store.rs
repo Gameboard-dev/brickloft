@@ -82,7 +82,8 @@ pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
                 <[u8; 3]>::try_from(parts).ok()
             })
             .collect();
-        let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
+        // (as many as a paint may have: four was the most until a pattern could have eight, and a form in a pattern's eight colours could then be copied and not pasted)
+        let colours = colours.filter(|c| c.len() <= crate::paint::MOST_COLOURS).ok_or("a form's colours cannot be read")?;
         let paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
         forms.push((parse_spec(spec)?, paint, place));
     }
@@ -384,6 +385,23 @@ mod tests {
         assert_eq!(unpack(&bytes, cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
         // and as the text a browser keeps
         assert_eq!(unpack(describe(&forms).as_bytes(), false).unwrap(), forms);
+    }
+
+    #[test]
+    fn a_form_in_eight_colours_is_saved_and_opened_again() {
+        // a form that took a pattern's eight colours and was then set to blend, as a player's was
+        let mut state = crate::state::State::new();
+        for mode in [crate::paint::Mode::Blend, crate::paint::Mode::Pattern] {
+            state.paint = Paint { mode, colours: crate::paint::palette("rug").to_vec(), axis: 2, width: 2 };
+            assert_eq!(state.paint.colours.len(), crate::paint::MOST_COLOURS);
+            state.refresh(|| 0.0);
+            let forms = state.forms();
+            assert_eq!(unpack(&pack(&state.painted(), &forms).unwrap(), cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
+        }
+        // one colour more than a paint may have is still refused
+        let nine = describe(&state.forms()).replacen("paint ", "paint ", 1).lines().map(|line| if line.starts_with("paint ") { format!("{line} 1,2,3") } else { line.to_string() }).collect::<Vec<_>>().join("
+");
+        assert!(unpack(nine.as_bytes(), false).is_err());
     }
 
     #[test]

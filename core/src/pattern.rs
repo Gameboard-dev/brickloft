@@ -1668,7 +1668,7 @@ fn lay_tiles(fit: Fit, region: &(dyn Fn(DVec2) -> f64 + Sync), settings: &Mosaic
 /// same all the way along that axis: a sloped brick may be lengthened
 /// along its ridge and not across its slope, which would change the
 /// slope. Each axis is taken in turn.
-pub(crate) fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
+pub fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
     let mut bricks = bricks;
     for along in 0..3 {
         // whether a shape is the same at both ends of this axis: every corner filled or not as the corner opposite it along the axis is
