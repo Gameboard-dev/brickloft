@@ -257,29 +257,36 @@ What remains:
 
 ## More furniture
 
-One kind of furniture is built, a bookcase, laid out board by board
+Twenty-seven kinds of furniture are built, in five styles
 ([algorithm.md](algorithm.md), section 7.12). What remains:
 
-- **Other kinds.** A table, a chair, a wall shelf, a cupboard with doors
-  and a chest of drawers are not written. Each is a function from a box
-  and the settings to boards, and the settings a form carries (a board
-  thickness, a count, a spacing, a seed) were named so that a new kind
-  needs no change to saves or to the tools Claude uses. A chair's raked
-  back and a table's turned legs need sloped or round parts, which the
-  bookcase does not.
-- **Shelves of different heights.** Every bay has the same shelves and
-  every opening is the same height to within a microbrick. A real
-  bookcase often has one tall opening at the bottom for large books.
-- **More on the shelves.** Books have no titles, bands or page edges, and
-  a book is one colour. There are three ornaments. Nothing is put on top
-  of the bookcase.
+- **Kinds not built.** A wardrobe with a mirror, a bunk bed, a rocking
+  chair, a piano, shelves on a wall, a seascape and a still life are not
+  written. An easel for a painting, and a painting that leans, were not
+  built: a picture hangs flat.
+- **Raked backs.** A wooden chair's back stands upright. A back that
+  leans is a sheared piece for every slat, which was done only for an
+  upholstered back's cushions.
+- **Trellis shapes.** A fan and an obelisk were left out. Their slats are
+  at angles other than 45 degrees, which bricks give only as steps.
+- **Smoother pictures.** A picture is whole cells. The tile code can cut a
+  cell in two along its diagonal, which would smooth a sun's rim and a
+  hill's slope, and is not used.
+- **Portraits.** A sitter looks straight ahead. There are six ways of
+  wearing hair, and no long beards, scarves or earrings.
+- **Plants in pots.** The plant is fitted, so a pot is hundreds of bricks
+  and takes tenths of a second, and when its report is saved the
+  measurement treats the plant's sloped bricks as boxes. A single
+  flower in a vase on a table is not built.
+- **Bookcases and styles.** A bookcase keeps its own settings and takes no
+  notice of the style. Every bay has the same shelves.
+- **Fronts.** A door cannot stand open, and glazed doors need a
+  translucent brick, which the view does not draw.
+- **Joining.** Furniture is joined to another form by cutting alone, and
+  a brick a join has cut is written to the game as plain plastic, not as
+  metal or light.
 - **A front facing any way.** The front is on the low Y side. Another
-  side is faced by a quarter turn of the whole form, which also turns its
-  dots.
-- **Doors and drawers.** A glazed door needs a translucent brick, which
-  the view does not draw.
-- **Joining.** A bookcase is joined to another form by cutting alone, as
-  a plant is, so it cannot be blended into a wall.
+  side is faced by a quarter turn of the whole form.
 
 Code under a licence the project cannot take was not ported and is not to
 be. That rules out the GPL generators (Veloren's `tree.rs`,

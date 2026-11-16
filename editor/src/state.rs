@@ -302,6 +302,9 @@ pub struct State {
     /// something done, said for a few seconds over the view: the words, and
     /// when they were first shown (by the panel's clock, once it has shown them)
     pub toast: Option<(String, Option<f64>)>,
+    /// recording the window as a GIF: its settings, and the recording under way (see `gif`)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub gif: crate::gif::Controls,
     /// how the form being edited is coloured
     pub paint: Paint,
     /// the workspace's other forms; the one being edited is the fields above
@@ -553,6 +556,8 @@ impl State {
             camera_at: ([0.0; 3], [1.0, 0.0, 0.0]),
             flight: std::collections::VecDeque::new(),
             toast: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            gif: crate::gif::Controls::default(),
             paint: Paint::default(),
             others: Vec::new(),
             scene: 0,
@@ -1447,17 +1452,39 @@ impl State {
     /// sides, Ctrl + scroll) resizes it with no code of its own (see
     /// `brickloft_core::furniture::Furniture::usual_form`).
     pub fn usual_furniture(&mut self, kind: brickloft_core::furniture::Kind) {
-        use brickloft_core::furniture::{Furniture, KINDS};
+        use brickloft_core::furniture::Furniture;
         let tall = Furniture::usual_size(kind)[2];
         // (the floor it stands on now, to stand on it still at its new height)
         let snapped = self.spec.snapped();
         let floor = snapped.points.first().map(|middle| brickloft_core::spec::cube_sides(&snapped, *middle)[2].0);
-        self.spec.furniture = Furniture { seed: self.spec.furniture.seed, ..Furniture::of(kind) };
+        // (and the style with the seed: a chair made from a table of a set is a chair of that set)
+        self.spec.furniture = Furniture { seed: self.spec.furniture.seed, style: self.spec.furniture.style, ..Furniture::of(kind) };
         (self.spec.radius, self.spec.stretch) = Furniture::usual_form(kind);
         if let (Some(floor), Some(middle)) = (floor, self.spec.points.first_mut()) {
             middle.z = floor + tall / 2.0;
         }
-        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(self.spec.furniture.colours()).to_vec(), ..Paint::default() };
+    }
+
+    /// Give every other piece of furniture in the workspace the style,
+    /// the seed and the colours of the one being edited, so that they
+    /// are a set: the same legs, the same weight, the same wood (see
+    /// `brickloft_core::furniture::Set`). A bookcase is left as it is,
+    /// having no style. Returns how many were changed. One step to undo.
+    pub fn match_furniture(&mut self) -> usize {
+        use brickloft_core::furniture::Kind;
+        let (style, seed, paint) = (self.spec.furniture.style, self.spec.furniture.seed, self.paint.clone());
+        let mut forms = self.forms();
+        let mut changed = 0;
+        for (spec, colours, _) in forms.iter_mut().skip(1).filter(|f| f.0.form == Form::Furniture && f.0.furniture.kind != Kind::Bookcase) {
+            (spec.furniture.style, spec.furniture.seed, *colours) = (style, seed, paint.clone());
+            changed += 1;
+        }
+        if changed > 0 {
+            self.record();
+            self.open(forms);
+        }
+        changed
     }
 
     /// Make the form a maze as one starts out: its usual size, plain
@@ -4464,5 +4491,49 @@ mod tests {
         dragged(&mut state, 5, 30.0);
         assert!(state.undo() && state.refresh(|| 0.0));
         assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 60])));
+    }
+
+    #[test]
+    fn a_piece_made_into_another_kind_keeps_its_style_and_seed_and_the_rest_are_made_to_match() {
+        use brickloft_core::furniture::{Furniture, Kind, Style};
+        let mut state = a_bookcase();
+        state.spec.furniture = Furniture { style: Style::Rustic, seed: 7, ..state.spec.furniture };
+        // made a dining table: its usual size, on the floor it stood on, in the rustic colours, and still the seventh rustic piece
+        state.usual_furniture(Kind::Dining);
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.furniture, Furniture { style: Style::Rustic, seed: 7, ..Furniture::of(Kind::Dining) });
+        assert_eq!(state.bounds, Some(([-22, -12, 0], [22, 12, 19])));
+        assert_eq!(state.paint.colours.as_slice(), crate::paint::palette("rustic furniture"));
+        assert!(state.problem.is_none() && state.built.error == 0.0 && !state.can_pull());
+        // its dots resize it as they do a cube, and it is a table at the new size
+        let top = state.handles().iter().find(|h| h.0 == Handle::Side(5)).unwrap().1;
+        state.drag(Handle::Side(5), top + DVec3::Z * 6.2 - DVec3::X * 80.0, DVec3::X, DVec3::X);
+        state.refresh(|| 0.0);
+        assert_eq!(state.bounds, Some(([-22, -12, 0], [22, 12, 25])));
+        // two chairs of other styles beside it, and a bookcase: matched, the chairs are the table's style, seed and colours, and the bookcase is left alone
+        for (kind, style) in [(Kind::Chair, Style::Modern), (Kind::Chair, Style::Classical), (Kind::Bookcase, Style::Modern)] {
+            state.record();
+            state.add_cube();
+            state.form = FURNITURE;
+            state.spec.furniture.style = style;
+            state.usual_furniture(kind);
+            state.refresh(|| 0.0);
+        }
+        let table = state.others.iter().position(|o| o.spec.furniture.kind == Kind::Dining).unwrap();
+        state.activate(table);
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.furniture.kind, Kind::Dining);
+        let before = state.forms();
+        assert_eq!(state.match_furniture(), 2);
+        let after = state.forms();
+        for (n, ((spec, paint, _), (was, ..))) in after.iter().zip(&before).enumerate() {
+            match spec.furniture.kind {
+                Kind::Bookcase => assert_eq!(spec, was, "form {n}"),
+                _ => assert_eq!((spec.furniture.style, spec.furniture.seed, paint.colours.as_slice()), (Style::Rustic, 7, crate::paint::palette("rustic furniture")), "form {n}"),
+            }
+        }
+        // one step to undo, and nothing to do a second time
+        assert_eq!(state.match_furniture(), 2);
+        assert!(state.undo());
     }
 }

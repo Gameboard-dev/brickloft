@@ -12,7 +12,10 @@ cargo run --release -p brickloft-editor -- 4   # the same, opening on the fifth 
 
 Without `--release` it builds faster and the editor still runs well: the
 fitting crate and all dependencies are optimised even in a debug build (see
-`[profile.dev]` in `Cargo.toml`).
+`[profile.dev]` in `Cargo.toml`). Recording a GIF is the exception. Its
+work is the editor's own code, which a debug build leaves unoptimised, so a
+recording asked for at 20 pictures a second keeps about 11 and holds each
+frame it takes one in for some 70 ms. Record with `--release`.
 
 The program writes nothing beside where it was started. Each kind of file
 has one place, the same on Windows, macOS and Linux
@@ -22,6 +25,7 @@ has one place, the same on Windows, macOS and Linux
 |---|---|---|
 | `<folder>/<name>.brz` | Saved forms, one prefab for each save | `Documents/brickloft/forms/` in the home folder |
 | `brickloft-N.png` | Save screenshot, F12 | `Pictures/brickloft/` in the home folder |
+| `brickloft-<date>-<time>.gif` | Record GIF, F11 | the same pictures folder |
 | `brickloft-report-N.txt` | Save report | `brickloft/` in the system's temporary folder |
 | `brickloft-build.brz` | Ctrl+C: the prefab put on the clipboard | the same temporary folder |
 | `brickloft-crash.txt` | A crash: what went wrong and where ([editor/src/crash.rs](../editor/src/crash.rs)) | the same temporary folder |
@@ -130,7 +134,9 @@ core/src/
   pattern.rs      stepping stones and the tile patterns
   wfc.rs          wave function collapse, kept with its tests and used by no pattern
   tree.rs         plants: trees, bushes, flowers and reeds
-  furniture.rs    furniture: a bookcase laid out board by board, with its books
+  furniture.rs    furniture: a bookcase laid out board by board, with its books; the kinds and their settings
+  furniture/      the other kinds: style.rs (styles and sets), parts.rs (legs, tops, backs), tables.rs, seating.rs,
+                  storage.rs, lights.rs, bed.rs, pots.rs, trellis.rs, pictures.rs
   maze.rs         mazes: the cells, the walls taken out, the way through
   maze/walls.rs   a maze's bricks: fitted walls, textures, hedge, floor
   blend.rs        joined forms fitted as one solid where they meet
@@ -152,6 +158,7 @@ editor/src/
   ruler.rs        the rulers
   store.rs        saved forms
   send.rs         saving a report and a screenshot
+  gif.rs          recording the window as an animated GIF
   places.rs       where each kind of file is kept
   crash.rs        writing a crash to brickloft-crash.txt
   icon.rs         the window's icon

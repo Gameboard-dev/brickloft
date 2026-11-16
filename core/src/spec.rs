@@ -2876,7 +2876,7 @@ fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Thread
 fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
         // nothing to fit, and nothing to measure: the furniture is these bricks
-        Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
+        Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: model.error, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
         // (nor a lawn: it is these bricks)
         Solid::Grass(lawn) => Built { bricks: lawn.bricks.clone(), solid: lawn.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: lawn.shades.clone() },
         Solid::Maze(walls) => {

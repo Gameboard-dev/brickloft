@@ -3820,8 +3820,8 @@ Fewer bricks come from fewer rings.
 
 Furniture is the one form whose bricks are worked out directly from its
 size and settings, with no solid to fit them to
-([core/src/furniture.rs](../core/src/furniture.rs)). There is one kind so
-far, a bookcase. It is boards and books, and each of those is a box on the
+([core/src/furniture.rs](../core/src/furniture.rs)). The first kind was
+a bookcase, and the method is explained on it. It is boards and books, and each of those is a box on the
 lattice, so each can be written down as a brick as soon as its place is
 known. The build is therefore exact at every size. A wall of bookcases 400
 microbricks wide and 240 tall is 3,877 bricks and is laid in about
@@ -3966,6 +3966,153 @@ drag out, 800 wide and 800 tall, is 25,819 bricks and is laid in
 about 2 ms. **Brick size** and the brick budget do not apply to
 furniture. Its boards are whole microbricks thick, and on a coarser grid a
 board 2 thick would become 3 thick or vanish.
+
+#### The other kinds, and what they share
+
+A bookcase was the first kind. There are twenty-six more: cupboards,
+tables, seating, lights, a bed, plants in pots and pictures.
+Each is a function from the box and the settings to bricks, in a file of
+its own under [core/src/furniture/](../core/src/furniture/), and each is
+laid out directly as the bookcase is. Only a plant growing in a pot is
+fitted (see below).
+
+<img src="images/furniture-set.png" width="700" alt="A farmhouse dining table with turned legs and an eight-sided top, three ladder-back chairs behind it, a bench in front, a sideboard with cream panelled doors and knobs, a floor lamp and a potted plant, all in the same pine">
+
+A table, its chairs, a bench, a sideboard and a lamp of one style and one seed.
+
+The kinds are built from a few shared parts
+([parts.rs](../core/src/furniture/parts.rs)). A round top is an octagon:
+three boxes and a sloped brick at each corner, seven bricks at any size.
+The outline fitter of section 7.2 would give a rounder edge. It was not
+used, because it is a fit to be run and measured for every top, and
+furniture is laid without one. A tapered leg keeps its outer corner upright and
+narrows on its two inner faces, by a ramp on each and a hip between them.
+A turned leg is square blocks of two widths: a foot, a ball, a shaft, a
+collar, a neck and a head. A lampshade or a tall planter is a ring of
+four ramps and four hips round a core. A door or a drawer front stands
+one microbrick in front of a cupboard's body with a microbrick left
+between it and the next, which is the dark line between two doors. The
+body itself is one solid block, because nothing inside a closed cupboard
+can be seen.
+
+No kind refuses a small size. Below the least size at which it has
+parts (three to six microbricks, by kind) a piece is one block, as a
+bookcase is.
+
+#### Styles and sets
+
+A piece has a style and a seed
+([style.rs](../core/src/furniture/style.rs)). A style is a set of choices
+that go together, and it is not a number added to every size. Modern has
+square sections, flush fronts and no mouldings. Farmhouse has turned
+legs, panelled doors with knobs and plank tops. Classical has tapered or
+turned legs, panelled doors, a cornice and a skirting, and upholstery.
+Rustic has heavy sections, trestles and stretchers. Industrial has thin
+metal frames carrying slabs of wood.
+
+The seed picks among what a style allows: which leg, which chair back,
+which handle, which lampshade. It picks without knowing the kind. The
+function that turns a style and a seed into choices, `Set::of`, is given
+no kind, so a dining table and a chair of one style and one seed are
+given the same legs, the same weight and the same wood. (A chair at its
+usual size has legs one microbrick thick, too thin to be turned or
+tapered, and there they are square.) Had each kind drawn its own
+numbers from the seed, a table and its chairs would have matched only by
+chance. A kind's own setting (a table's legs, a chair's back) overrules
+the style for that piece alone.
+
+Colour numbers follow the same idea. For every kind but the bookcase, the
+plants and the pictures, a number names what a thing is made of: 0 the
+wood, 1 a second wood or the paint of doors, 2 metal, 3 upholstery, 4 a
+second cloth, 5 the light of a lamp, 6 pale linen, 7 a top of another
+stuff. A table's top and a cupboard's door are therefore the same wood in
+the same number, and one set of colours paints a whole room.
+
+#### Lights and metal in the game
+
+A lamp's bulb and a candle's flame are bricks of colour 5. In the file
+the editor copies ([editor/src/brz.rs](../editor/src/brz.rs)) each is
+written in the game's glowing material, and the bricks a piece names as
+its lights also carry a point light, as the lights of a dressed pine do.
+A lamp names one brick, however many bricks of it glow, and a chandelier
+one for each candle, eight at most. Bricks of colour 2 are written in the
+game's metal. The piece is built again when the file is written, turned
+and flipped as it stands, and each brick is looked up by where it is, so
+a lamp laid on its side is still lit.
+
+#### Plants in pots
+
+A potted plant, a hanging basket and a window box are a container with a
+plant in it ([pots.rs](../core/src/furniture/pots.rs)). The container is
+laid by rule and is exact: a round pot is stacked octagons with a rim and
+a saucer. The plant is one of the Plant form's own (section 7.10),
+reached through the functions that form already offers, and it is fitted
+cell by cell as any plant is. It is the one part of any furniture with a
+discrepancy.
+
+The plant keeps its own proportions. It is grown at the height the box
+has room for above the soil, with its spread in the proportion its kind
+starts at, and grown again smaller if that is wider than the box.
+Stretched to fill the box instead, a tulip in a wide pot had a cup as
+wide as the pot. The plant gives way to the pot: its distance function is
+cut by the box of every brick of the pot, so no brick of the plant shares
+room with one of the pot's.
+
+<img src="images/furniture-pots.png" width="700" alt="Eleven potted plants in terracotta, glazed, square and tall pots (a yucca, a box ball, a hydrangea, peonies, tulips, daffodils, daisies, petunias, a cypress, a palm and a cherry tree), two hanging baskets and two window boxes">
+
+A potted plant is about 1,300 bricks at its usual size and takes
+about 90 ms (a window box of four plants takes about 1.2 s), where a table takes a few thousandths of a millisecond. A
+plant is grown no taller than 120 microbricks however tall the box is.
+
+#### A trellis
+
+A trellis in a planter is exact all through
+([trellis.rs](../core/src/furniture/trellis.rs)). The lattice is two
+layers, as a joiner nails one: uprights against the wall and rails across
+in front of them. A diamond lattice is laths at 45 degrees, each a ramp
+and its opposite in every cell it crosses, which is a lath's true width;
+stepped out of whole cells it was a stair. An arched top is a square
+lattice whose uprights shorten towards the sides.
+
+The climber is laid by rule too, and does not use the Plant form. That
+form has no climber, and its nearest thing, a hedge laid along lines, is a
+mass of leaf several microbricks thick: along slats one microbrick wide
+it buried them. Here a stem goes up an upright, now and then turns along
+a rail to the next upright, and stops at a height that **Coverage** sets.
+Leaves are single bricks one or two microbricks long, set beside a stem's
+cells or in front of them, thickly near the soil and thinly at the stem's
+end. A clematis has flowers of one colour among them, a rose of two, and
+wisteria has trusses hanging from its stems. Every cell is taken once,
+and every leaf is against a stem or another leaf.
+
+<img src="images/furniture-trellis.png" width="700" alt="Six trellises seen from the front: a bare square lattice, the same a quarter, six tenths and fully covered by a climber, a diamond lattice with wisteria, and an arched one overgrown; the lattice shows through every one">
+
+#### Pictures
+
+A framed painting or portrait is a frame and a mosaic one microbrick deep
+([pictures.rs](../core/src/furniture/pictures.rs)). The picture is drawn
+a microbrick to a pixel by a function of the seed, cut into runs of one
+colour row by row, and the runs are joined into the largest bricks by the
+code that joins a mosaic's tiles (`pattern::joined`). A sunset 46 by 34,
+which is 1,564 pixels, is about 150 bricks.
+
+Every shape in a picture is decided with additions, multiplications,
+comparisons and square roots, each of which gives the same answer to the
+last bit on any machine. A sine does not, so hills are triangle waves,
+and a sky grades by a square. The same seed is therefore the same picture
+everywhere.
+
+A painting is a sunset over water, a landscape of four ranges of hills
+with firs, or an abstract of divided rectangles, bands or arcs. A
+portrait is a cartoon head and shoulders. Everything in it is placed in
+whole microbricks by how far a cell is to either side of the middle line,
+so a face is its own mirror image exactly, which is most of what makes a
+few dozen pixels read as a face. The mouth always turns up at its ends:
+at this size a straight mouth reads as displeased. A picture uses up to
+29 colour numbers, and one set of colours holds four skins, five colours
+of hair and four of clothes, among which the seed picks.
+
+<img src="images/furniture-portraits.png" width="700" alt="Ten framed cartoon portraits in a row: heads and shoulders with different skin, hair, hats and glasses, each smiling"> <img src="images/furniture-paintings.png" width="700" alt="Framed paintings: four landscapes with mountains, lakes and firs, and four abstracts of rectangles, arcs and bands">
 
 ## 8. Changing a form: added points, mirror, turning, grids
 
