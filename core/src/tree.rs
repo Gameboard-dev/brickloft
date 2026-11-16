@@ -49,6 +49,8 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 mod bloom;
 pub use bloom::{Bloom, Flower, FLOWERS, MOST_TILT};
+mod over;
+pub use over::{Over, PROUD};
 
 /// The golden angle, in radians: the turn between one leaf and the next
 /// that never lines two leaves up, so each has the most light (Vogel 1979).
@@ -584,6 +586,8 @@ pub struct Model {
     clear: Vec<f32>,
     /// the numbers the patches of light on leaves are blended from (see [`LATTICE`])
     lattice: Vec<f32>,
+    /// A solid the plant is cut off at, [`PROUD`] outside it: for hedge grown over a form (see [`over`]). Asked where the plant is, not from its foot.
+    within: Option<std::sync::Arc<dyn Fn(DVec3) -> f64 + Send + Sync>>,
 }
 
 impl std::fmt::Debug for Model {
@@ -593,7 +597,7 @@ impl std::fmt::Debug for Model {
 }
 
 /// A number from 0 up to 1 for each lattice point, the same every time.
-fn hash(x: i32, y: i32, z: i32, seed: u32) -> f64 {
+pub(crate) fn hash(x: i32, y: i32, z: i32, seed: u32) -> f64 {
     // a few rounds of multiply and shift, as in `pattern::Numbers`
     let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ (z as u32).wrapping_mul(0xC2B2_AE3D) ^ seed;
     h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
@@ -658,6 +662,19 @@ impl Model {
     /// each wall, each built on its own, would have been bricks laid
     /// twice over wherever two walls meet.
     pub fn laid_all(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay]) -> Model {
+        Model::grown(tree, base, height, spread, lays, None)
+    }
+
+    /// Hedge grown over a solid, which is given from `base` as a plant's
+    /// parts are (see [`over`]). `tree` gives its density, its looseness,
+    /// its berries and its seed, whatever kind it says it is.
+    pub fn over(tree: &Tree, base: DVec3, over: &Over) -> Model {
+        Model::grown(&Tree { kind: Kind::Hedge, ..*tree }, base, over.hi.z, over.half, &[], Some(over))
+    }
+
+    /// What [`Model::laid_all`] and [`Model::over`] both are: the plant
+    /// grown, moved to where it stands, and filed.
+    fn grown(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay], over: Option<&Over>) -> Model {
         let none = Lay::default();
         let lay = lays.first().unwrap_or(&none);
         let tree = tree.clamped();
@@ -707,6 +724,7 @@ impl Model {
             Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK, false),
             Kind::Cherry => broadleaf(&mut grown, &tree, height, spread, &CHERRY, lay.closed),
             Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH, false),
+            Kind::Hedge if over.is_some() => over::hedge(&mut grown, &tree, over.unwrap()),
             Kind::Hedge | Kind::Reeds => {
                 // grown straight, then laid along its line (see [`Grown::lay_along`]); of several lines, each line's after the last's
                 let runs: Vec<Run> = lays.iter().map(Run::new).collect();
@@ -747,7 +765,8 @@ impl Model {
                     }
                 }
             }
-            Kind::Grass => grass(&mut grown, &tree, height, spread, lay),
+            // (grass is not grown: it is laid out, cell by cell, in `crate::grass`)
+            Kind::Grass => {}
             Kind::Peony => peony(&mut grown, &tree, height, spread),
             Kind::Hydrangea => hydrangea(&mut grown, &tree, height, spread),
             Kind::Petunia => petunia(&mut grown, &tree, height, spread),
@@ -760,11 +779,7 @@ impl Model {
         // floor of the cell its point is in
         let floor = base.z.floor();
         let stand = DVec3::new(base.x, base.y, floor);
-        // (grass dug below the floor it lies on reaches that far under it)
-        let dug = if tree.kind == Kind::Grass { grown.parts.iter().map(|part| part.shape.bounds().0.z).fold(0.0, f64::min) } else { 0.0 };
-        // (the soil of a flat lawn hangs a little under its level, and is cut off there as it always was)
-        let dug = if dug < -1.0 { dug.floor() } else { 0.0 };
-        let ground = floor + dug;
+        let ground = floor;
         for part in &mut grown.parts {
             match &mut part.shape {
                 Shape::Cone { a, .. } => *a += stand,
@@ -862,7 +877,10 @@ impl Model {
         let clear = steps.iter().map(|s| NEAR.max(((*s).clamp(1, far + 1) - 1) as f64 * bucket * COARSE as f64) as f32).collect();
         let seed = tree.seed as u32 ^ 0x5EED;
         let lattice = (0..LATTICE * LATTICE * LATTICE).map(|n| hash((n % LATTICE) as i32, (n / LATTICE % LATTICE) as i32, (n / (LATTICE * LATTICE)) as i32, seed) as f32).collect();
-        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, per_bucket: 1.0 / bucket, dims, coarse, start, items, clear, lattice }
+        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, per_bucket: 1.0 / bucket, dims, coarse, start, items, clear, lattice, within: over.map(|over| {
+            let solid = over.solid.clone();
+            std::sync::Arc::new(move |p: DVec3| solid(p - stand)) as std::sync::Arc<dyn Fn(DVec3) -> f64 + Send + Sync>
+        }) }
     }
 
     /// The box the tree fills.
@@ -912,6 +930,10 @@ impl Model {
             // nothing listed is near: how clear the bucket is of everything else
             let wide = c.x as usize / COARSE + self.coarse[0] * (c.y as usize / COARSE + self.coarse[1] * (c.z as usize / COARSE));
             best = best.min(self.clear[wide] as f64);
+        }
+        // (cut off where the solid it is grown over ends, a little outside it; asked only near the plant, where it can change the answer)
+        if let Some(within) = self.within.as_ref().filter(|_| best < NEAR) {
+            best = best.max(within(p) - PROUD);
         }
         (best.max(under), which)
     }
@@ -1978,6 +2000,27 @@ fn berries(g: &mut Grown, at: DVec3, r: f64, from: DVec3) {
     }
 }
 
+/// One tuft of a hedge's leaves, on a face that looks `outward`, at `at`
+/// on that face: a ball of leaves of about the size `mass`, with berries
+/// on about one in three if the hedge has them.
+///
+/// It is set back from the face by its own size, by `back` more, and by
+/// more again the looser the hedge. `keep` then has the last word on where
+/// it is, given its place and its size: a hedge holds it inside its box.
+/// Shared by the hedge laid along a line and the hedge grown over a solid
+/// (see [`over`]), so that the two are one hedge.
+#[allow(clippy::too_many_arguments)]
+fn tuft(g: &mut Grown, mass: f64, loose: f64, berried: bool, at: DVec3, outward: DVec3, back: f64, keep: &dyn Fn(DVec3, f64) -> DVec3) {
+    let r = mass * g.between(0.8, 1.15);
+    let at = at - outward * (r * 0.75 + back + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
+    let at = keep(at, r);
+    g.leaves(at, DVec3::new(r, r, r * 0.8));
+    // (as many to an area on a thin hedge, whose tufts are small and many, as on a thick one)
+    if berried && g.unit() < 0.35 * (mass / 4.5).powi(2).min(1.0) {
+        berries(g, at, r * 0.8, at - outward * mass);
+    }
+}
+
 /// A hedge: box clipped to a wall, as long as it is asked to be.
 ///
 /// The same plant as the boxwood and the same tufts of leaves, held to
@@ -2028,18 +2071,13 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64, closed
     // the tufts: rows along the top and down each side
     let step = mass * 1.15;
     let along = ((2.0 * long / step).ceil() as usize).max(1);
-    // (`outward` is the way the face it is on looks: it is set back from the face by its own size, and by more the looser the hedge)
+    // (kept inside the hedge's size, its clusters of leaves and all)
+    let extras = tree.extras;
     let tuft = |g: &mut Grown, at: DVec3, outward: DVec3| {
-        let r = mass * g.between(0.8, 1.15);
-        let at = at - outward * (r * 0.75 + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
-        // (kept inside the hedge's size, its clusters of leaves and all)
-        let (far, wide) = (if closed { long } else { (long - r - 1.7).max(0.0) }, (spread - r - 1.7).max(0.0));
-        let at = DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8));
-        g.leaves(at, DVec3::new(r, r, r * 0.8));
-        // (as many to an area on a thin hedge, whose tufts are small and many, as on a thick one)
-        if tree.extras && g.unit() < 0.35 * (mass / 4.5).powi(2).min(1.0) {
-            berries(g, at, r * 0.8, at - outward * mass);
-        }
+        tuft(g, mass, loose, extras, at, outward, 0.0, &|at, r| {
+            let (far, wide) = (if closed { long } else { (long - r - 1.7).max(0.0) }, (spread - r - 1.7).max(0.0));
+            DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8))
+        })
     };
     let across = ((2.0 * half(height) / step).ceil() as usize).max(1);
     let up = (((height - foot) / step).ceil() as usize).max(1);
@@ -2507,14 +2545,14 @@ impl Lay {
 }
 
 /// A line along the ground with a way of finding the place so far along it.
-struct Run {
-    points: Vec<DVec3>,
+pub(crate) struct Run {
+    pub(crate) points: Vec<DVec3>,
     /// how far along the line each point is
     along: Vec<f64>,
 }
 
 impl Run {
-    fn new(lay: &Lay) -> Run {
+    pub(crate) fn new(lay: &Lay) -> Run {
         let mut points: Vec<DVec3> = lay.run.iter().map(|p| DVec3::new(p.x, p.y, 0.0)).collect();
         if lay.closed && points.len() > 2 {
             points.push(points[0]);
@@ -2552,7 +2590,7 @@ impl Run {
     }
 
     /// How far a point of the ground is from the line.
-    fn distance(&self, p: DVec3) -> f64 {
+    pub(crate) fn distance(&self, p: DVec3) -> f64 {
         self.points.windows(2).map(|w| {
             let ab = w[1] - w[0];
             let t = ((p - w[0]).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
@@ -2562,7 +2600,7 @@ impl Run {
 
     /// Whether a point of the ground is inside the line, taken as an
     /// outline (the even-odd rule, as `sdf::Fill` has it).
-    fn holds(&self, p: DVec3) -> bool {
+    pub(crate) fn holds(&self, p: DVec3) -> bool {
         let mut inside = false;
         let mut a = *self.points.last().unwrap();
         for &b in &self.points {
@@ -2597,414 +2635,6 @@ impl Grown {
         }
         for limb in &mut self.limbs[limbs..] {
             limb.path.iter_mut().for_each(|p| *p = run.laid(*p, half));
-        }
-    }
-}
-
-/// Grass: a patch or a strip of it, over ground that can be raised.
-///
-/// It covers the ground within its spread of the line it is laid along,
-/// and, where the line is closed, everything the line encloses: a strip
-/// along a path, or a lawn of any outline.
-///
-/// It is a surface and not a solid. Under the blades is a skin of soil
-/// about two cells thick, in a colour of its own, so that a patch set on a
-/// floor leaves no gap under it and a mound is closed on top; under a
-/// mound there is nothing. Blades with nothing under them were tried in
-/// the mind only: over a floor of another colour the floor shows between
-/// every tuft, and a raised patch would be blades standing in the air.
-///
-/// The ground is shaped as terrain is in a game that has a tool for it:
-/// by touches of a brush, each with a range and an amount, that push the
-/// ground up, push it down or flatten it (see [`ground`]). Dug below the
-/// water's level, a hollow is a pond: going down a bank the grass thins
-/// and stops at the water's edge; the soil is sand from a little above
-/// the water to a little below it, and the pond's bed further down,
-/// with a stone on it here and there; water fills the hollow to the
-/// level, flat on top; and reeds stand in the shallows and on the bank.
-/// The stones and reeds are placed by numbers of their own for each spot
-/// of ground, and not from the run the blades are drawn from, so that
-/// digging a pond leaves the lawn round it as it was. The soil and
-/// the blades follow the ground, and the blades stay upright on it.
-///
-/// The blades are in tufts, on a grid shaken so that no rows show, two to
-/// four to a tuft, each of its own height and lean and of one of three
-/// greens; all lean a little one way, as grass does. A blade is two
-/// lengths of round rib a cell or so thick, the thinnest that is built.
-/// Where water stands in a patch of grass that has two levels of it, and
-/// the streams that run from the upper to the lower.
-///
-/// The rule. The ground is flooded from the edge of the patch inwards
-/// (priority flood: Barnes, Lehman and Mulla 2014,
-/// https://arxiv.org/abs/1511.04463), which gives every place the height
-/// water would have to reach there before it ran off the patch: its spill
-/// height. A hollow is the places lying under their spill height that
-/// touch one another. Water stands in a hollow as far below its rim as it
-/// stands below the lawn in a pond, so a hollow whose rim is on raised
-/// ground holds its water higher than the lawn's ponds do. All such raised
-/// hollows share one height, that of the lowest of them, so there are two
-/// levels and no more, and none of them can overflow. Asked which pond is
-/// at which level, the answer is read off the ground the user sculpted
-/// and never typed.
-///
-/// A stream leaves each raised pond for the nearest water at the lower
-/// level by the cheapest way over the ground (Dijkstra's), where a step
-/// costs its length and three times as much again for each cell the
-/// ground there stands above the upper water: it goes round a rise sooner
-/// than through it. Its water starts at the upper level and at each cell
-/// of its length is the lower of what it was and the ground there, in
-/// whole cells: flat reaches with a step down between them, never a rise.
-/// The alternative, water sloping with the ground, cannot be built of
-/// bricks with level tops. A way that would have to climb over ground
-/// higher than the pond's own rim is no way downhill, and that pond has no
-/// stream.
-struct Waters {
-    lo: DVec3,
-    step: f64,
-    nx: usize,
-    ny: usize,
-    /// whether a place is in or beside a raised hollow
-    high: Vec<bool>,
-    upper: f64,
-    lower: f64,
-    /// the stream's place nearest each cell of the grid, if one is near
-    near: Vec<u32>,
-    /// the streams, a cell apart along their lengths: where, and how high the water is there
-    stream: Vec<(DVec3, f64)>,
-}
-
-/// How far under a stream's water its bed is cut. The soil is balls that
-/// stand a cell and a half over the ground they are laid on (see
-/// [`grass`]), so a bed a cell and a half down, which was tried, was soil
-/// to the water's very surface with water showing in the gaps.
-const BED_UNDER: f64 = 2.8;
-
-/// What water a place is beside: its level, and when that water is a
-/// stream's, how far the place is from the middle of it.
-type Wet = (f64, Option<f64>);
-
-impl Waters {
-    fn cell(&self, p: DVec3) -> Option<usize> {
-        let (i, j) = (((p.x - self.lo.x) / self.step).round(), ((p.y - self.lo.y) / self.step).round());
-        (i >= 0.0 && j >= 0.0 && (i as usize) < self.nx && (j as usize) < self.ny).then(|| j as usize * self.nx + i as usize)
-    }
-
-    /// The stream beside a place: how far its middle, and its water's level there.
-    fn beside(&self, p: DVec3) -> Option<(f64, f64)> {
-        let k = *self.near.get(self.cell(p)?)? as usize;
-        if k >= self.stream.len() {
-            return None;
-        }
-        (k.saturating_sub(5)..(k + 6).min(self.stream.len())).map(|n| ((self.stream[n].0 - p).truncate().length(), self.stream[n].1)).min_by(|a, b| a.0.total_cmp(&b.0))
-    }
-
-    /// The ground at a place with the streams' channels cut into it: a
-    /// bed [`BED_UNDER`] the water, four and a half cells
-    /// wide, and banks that rise to the ground as it was over the next
-    /// two and a quarter, or over more where the cut is deep.
-    fn ground(&self, p: DVec3, was: f64) -> f64 {
-        match self.beside(p) {
-            Some((far, level)) if was > level - BED_UNDER => {
-                // (where it cuts deep, through the rim of the pond it leaves, the banks lie back further: upright, the soil of the two would close over the water)
-                let t = ((far - 2.2) / (1.5 * (was - level + BED_UNDER)).max(2.25)).clamp(0.0, 1.0);
-                level - BED_UNDER + (was - level + BED_UNDER) * t * t * (3.0 - 2.0 * t)
-            }
-            _ => was,
-        }
-    }
-
-    /// The water a place is beside, given the ground there as it was sculpted.
-    fn level(&self, p: DVec3, was: f64) -> Wet {
-        let pond = if self.cell(p).is_some_and(|c| self.high[c]) { self.upper } else { self.lower };
-        match self.beside(p) {
-            // (in a pond, the pond's water)
-            Some((far, level)) if far < 5.0 && was + 1.0 >= pond => (level, Some(far)),
-            _ => (pond, None),
-        }
-    }
-
-    fn found(lay: &Lay, lower: f64, covered: &dyn Fn(DVec3) -> bool, lifted: &dyn Fn(DVec3) -> f64, lo: DVec3, hi: DVec3, step: f64, seed: u32) -> Waters {
-        use std::{cmp::Reverse, collections::BinaryHeap};
-        let mut waters = Waters { lo, step, nx: 0, ny: 0, high: Vec::new(), upper: lower, lower, near: Vec::new(), stream: Vec::new() };
-        let (nx, ny) = (((hi.x - lo.x) / step).ceil() as usize + 1, ((hi.y - lo.y) / step).ceil() as usize + 1);
-        // (a patch past six hundred cells square keeps one level: the flood is a grid of the whole patch in memory)
-        if lay.levels < 2 || nx * ny > 400_000 {
-            return waters;
-        }
-        let at = |c: usize| DVec3::new(lo.x + (c % nx) as f64 * step, lo.y + (c / nx) as f64 * step, 0.0);
-        let inside: Vec<bool> = (0..nx * ny).map(|c| covered(at(c))).collect();
-        let high: Vec<f64> = (0..nx * ny).map(|c| if inside[c] { lifted(at(c)) } else { 0.0 }).collect();
-        let around = |c: usize| {
-            let (i, j) = ((c % nx) as i64, (c / nx) as i64);
-            [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(move |(di, dj)| (i + di, j + dj)).map(move |(i, j)| (i >= 0 && j >= 0 && i < nx as i64 && j < ny as i64).then(|| j as usize * nx + i as usize))
-        };
-        // (heights as whole numbers, a thousandth of a cell, for the heap to order)
-        let key = |h: f64| (h * 1024.0).round() as i64;
-        // the flood, from the edge of the patch inwards
-        let mut fill = vec![f64::NAN; nx * ny];
-        let mut heap = BinaryHeap::new();
-        for c in (0..nx * ny).filter(|c| inside[*c]) {
-            if around(c).any(|n| n.is_none_or(|n| !inside[n])) {
-                fill[c] = high[c];
-                heap.push(Reverse((key(high[c]), c)));
-            }
-        }
-        while let Some(Reverse((_, c))) = heap.pop() {
-            for n in around(c).flatten() {
-                if inside[n] && fill[n].is_nan() {
-                    fill[n] = high[n].max(fill[c]);
-                    heap.push(Reverse((key(fill[n]), n)));
-                }
-            }
-        }
-        // the hollows, and of them the raised ones deep enough to hold water
-        let (mut hollow, mut raised) = (vec![u32::MAX; nx * ny], Vec::<(f64, usize)>::new());
-        let mut hollows = 0;
-        for c in 0..nx * ny {
-            if !inside[c] || hollow[c] != u32::MAX || fill[c] - high[c] <= 0.05 {
-                continue;
-            }
-            let (mut stack, mut deep) = (vec![c], 0.0f64);
-            hollow[c] = hollows;
-            while let Some(c) = stack.pop() {
-                deep = deep.max(fill[c] - high[c]);
-                for n in around(c).flatten() {
-                    if inside[n] && hollow[n] == u32::MAX && fill[n] - high[n] > 0.05 {
-                        hollow[n] = hollows;
-                        stack.push(n);
-                    }
-                }
-            }
-            let own = (fill[c] + lower).floor();
-            if deep > 1.0 - lower && own > lower + 1.5 {
-                raised.push((own, hollows as usize));
-            }
-            hollows += 1;
-        }
-        waters.nx = nx;
-        waters.ny = ny;
-        waters.high = vec![false; nx * ny];
-        waters.near = vec![u32::MAX; nx * ny];
-        if raised.is_empty() {
-            return waters;
-        }
-        waters.upper = raised.iter().map(|r| r.0).fold(f64::MAX, f64::min);
-        let upper = waters.upper;
-        // each raised hollow and its banks, three cells of the grid out but not over its rim and down the far side
-        let mut edge: Vec<usize> = (0..nx * ny).filter(|c| hollow[*c] != u32::MAX && raised.iter().any(|r| r.1 == hollow[*c] as usize)).collect();
-        for c in &edge {
-            waters.high[*c] = true;
-        }
-        for _ in 0..3 {
-            let mut next = Vec::new();
-            for c in edge {
-                for n in around(c).flatten() {
-                    if inside[n] && !waters.high[n] && fill[n] >= fill[c] - 0.05 {
-                        waters.high[n] = true;
-                        fill[n] = fill[n].min(fill[c] + 0.04);
-                        next.push(n);
-                    }
-                }
-            }
-            edge = next;
-        }
-        let pond = |c: usize| inside[c] && !waters.high[c] && high[c] + 1.0 < lower;
-        // the streams: at most eight, each a search of the whole grid
-        let mut near = vec![f32::MAX; nx * ny];
-        for &(_, which) in raised.iter().take(8) {
-            let (mut cost, mut from) = (vec![f64::MAX; nx * ny], vec![u32::MAX; nx * ny]);
-            let mut heap = BinaryHeap::new();
-            let mut rim = f64::MIN;
-            for c in (0..nx * ny).filter(|c| hollow[*c] == which as u32) {
-                rim = rim.max(fill[c]);
-                if high[c] + 1.0 < upper {
-                    cost[c] = 0.0;
-                    heap.push(Reverse((0i64, c)));
-                }
-            }
-            let mut end = None;
-            while let Some(Reverse((k, c))) = heap.pop() {
-                if k > key(cost[c]) {
-                    continue;
-                }
-                if pond(c) {
-                    end = Some(c);
-                    break;
-                }
-                for n in around(c).flatten().filter(|n| inside[*n]) {
-                    let long = if n % nx != c % nx && n / nx != c / nx { step * std::f64::consts::SQRT_2 } else { step };
-                    let to = cost[c] + long * (1.0 + 3.0 * (high[n] - upper).max(0.0));
-                    if key(to) < key(cost[n]) {
-                        cost[n] = to;
-                        from[n] = c as u32;
-                        heap.push(Reverse((key(to), n)));
-                    }
-                }
-            }
-            let Some(mut c) = end else { continue };
-            let mut way = vec![at(c)];
-            let mut top = high[c];
-            while from[c] != u32::MAX {
-                c = from[c] as usize;
-                top = top.max(high[c]);
-                way.push(at(c));
-            }
-            // no way that does not climb over more than its own rim: no stream
-            if top > rim + 1.0 || way.len() < 2 {
-                continue;
-            }
-            way.reverse();
-            for _ in 0..2 {
-                let was = way.clone();
-                for i in 1..way.len() - 1 {
-                    way[i] = (was[i - 1] + was[i] * 2.0 + was[i + 1]) / 4.0;
-                }
-            }
-            // along it a cell at a time, wandering to each side by the seed, most in its middle and not at all at its ends
-            let lengths: Vec<f64> = std::iter::once(0.0).chain(way.windows(2).scan(0.0, |sum, w| { *sum += (w[1] - w[0]).length(); Some(*sum) })).collect();
-            let long = *lengths.last().unwrap();
-            let (phase, swing) = (hash(which as i32, 0, 9, seed) * TAU, (long / 10.0).min(2.4));
-            let mut leg = 0;
-            let mut places: Vec<(DVec3, f64)> = Vec::new();
-            for n in 0..=long.floor() as usize {
-                let s = (n as f64).min(long);
-                while leg + 2 < way.len() && lengths[leg + 1] < s {
-                    leg += 1;
-                }
-                let (a, b) = (way[leg], way[leg + 1]);
-                let along = (b - a).normalize_or_zero();
-                let across = DVec3::new(-along.y, along.x, 0.0);
-                let p = a.lerp(b, ((s - lengths[leg]) / (lengths[leg + 1] - lengths[leg]).max(1e-9)).clamp(0.0, 1.0)) + across * swing * (std::f64::consts::PI * s / long).sin() * (phase + s * TAU / 28.0).sin();
-                // (under the lower of its two banks, so that it stands above neither)
-                let bank = [-4.4, -2.2, 0.0, 2.2, 4.4].iter().map(|side| lifted(p + across * *side)).fold(f64::MAX, f64::min);
-                places.push((p, bank));
-            }
-            let mut level = upper;
-            for (n, &(p, _)) in places.iter().enumerate() {
-                // (Still at the pond's own level until it is out through the rim. From there, under its banks here and for three cells on: a cell of water takes the level of the place on the stream nearest it, which may be a little upstream of it.)
-                if !waters.cell(p).is_some_and(|c| waters.high[c]) {
-                    let bank = places[n..(n + 4).min(places.len())].iter().map(|place| place.1).fold(f64::MAX, f64::min);
-                    level = level.min((bank - 0.5).floor()).max(lower);
-                }
-                let k = waters.stream.len() as u32;
-                waters.stream.push((p, level));
-                let reach = (16.0 / step).ceil() as i64;
-                let (ci, cj) = (((p.x - lo.x) / step).round() as i64, ((p.y - lo.y) / step).round() as i64);
-                for j in (cj - reach).max(0)..=(cj + reach).min(ny as i64 - 1) {
-                    for i in (ci - reach).max(0)..=(ci + reach).min(nx as i64 - 1) {
-                        let c = j as usize * nx + i as usize;
-                        let far = (at(c) - p).length() as f32;
-                        if far < 16.0 && far < near[c] {
-                            near[c] = far;
-                            waters.near[c] = k;
-                        }
-                    }
-                }
-            }
-            // (a gap in the numbering, so that one stream's places are not taken for the next's)
-            for _ in 0..12 {
-                waters.stream.push((DVec3::splat(f64::MAX / 4.0), lower));
-            }
-        }
-        waters
-    }
-}
-
-fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
-    let (thick, lean) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
-    let run = Run::new(lay);
-    let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
-    let sculpted = |p: DVec3| ground(&lay.mounds, p);
-    let seed = tree.seed as u32 ^ 0x9A55;
-    let (lo, hi) = run.points.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p - spread), hi.max(*p + spread)));
-    // (the grid the water is found on is the grid the soil is laid on)
-    let step = 2.4;
-    let waters = lay.water.map(|lower| Waters::found(lay, lower, &covered, &sculpted, lo, hi, step, seed));
-    let lifted = |p: DVec3| waters.as_ref().map_or(sculpted(p), |w| w.ground(p, sculpted(p)));
-    let water = |p: DVec3| -> Option<Wet> { waters.as_ref().map(|w| w.level(p, sculpted(p))) };
-    g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.0, 1.0], None, 0);
-    // the soil: a skin of flat balls, close enough to run together
-    let across = |low: f64, high: f64, step: f64| (0..=((high - low) / step).ceil() as usize).map(move |i| low + i as f64 * step);
-    for y in across(lo.y, hi.y, step) {
-        for x in across(lo.x, hi.x, step) {
-            let p = DVec3::new(x, y, 0.0);
-            if covered(p) {
-                // (on a slope, soil down to the ground beside it as well, so that the skin has no tear in it)
-                let here = lifted(p);
-                let lowest = [DVec3::X, -DVec3::X, DVec3::Y, -DVec3::Y].iter().map(|way| lifted(p + *way * step)).fold(here, f64::min);
-                // by the water it is sand, and under it the bed of the pond
-                // (a stream's bed is sand and stones all through: it runs too fast for mud to settle)
-                let wet = water(p);
-                let skin = match wet {
-                    Some((level, None)) if here <= level - 1.5 => BED,
-                    Some((level, _)) if here <= level + 1.2 => SAND,
-                    _ => TRUNK,
-                };
-                let mut z = here;
-                while z > lowest - 1.0 {
-                    g.blob(p + DVec3::Z * (z + 0.45), DVec3::new(2.3, 2.3, 1.15), skin, false);
-                    z -= 1.6;
-                }
-                // (a stream's water only in its channel, and not wherever the ground beside it happens to lie lower)
-                if let Some((level, _)) = wet.filter(|(level, by)| here + 1.0 < *level && by.is_none_or(|far| far < 3.0)) {
-                    // The water: a column from the bed to the level, flat
-                    // on top, wide enough to run into its neighbours.
-                    // Eight-sided and upright, as a trunk is, so that it
-                    // is boxes the fitter can join into few.
-                    g.parts.push(Part { shape: Shape::Column { a: p + DVec3::Z * (here + 0.8), b: p + DVec3::Z * level, ra: 1.75, rb: 1.75, slack: 1.0, cut: 0.0 }, shade: WATER });
-                    // and here and there a stone on the bed
-                    let chance = hash(x.round() as i32, y.round() as i32, 3, seed);
-                    if here <= level - 1.5 && chance < 0.06 {
-                        let r = 1.4 + 18.0 * chance;
-                        g.blob(p + DVec3::Z * (here + 1.0 + r * 0.4), DVec3::new(r, r * 0.85, r * 0.7), STONE, false);
-                    }
-                }
-            }
-        }
-    }
-    // the blades
-    let wind = g.between(0.0, TAU);
-    let downwind = DVec3::new(wind.cos(), wind.sin(), 0.0);
-    let gap = 3.4 - 1.9 * thick;
-    for y in across(lo.y, hi.y, gap) {
-        for x in across(lo.x, hi.x, gap) {
-            let p = DVec3::new(x + g.between(-0.45, 0.45) * gap, y + g.between(-0.45, 0.45) * gap, 0.0);
-            let blades = 2 + (g.unit() * 2.4) as usize;
-            // (the numbers are drawn whether or not the tuft is kept, so that widening a patch leaves the tufts it had as they were)
-            let drawn: Vec<(DVec3, DVec3, f64, f64)> = (0..blades).map(|_| (g.any_way(), g.any_way(), g.between(0.5, 1.0), g.unit())).collect();
-            if !covered(p) {
-                continue;
-            }
-            let here = lifted(p);
-            if let Some((level, by)) = water(p) {
-                // Reeds in the shallows and on the bank, by a throw of
-                // their own for each place, so that the same seed has
-                // them in the same places whatever else changes.
-                let (throw, thin) = (hash(x.round() as i32, y.round() as i32, 5, seed), hash(x.round() as i32, y.round() as i32, 6, seed));
-                // (a third as many along a stream as round a pond)
-                if (here - level).abs() < 2.6 && throw < lay.reeds * if by.is_some() { 0.05 } else { 0.14 } {
-                    let tall = 14.0 + 12.0 * thin + height;
-                    let (foot, top) = (p + DVec3::Z * (here + 0.8), p + DVec3::new(drawn[0].0.x, drawn[0].0.y, 0.0) * 1.5 + DVec3::Z * (here + tall));
-                    g.cone(foot, top, 1.0, 0.9, LEAF_DARK);
-                    g.cone(foot.lerp(top, 0.66), foot.lerp(top, 0.86), 1.45, 1.45, BED);
-                    let out = DVec3::new(drawn[0].1.x, drawn[0].1.y, 0.0).normalize_or_zero();
-                    g.cone(foot, foot + DVec3::Z * tall * 0.4 + out * 1.5, 1.0, 0.95, LEAF);
-                    g.cone(foot + DVec3::Z * tall * 0.4 + out * 1.5, foot + DVec3::Z * tall * 0.6 + out * 6.0, 0.95, 0.8, LEAF);
-                }
-                // the grass thins out towards the water and stops at its edge
-                if here <= level + 0.3 || thin > (here - level - 0.3) / 1.7 {
-                    continue;
-                }
-            }
-            let foot = p + DVec3::Z * (here + 1.0);
-            for (first, second, long, tone) in drawn {
-                let up = (DVec3::Z + downwind * 0.45 * lean + first * 0.3).normalize();
-                let over = (up + downwind * 0.5 * lean + second * 0.25).normalize();
-                let (half, tip) = (foot + up * height * long * 0.55, foot + up * height * long * 0.55 + over * height * long * 0.45);
-                let shade = if tone < 0.5 { LEAF } else if tone < 0.78 { LEAF_DARK } else { LEAF_LIGHT };
-                g.cone(foot, half, 0.95, 0.85, shade);
-                g.cone(half, tip, 0.85, 0.62, shade);
-            }
         }
     }
 }
@@ -3967,7 +3597,8 @@ mod tests {
     /// from the tree are. Checked against all the parts, one by one.
     #[test]
     fn the_bucket_grid_agrees_with_asking_every_part() {
-        for (kind, name) in KINDS {
+        // (but grass, which is laid out and has no parts: see `crate::grass`)
+        for (kind, name) in KINDS.into_iter().filter(|(kind, _)| *kind != Kind::Grass) {
             let spec = small(kind, 4);
             let tree = Model::new(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius);
             let (lo, hi) = tree.bounds();
@@ -4377,82 +4008,6 @@ mod tests {
     }
 
     #[test]
-    fn grass_is_a_skin_of_soil_and_blades_that_added_points_raise() {
-        let (height, spread) = Tree::usual_size(Kind::Grass);
-        let strip = along(Kind::Grass, &[(-30.0, 0.0), (0.0, 0.0), (30.0, 0.0)], spread, false);
-        let flat = build(&strip).unwrap();
-        // thin: nowhere taller than its blades and the soil under them
-        let (lo, hi) = extent(&flat, &[TRUNK, LEAF, LEAF_DARK, LEAF_LIGHT]);
-        assert!(hi.z <= height + 3.0 && lo.z >= 0.0, "{} to {} high", lo.z, hi.z);
-        // soil under all of it, with no gap: over the whole patch the ground is covered, and it is the soil's colour at the bottom
-        let (mut covered, mut all) = (0, 0);
-        for x in (-28..28).step_by(3) {
-            for y in (-18..18).step_by(3) {
-                all += 1;
-                covered += top_at(&flat, x as f64 + 0.5, y as f64 + 0.5).is_some() as usize;
-            }
-        }
-        assert_eq!(covered, all, "bare ground showing through the grass");
-        let soil = bricks_of(&flat, &[TRUNK]);
-        assert!(soil.len() > 100 && soil.iter().all(|b| b.z < 3.0), "{} bricks of soil", soil.len());
-        // three greens, and blades of different heights
-        for shade in [LEAF, LEAF_DARK, LEAF_LIGHT] {
-            assert!(bricks_of(&flat, &[shade]).len() > 200, "few bricks of green {shade}");
-        }
-        let tops: std::collections::HashSet<i32> = (-25..25).filter_map(|x| top_at(&flat, x as f64 + 0.5, 0.5)).collect();
-        assert!(tops.len() >= 4, "the blades are all one height: {tops:?}");
-        // thicker growth is more blades
-        let blades = |full: i32| build(&Spec { tree: Tree { fullness: full, ..strip.tree }, ..strip.clone() }).unwrap().bricks.len();
-        assert!(blades(100) > blades(0) * 3 / 2);
-
-        // a point added and lifted raises the ground round it, by about as much, and leaves the far end alone
-        let mound = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::new(16.0, 0.0, 12.0))], ..strip.clone() }).unwrap();
-        let (at_it, far) = (top_at(&mound, 10.5, 2.5).unwrap(), top_at(&mound, -25.5, 2.5).unwrap());
-        assert!(at_it as f64 > 12.0 && at_it as f64 <= 12.0 + height + 3.0 && far as f64 <= height + 3.0, "{at_it} high at the mound, {far} far from it");
-        // a surface: under the mound there is nothing
-        assert!(!mound.bricks.iter().any(|b| b.min[0] <= 10 && 10 < b.min[0] + b.ext[0] && b.min[1] <= 2 && 2 < b.min[1] + b.ext[1] && b.min[2] <= 4 && 4 < b.min[2] + b.ext[2]), "the mound is solid");
-        // the soil is its skin still: soil bricks up at the mound's height
-        assert!(bricks_of(&mound, &[TRUNK]).iter().any(|b| b.z > 9.0));
-        // pushed down, the ground stays on the floor it stands on
-        let dip = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::new(16.0, 0.0, -12.0))], ..strip.clone() }).unwrap();
-        // (pushed down in flat ground it digs below the floor, and the soil goes down with it)
-        let lowest = dip.bricks.iter().map(|b| b.min[2]).min().unwrap();
-        assert!(lowest <= -10 && lowest >= -15, "a hollow dug 12 deep reaches {lowest}");
-        // (water stands in it, 3 below the lawn)
-        assert!(top_at(&dip, 10.5, 2.5).unwrap() == -3 && top_at(&dip, -25.5, 2.5).unwrap() >= 1);
-
-        // The ground as a brush shapes it. A wide push is a hill, not a
-        // spike: half way out it is half as high, and at its edge it is gone.
-        let hill = Sculpt { at: DVec3::ZERO, range: 30.0, amount: 10.0, flatten: false };
-        let at = |touches: &[Sculpt], x: f64| ground(touches, DVec3::new(x, 0.0, 0.0));
-        assert!((at(&[hill], 0.0) - 10.0).abs() < 1e-9 && (at(&[hill], 15.0) - 5.0).abs() < 1e-9 && at(&[hill], 30.0) == 0.0 && at(&[hill], 29.0) < 0.1);
-        // level at its top and at its edge: no crease where it meets the flat
-        assert!(at(&[hill], 0.0) - at(&[hill], 1.0) < 0.05 && at(&[hill], 29.0) - at(&[hill], 30.0) < 0.05);
-        // two pushes add, and a push down takes a hollow out of raised ground and no more
-        let beside = Sculpt { at: DVec3::new(20.0, 0.0, 0.0), ..hill };
-        assert!(at(&[hill, beside], 10.0) > at(&[hill], 10.0) + 4.0);
-        let hollow = Sculpt { at: DVec3::ZERO, range: 10.0, amount: -4.0, flatten: false };
-        assert!((at(&[hill, hollow], 0.0) - 6.0).abs() < 1e-9 && at(&[hollow], 0.0) == -4.0);
-        // flattening brings the ground to its level within half its range, and leaves it alone beyond it
-        let terrace = Sculpt { at: DVec3::new(12.0, 0.0, 0.0), range: 12.0, amount: 3.0, flatten: true };
-        for x in [7.0, 12.0, 17.0] {
-            assert!((at(&[hill, terrace], x) - 3.0).abs() < 1e-9, "{} at {x}", at(&[hill, terrace], x));
-        }
-        assert_eq!(at(&[hill, terrace], -5.0), at(&[hill], -5.0));
-        // strokes are in order: a hill pushed up after the flattening stands on the terrace
-        assert!(at(&[terrace, hill], 12.0) > 3.0);
-        // and built: a flattened top is level, where the hill it was cut from was not
-        let top = |pulls: Vec<(DVec3, DVec3)>| { let built = build(&Spec { pulls, ..strip.clone() }).unwrap(); bricks_of(&built, &[TRUNK]).iter().filter(|b| (b.x - 0.5).abs() < 6.0 && b.y.abs() < 6.0).map(|b| b.z).fold((f64::MAX, f64::MIN), |(lo, hi), z| (lo.min(z), hi.max(z))) };
-        let (raised, levelled) = (top(vec![(DVec3::new(8.5, 0.5, 0.5), DVec3::new(24.0, 0.0, 12.0))]), top(vec![(DVec3::new(8.5, 0.5, 0.5), DVec3::new(24.0, 0.0, 12.0)), (DVec3::new(0.5, 0.5, 0.5), DVec3::new(20.0, 16.0, 6.0))]));
-        assert!(raised.1 - raised.0 > 2.5 && levelled.1 - levelled.0 <= 2.0 && (levelled.0 - 6.0).abs() < 2.5, "raised {raised:?}, flattened {levelled:?}");
-
-        // a closed line is an outline, filled; open, it is a strip along the line
-        let corners = [(-40.0, -40.0), (40.0, -40.0), (40.0, 40.0), (-40.0, 40.0)];
-        let (lawn, strips) = (build(&along(Kind::Grass, &corners, 6.0, true)).unwrap(), build(&along(Kind::Grass, &corners, 6.0, false)).unwrap());
-        assert!(top_at(&lawn, 0.5, 0.5).is_some() && top_at(&strips, 0.5, 0.5).is_none());
-    }
-
-    #[test]
     fn a_trunk_is_eight_sided_on_the_lattice_and_built_of_tall_bricks() {
         // an oak's trunk between its roots and its fork: every layer the same, so few bricks, each many cells tall
         let spec = spec(Kind::Oak, 2);
@@ -4600,64 +4155,6 @@ mod tests {
         }
     }
 
-    /// A lawn 100 by 80, timed: run by name with `--ignored --nocapture`.
-    #[test]
-    #[ignore = "a measurement, not a check"]
-    #[cfg(not(debug_assertions))]
-    fn how_long_a_lawn_takes() {
-        use crate::par::Threads;
-        let lawn = Spec { closed: true, ..along(Kind::Grass, &[(-50.0, -40.0), (50.0, -40.0), (50.0, 40.0), (-50.0, 40.0)], 4.0, true) };
-        let lawn = Spec { rise: Some(5.0), pulls: (0..40).map(|n| (DVec3::new(-40.0 + 2.0 * n as f64, (n as f64 * 0.7).sin() * 25.0, 0.5), DVec3::new(18.0, 0.0, 6.0))).collect(), ..lawn };
-        for threads in [Threads::ONE, Threads::available()] {
-            let least = (0..3).map(|_| { let at = std::time::Instant::now(); let built = crate::spec::build_with(&lawn, true, threads).unwrap(); (at.elapsed(), built.bricks.len()) }).min().unwrap();
-            println!("a lawn 100 by 80 with 40 touches on {} threads: {:?}, {} bricks", threads.count(), least.0, least.1);
-        }
-    }
-
-    #[test]
-    fn a_hollow_dug_below_the_waters_level_is_a_pond() {
-        let lawn = Spec { closed: true, depth: 6, ..along(Kind::Grass, &[(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)], 4.0, true) };
-        let level = -(lawn.tree.count as f64);
-        // a hollow 10 deep, 22 wide: far deeper than the water stands (3 below the lawn)
-        let dig = |amount: f64| Spec { pulls: vec![(DVec3::new(0.5, 0.5, 0.5), DVec3::new(22.0, 0.0, amount))], ..lawn.clone() };
-        let pond = build(&dig(-10.0)).unwrap();
-        let water = bricks_of(&pond, &[WATER]);
-        assert!(water.len() > 5, "no water in a hollow 10 deep");
-        // flat on top, at the level, and nowhere above it; under it, down to the bed
-        let top = pond.bricks.iter().zip(&pond.shades).filter(|(_, s)| **s == WATER).map(|(b, _)| b.min[2] + b.ext[2]).max().unwrap();
-        assert_eq!(top as f64, level, "the water's top");
-        for x in [-6.0, 0.0, 5.0] {
-            let over = pond.bricks.iter().zip(&pond.shades).filter(|(b, _)| b.min[0] as f64 <= x && x < (b.min[0] + b.ext[0]) as f64 && b.min[1] <= 0 && 0 < b.min[1] + b.ext[1]).max_by_key(|(b, _)| b.min[2] + b.ext[2]).unwrap();
-            assert_eq!((*over.1, over.0.min[2] + over.0.ext[2]), (WATER, top), "over the middle of the pond at {x}");
-        }
-        // in few large bricks
-        let cells: i32 = pond.bricks.iter().zip(&pond.shades).filter(|(_, s)| **s == WATER).map(|(b, _)| b.ext[0] * b.ext[1] * b.ext[2]).sum();
-        assert!(cells / water.len() as i32 >= 10, "{cells} cells of water in {} bricks", water.len());
-        // the bank in order going down: grass, then sand, then the bed; and stones only on the bed
-        let mean = |shades: &[u8]| { let these = bricks_of(&pond, shades); assert!(these.len() > 3, "no bricks of {shades:?}"); these.iter().map(|p| p.truncate().length()).sum::<f64>() / these.len() as f64 };
-        let (bed, sand) = (mean(&[BED]), mean(&[SAND]));
-        assert!(bed < sand && sand < 22.0, "the bed is {bed:.1} from the middle and the sand {sand:.1}");
-        let blades = bricks_of(&build(&Spec { depth: 1, ..dig(-10.0) }).unwrap(), &[LEAF, LEAF_DARK, LEAF_LIGHT]);
-        let near = blades.iter().filter(|p| p.truncate().length() < sand - 3.0).count();
-        assert!(blades.len() > 500);
-        assert_eq!(near, 0, "grass growing in the water");
-        // (a large one may stand out of shallow water)
-        assert!(bricks_of(&pond, &[STONE]).iter().all(|p| p.z < level + 3.0));
-        // reeds round the margin, more when asked for more, and none when asked for none
-        let reeds = |depth: i32| build(&Spec { depth, ..dig(-10.0) }).unwrap().bricks.iter().filter(|b| b.ext[2] >= 3 && b.min[2] + b.ext[2] > 12).count();
-        assert!(reeds(1) == 0 && reeds(4) > 0 && reeds(11) > reeds(4) * 2, "{} {} {}", reeds(1), reeds(4), reeds(11));
-        // no water in a hollow that stops above the level, on a hill, or when water is switched off
-        assert!(bricks_of(&build(&dig(-2.0)).unwrap(), &[WATER, SAND, BED]).is_empty() || bricks_of(&build(&dig(-2.0)).unwrap(), &[WATER]).is_empty());
-        assert!(bricks_of(&build(&dig(8.0)).unwrap(), &[WATER]).is_empty());
-        assert!(bricks_of(&build(&Spec { tree: Tree { count: 0, ..lawn.tree }, ..dig(-10.0) }).unwrap(), &[WATER]).is_empty());
-        // Digging the pond leaves the lawn far from it blade for blade as it was. (From its own level up: a patch with a pond in it is cut off at the pond's depth and not at its own level, so the underside of its soil, most of a cell, is built all over it where a flat lawn's is cut away.)
-        let flat = build(&lawn).unwrap();
-        // (as the cells it fills: the bricks are joined up a little differently, the fit having begun from another corner)
-        let far = |built: &crate::spec::Built| { let mut cells = std::collections::BTreeSet::new(); for b in built.bricks.iter().filter(|b| b.min[0] > 28 && b.min[2] >= 2 && b.mask == CUBE) { for x in 0..b.ext[0] { for y in 0..b.ext[1] { for z in 0..b.ext[2] { cells.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z]); } } } } cells };
-        let (was, now) = (far(&flat), far(&pond));
-        assert!(was.len() > 300 && was.symmetric_difference(&now).count() * 50 < was.len(), "{} of {} cells differ", was.symmetric_difference(&now).count(), was.len());
-    }
-
     /// How far a trunk reaches from its middle at a height: the least and the most of eight ways round.
     fn reach(tree: &Model, z: f64) -> (f64, f64) {
         // (stepping out to the first place outside it: a willow's strands hang round its trunk, and are not it)
@@ -4739,92 +4236,6 @@ mod tests {
             // bare: the same tree with no blossom on it nor under it
             let bare = build(&Spec { closed: true, tree: Tree { extras: true, ..spec(Kind::Cherry, seed).tree }, ..spec(Kind::Cherry, seed) }).unwrap();
             assert!(bricks_of(&bare, &[LEAF, LEAF_DARK, LEAF_LIGHT, EXTRA, TOP]).is_empty() && bricks_of(&bare, &[LIMB]).len() > 100, "seed {seed}: bare");
-        }
-    }
-
-    /// A lawn with a hill that has a hollow on it, and a hollow in the flat beside the hill.
-    fn two_hollows() -> Spec {
-        let lawn = Spec { depth: 4, ..along(Kind::Grass, &[(-60.0, -40.0), (60.0, -40.0), (60.0, 40.0), (-60.0, 40.0)], 4.0, true) };
-        let touch = |x: f64, range: f64, amount: f64| (DVec3::new(x + 0.5, 0.5, 0.5), DVec3::new(range, 0.0, amount));
-        Spec { pulls: vec![touch(-25.0, 34.0, 16.0), touch(-25.0, 16.0, -14.0), touch(30.0, 20.0, -10.0)], ..lawn }
-    }
-
-    /// The heights water's surface stands at over the places from `from` to `to` along x.
-    fn water_tops(built: &crate::spec::Built, from: f64, to: f64) -> std::collections::BTreeSet<i32> {
-        let mut tops = std::collections::BTreeMap::new();
-        for (b, _) in built.bricks.iter().zip(&built.shades).filter(|(b, s)| **s == WATER && (b.min[0] as f64) < to && (b.min[0] + b.ext[0]) as f64 > from) {
-            for x in (b.min[0]..b.min[0] + b.ext[0]).filter(|x| (*x as f64 + 1.0) > from && (*x as f64) < to) {
-                for y in b.min[1]..b.min[1] + b.ext[1] {
-                    let top = tops.entry((x, y)).or_insert(i32::MIN);
-                    *top = (*top).max(b.min[2] + b.ext[2]);
-                }
-            }
-        }
-        tops.into_values().collect()
-    }
-
-    #[test]
-    fn two_hollows_at_two_heights_hold_water_at_two_levels_and_a_stream_runs_down_between_them() {
-        let (one, two) = (two_hollows(), Spec { tube: true, ..two_hollows() });
-        let (flat, stepped) = (build(&one).unwrap(), build(&two).unwrap());
-        // one level: water only at the lawn's own, in the lower hollow
-        // (a cell of water at a pond's very edge may be a cell lower, under the lip of its bank)
-        let level = |tops: &std::collections::BTreeSet<i32>| { let (low, high) = (*tops.iter().next().unwrap(), *tops.iter().next_back().unwrap()); assert!(high - low <= 1, "a pond's water at {tops:?}"); high };
-        assert_eq!(level(&water_tops(&flat, -100.0, 100.0)), -3);
-        assert!(water_tops(&flat, -100.0, 5.0).is_empty());
-        // two: the hollow on the hill holds water too, higher, and each pond is level
-        let (upper, lower) = (water_tops(&stepped, -30.0, -20.0), water_tops(&stepped, 26.0, 34.0));
-        assert_eq!(level(&lower), -3);
-        let high = level(&upper);
-        assert!(high >= 0, "the upper pond stands at {high}");
-        // the stream: water all the way from one to the other, never rising on the way down, never over its banks
-        let along: Vec<i32> = (-18..=22).map(|x| water_tops(&stepped, x as f64 + 0.25, x as f64 + 0.75).into_iter().max().unwrap_or_else(|| panic!("the stream is dry at {x}"))).collect();
-        // (taken two cells apart: where it bends, the end of one reach lies beside the start of the next, and which is the higher at one x is by a cell either way)
-        assert!(along.windows(3).all(|w| w[2] <= w[0]) && along[0] == high && *along.last().unwrap() == -3, "the stream's water, going down: {along:?}");
-        assert!(along.iter().collect::<std::collections::BTreeSet<_>>().len() >= 4, "it falls in {along:?}: no steps");
-        let mut worst: f64 = f64::MIN;
-        for (b, _) in stepped.bricks.iter().zip(&stepped.shades).filter(|(b, s)| **s == WATER && b.min[0] > -12 && b.min[0] + b.ext[0] < 10) {
-            for x in 0..b.ext[0] {
-                for y in 0..b.ext[1] {
-                    let at = DVec3::new((b.min[0] + x) as f64 + 0.5, (b.min[1] + y) as f64 + 0.5, 0.5);
-                    worst = worst.max((b.min[2] + b.ext[2]) as f64 - crate::spec::grass_ground(&two, at));
-                }
-            }
-        }
-        assert!(worst <= 1.0, "the stream stands {worst} over the ground it was cut into");
-        // narrow: a few cells of water across, where it runs along x
-        let across = |x: i32| stepped.bricks.iter().zip(&stepped.shades).filter(|(b, s)| **s == WATER && b.min[0] <= x && x < b.min[0] + b.ext[0]).map(|(b, _)| (b.min[1], b.min[1] + b.ext[1])).fold((i32::MAX, i32::MIN), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)));
-        assert!((2..=9).contains(&(across(0).1 - across(0).0)), "the stream is {:?} across", across(0));
-        // its bed is sand, and the same on any number of threads
-        assert!(bricks_of(&stepped, &[SAND]).iter().filter(|p| p.x > -10.0 && p.x < 12.0).count() > 20);
-        let many = crate::spec::build_with(&two, true, crate::par::Threads::forced(5)).unwrap();
-        assert_eq!((&stepped.bricks, &stepped.shades), (&many.bricks, &many.shades));
-        // one hollow in a flat lawn: two levels are the same bricks as one
-        let single = Spec { pulls: two_hollows().pulls[2..].to_vec(), ..two_hollows() };
-        let (a, b) = (build(&single).unwrap(), build(&Spec { tube: true, ..single.clone() }).unwrap());
-        assert_eq!((&a.bricks, &a.shades), (&b.bricks, &b.shades));
-        // a hollow on a hill with no lower water to run to: a pond up there, and no stream
-        let alone = build(&Spec { tube: true, pulls: two_hollows().pulls[..2].to_vec(), ..two_hollows() }).unwrap();
-        assert!(!water_tops(&alone, -30.0, -20.0).is_empty() && water_tops(&alone, -8.0, 100.0).is_empty(), "{:?}", water_tops(&alone, -8.0, 100.0));
-    }
-
-    #[test]
-    fn a_pond_is_a_basin_as_deep_as_it_was_dug_with_water_down_to_its_bed() {
-        let lawn = Spec { closed: true, depth: 1, ..along(Kind::Grass, &[(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)], 4.0, true) };
-        for deep in [6.0, 10.0, 16.0] {
-            let pond = build(&Spec { pulls: vec![(DVec3::new(0.5, 0.5, 0.5), DVec3::new(22.0, 0.0, -deep))], ..lawn.clone() }).unwrap();
-            // the cells over the pond's middle, from the top down: which part each is
-            let mut column: Vec<(i32, u8)> = pond.bricks.iter().zip(&pond.shades).filter(|(b, _)| b.min[0] <= 0 && 0 < b.min[0] + b.ext[0] && b.min[1] <= 0 && 0 < b.min[1] + b.ext[1]).flat_map(|(b, s)| (b.min[2]..b.min[2] + b.ext[2]).map(|z| (z, *s))).collect();
-            column.sort();
-            column.reverse();
-            let water: Vec<i32> = column.iter().filter(|c| c.1 == WATER).map(|c| c.0).collect();
-            // water from the level (3 below the lawn) down to within a cell or two of the dug depth, with nothing else in it
-            assert_eq!(column[0], (-4, WATER), "dug {deep}: the top of {column:?}");
-            let bottom = *water.last().unwrap();
-            assert!(water.len() as i32 == -3 - bottom && (bottom as f64 + deep).abs() <= 2.0, "dug {deep}: water in {water:?}");
-            // and under it the bed, at the dug depth: not soil under the surface, nor a slab of water on flat ground
-            let under: Vec<(i32, u8)> = column.iter().filter(|c| c.0 < bottom).copied().collect();
-            assert!(!under.is_empty() && under.iter().all(|c| matches!(c.1, BED | STONE)) && under.len() <= 4, "dug {deep}: under the water {under:?}");
         }
     }
 

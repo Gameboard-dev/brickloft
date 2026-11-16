@@ -302,6 +302,9 @@ pub struct State {
     /// something done, said for a few seconds over the view: the words, and
     /// when they were first shown (by the panel's clock, once it has shown them)
     pub toast: Option<(String, Option<f64>)>,
+    /// recording the window as a GIF: its settings, and the recording under way (see `gif`)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub gif: crate::gif::Controls,
     /// how the form being edited is coloured
     pub paint: Paint,
     /// the workspace's other forms; the one being edited is the fields above
@@ -452,6 +455,30 @@ pub fn turned_way(q: [f64; 4], v: DVec3, back: bool) -> DVec3 {
     v + 2.0 * u.cross(u.cross(v) + v * q[3])
 }
 
+/// Which way a plant grows, as its bricks are built: the axis its own up
+/// lies along, and whether up is towards that axis's low end. `None` for
+/// a form that is no plant.
+///
+/// A plant's blend or stripes run up it, the one way that suits a thing
+/// that grows (see `panel::colours`). They were laid along z whatever the
+/// plant, which is up only for a plant standing as it grew: a tree given a
+/// quarter turn onto its side was banded across its trunk, and one flipped
+/// top to bottom had its foot's colour at its crown.
+///
+/// A build is mirrored first, where the form is flipped, and then given
+/// its quarter turns (`brickloft_core::spec::build_with`). So the plant's
+/// up is z, the other way if it is flipped along z, and then wherever the
+/// turn takes z.
+pub fn grows_along(spec: &Spec) -> Option<(usize, bool)> {
+    if spec.form != Form::Tree {
+        return None;
+    }
+    let turn = brickloft_core::shapes::ORIENT[(spec.turned % 24) as usize];
+    // (the turn takes the brick's axis `perm[i]` to the world's axis `i`, the other way round if bit `i` of `neg` is set)
+    let axis = (0..3).find(|i| turn.perm[*i] == 2)?;
+    Some((axis, (turn.neg >> axis & 1 == 1) != spec.flip[2]))
+}
+
 /// Whether a form's grid is at an angle, and so not the world's.
 pub fn on_own_grid(spec: &Spec) -> bool {
     spec.grid != LEVEL
@@ -529,6 +556,8 @@ impl State {
             camera_at: ([0.0; 3], [1.0, 0.0, 0.0]),
             flight: std::collections::VecDeque::new(),
             toast: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            gif: crate::gif::Controls::default(),
             paint: Paint::default(),
             others: Vec::new(),
             scene: 0,
@@ -1023,13 +1052,15 @@ impl State {
         let spec = self.full_spec();
         let forms: Vec<(&Built, &Paint, Option<Bounds>, [i32; 3], &Spec)> = std::iter::once((&self.built, &self.paint, self.bounds, self.place, &spec)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place, &i.spec))).collect();
         let colour_of = |form: usize, from: Option<usize>, brick: &CellBrick| {
-            let (built, paint, bounds, ..) = forms[form];
+            let (built, paint, bounds, _, spec) = forms[form];
             let patterned = paint.mode == crate::paint::Mode::Pattern && built.shades.len() == built.bricks.len();
             let (lo, hi) = bounds.unwrap_or(([0; 3], [1; 3]));
+            // (a plant's blend or stripes run up it, from its foot, however it has been turned)
+            let (axis, back) = grows_along(spec).unwrap_or((paint.axis.min(2), false));
             match from {
                 Some(n) if patterned => paint.shade(built.shades[n]),
-                Some(n) => paint.colour(&built.bricks[n], lo, hi),
-                None => paint.colour(brick, lo, hi),
+                Some(n) => paint.colour_along(&built.bricks[n], lo, hi, axis, back),
+                None => paint.colour_along(brick, lo, hi, axis, back),
             }
         };
         // (nothing joined: every form's bricks are its own, and there is nothing to put together)
@@ -1545,9 +1576,11 @@ impl State {
     /// ready. Returns whether new bricks were put in place this time.
     ///
     /// Built here, as every form was, a slow form stopped the window for
-    /// as long as it took: a lawn of sixty thousand bricks takes half a
-    /// second, so each touch of the brush on it was a freeze, and a stroke
-    /// of touches a run of them, several seconds together. Now the window
+    /// as long as it took: a lawn of sixty thousand bricks took half a
+    /// second when grass was fitted, so each touch of the brush on it was
+    /// a freeze, and a stroke of touches a run of them, several seconds
+    /// together. (A lawn is laid out now, in a few milliseconds, and is
+    /// built here: see `brickloft_core::grass`. A tree is still slow.) Now the window
     /// goes on drawing the bricks it has, and takes the new ones when the
     /// other thread sends them. One build at a time: a change made while
     /// one is under way waits for it, and is built next, so a run of
@@ -1558,9 +1591,9 @@ impl State {
     /// goes by how long its last build took.
     ///
     /// The alternative was to build a slow form in pieces and only the
-    /// pieces a change touches. That is the larger gain for a lawn and is
-    /// particular to each kind of form; this keeps the window answering for
-    /// every form, the ones not yet thought of among them.
+    /// pieces a change touches. That is particular to each kind of form;
+    /// this keeps the window answering for every form, the ones not yet
+    /// thought of among them.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn refresh_behind(&mut self, now_ms: impl Fn() -> f64 + Copy) -> bool {
         let wanted = |state: &State| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..state.full_spec() };
@@ -3763,6 +3796,37 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1500));
         state.refresh_behind(|| 0.0);
         assert!(state.form == CUBE && state.built.bricks == cube);
+    }
+
+    #[test]
+    fn a_plants_blend_and_stripes_run_up_it_however_it_is_turned_or_flipped() {
+        for mode in [crate::paint::Mode::Blend, crate::paint::Mode::Stripes] {
+            let plant = |turns: &[usize], flipped: bool| {
+                let mut state = State::new();
+                state.form = TREE;
+                state.preset();
+                state.usual_tree(brickloft_core::tree::Kind::Tulip);
+                state.paint = Paint { mode, colours: vec![[200, 0, 0], [0, 200, 0], [0, 0, 200]], axis: 2, width: 3 };
+                turns.iter().for_each(|axis| state.turn(*axis, false));
+                state.spec.flip[2] = flipped;
+                state.refresh(|| 0.0);
+                assert!(state.problem.is_none(), "{:?}", state.problem);
+                let colours: Vec<Option<[u8; 3]>> = state.painted().iter().map(|brick| brick.1).collect();
+                (colours, state.built.bricks.clone())
+            };
+            // as it grew: the first colour at its foot, others above, and in a blend the last at its top (stripes come round again)
+            let (upright, bricks) = plant(&[], false);
+            let (foot, top) = (bricks.iter().enumerate().min_by_key(|(_, b)| b.min[2]).unwrap().0, bricks.iter().enumerate().max_by_key(|(_, b)| b.min[2] + b.ext[2]).unwrap().0);
+            assert!(upright[foot] == Some([200, 0, 0]) && (mode == crate::paint::Mode::Stripes || upright[top] == Some([0, 0, 200])) && upright.iter().collect::<std::collections::HashSet<_>>().len() >= 3, "{mode:?}: {:?} at its foot, {:?} at its top", upright[foot], upright[top]);
+            // Laid on its side about x, about y, both, upside down, and upside down on its side:
+            // each brick the colour it was (a build turned or flipped is the same bricks in the same order).
+            for (turns, flipped) in [(&[0usize][..], false), (&[1], false), (&[0, 1], false), (&[2, 0, 0], false), (&[], true), (&[1], true)] {
+                let (colours, turned) = plant(turns, flipped);
+                assert!(turned.len() == bricks.len() && (turns.is_empty() && !flipped || turned != bricks));
+                let wrong = colours.iter().zip(&upright).filter(|(a, b)| a != b).count();
+                assert_eq!(wrong, 0, "{mode:?}, turned {turns:?}, flipped {flipped}: {wrong} of {} bricks are another colour than they were upright", bricks.len());
+            }
+        }
     }
 
     /// Not a test: what a touch of the brush on a large lawn costs, and a tree joined into it.

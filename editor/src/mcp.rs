@@ -688,6 +688,30 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
     let mut forms = state.forms();
     // what asks about the workspace or moves the camera, and changes no form
     match name {
+        // a recording of the window (see `gif`): into the pictures folder and nowhere else, whatever is asked
+        "start_gif" => {
+            let chosen = |named: &str, among: &[&str]| match arguments.get(named) {
+                None | Some(Value::Null) => Ok(None),
+                Some(given) => among.iter().position(|one| given.as_str() == Some(one) || given.as_u64().is_some_and(|n| n.to_string() == *one)).map(Some).ok_or(format!("{named} is one of {}", among.join(", "))),
+            };
+            let (size, rate) = (chosen("size", &["full", "half", "third"])?, chosen("rate", &["10", "20", "25"])?);
+            (state.gif.size, state.gif.rate) = (size.unwrap_or(state.gif.size), rate.unwrap_or(state.gif.rate));
+            let panel = arguments.get("panel").and_then(Value::as_bool).unwrap_or(true);
+            return state.gif.start(panel, now_ms()).map(|said| format!("{said}. It records until stop_gif, or stops by itself at {:.0} seconds or {} MB.", crate::gif::LONGEST_MS / 1000.0, crate::gif::LARGEST >> 20));
+        }
+        "stop_gif" => {
+            if !state.gif.recording() {
+                return Err("Nothing is being recorded".into());
+            }
+            return match state.gif.wait(now_ms()) {
+                Some(crate::gif::Said::Done(said)) => {
+                    state.toast = Some((said.clone(), None));
+                    Ok(format!("{said}. {}", state.gif.cost))
+                }
+                Some(crate::gif::Said::Failed(why)) => Err(why),
+                None => Err("Nothing is being recorded".into()),
+            };
+        }
         "get_camera" => {
             let (at, looking) = state.camera_at;
             let looking = DVec3::from_array(looking);
@@ -823,7 +847,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.record();
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
-            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1)).or(furniture.map(|_| spec.furniture.colours()));
+            let own = spec.hedged().then_some("hedge").or(spec.stones.map(|_| "stepping stones")).or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1)).or(furniture.map(|_| spec.furniture.colours()));
             // (a maze's colours go by what its walls are)
             let walls = maze.then(|| crate::paint::maze_palettes(crate::paint::maze_texture(&spec))[0].clone());
             state.add_form(spec);
@@ -842,6 +866,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let at = index(&forms)?;
             let (spec, paint, place) = &mut forms[at];
             let was = spec.form;
+            let was_hedge = spec.hedged();
             let walls_were = crate::paint::maze_texture(spec);
             *spec = changed(spec, settings)?;
             brickloft_core::spec::build(spec)?;
@@ -851,6 +876,9 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             } else if maze && (was != spec.form || walls_were != crate::paint::maze_texture(spec)) {
                 // (a form made into a maze, or a maze given other walls, comes in those walls' colours)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::maze_palettes(crate::paint::maze_texture(spec))[0].clone(), ..Paint::default() };
+            } else if spec.hedged() && !was_hedge {
+                // (and a form made hedge in a hedge's)
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette("hedge").to_vec(), ..Paint::default() };
             } else if spec.form == brickloft_core::spec::Form::Tree && was != spec.form {
                 // (a form made into a tree comes in the tree's colours, as one added does)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
@@ -984,11 +1012,12 @@ mod tests {
         // every tool listed is one `apply` knows, and the other way about
         let mut state = State::new();
         // (but for the picture, which the frame loop gives once it has drawn)
-        for name in tool_names().into_iter().filter(|name| name != "take_screenshot") {
+        // (and for a recording, which would be started in the pictures folder of whoever runs the tests: `gif` has its own)
+        for name in tool_names().into_iter().filter(|name| name != "take_screenshot" && name != "start_gif") {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 15);
+        assert_eq!(tool_names().len(), 17);
     }
 
     #[test]
@@ -1249,6 +1278,39 @@ mod tests {
         assert_eq!(state.forms(), before);
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": "gerbera,900,-90,5,5" } }), || 0.0).unwrap();
         assert_eq!(state.forms()[0].0.tree.bloom, Bloom { flower: Flower::Gerbera, tilt: 90, turn: 270, stem: true, fallen: true });
+    }
+
+    #[test]
+    fn an_arch_is_built_as_hedge_when_asked_and_stays_hedge_through_undo_copy_and_save() {
+        use brickloft_core::tree::{Kind, Tree};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        let feet = json!([[-29.5, 0.5, 0.5], [30.5, 0.5, 0.5]]);
+        // asked for with the arch, it comes as hedge in a hedge's colours, with the hedge's own settings beside it
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "arch pointed", "points": feet, "thick": 10, "depth": 12, "hedge": true, "tree": "hedge,3,80,5,40,1" } }), || 0.0).unwrap());
+        assert!(state.spec.hedge && state.spec.hedged());
+        assert_eq!(state.spec.tree, Tree { seed: 3, fullness: 80, bend: 40, extras: true, ..Tree::of(Kind::Hedge) });
+        assert_eq!((added["forms"][0]["settings"]["hedge"].as_str(), state.paint.mode, state.paint.colours.as_slice()), (Some("true"), Mode::Pattern, crate::paint::palette("hedge")));
+        let hedge = state.built.bricks.len();
+        assert!(hedge > 2000 && state.built.shades.len() == hedge, "{hedge} bricks");
+        // taken off, it is the plain arch; put back on a plain arch, it is hedge in a hedge's colours again
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "hedge": false }, "colour": { "mode": "one", "colours": ["#808080"] } }), || 0.0).unwrap();
+        assert!(!state.forms()[0].0.hedge && state.built.bricks.len() < 400, "{} bricks", state.built.bricks.len());
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "hedge": true } }), || 0.0).unwrap();
+        assert_eq!((state.built.bricks.len(), state.forms()[0].1.colours.as_slice()), (hedge, crate::paint::palette("hedge")));
+        // one step back is the plain arch, and forward again the hedge
+        assert!(state.undo() && !state.forms()[0].0.hedge);
+        assert!(state.redo() && state.forms()[0].0.hedge);
+        // copied and pasted, and saved and opened, both are hedge
+        let (_, copied) = state.copied();
+        state.paste(copied);
+        assert_eq!(state.forms().iter().filter(|form| form.0.hedged()).count(), 2);
+        let opened = crate::store::forms_in(&crate::store::describe(&state.forms())).unwrap();
+        assert_eq!(opened.iter().map(|form| (form.0.hedge, form.0.tree)).collect::<Vec<_>>(), state.forms().iter().map(|form| (form.0.hedge, form.0.tree)).collect::<Vec<_>>());
+        // what is neither true nor false is refused
+        for bad in [json!("yes"), json!(1), json!("true\nradius = 900"), json!("")] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "hedge": bad } }), || 0.0).is_err(), "{bad} was accepted");
+        }
     }
 
     #[test]

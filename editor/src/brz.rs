@@ -139,6 +139,12 @@ const LAMP_RADIUS: f32 = 120.0;
 /// the brick stood over the ground, which told blades from soil and
 /// could not tell water from a stone lying in it.
 ///
+/// A lawn is laid out and not grown (`brickloft_core::grass`), so it is
+/// asked which of its own bricks holds the place
+/// (`brickloft_core::spec::lawn`). By the place and not by the brick's
+/// number in the build, because a brick of a join is a piece cut from one
+/// of the form's bricks and has no number there.
+///
 /// Any other plant's greenery is walked through too if the form says so,
 /// and its wood is not: a crown to walk through, limbs to stand on.
 ///
@@ -165,11 +171,23 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
     if !as_grown || !(grass || soft || dressed) {
         return Box::new(|_| Stuff::Solid);
     }
+    // (asked where its colour was: at the middle of a sloped brick, and of a box at the middle of one of its cells, all of which are one part)
+    let middle_of = |cell: &brickloft_core::shapes::CellBrick| {
+        let ext = if cell.mask == brickloft_core::shapes::CUBE { [1; 3] } else { cell.ext };
+        DVec3::new(cell.min[0] as f64 + ext[0] as f64 / 2.0, cell.min[1] as f64 + ext[1] as f64 / 2.0, cell.min[2] as f64 + ext[2] as f64 / 2.0)
+    };
+    if grass {
+        let Some(lawn) = brickloft_core::spec::lawn(spec) else { return Box::new(|_| Stuff::Solid) };
+        // Soil, sand, stones and the bed of a pond are solid; so is whatever is no brick of the lawn's own (the fillet of a join).
+        return Box::new(move |cell| match lawn.part(middle_of(cell)) {
+            Some(tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
+            Some(tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
+            _ => Stuff::Solid,
+        });
+    }
     let Some(plant) = brickloft_core::spec::plant(spec) else { return Box::new(|_| Stuff::Solid) };
     Box::new(move |cell| {
-        // (asked where its colour was: at the middle of a sloped brick, and of a box at the middle of one of its cells, all of which are one part)
-        let ext = if cell.mask == brickloft_core::shapes::CUBE { [1; 3] } else { cell.ext };
-        let middle = DVec3::new(cell.min[0] as f64 + ext[0] as f64 / 2.0, cell.min[1] as f64 + ext[1] as f64 / 2.0, cell.min[2] as f64 + ext[2] as f64 / 2.0);
+        let middle = middle_of(cell);
         // What is wood, by the part and not by its colour, which a
         // player may change: the trunk and the limbs of anything; the
         // marks on a birch's bark; the fibre under a palm's crown; and in
@@ -178,9 +196,6 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
         // A brick is of one part all through (see `tree::Model::colour`),
         // so none is half wood and half leaf.
         match (kind, plant.shade(middle)) {
-            (Kind::Grass, tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
-            (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
-            (Kind::Grass, _) => Stuff::Solid,
             (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
             // A dressed pine's decorations, by the part and not the colour. They are solid whether or not its needles are walked through: a bauble is a thing to bump into.
             (Kind::Pine, tree::STAR | tree::EXTRA | tree::BAUBLE_GOLD | tree::BAUBLE_PALE | tree::TINSEL) => Stuff::Metal,

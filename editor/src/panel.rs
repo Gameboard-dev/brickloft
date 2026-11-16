@@ -158,6 +158,8 @@ pub struct Asked {
     pub clear_reports: bool,
     /// save a picture of the window
     pub screenshot: bool,
+    /// start recording the window as a GIF, or stop
+    pub gif: bool,
     /// put the workspace on the clipboard as a .brz file
     pub copy: bool,
     /// search for the best fit near the current settings
@@ -664,6 +666,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if cfg!(not(target_arch = "wasm32")) {
             asked.screenshot = helped(ui, help("save_screenshot"), |ui| ui.button("Save screenshot"))
                 .clicked();
+            // (a recording of the window, and how large and how often its pictures are: see `gif`)
+            #[cfg(not(target_arch = "wasm32"))]
+            ui.horizontal(|ui| {
+                let recording = state.gif.recording();
+                asked.gif = helped(ui, help("record_gif"), |ui| ui.button(if recording { "Stop recording" } else { "Record GIF" })).clicked();
+                // a recording under way keeps the size and rate it began with
+                ui.add_enabled_ui(!recording, |ui| {
+                    ComboBox::from_id_salt("gif size").width(80.0).selected_text(crate::gif::SIZES[state.gif.size].0).show_ui(ui, |ui| {
+                        for (which, (name, _)) in crate::gif::SIZES.iter().enumerate() {
+                            ui.selectable_value(&mut state.gif.size, which, *name);
+                        }
+                    })
+                        .response
+                        .on_hover_text(help("gif_size"));
+                    ComboBox::from_id_salt("gif rate").width(90.0).selected_text(crate::gif::RATES[state.gif.rate].0).show_ui(ui, |ui| {
+                        for (which, (name, _)) in crate::gif::RATES.iter().enumerate() {
+                            ui.selectable_value(&mut state.gif.rate, which, *name);
+                        }
+                    })
+                        .response
+                        .on_hover_text(help("gif_rate"));
+                });
+            });
             asked.copy = helped(ui, help("copy_to_clipboard"), |ui| ui.add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard")))
                 .clicked();
         }
@@ -736,6 +761,8 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     // `brickloft_core::maze::walls`), and one more, hedge, which is not a
     // pattern at all but is chosen in the same breath.
     let walls = state.form == MAZE;
+    // (and an arch has it too: the same hedge, grown over the arch's own band)
+    let arch = state.form == ARCH;
     if !(state.form <= BEZIER || state.form == CUBE || walls) {
         return;
     }
@@ -752,7 +779,7 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     // each, since a form has one pattern at most. 0 is none, 1
     // the stepping stones, and 2 onwards the styles of mosaic.
     let styles = &brickloft_core::pattern::STYLES;
-    // (the last on the list, past the styles, and for a maze alone)
+    // (the last on the list, past the styles, and for a maze or an arch alone)
     let hedge = styles.len() + 2;
     let named = |choice: usize| match choice {
         0 => "none",
@@ -761,10 +788,10 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
         _ => styles[(choice - 2).min(styles.len() - 1)].name,
     };
     // what of the list a form may have: a maze no stepping stones and no rug, and nothing else a hedge
-    let offered = |choice: usize| if walls { choice != 1 && named(choice) != "rug" } else { choice != hedge };
+    let offered = |choice: usize| if walls { choice != 1 && named(choice) != "rug" } else { choice != hedge || arch };
     // the sets of colours a choice comes in, which for a maze have the floor and the way through among them
     let sets = |choice: usize| if walls { crate::paint::maze_palettes(named(choice)) } else { crate::paint::palettes(named(choice)).iter().map(|set| set.to_vec()).collect() };
-    let before = if walls && s.maze.hedge { hedge } else if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
+    let before = if (walls && s.maze.hedge) || (arch && s.hedge) { hedge } else if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
     // (a maze given a rug or stones from outside has plain walls: see `brickloft_core::maze::walls::wrapped`)
     let before = if offered(before) { before } else { 0 };
     let mut choice = before;
@@ -792,10 +819,20 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
             (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets(choice)[0].clone());
         }
     } else if choice != before {
+        // An arch built as hedge: no thinner or less deep than a hedge can
+        // be, and grown as the Plant form's hedge starts out, as a maze's
+        // is. (The solid is thickened to that when it is built in any
+        // case; the sliders are moved so that they say what is built.)
+        s.hedge = choice == hedge;
+        if s.hedge {
+            let (thick, deep) = brickloft_core::spec::hedge_size(s);
+            (s.thick, s.depth) = (thick, deep as i32);
+            s.tree = brickloft_core::tree::Tree { seed: s.tree.seed, ..brickloft_core::tree::Tree::of(brickloft_core::tree::Kind::Hedge) };
+        }
         s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
         // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
         // (cobbles start uneven: all alike, they are a grid of squares)
-        s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
+        s.mosaic = (choice >= 2 && choice != hedge).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
         // A pattern is its colours, and each has colours of its
         // own to start in (a rug's reds and golds, a floor of
         // planks' browns). They are brought in with the pattern
@@ -818,7 +855,10 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     // another pattern, in the next of its sets of colours
     let mut another = None;
-    if walls && s.maze.hedge {
+    if (walls && s.maze.hedge) || (arch && s.hedge) {
+        if arch {
+            ui.label("A hedge is at least 6 thick and 6 deep.").on_hover_text(help("arch_hedge"));
+        }
         // the hedge's own settings, as the Plant form has them for a hedge (see `tree`)
         helped(ui, for_kind(help("tree_fullness"), brickloft_core::tree::Kind::Hedge), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text("Density")));
         helped(ui, for_kind(help("tree_bend"), brickloft_core::tree::Kind::Hedge), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text("Looseness")));
