@@ -1,142 +1,156 @@
 # Development
 
-## Build and test
+How to build, run, test and examine arcs. It is a Rust workspace of two
+crates and needs only [Rust](https://rustup.rs).
+
+## Run it
 
 ```sh
-cargo test                      # core and editor logic
-cargo run -p arcs-editor        # the editor as a desktop window (program `arcs`)
-cargo run -p arcs-editor -- 5   # the same, opening on the sixth form in the menu
-sh build-editor.sh              # optional: the editor as a page for a browser, into dist/
+cargo run --release -p arcs-editor        # the editor (the program is called `arcs`)
+cargo run --release -p arcs-editor -- 4   # the same, opening on the fifth form in the menu
+```
+
+Without `--release` it builds faster and the editor still runs well: the
+fitting crate and all dependencies are optimised even in a debug build (see
+`[profile.dev]` in `Cargo.toml`).
+
+The program writes three kinds of file beside wherever it was started, so
+start it from a folder you can write to:
+
+| File | Written by |
+|---|---|
+| `arcs-build.brz` | Ctrl+C: the prefab put on the clipboard |
+| `arcs-report-N.txt` | Save report |
+| `arcs-forms/` | Saved forms |
+
+All three are in `.gitignore`.
+
+The optional browser page is built with `sh build-editor.sh`; see
+[web-page.md](web-page.md).
+
+## Test it
+
+```sh
+cargo test          # everything: about 110 tests, a few seconds
+cargo test -p arcs-core
+cargo test -p arcs-editor
+```
+
+What the tests hold the code to:
+
+- **Shapes:** every pose of every brick has the right volume and corners,
+  and every pose can be reached by one of the game's 24 orientations.
+- **Fitters:** no two bricks hold the same point; every form builds bricks
+  the game can place; spheres, rings and arches come out mirror symmetric; a
+  pyramid is exactly its four slopes; named forms stay under a stated share
+  of stepped faces.
+- **Measurement:** a lone brick of each shape has the surface area of its
+  solid, and the discrepancy the fitter reports is the real disagreement.
+- **Editor:** dragging, undo, grids, picking, copy and paste, tested through
+  the same functions the mouse and keys call, with no window.
+
+A fix for a bug comes with a test that fails when the bug is put back.
+
+## Examine a fit
+
+A saved report can be rebuilt and measured again from the command line,
+which is how a change to a fitter is judged.
+
+```sh
+# rebuild the form in a report and print a fresh report
+cargo run --release -p arcs-core --example inspect -- arcs-report-1.txt
+
+# the same form with settings changed
+cargo run --release -p arcs-core --example inspect -- arcs-report-1.txt simplify=0 grain=1
+
+# just the brick count, extent and discrepancy
+cargo run --release -p arcs-core --example extent -- arcs-report-1.txt
+
+# time a set of representative forms
 cargo run --release -p arcs-core --example timing
+
+# time the form in a report, measured and unmeasured, optionally scaled up
+cargo run --release -p arcs-core --example timing -- arcs-report-1.txt 3
 ```
 
-## Inspecting a fit
+A report has these sections:
+
+| Section | What it holds |
+|---|---|
+| `[spec]` | the form's settings, one `key = value` a line; this alone is enough to rebuild it |
+| `[fit]` | brick counts by kind, the form's volume, the discrepancy |
+| `[improvable]`, `[worst]` | the cells where bricks and form disagree most |
+| `[surface]` | the share of the outside within 10, 20, 30 and 45 degrees of the true surface, the stepped share, the same by layer, the worst faces |
+| `[section ...]` | cuts through bricks and form together, drawn in text |
+
+In a section drawing, `#` is brick and form, `O` is brick outside the form,
+`!` is form with no brick, and `.` is neither.
+
+`core/src/report.rs` documents the format.
+
+## The grid-at-an-angle trial
 
 ```sh
-cargo run -p arcs-core --example inspect -- arcs-report-1.txt
-cargo run -p arcs-core --example inspect -- arcs-report-1.txt simplify=0 grain=1
+cargo run -p arcs-editor --example grid_trial
 ```
 
-The editor's **Save report** button writes `arcs-report-1.txt`, `-2` and so on
-(never replacing an earlier one) where the editor was started. A
-report holds the form's settings, its bricks, and the bricks measured against
-the form cell by cell: the cells one unit brick would improve, the worst
-cells, and maps of the form, the bricks and their difference. `inspect`
-rebuilds the form from a report's `[spec]` section and prints a fresh one;
-extra `key=value` arguments override settings, to try a change on the same
-form. `core/src/report.rs` documents the format.
+writes `arcs-grid-trial.brz`: a flat ring on the world's grid and an arch on
+a second grid tilted 30° and 20°. It was written to find out whether the
+game accepts a prefab with a tilted grid from the clipboard (it does).
 
-The brick orientation rules have been confirmed in the game, by pasting
-forms from the clipboard.
+## Layout of the code
+
+```
+core/src/
+  curves.rs       curves, flattened to polylines
+  sdf.rs          solids as distance functions
+  shapes.rs       the nine brick shapes as corner masks
+  orient.rs       corner mask -> the game's asset, orientation and size
+  spec.rs         a form's settings -> the right fitter -> bricks
+  fit_volume.rs   cell by cell
+  fit_planar.rs   flat outlines
+  fit_round.rs    spheres, ellipsoids, domes
+  fit_pyramid.rs  pyramids
+  fit_stack.rs    round tubes as pipes
+  fit_lathe.rs    profiles spun about an axis
+  fit_ribbon.rs   bands and tubes lifted out of their plane
+  report.rs       measuring a fit; the report format
+  surface.rs      the surface survey and section drawings
+editor/src/
+  lib.rs          the frame loop: events, fit, draw
+  state.rs        the workspace: forms, dots, dragging, grids, undo
+  panel.rs        the settings panel
+  camera.rs       the flown camera
+  brz.rs          the prefab file, and the clipboard
+  mesh.rs         a triangle mesh for each brick shape
+  material.rs     the bricks' shader, with edge lines
+  paint.rs        colouring a form
+  ruler.rs        the rulers
+  store.rs        saved forms
+  send.rs         saving a report
+```
+
+`core` depends on nothing but a vector-maths crate and knows nothing of the
+game's file format or the window. Everything it does can be run and tested
+from the command line.
 
 ## Dependencies
 
 | Crate | Used by | Why this and not by hand |
 |---|---|---|
 | `glam` (f64 only) | core | vector maths |
-| `three-d` (window + egui only) | editor | rendering, camera, picking, panel |
-| `brdb` (its .brz half only) | editor | the game's own prefab file, for the clipboard |
-| `clipboard-win` | editor, Windows | putting a file on the clipboard |
+| `three-d` (window and panel features only) | editor | rendering, picking and the panel in one crate |
+| `brdb` (its `.brz` half only) | editor | the game's own prefab format; the alternative is re-deriving its schemas from the game with no way to check the result |
+| `clipboard-win` | editor, Windows | putting a file on the clipboard; the alternative is the raw Win32 calls it wraps |
+| `wasm-bindgen`, `web-sys`, `js-sys` | editor, browser page only | the bridge between the compiled program and the page |
 
-Not used: Bevy (several times the compile time and download for the same
-four needs).
+Not used: a game engine (several times the compile time and download for
+the same needs), or any async runtime.
 
-## Compile times (measured, Windows, cold cache)
+## Conventions
 
-| Step | Time |
-|---|---|
-| core, with tests | 11 s |
-| editor dependencies, first time | 49 s |
-| core, after an edit | 3 to 5 s |
-
-Dependencies are built optimised once and cached; the workspace's own crates
-build unoptimised with thin debug info (`Cargo.toml`, `[profile.dev]`).
-
-## Fit times (measured, release build)
-
-Closest fit (Simplify 0, brick size 1):
-
-| Form | Time | Bricks | Discrepancy |
-|---|---|---|---|
-| Round arch, span 32, 3 thick, 4 deep | 4 ms | 40 | 4.9% |
-| Round arch, span 160 | 154 ms | 149 | 3.9% |
-| Circle band, radius 60 | 139 ms | 181 | 3.8% |
-| Solid sphere, radius 12 | 7 ms | 217 | 4.0% |
-| Solid sphere, radius 50 | 128 ms | 2,215 | 1.2% |
-| Hollow sphere, radius 50, wall 2 | 263 ms | 35,191 | 9.8% |
-| Hollow dome, radius 100, wall 2 | 663 ms | 71,041 | 9.5% |
-| Torus, radius 40, 8 thick | 149 ms | 573 | 12.0% |
-
-The editor's starting balance (Simplify 0.25, automatic size, budget 2500):
-
-| Form | Time | Bricks | Brick size | Discrepancy |
-|---|---|---|---|---|
-| Round arch, span 32 | 3 ms | 32 | 1 | 7.3% |
-| Round arch, span 160 | 162 ms | 112 | 1 | 3.9% |
-| Circle band, radius 60 | 149 ms | 149 | 1 | 4.6% |
-| Solid sphere, radius 12 | 9 ms | 217 | 1 | 4.0% |
-| Solid sphere, radius 50 | 164 ms | 2,215 | 1 | 1.2% |
-| Hollow sphere, radius 50, wall 2 | 237 ms | 35,191 | 1 | 9.8% |
-| Hollow dome, radius 100, wall 2 | 641 ms | 71,041 | 1 | 9.5% |
-| Torus, radius 40, 8 thick | 201 ms | 573 | 1 | 12.0% |
-
-Spheres and tori are laid out whole (see how-it-fits.md); the two large thin
-shells are past what that method's lattice allows and are still fitted cell
-by cell.
-
-Simplify thins flat forms only; volumes are thinned by brick size.
-
-Sizes are in microbricks.
-The two thin shells are over budget: see "Limits" in
-[how-it-fits.md](how-it-fits.md).
-
-## Where the time goes, and what was done about it
-
-Measured again after the changes below (release build, brick size 1), as
-the editor builds while a form is being dragged, and in full:
-
-| Form | Dragging | Let go (measured) |
-|---|---|---|
-| Flat arch, span 320 | 156 ms | 156 ms (was 1,250 ms) |
-| Arch as a pipe, span 320 | 33 ms | 127 ms |
-| Ring as a pipe, radius 80 | 41 ms | 175 ms |
-| Solid sphere, radius 80 | 7 ms | 295 ms (was 51,000 bricks, now 3,400) |
-
-- **Triangles are measured a sample row at a time**, from running counts
-  along each row, not a cell at a time across their whole box. On a large
-  flat arch that was nine tenths of the time.
-- **A form laid out whole is measured only once the mouse is let go.**
-  Measuring a sphere or a pipe against its form takes several times as long
-  as building it, and while dragging only the bricks are wanted.
-- **Measuring has no record to keep**, so its limit is the build's own. The
-  report's 16 bytes a cell had capped it at 4 million cells, and a sphere
-  over 78 in radius was fitted cell by cell for want of a measurement.
-
-Still slow: a thin hollow sphere above about radius 45 is fitted cell by
-cell (see how-it-fits.md), half a second at radius 80 and several at 160.
-
-- **Volume fitter:** the form is tested once per 8 × 8 × 8 block of cells;
-  blocks wholly inside or outside are never sampled. Each remaining cell's 64
-  samples are one `u64`, compared with each candidate shape by XOR and a
-  population count.
-- **Planar fitter:** a candidate triangle is compared with the form a row of
-  8 samples at a time, and with the unit pieces it would replace through a
-  summed-area table (four lookups whatever its size).
-- **Distance to a curve:** segments are filed in a bucket grid, so a query
-  reads one bucket, not the whole curve.
-- **Drawing:** one instanced mesh per brick shape, so a build is at most 29
-  draw calls however many bricks it has.
-
-The torus was the slowest form per brick (313 ms) while it was built as a
-small disc spun about an axis, which tests every sample against every edge
-of the disc. As its own formula it takes 21 ms.
-
-- **Stretched ramps in 3D:** each surface cell is tried with the one ramp
-  that faces the way the form does there, found from which half of the cell
-  holds more of it, and cells are looked up through a direct table. The first
-  version tried all twelve ramps at every cell and searched a sorted list for
-  each lookup: 3.1 s for a radius-50 sphere against 0.15 s now.
-- **Shadows:** the shadow map is redrawn only when the bricks change, not
-  every frame.
-- **Edge lines:** drawn in the bricks' own shader from per-vertex edge
-  distances, so they add no geometry and no draw calls.
+- Comments say why a thing is done the way it is, and what was tried
+  before, not what the line does.
+- Where a method was replaced, the comment keeps the reason and the
+  measurement that decided it.
+- Long lines are deliberate; the code is not run through `cargo fmt`.

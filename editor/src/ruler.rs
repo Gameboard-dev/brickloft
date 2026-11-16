@@ -29,9 +29,14 @@ fn on_screen(camera: &Camera, pixels_per_point: f32, p: Vec3) -> Option<Pos2> {
 /// The two level rulers lie on the floor of the form's box, one cell out
 /// from its low-x and low-y sides, and the upright one stands at the corner
 /// where they meet, so all three read from the same zero.
-pub fn draw(ui: &egui::Ui, camera: &Camera, pixels_per_point: f32, lo: [i32; 3], hi: [i32; 3]) {
-    // under the panel, over the view
-    let painter = ui.ctx().layer_painter(egui::LayerId::background());
+pub fn draw(ui: &egui::Ui, camera: &Camera, pixels_per_point: f32, left: f32, lo: [i32; 3], hi: [i32; 3]) {
+    // Over the view and not over the panel: kept to the part of the screen
+    // to the right of where the panel ends. The panel is painted on the
+    // same layer and before this, so without the limit a ruler that ran
+    // behind the panel was drawn across its settings.
+    let mut view = ui.ctx().content_rect();
+    view.min.x = view.min.x.max(left);
+    let painter = ui.ctx().layer_painter(egui::LayerId::background()).with_clip_rect(view);
     let project = |p: Vec3| on_screen(camera, pixels_per_point, p);
     let corner = vec3(lo[0] as f32 - 1.0, lo[1] as f32 - 1.0, lo[2] as f32);
     let axes = [vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0)];

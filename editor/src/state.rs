@@ -1397,6 +1397,13 @@ impl State {
         self.spec.pulls.pop();
     }
 
+    /// Take off one added point, by its number: Shift + right click on it.
+    pub fn remove_pull_at(&mut self, which: usize) {
+        if which < self.spec.pulls.len() {
+            self.spec.pulls.remove(which);
+        }
+    }
+
     pub fn add_point(&mut self) {
         let grid = |q: DVec3| DVec3::new(q.x.floor() + 0.5, q.y.floor() + 0.5, q.z.floor() + 0.5);
         if self.form == ARCH {
@@ -1685,6 +1692,12 @@ mod tests {
         let top_before = out_before;
         // the circle is still a circle: its radius and centre are as they were
         assert_eq!((state.spec.radius, state.spec.points[0]), (radius, centre));
+        // one of several is taken off by its number, and the others are left as they were
+        state.spec.pulls.push((held + DVec3::Z, DVec3::Z));
+        let first = state.spec.pulls[0];
+        state.remove_pull_at(1);
+        state.remove_pull_at(7);
+        assert_eq!(state.spec.pulls, vec![first]);
         // taken off again, it is round again; and a solid has no such points
         state.remove_pull();
         state.refresh(|| 0.0);

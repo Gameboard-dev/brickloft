@@ -195,13 +195,22 @@ pub fn run_form(form: usize) {
             if let (true, Some((lo, hi))) = (state.show_ruler, state.bounds) {
                 // where the form stands, to the cell below
                 let stands = state.place.map(|u| u.div_euclid(2));
-                ruler::draw(ui, &camera, frame.device_pixel_ratio, [0, 1, 2].map(|k| lo[k] + stands[k]), [0, 1, 2].map(|k| hi[k] + stands[k]));
+                ruler::draw(ui, &camera, frame.device_pixel_ratio, state.panel_right, [0, 1, 2].map(|k| lo[k] + stands[k]), [0, 1, 2].map(|k| hi[k] + stands[k]));
             }
         });
 
         // handles take the mouse before the camera does
         for event in frame.events.iter_mut() {
             match event {
+                // Shift + right click on a point that was added takes it off again
+                Event::MousePress { button: MouseButton::Right, position, modifiers, handled, .. } if !*handled && modifiers.shift => {
+                    if let Ok(Some(hit)) = pick(&context, &camera, *position, &handle_mesh, Cull::Back) {
+                        if let Some((Handle::Pull(which), _)) = shown_handles.get(hit.instance_id as usize) {
+                            state.remove_pull_at(*which);
+                            *handled = true;
+                        }
+                    }
+                }
                 // a middle click turns the camera to face what the cursor is on
                 Event::MousePress { button: MouseButton::Middle, position, handled, .. } if !*handled => {
                     let towards = camera.view_direction_at_pixel(*position);
