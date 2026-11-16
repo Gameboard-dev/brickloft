@@ -89,7 +89,8 @@ cargo run --release -p arcs-editor
 
 The first build takes about a minute. Putting the file on the clipboard is
 written for Windows; elsewhere the program still writes `arcs-build.brz`
-beside where it was started, to be loaded by hand.
+to the folder `omegga-arcs` in the system's temporary folder, to be loaded
+by hand.
 
 ## Use it
 

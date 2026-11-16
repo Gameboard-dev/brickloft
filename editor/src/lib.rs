@@ -13,6 +13,8 @@ pub mod material;
 pub mod mesh;
 pub mod paint;
 pub mod panel;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod places;
 pub mod ruler;
 pub mod send;
 pub mod state;
@@ -471,6 +473,9 @@ pub fn run_form(form: usize) {
                 state.alert = Some(("Not copied", said.clone()));
             }
             state.report_note = said;
+        }
+        if asked.clear_reports {
+            state.report_note = send::clear_reports();
         }
         if asked.report {
             state.report_note = match arcs_core::report::report(&state.full_spec()) {

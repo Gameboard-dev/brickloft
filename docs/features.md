@@ -152,8 +152,8 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 
 **Save** under **Saved forms** keeps the whole workspace: every form, with
 its colours, where it stands and the grid it is on. Saves are kept in
-folders (`arches`, `domes`, or your own) under `arcs-forms/`, beside where
-the program was started.
+folders (`arches`, `domes`, or your own) under `Documents/omegga-arcs/forms`
+in your home folder, the same on Windows, macOS and Linux.
 
 A save is a Brickadia prefab file (`.brz`), the same file Ctrl+C makes, so
 the game can load it as it stands. The file holds the bricks and, in its
@@ -210,8 +210,9 @@ page cannot write files, so it has neither.
 
 ## Reports
 
-**Save report** writes `arcs-report-1.txt`, `-2` and so on beside where the
-program was started. A report holds the form's settings, its bricks, the
+**Save report** writes `arcs-report-1.txt`, `-2` and so on to the folder
+`omegga-arcs` in the system's temporary folder, and says where. **Clear
+reports** deletes every report there and nothing else. A report holds the form's settings, its bricks, the
 cells where bricks and form disagree most, the share of its surface within
 10, 20, 30 and 45 degrees of the true surface, and drawings of cuts through
 bricks and form together. It can be rebuilt and re-measured from the command

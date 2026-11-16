@@ -128,8 +128,8 @@ pub fn tilted_trial() -> Result<Vec<u8>, String> {
     world.to_brz_vec().map_err(|e| e.to_string())
 }
 
-/// Write the workspace to `arcs-build.brz` beside where the editor was
-/// started, and put that file on the clipboard. Returns what to tell the
+/// Write the workspace to `arcs-build.brz` in the program's temporary
+/// folder (see `places`), and put that file on the clipboard. Returns what to tell the
 /// player.
 pub fn copy(bricks: &[Painted], forms: &[Placed]) -> String {
     if bricks.is_empty() {
@@ -142,9 +142,12 @@ pub fn copy(bricks: &[Painted], forms: &[Placed]) -> String {
     // One fixed name, replaced each time: what is on the clipboard is a
     // reference to the file, so it has to exist somewhere, and a fresh name
     // for every copy would leave a pile of them.
-    let path = std::env::current_dir().unwrap_or_default().join("arcs-build.brz");
+    let path = match crate::places::passing() {
+        Ok(folder) => folder.join("arcs-build.brz"),
+        Err(e) => return format!("Could not make the file: {e}"),
+    };
     if let Err(e) = std::fs::write(&path, &bytes) {
-        return format!("Could not write {}: {e}. Start the editor from a folder you can write to.", path.display());
+        return format!("Could not write {}: {e}", path.display());
     }
     let size = format!("{} bricks, {} bytes", bricks.len(), bytes.len());
     match place_on_clipboard(&path) {

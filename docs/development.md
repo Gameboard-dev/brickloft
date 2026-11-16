@@ -14,16 +14,20 @@ Without `--release` it builds faster and the editor still runs well: the
 fitting crate and all dependencies are optimised even in a debug build (see
 `[profile.dev]` in `Cargo.toml`).
 
-The program writes three kinds of file beside wherever it was started, so
-start it from a folder you can write to:
+The program writes nothing beside where it was started. Each kind of file
+has one place, the same on Windows, macOS and Linux
+([editor/src/places.rs](../editor/src/places.rs)):
 
-| File | Written by |
-|---|---|
-| `arcs-build.brz` | Ctrl+C: the prefab put on the clipboard |
-| `arcs-report-N.txt` | Save report |
-| `arcs-forms/` | Saved forms, one `.brz` prefab for each save |
+| File | Written by | Where |
+|---|---|---|
+| `<folder>/<name>.brz` | Saved forms, one prefab for each save | `Documents/omegga-arcs/forms/` in the home folder |
+| `arcs-N.png` | Save screenshot, F12 | `Pictures/omegga-arcs/` in the home folder |
+| `arcs-report-N.txt` | Save report | `omegga-arcs/` in the system's temporary folder |
+| `arcs-build.brz` | Ctrl+C: the prefab put on the clipboard | the same temporary folder |
 
-All three are in `.gitignore`.
+The temporary folder is `%TEMP%` on Windows, `$TMPDIR` on macOS and `/tmp`
+on Linux unless `TMPDIR` says otherwise. The commands below take a report's
+path, which **Save report** shows when it writes one.
 
 The optional browser page is built with `sh build-editor.sh`; see
 [web-page.md](web-page.md).

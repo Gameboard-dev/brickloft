@@ -157,7 +157,7 @@ another for the browser, chosen with `#[cfg(target_arch = "wasm32")]`:
 |---|---|---|
 | Window | made with an icon, maximised | the page's canvas |
 | Time | the system's monotonic clock | `Date.now()`, since that clock is not available |
-| Saved forms | `.brz` prefab files under `arcs-forms/` | the browser's local storage, one entry per save |
+| Saved forms | `.brz` prefab files under `Documents/omegga-arcs/forms/` | the browser's local storage, one entry per save |
 | Save report | a numbered text file | the report's text on the clipboard |
 | Copy and paste of bricks | a `.brz` file on the clipboard | not available |
 

@@ -1,34 +1,6 @@
 //! Saving a report on a fit, or a picture of the window, to be read or
 //! passed on.
 
-/// A file beside where the program was started: `stem-1.ext`, -2, ...: the
-/// first number not yet used, so that every save is kept. (One fixed name
-/// lost every report but the last.)
-#[cfg(not(target_arch = "wasm32"))]
-fn numbered(stem: &str, ext: &str) -> std::path::PathBuf {
-    let folder = std::env::current_dir().unwrap_or_default();
-    (1..10_000).map(|n| folder.join(format!("{stem}-{n}.{ext}"))).find(|p| !p.exists()).unwrap_or_else(|| folder.join(format!("{stem}.{ext}")))
-}
-
-/// The folder screenshots go in: `omegga-arcs` inside the user's pictures
-/// folder, made if it is not there.
-///
-/// The pictures folder is taken to be `Pictures` in the home folder, which
-/// is where Windows, macOS and most Linux desktops keep it; on Linux
-/// `XDG_PICTURES_DIR` is used when it is set. A user who has moved the
-/// folder elsewhere gets a `Pictures` folder in the old place. Asking each
-/// system where the folder really is takes a system interface per platform
-/// (or the `dirs` crate, which wraps them), for a folder the message names
-/// anyway.
-#[cfg(not(target_arch = "wasm32"))]
-fn screenshot_folder() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or("the home folder is not known")?;
-    let pictures = std::env::var_os("XDG_PICTURES_DIR").filter(|_| cfg!(target_os = "linux")).map(std::path::PathBuf::from).unwrap_or_else(|| std::path::Path::new(&home).join("Pictures"));
-    let folder = pictures.join("omegga-arcs");
-    std::fs::create_dir_all(&folder).map_err(|e| format!("could not make {}: {e}", folder.display()))?;
-    Ok(folder)
-}
-
 /// Write a picture of the window, given as rows of pixels from the top,
 /// to a numbered PNG file in the screenshot folder, and put the picture on
 /// the clipboard as well. Returns what to tell the player.
@@ -38,7 +10,7 @@ pub fn save_screenshot(width: u32, height: u32, pixels: &[[u8; 4]]) -> String {
         return "No screenshot: the picture read back is not the size of the window".into();
     }
     let written = (|| -> Result<std::path::PathBuf, String> {
-        let folder = screenshot_folder()?;
+        let folder = crate::places::screenshots()?;
         // arcs-1.png, -2, ...: the first number not yet used
         let path = (1..100_000).map(|n| folder.join(format!("arcs-{n}.png"))).find(|p| !p.exists()).ok_or("the folder is full")?;
         // the window's own see-through value is left out: a picture of the
@@ -112,6 +84,27 @@ fn picture_on_clipboard(_: u32, _: u32, _: &[[u8; 4]]) -> Result<(), String> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     #[test]
+    fn only_files_named_as_reports_are_counted_as_reports() {
+        assert_eq!(super::report_number("arcs-report-34.txt"), Some(34));
+        for other in ["arcs-report-.txt", "arcs-report-3.txt.bak", "arcs-report-x.txt", "arcs-report--3.txt", "arcs-build.brz", "notes.txt", "arcs-report-1234567.txt", "../arcs-report-1.txt"] {
+            assert_eq!(super::report_number(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn clearing_takes_the_reports_out_of_a_folder_and_leaves_the_rest() {
+        let folder = std::env::temp_dir().join(format!("omegga-arcs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        for name in ["arcs-report-1.txt", "arcs-report-7.txt", "arcs-build.brz", "notes.txt"] {
+            std::fs::write(folder.join(name), "x").unwrap();
+        }
+        let mut found = super::reports_in(&folder);
+        found.sort();
+        assert_eq!(found, [1, 7]);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
     fn a_bmp_holds_its_rows_from_the_bottom_blue_first_and_padded() {
         // two pixels across, two down: red, green over blue, white
         let pixels = [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [255, 255, 255, 255]];
@@ -125,16 +118,61 @@ mod tests {
     }
 }
 
-/// Put a report where it can be read: a file beside where the program was
-/// started on the desktop, the clipboard in the browser (a page cannot write
-/// files). Returns what to tell the player.
+/// The number in a report's file name, `arcs-report-<number>.txt`, if
+/// `name` is one.
+#[cfg(not(target_arch = "wasm32"))]
+fn report_number(name: &str) -> Option<u32> {
+    let digits = name.strip_prefix("arcs-report-")?.strip_suffix(".txt")?;
+    (!digits.is_empty() && digits.len() <= 6 && digits.bytes().all(|b| b.is_ascii_digit())).then(|| digits.parse().ok())?
+}
+
+/// The numbers of the reports in `folder`.
+#[cfg(not(target_arch = "wasm32"))]
+fn reports_in(folder: &std::path::Path) -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    entries.flatten().filter(|e| e.path().is_file()).filter_map(|e| report_number(e.file_name().to_str()?)).collect()
+}
+
+/// Put a report where it can be read: on the desktop a file in the
+/// program's temporary folder (see `places`), numbered one past the last
+/// report there so that every save is kept; in the browser the clipboard (a
+/// page cannot write files). Returns what to tell the player.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_report(text: &str) -> String {
-    let path = numbered("arcs-report", "txt");
-    match std::fs::write(&path, text) {
-        Ok(()) => format!("Report saved to {}", path.display()),
-        Err(e) => format!("Could not save the report to {}: {e}. Start the editor from a folder you can write to.", path.display()),
+    let saved = crate::places::passing().and_then(|folder| {
+        let number = reports_in(&folder).into_iter().max().unwrap_or(0) + 1;
+        let path = folder.join(format!("arcs-report-{number}.txt"));
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(path)
+    });
+    match saved {
+        Ok(path) => format!("Report saved to {}", path.display()),
+        Err(e) => format!("Could not save the report: {e}"),
     }
+}
+
+/// Delete every report in the program's temporary folder, and nothing else
+/// there: only files named as [`save_report`] names them. Returns what to
+/// tell the player.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn clear_reports() -> String {
+    let folder = match crate::places::passing() {
+        Ok(folder) => folder,
+        Err(e) => return format!("No reports cleared: {e}"),
+    };
+    let numbers = reports_in(&folder);
+    let gone = numbers.iter().filter(|n| std::fs::remove_file(folder.join(format!("arcs-report-{n}.txt"))).is_ok()).count();
+    match (gone, numbers.len() - gone) {
+        (0, 0) => format!("There are no reports in {}", folder.display()),
+        (gone, 0) => format!("Cleared {gone} report{} from {}", if gone == 1 { "" } else { "s" }, folder.display()),
+        (gone, left) => format!("Cleared {gone} reports from {}; {left} could not be deleted", folder.display()),
+    }
+}
+
+/// A page has no report files to clear: its reports go to the clipboard.
+#[cfg(target_arch = "wasm32")]
+pub fn clear_reports() -> String {
+    String::new()
 }
 
 #[cfg(target_arch = "wasm32")]

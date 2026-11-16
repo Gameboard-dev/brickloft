@@ -74,6 +74,8 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
 #[derive(Default)]
 pub struct Asked {
     pub report: bool,
+    /// delete every saved report
+    pub clear_reports: bool,
     /// save a picture of the window
     pub screenshot: bool,
     /// put the workspace on the clipboard as a .brz file
@@ -408,10 +410,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         saved_forms(ui, state);
 
         ui.separator();
-        asked.report = ui
-            .button("Save report")
-            .on_hover_text("Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong.")
-            .clicked();
+        ui.horizontal(|ui| {
+            asked.report = ui
+                .button("Save report")
+                .on_hover_text("Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong. Reports go in the folder omegga-arcs in the system's temporary folder.")
+                .clicked();
+            // a page's reports go to the clipboard: there are no files to clear
+            if cfg!(not(target_arch = "wasm32")) {
+                asked.clear_reports = ui.button("Clear reports").on_hover_text("Deletes every saved report file. Nothing else is touched.").clicked();
+            }
+        });
         // a web page cannot put a file on the clipboard (see `brz`), nor
         // write one to disk
         if cfg!(not(target_arch = "wasm32")) {

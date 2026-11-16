@@ -3,8 +3,8 @@
 //! A save is the whole workspace: every form, with its colours, where it
 //! stands and the grid it is on.
 //!
-//! On the desktop a save is a Brickadia prefab, `arcs-forms/<folder>/<name>.brz`
-//! beside where the editor was started: the same file Ctrl+C makes (see
+//! On the desktop a save is a Brickadia prefab, `<folder>/<name>.brz` under
+//! `Documents/omegga-arcs/forms` (see `places`): the same file Ctrl+C makes (see
 //! `brz`), holding the bricks and, in its description, the forms they were
 //! fitted to. That format was chosen over a text format of the editor's own
 //! (YAML, TOML, JSON) for three reasons. The editor already writes and
@@ -152,8 +152,29 @@ mod files {
     use super::*;
     use std::path::PathBuf;
 
+    /// Where saves are kept: see `places`. With no home folder to put them
+    /// in, a folder that cannot exist, so that nothing is listed and a save
+    /// says why it failed.
     fn root() -> PathBuf {
-        std::env::current_dir().unwrap_or_default().join("arcs-forms")
+        let Ok(root) = crate::places::forms() else { return PathBuf::new().join("\0no home folder") };
+        // Saves used to be kept in `arcs-forms` beside where the program
+        // was started. The first time the new folder is wanted, any found
+        // there are copied over (and left where they were), so that moving
+        // the folder loses nobody's forms.
+        let old = std::env::current_dir().unwrap_or_default().join("arcs-forms");
+        if !root.exists() && old.is_dir() {
+            for folder in names(old.clone(), true) {
+                let (from, to) = (old.join(&folder), root.join(&folder));
+                if std::fs::create_dir_all(&to).is_ok() {
+                    for name in names(from.clone(), false) {
+                        for ext in ["brz", "txt"] {
+                            let _ = std::fs::copy(from.join(format!("{name}.{ext}")), to.join(format!("{name}.{ext}")));
+                        }
+                    }
+                }
+            }
+        }
+        root
     }
 
     /// Names of the entries of `dir` that are folders (or, if not, saves:
