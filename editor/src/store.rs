@@ -224,6 +224,21 @@ mod files {
         Ok(format!("Saved to {}", path.display()))
     }
 
+    /// Delete a save: its .brz, and the .txt of the same name an earlier
+    /// version may have left, which would otherwise be listed in its place.
+    pub fn remove(folder: &str, name: &str) -> Result<(), String> {
+        let stem = root().join(clean(folder)?).join(clean(name)?);
+        let mut gone = false;
+        for ext in ["brz", "txt"] {
+            let path = stem.with_extension(ext);
+            if path.is_file() {
+                std::fs::remove_file(&path).map_err(|e| format!("could not delete {}: {e}", path.display()))?;
+                gone = true;
+            }
+        }
+        if gone { Ok(()) } else { Err("that form is no longer there".into()) }
+    }
+
     /// A save's bytes, and whether they are a .brz file's. Where a name was
     /// saved both ways, the .brz is the later one and is the one read.
     pub fn read(folder: &str, name: &str) -> Result<(Vec<u8>, bool), String> {
@@ -287,6 +302,10 @@ mod files {
         Ok(format!("Saved as {folder} / {name} in this browser"))
     }
 
+    pub fn remove(folder: &str, name: &str) -> Result<(), String> {
+        storage()?.remove_item(&key(&clean(folder)?, &clean(name)?)).map_err(|_| "the browser would not delete it".to_string())
+    }
+
     pub fn read(folder: &str, name: &str) -> Result<(Vec<u8>, bool), String> {
         let text = storage()?.get_item(&key(&clean(folder)?, &clean(name)?)).ok().flatten().ok_or_else(|| "that form is no longer there".to_string())?;
         Ok((text.into_bytes(), false))
@@ -294,6 +313,12 @@ mod files {
 }
 
 pub use files::{add_folder, folders, forms};
+
+/// Delete the save under `name` in `folder`. It cannot be brought back, so
+/// the panel asks first.
+pub fn delete(folder: &str, name: &str) -> Result<(), String> {
+    files::remove(folder, name)
+}
 
 #[cfg(test)]
 mod tests {

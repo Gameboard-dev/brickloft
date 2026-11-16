@@ -163,7 +163,8 @@ forms that can still be reshaped.
 **Open** puts a save in place of the whole workspace, and Ctrl+Z brings the
 workspace back. **Add** adds the save's forms beside the form being edited
 and on its grid, as a paste does. Dragging a save from the list onto the
-view adds it too. Saves made by earlier versions, which were text files of
+view adds it too. **Delete** removes a save from disk after asking you to
+confirm, since Ctrl+Z cannot bring a deleted file back. Saves made by earlier versions, which were text files of
 one form's settings, are still listed and opened.
 
 ## Colour

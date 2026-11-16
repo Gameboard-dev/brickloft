@@ -192,6 +192,9 @@ pub struct State {
     /// A notice to be read, as its heading and its text: shown over the view
     /// until dismissed.
     pub alert: Option<(&'static str, String)>,
+    /// a saved form the player has asked to delete, as its folder and its
+    /// name: asked about over the view, and deleted only on a yes
+    pub deleting: Option<(String, String)>,
     /// something done, said for a few seconds over the view: the words, and
     /// when they were first shown (by the panel's clock, once it has shown them)
     pub toast: Option<(String, Option<f64>)>,
@@ -353,6 +356,7 @@ impl State {
             problem: None,
             report_note: String::new(),
             alert: None,
+            deleting: None,
             toast: None,
             paint: Paint::default(),
             others: Vec::new(),

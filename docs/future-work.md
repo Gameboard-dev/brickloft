@@ -26,6 +26,14 @@ The tools would take exact values where the mouse takes approximate ones:
 - **Reading back:** each form's settings, brick count and discrepancy, so
   that Claude can check a change and correct it.
 
+A further use is rebuilding an existing object. Given a point cloud of a
+solid 3D object, which is a list of points sampled from its surface, Claude
+would recreate the object from the editor's own forms: choosing a sphere
+here and an arch or a revolved profile there, then sizing, placing, turning
+and colouring each until the forms together match the cloud. Each change
+would appear in the editor as it is made, so the player watches the object
+being assembled and can stop or correct it at any step.
+
 Every change would pass through the same code as a change made by hand. It
 would therefore be refitted, drawn and added to the undo history in the
 same way, and Ctrl+Z would take back a step Claude made.
@@ -40,6 +48,10 @@ Open questions:
   to be validated and limited in size exactly as a pasted file's values
   are, and the listener must accept connections from the same computer
   only.
+- **Point clouds.** A cloud has to reach Claude in a form it can reason
+  about, and a large one will need thinning first. Judging how well the
+  forms match the cloud needs a measure the editor can report, such as the
+  share of the cloud's points lying on or near the bricks.
 - **Scope.** The plugin that once sent bricks to a running game server was
   removed as needless complexity. This connection runs the other way, into
   the editor, and the game is still reached only through copy and paste.

@@ -1061,7 +1061,12 @@ A round section was used first. Its top falls away ever more steeply
 towards its sides, and a surface steeper than one cell up per cell across
 cannot be made of bricks one cell square, so the sides came out as tall
 slivers standing proud of one another. With the octagon, the steep part is
-an upright wall. Whole cells would give that wall the outline of a
+an upright wall. The stretch by $`\sqrt{1 + m^2}`$ is limited, so that the
+tube never reaches further than $`H`$ past the lowest and highest points of
+the curve over that ground. Without the limit, a curve that turns straight
+up for a short way made $`m`$ very large there and the tube a tall blade. A
+curve pulled into a loop passes over the same ground twice at two heights,
+and each pass is built as its own tube. Whole cells would give that wall the outline of a
 staircase wherever the tube runs at an angle to the grid, so each notch of
 the staircase is filled with half a cell, a ramp standing on end. On a tube
 11 across pulled up by 25 cells, the stepped share of the outside fell from

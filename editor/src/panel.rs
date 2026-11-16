@@ -22,6 +22,7 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
     // edited, added to the workspace beside it, or dragged onto the view,
     // which adds it too.
     let mut open: Option<(String, bool)> = None;
+    let mut delete: Option<String> = None;
     if state.forms.is_empty() {
         ui.label("Nothing saved here yet.");
     }
@@ -37,7 +38,13 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
             if ui.small_button("Add").on_hover_text("Add its forms to the workspace, beside the form being edited and on its grid.").clicked() {
                 open = Some((name.clone(), true));
             }
+            if ui.small_button("Delete").on_hover_text("Delete this saved form. You are asked first.").clicked() {
+                delete = Some(name.clone());
+            }
         });
+    }
+    if let Some(name) = delete {
+        state.deleting = Some((state.folder.clone(), name));
     }
     if let Some((name, add)) = open {
         let folder = state.folder.clone();
@@ -101,6 +108,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if ui.button("OK").clicked() || keyed {
                 state.alert = None;
             }
+        });
+    }
+    // A saved form about to be deleted. A file once deleted is not brought
+    // back by Ctrl+Z, so it is asked about first, and only the button says
+    // yes: Enter does not, so that a key pressed out of habit to close a
+    // notice cannot delete anything. Escape says no.
+    if let Some((folder, name)) = state.deleting.clone() {
+        egui::Window::new("Delete saved form").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ui.ctx(), |ui| {
+            ui.set_max_width(420.0);
+            ui.label(format!("Delete \"{name}\" from the folder \"{folder}\"? It cannot be brought back."));
+            ui.horizontal(|ui| {
+                if ui.button("Delete").clicked() {
+                    state.store_note = match crate::store::delete(&folder, &name) {
+                        Ok(()) => format!("Deleted {name}"),
+                        Err(e) => format!("Not deleted: {e}"),
+                    };
+                    state.deleting = None;
+                    state.list_saved();
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    state.deleting = None;
+                }
+            });
         });
     }
     // Something done that needs no answer, said at the top of the view for
