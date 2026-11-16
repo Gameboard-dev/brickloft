@@ -785,7 +785,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.rise = Some(height);
                 }
                 // (and a hedge given no length is three times as long as it is thick)
-                if kind == brickloft_core::tree::Kind::Hedge && !settings.contains_key("stretch") {
+                if matches!(kind, brickloft_core::tree::Kind::Hedge | brickloft_core::tree::Kind::Reeds) && !settings.contains_key("stretch") {
                     spec.stretch.x = brickloft_core::tree::HEDGE_LENGTH;
                 }
             }
