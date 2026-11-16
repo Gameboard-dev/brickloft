@@ -385,36 +385,9 @@ pub enum Field {
     /// side of it in that plane and `half_deep` to each side square to
     /// both (see [`Stroke::rail`]).
     Rail { stroke: Stroke, axis: usize, half_thick: f64, half_deep: f64 },
-    /// A band that lay flat across `axis`, from `w0` to `w0 + depth` along
-    /// it and with the outline `region` seen along it, raised to follow
-    /// `path`: over each point of the outline, by as much as the nearest
-    /// part of the path is off `plane` (see [`lift_at`]). `steep` is the
-    /// most the path climbs for each cell it goes.
-    Ribbon { region: Region, axis: usize, w0: f64, depth: f64, path: Vec<DVec3>, plane: f64, steep: f64 },
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
-}
-
-/// How far along `axis` a path is from `plane`, at the part of it nearest
-/// the point (u, v) as seen along that axis. Between two of the path's
-/// points the answer runs evenly from one's to the other's, so it has no
-/// jumps along the path.
-pub fn lift_at(path: &[DVec3], axis: usize, plane: f64, u: f64, v: f64) -> f64 {
-    let (ua, va) = [(1, 2), (0, 2), (0, 1)][axis.min(2)];
-    let at = DVec2::new(u, v);
-    let flat = |p: DVec3| DVec2::new(p[ua], p[va]);
-    let mut best = (f64::INFINITY, 0.0);
-    for pair in path.windows(2) {
-        let (a, b) = (flat(pair[0]), flat(pair[1]));
-        let along = b - a;
-        let t = if along.length_squared() > 1e-18 { ((at - a).dot(along) / along.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-        let off = (a + along * t).distance_squared(at);
-        if off < best.0 {
-            best = (off, pair[0][axis] + (pair[1][axis] - pair[0][axis]) * t - plane);
-        }
-    }
-    best.1
 }
 
 impl Field {
@@ -470,13 +443,6 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
-            Field::Ribbon { region, axis, w0, depth, path, plane, steep } => {
-                let (ua, va) = [(1, 2), (0, 2), (0, 1)][(*axis).min(2)];
-                let middle = w0 + depth / 2.0 + lift_at(path, *axis, *plane, p[ua], p[va]);
-                // straight along the axis, made no more than the true distance
-                let slab = ((p[*axis] - middle).abs() - depth / 2.0) / (1.0 + steep * steep).sqrt();
-                region.eval(DVec2::new(p[ua], p[va])).max(slab)
-            }
             Field::Rail { stroke, axis, half_thick, half_deep } => stroke.rail(p, *axis, *half_thick, *half_deep),
             Field::Warp { inner, pulls, reach, scale } => {
                 // Where this point was before the pulls moved it. A pull

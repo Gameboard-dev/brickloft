@@ -1,29 +1,25 @@
-//! A flat band whose curve rises and falls: a ring pulled up at one side.
+//! A solid that has a top and an under side over the ground it covers: a
+//! tube or a flat band whose curve rises and falls, as a ring pulled up at
+//! one side does.
 //!
-//! Seen along the axis it lay flat across, such a band has the outline it
-//! always had; only its height changes along it. So it is built from the
-//! flat band's own bricks, which fit that outline as well as it can be
-//! fitted, each raised to the height of the curve where it stands:
+//! Such a solid is built in columns. Its ground is whole cells and half
+//! cells that share their corners ([`Ground`]), each corner is given one
+//! height for the top and one for the under side, and each cell is made
+//! from the heights at its own corners ([`parts_of`]): a sloped piece on
+//! top, the piece that answers it underneath, and whole cells between
+//! them. What the ground is and how high the two sides are over it is the
+//! caller's to say (`lifted_tube` and `lifted_band` in `spec.rs`).
 //!
-//! - a brick the curve is level over is moved up or down whole;
-//! - a block the curve climbs over is cut into single cells, and each cell
-//!   is made from the heights of its four corners (see [`parts_of`]): a
-//!   sloped piece on top, the piece that answers it underneath, and whatever
-//!   is left between them;
-//! - a three-cornered brick of the outline is given a sloped top where one
-//!   brick can make it, which is where it rises towards its square corner or
-//!   away from it.
-//!
-//! Where none of that can be done (a cell whose corners are at four
-//! different heights, a three-cornered brick the curve crosses askew, a
-//! climb steeper than the band is thick) the piece is moved whole to the
-//! height of its middle, and there is a step at its edges. The alternative
-//! was fitting the whole band cell by cell as a tube, which lost the
-//! outline as well: reports 27 and 28, a third of their faces steps.
+//! A flat band was first raised another way, in this file: its own bricks,
+//! each moved to the height of the curve where it stood, a block the curve
+//! climbed over cut into single cells. That is gone. A long three-cornered
+//! brick of the outline that the curve climbed along could only be moved
+//! whole, and stood out of the band as a slab, and a cell the curve
+//! climbed over by more than the band was deep became a plain block. On
+//! reports 27 and 28 a quarter and a sixth of the outside were steps.
 
-use crate::fit_round::rest_of_box;
 use crate::fit_stack::valley;
-use crate::shapes::{shape_info, CellBrick, Kind, CUBE};
+use crate::shapes::{shape_info, CellBrick, Kind};
 use crate::spec::plane_axes;
 
 /// A square of a sloping surface in parts, from the heights of its four corners
@@ -481,142 +477,10 @@ pub fn columns(cells: &[(i32, i32)], span: &dyn Fn(f64, f64) -> (f64, f64), axis
     ground.lay(axis, max_ext)
 }
 
-/// A band to raise. Everything is in cells.
-pub struct Ribbon<'a> {
-    /// the band's bricks as fitted flat: all of one thickness across `axis`
-    pub flat: &'a [CellBrick],
-    pub axis: usize,
-    /// how far along `axis` the curve is from where it lay flat, over the
-    /// point (u, v) of the plane across it
-    pub lift: &'a dyn Fn(f64, f64) -> f64,
-    pub max_ext: i32,
-}
-
-/// The bricks of `ribbon`, or `None` if its flat bricks are not all of one
-/// thickness, or hold a shape a flat band is not made of.
-pub fn fit_ribbon(ribbon: &Ribbon) -> Option<Vec<CellBrick>> {
-    let axis = ribbon.axis;
-    let (ua, va) = plane_axes(axis);
-    let first = ribbon.flat.first()?;
-    let (w0, thick) = (first.min[axis], first.ext[axis]);
-    if ribbon.flat.iter().any(|b| b.min[axis] != w0 || b.ext[axis] != thick) {
-        return None;
-    }
-    let limit = ribbon.max_ext.max(1);
-    let lifted = |u: i32, v: i32| (ribbon.lift)(u as f64, v as f64).round() as i32;
-    let mut bricks: Vec<CellBrick> = Vec::new();
-
-    // a brick over `[u, v, wu, wv]` of the plane and `from..to` along the
-    // axis, its mask given with the plane's corners first and the axis last
-    let mut brick = |[u, v, wu, wv]: [i32; 4], local: u8, from: i32, to: i32| {
-        if to <= from || shape_info(local).is_none() {
-            return;
-        }
-        let mask = (0..8u8).filter(|c| local >> c & 1 == 1).fold(0u8, |m, c| m | 1 << ((c & 1) << ua | (c >> 1 & 1) << va | (c >> 2) << axis));
-        // one that is the same all the way along the axis may be cut to length
-        let upright = local & 15 == local >> 4;
-        let mut at = from;
-        while at < to {
-            let run = if upright { (to - at).min(limit) } else { to - at };
-            let (mut min, mut ext) = ([0; 3], [0; 3]);
-            (min[ua], min[va], min[axis]) = (u, v, at);
-            (ext[ua], ext[va], ext[axis]) = (wu, wv, run);
-            bricks.push(CellBrick { mask, min, ext });
-            at += run;
-        }
-    };
-    // One part of the band over a box of the plane: standing on the corners
-    // `foot` of the box, its top starting `from` cells up and reaching
-    // `peak` at the corners `up`.
-    let mut part = |on: [i32; 4], foot: u8, from: i32, peak: i32, up: u8, in_valley: bool| {
-        if up == 0 || peak == from {
-            brick(on, foot | foot << 4, w0 + from, w0 + from + thick);
-            return;
-        }
-        let top = if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 };
-        // what the same piece leaves of its box, where the under side is
-        let under = if foot == 15 { rest_of_box(top) } else { (foot & !up) | foot << 4 };
-        // Half a square that rises towards one end of its long side is a
-        // brick (a half inner corner) on top or underneath, but not both:
-        // what it would leave of its box is no brick. The side that can be
-        // sloped is, and the other is left level: the band is a little too
-        // thick or too thin there, and smooth on one face.
-        match (shape_info(top).is_some(), shape_info(under).is_some()) {
-            (true, true) => {
-                brick(on, top, w0 + thick + from, w0 + thick + peak);
-                brick(on, under, w0 + from, w0 + peak);
-                brick(on, foot | foot << 4, w0 + peak, w0 + thick + from);
-            }
-            (true, false) => {
-                brick(on, top, w0 + thick + from, w0 + thick + peak);
-                brick(on, foot | foot << 4, w0 + from, w0 + thick + from);
-            }
-            (false, true) => {
-                brick(on, under, w0 + from, w0 + peak);
-                brick(on, foot | foot << 4, w0 + peak, w0 + thick + peak);
-            }
-            (false, false) => brick(on, foot | foot << 4, w0 + from, w0 + from + thick),
-        }
-    };
-
-    for b in ribbon.flat {
-        let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
-        let on = [u, v, wu, wv];
-        // the corners of the box, numbered as a brick's are: u, then v
-        let corner = |k: usize| (u + (k as i32 & 1) * wu, v + (k as i32 >> 1) * wv);
-        let level = |k: usize| lifted(corner(k).0, corner(k).1);
-        let middle = |at: [i32; 4]| (ribbon.lift)(at[0] as f64 + at[2] as f64 / 2.0, at[1] as f64 + at[3] as f64 / 2.0);
-        if b.mask == CUBE {
-            let all_level = (0..=wv).all(|j| (0..=wu).all(|i| lifted(u + i, v + j) == level(0)));
-            if all_level {
-                part(on, 15, level(0), level(0), 0, false);
-                continue;
-            }
-            for j in 0..wv {
-                for i in 0..wu {
-                    let cell = [u + i, v + j, 1, 1];
-                    let c = [lifted(u + i, v + j), lifted(u + i + 1, v + j), lifted(u + i, v + j + 1), lifted(u + i + 1, v + j + 1)];
-                    let (lo, hi) = (*c.iter().min().unwrap(), *c.iter().max().unwrap());
-                    let share = (middle(cell) - lo as f64) / (hi - lo).max(1) as f64;
-                    match parts_of(c, share).filter(|_| hi - lo <= thick) {
-                        Some(parts) => parts.into_iter().for_each(|(foot, from, peak, up, in_valley)| part(cell, foot, from, peak, up, in_valley)),
-                        None => {
-                            let whole = middle(cell).round() as i32;
-                            part(cell, 15, whole, whole, 0, false);
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-        // a three-cornered brick of the outline: a ramp standing along the axis
-        shape_info(b.mask).filter(|i| i.kind == Kind::Ramp && i.axis as usize == axis)?;
-        let foot = (0..4u8).filter(|k| b.mask >> ((k & 1) << ua | (k >> 1) << va) & 1 == 1).fold(0u8, |m, k| m | 1 << k);
-        let lacks = (!foot & 15).trailing_zeros() as usize;
-        let square = 3 - lacks;
-        let held: Vec<usize> = (0..4).filter(|k| foot >> k & 1 == 1).collect();
-        let (lo, hi) = (held.iter().map(|k| level(*k)).min().unwrap(), held.iter().map(|k| level(*k)).max().unwrap());
-        let up = held.iter().filter(|k| level(**k) == hi).fold(0u8, |m, k| m | 1 << k);
-        let two_levels = held.iter().all(|k| level(*k) == lo || level(*k) == hi);
-        let _ = square;
-        if hi == lo {
-            part(on, foot, lo, lo, 0, false);
-        } else if two_levels && hi - lo <= thick {
-            part(on, foot, lo, hi, up, false);
-        } else {
-            // at the height of its own middle, a third of the way in from its square corner
-            let (sq, others): ((i32, i32), Vec<(i32, i32)>) = (corner(square), held.iter().filter(|k| **k != square).map(|k| corner(*k)).collect());
-            let whole = (ribbon.lift)((sq.0 + others[0].0 + others[1].0) as f64 / 3.0, (sq.1 + others[0].1 + others[1].1) as f64 / 3.0).round() as i32;
-            part(on, foot, whole, whole, 0, false);
-        }
-    }
-    (!bricks.is_empty()).then_some(bricks)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shapes::inside_shape;
+    use crate::shapes::{inside_shape, CUBE};
 
     fn holding(bricks: &[CellBrick], p: [f64; 3]) -> usize {
         bricks
@@ -720,38 +584,5 @@ mod tests {
         // a tetrahedron is the same along no axis
         let tets: Vec<CellBrick> = (0..3).map(|x| CellBrick { mask: 0x17, min: [x, 0, 0], ext: [1, 1, 1] }).collect();
         assert_eq!(in_rows(tets, 80).len(), 3);
-    }
-
-    #[test]
-    fn a_band_climbing_along_itself_is_ramps_above_and_below() {
-        // a straight band along x, three wide and two thick, lying across z,
-        // and an end of it cut on the slant: a three-cornered brick
-        let flat = [CellBrick { mask: CUBE, min: [0, 0, 5], ext: [12, 3, 2] }, CellBrick { mask: 0x77, min: [12, 0, 5], ext: [3, 3, 2] }];
-        // level, then one up in two across, then level again four higher
-        let lift = |u: f64, _: f64| ((u - 2.0) / 2.0).clamp(0.0, 4.0);
-        let bricks = fit_ribbon(&Ribbon { flat: &flat, axis: 2, lift: &lift, max_ext: 80 }).unwrap();
-        // every point over the band: in one brick exactly when within a cell of the true slab
-        let n = 41;
-        for k in 0..n * n * n {
-            let p = [((k % n) as f64 + 0.31) / n as f64 * 15.0, ((k / n % n) as f64 + 0.47) / n as f64 * 3.0, 4.0 + ((k / (n * n)) as f64 + 0.29) / n as f64 * 9.0];
-            let inside_outline = p[0] < 12.0 || (p[0] - 12.0) + p[1] < 3.0;
-            let mid = 6.0 + lift(p[0], p[1]);
-            let held = holding(&bricks, p);
-            assert!(held <= 1, "{held} bricks hold {p:?}");
-            if inside_outline && (p[2] - mid).abs() < 0.4 {
-                assert_eq!(held, 1, "a hole at {p:?}");
-            }
-            if !inside_outline || (p[2] - mid).abs() > 1.6 {
-                assert_eq!(held, 0, "a brick at {p:?}, off the band");
-            }
-        }
-        // sloped bricks where it climbs, none where it is level
-        let sloped: Vec<&CellBrick> = bricks.iter().filter(|b| b.mask != CUBE && b.mask != 0x77).collect();
-        assert!(sloped.len() >= 8 && sloped.iter().all(|b| b.min[0] >= 2 && b.min[0] < 10), "{} sloped bricks", sloped.len());
-        // the slanted end, which the curve is level over, is its own brick moved up whole
-        assert!(bricks.iter().any(|b| b.mask == 0x77 && b.min == [12, 0, 9] && b.ext == [3, 3, 2]));
-        // bricks of two thicknesses are not a band
-        let odd = [flat[0], CellBrick { ext: [3, 3, 1], ..flat[1] }];
-        assert!(fit_ribbon(&Ribbon { flat: &odd, axis: 2, lift: &lift, max_ext: 80 }).is_none());
     }
 }
