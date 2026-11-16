@@ -12,7 +12,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 10] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Maze"];
+pub const FORMS: [&str; 11] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -26,7 +26,12 @@ pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
 pub const CUBE: usize = 7;
 pub const TREE: usize = 8;
-pub const MAZE: usize = 9;
+// (After Plant, as it was asked for, with the maze after it. A save names
+// its forms in words and not by these places (see
+// `brickloft_core::report::spec_text`), so no save changes meaning when a
+// place does.)
+pub const FURNITURE: usize = 9;
+pub const MAZE: usize = 10;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -169,6 +174,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Pyramid => PYRAMID,
         Form::Cube => CUBE,
         Form::Tree => TREE,
+        Form::Furniture => FURNITURE,
         Form::Maze => MAZE,
     }
 }
@@ -176,6 +182,7 @@ pub(crate) fn form_index(form: Form) -> usize {
 /// The points a form of kind `form` (one of `ARCH` to `TREE`) starts
 /// from, and a Bezier curve's weights: where the editor sets one down, and
 /// what a form added from outside gets if it is given none of its own.
+/// For furniture `radius` is half its height (see [`half_height`]).
 pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
@@ -183,12 +190,24 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
         CIRCLE | PYRAMID | TREE | MAZE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
+        // Standing on the floor too. Its point is its middle, as a
+        // cube's is, so half its height up: exactly, and not in the
+        // cell below as a cube's is, since its height is whatever its
+        // kind starts at and may be even.
+        FURNITURE => (vec![DVec3::new(0.5, 0.5, radius)], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
         BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
         // resting on the floor
         SPHERE => (vec![cell(0.0, 0.0, radius.ceil())], Vec::new()),
         _ => (vec![cell(0.0, 0.0, 10.0), cell(5.0, 0.0, 8.0), cell(8.0, 0.0, 0.0)], Vec::new()),
     }
+}
+
+/// What [`usual_points`] is to be given for a form's radius: the radius,
+/// or for furniture half its height, which is what stands it on the
+/// floor. Its radius is half its depth (see `State::usual_furniture`).
+pub fn half_height(form: usize, spec: &Spec) -> f64 {
+    if form == FURNITURE { (2.0 * spec.radius * spec.stretch.z).round() / 2.0 } else { spec.radius }
 }
 
 /// A brick of the workspace: the brick, its colour (`None` for the player's
@@ -633,7 +652,7 @@ impl State {
     /// microbricks allow). Returns whether it is. By whole cells, so that a
     /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | MAZE);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | FURNITURE | MAZE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -1029,7 +1048,8 @@ impl State {
         let mut all = Vec::new();
         // A tree has nothing to tune: it fits no better a cell to one
         // side, and each try would be a second's building. Nor has a maze.
-        if matches!(self.form, TREE | MAZE) {
+        // (Nor has furniture, which is exact wherever it stands.)
+        if matches!(self.form, TREE | FURNITURE | MAZE) {
             return all;
         }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
@@ -1198,7 +1218,7 @@ impl State {
     /// Start the chosen form from a sensible example of itself.
     pub fn preset(&mut self) {
         self.preset_settings();
-        let (points, weights) = usual_points(self.form, self.spec.radius);
+        let (points, weights) = usual_points(self.form, half_height(self.form, &self.spec));
         (self.spec.points, self.spec.weights) = (points, weights);
         self.lay_tree();
     }
@@ -1282,6 +1302,10 @@ impl State {
                 let kind = s.tree.kind;
                 self.usual_tree(kind);
             }
+            FURNITURE => {
+                let kind = s.furniture.kind;
+                self.usual_furniture(kind);
+            }
             MAZE => self.usual_maze(),
             _ => {}
         }
@@ -1306,6 +1330,31 @@ impl State {
         // (from one kind that lies along a line to another, the line is kept)
         self.spec.stretch = DVec3::ONE;
         self.lay_tree();
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+    }
+
+    /// Make the form the furniture of `kind` as it starts out: its
+    /// settings, its usual size, and its own colours, standing where it
+    /// stood. The seed is kept, as a tree's is.
+    ///
+    /// The colours come with it for a tree's reason: a bookcase in one
+    /// colour is a block, since its books are told apart by colour alone.
+    ///
+    /// Its size is kept as a cube's is, half a side and a stretch along
+    /// each axis, so that everything that resizes a cube (the dots on its
+    /// sides, Ctrl + scroll) resizes it with no code of its own (see
+    /// `brickloft_core::furniture::Furniture::usual_form`).
+    pub fn usual_furniture(&mut self, kind: brickloft_core::furniture::Kind) {
+        use brickloft_core::furniture::{Furniture, KINDS};
+        let tall = Furniture::usual_size(kind)[2];
+        // (the floor it stands on now, to stand on it still at its new height)
+        let snapped = self.spec.snapped();
+        let floor = snapped.points.first().map(|middle| brickloft_core::spec::cube_sides(&snapped, *middle)[2].0);
+        self.spec.furniture = Furniture { seed: self.spec.furniture.seed, ..Furniture::of(kind) };
+        (self.spec.radius, self.spec.stretch) = Furniture::usual_form(kind);
+        if let (Some(floor), Some(middle)) = (floor, self.spec.points.first_mut()) {
+            middle.z = floor + tall / 2.0;
+        }
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
 
@@ -1357,6 +1406,7 @@ impl State {
             PYRAMID => Form::Pyramid,
             CUBE => Form::Cube,
             TREE => Form::Tree,
+            FURNITURE => Form::Furniture,
             MAZE => Form::Maze,
             _ => Form::Revolve,
         };
@@ -1595,7 +1645,8 @@ impl State {
             // radius dot: it would move all six sides at once, which
             // Ctrl + scroll does, and seven dots round a small cube leave
             // little of it to see.
-            CUBE if !p.is_empty() => {
+            // (furniture fills a cube's box and is resized by the same dots)
+            CUBE | FURNITURE if !p.is_empty() => {
                 let snapped = self.spec.snapped();
                 let sides = brickloft_core::spec::cube_sides(&snapped, snapped.points[0]);
                 for side in 0..6 {
@@ -2150,7 +2201,8 @@ impl State {
     pub fn can_pull(&self) -> bool {
         // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
         // (nor a maze, whose walls are where its cells are)
-        self.form != MAZE && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
+        // (nor furniture, which is boards: there is no curve in it to pull)
+        !matches!(self.form, MAZE | FURNITURE) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -3866,5 +3918,99 @@ mod tests {
         assert_eq!(state.others.len(), 3);
         // one step to undo
         assert!(state.undo() && state.others.len() == 2 && state.spec.on_grid == 3);
+    }
+
+    /// A bookcase as the menu starts one, built.
+    fn a_bookcase() -> State {
+        let mut state = State::new();
+        state.form = FURNITURE;
+        state.preset();
+        state.refresh(|| 0.0);
+        state
+    }
+
+    /// How many shelves, bays and books the bookcase being edited has.
+    fn counted(state: &State) -> (usize, usize, usize) {
+        let spec = state.full_spec().snapped();
+        let count = brickloft_core::furniture::Model::new(&spec.furniture, brickloft_core::spec::cube_sides(&spec, spec.points[0]), spec.max_ext, spec.wedges).unwrap().count;
+        (count.shelves, count.bays, count.books)
+    }
+
+    #[test]
+    fn furniture_starts_as_a_bookcase_on_the_floor_in_its_own_colours() {
+        use brickloft_core::furniture::{Furniture, Kind};
+        let mut state = a_bookcase();
+        assert_eq!((state.full_spec().form, state.spec.furniture), (Form::Furniture, Furniture::of(Kind::Bookcase)));
+        // 36 by 10 by 60, standing on the floor
+        assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 60])));
+        assert!(state.problem.is_none() && state.built.error == 0.0 && state.built.shades.len() == state.built.bricks.len());
+        assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (crate::paint::Mode::Pattern, crate::paint::palette("bookcase")));
+        // its bricks are in its colours: the wood, the back, and several of the books'
+        let seen: std::collections::HashSet<[u8; 3]> = state.painted().iter().filter_map(|b| b.1).collect();
+        assert!(seen.len() >= 6 && seen.iter().all(|c| state.paint.colours.contains(c)), "{} colours", seen.len());
+        // a dot at its middle and one on each side, as a cube has; no points are added to it, and nothing about it is searched for
+        assert_eq!(state.handles().iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0)].into_iter().chain((0..6).map(Handle::Side)).collect::<Vec<_>>());
+        assert!(!state.can_pull() && state.add_pull(DVec3::new(0.5, -5.0, 30.0)).is_none() && state.tunable(None).is_empty());
+        // every set of colours has a colour for each of its eight numbers, and a name
+        let sets = crate::paint::palettes("bookcase");
+        assert!(sets.len() == crate::paint::furniture_palette_names("bookcase").len() && sets.iter().all(|set| set.len() == crate::paint::MOST_COLOURS));
+        // put back to how it starts, it keeps its seed and the floor it stands on
+        state.spec.furniture = Furniture { seed: 9, board: 5, books: 10, ..state.spec.furniture };
+        state.spec.points[0].z += 20.0;
+        state.usual_furniture(Kind::Bookcase);
+        state.refresh(|| 0.0);
+        assert_eq!((state.spec.furniture, state.bounds), (Furniture { seed: 9, ..Furniture::of(Kind::Bookcase) }, Some(([-18, -5, 20], [18, 5, 80]))));
+        // and a save of it is read back as it was
+        let forms = state.forms();
+        assert_eq!(crate::store::forms_in(&crate::store::describe(&forms)).unwrap(), forms);
+    }
+
+    #[test]
+    fn dragging_a_side_of_a_bookcase_resizes_it_and_its_shelves_and_books_follow() {
+        // the cursor `far` microbricks further out than the dot on `side`, seen from square to the side's axis
+        let dragged = |state: &mut State, side: usize, far: f64| {
+            let axis = side / 2;
+            let at = state.handles().iter().find(|h| h.0 == Handle::Side(side)).unwrap().1;
+            let (mut way, mut from) = (DVec3::ZERO, DVec3::ZERO);
+            (way[axis], from[(axis + 1) % 3]) = (if side % 2 == 0 { -1.0 } else { 1.0 }, 1.0);
+            state.drag(Handle::Side(side), at + way * far - from * 80.0, from, from);
+            assert!(state.refresh(|| 0.0) && state.problem.is_none(), "side {side}: {:?}", state.problem);
+            assert!(state.built.error == 0.0 && state.built.shades.len() == state.built.bricks.len(), "side {side}");
+        };
+        let mut state = a_bookcase();
+        state.place = [6, -4, 2];
+        let (shelves, bays, books) = counted(&state);
+        assert_eq!((shelves, bays), (3, 1));
+        // its top dragged up by 26: the floor stays, and there are two more shelves, with books on them
+        dragged(&mut state, 5, 26.2);
+        assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 86])));
+        let taller = counted(&state);
+        assert!(taller.0 == shelves + 2 && taller.1 == 1 && taller.2 > books, "{taller:?}");
+        // its right side dragged out by 40: the left stays, and it is two bays (70 inside, and a bay is 34 at most)
+        dragged(&mut state, 1, 40.4);
+        assert_eq!(state.bounds, Some(([-18, -5, 0], [58, 5, 86])));
+        let wider = counted(&state);
+        assert!(wider.0 == taller.0 && wider.1 == 2 && wider.2 * 2 > 3 * taller.2, "{wider:?} after {taller:?}");
+        // its front dragged in by 4: shallower, and the same shelves and bays
+        dragged(&mut state, 2, -4.0);
+        assert_eq!(state.bounds, Some(([-18, -1, 0], [58, 5, 86])));
+        assert_eq!((counted(&state).0, counted(&state).1), (wider.0, wider.1));
+        // each side pushed in through the one opposite stops a microbrick short of it, and something is still built
+        for side in [5, 1, 2] {
+            dragged(&mut state, side, -500.0);
+        }
+        assert_eq!(state.bounds, Some(([-18, 4, 0], [-17, 5, 1])));
+        assert_eq!(state.built.bricks.len(), 1);
+        // and dragged back out it is a bookcase again
+        for (side, far) in [(5, 59.0), (1, 35.0), (2, 9.0)] {
+            dragged(&mut state, side, far);
+        }
+        assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 60])));
+        assert_eq!(counted(&state), (shelves, bays, books));
+        // undone, it is as it was before the last drag
+        state.record();
+        dragged(&mut state, 5, 30.0);
+        assert!(state.undo() && state.refresh(|| 0.0));
+        assert_eq!(state.bounds, Some(([-18, -5, 0], [18, 5, 60])));
     }
 }

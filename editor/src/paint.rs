@@ -266,6 +266,20 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [246, 244, 236], [232, 228, 214], [200, 180, 60]],
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [240, 130, 30], [206, 50, 30], [50, 34, 26]],
         ],
+        // A bookcase's colours are for its parts, in the order of
+        // `brickloft_core::furniture`'s numbers: the wood of the carcass,
+        // a second tone of it for the back panel, and six the books and
+        // ornaments share. The back is the darker of the two woods in
+        // every set but the black one, as the inside of a bookcase is in
+        // shadow; and no book is close to either wood, or it would be
+        // lost against the back.
+        // oak with mixed cloth spines; dark walnut with leather; white with pastels; black with brights
+        "bookcase" => &[
+            &[[178, 138, 90], [146, 110, 70], [140, 40, 42], [38, 72, 112], [44, 98, 68], [204, 166, 72], [230, 220, 198], [66, 48, 44]],
+            &[[78, 52, 38], [56, 38, 28], [124, 30, 34], [34, 74, 52], [150, 104, 60], [196, 160, 84], [36, 44, 78], [112, 64, 40]],
+            &[[240, 238, 232], [214, 212, 204], [244, 182, 194], [170, 206, 232], [184, 224, 192], [250, 230, 160], [206, 186, 228], [250, 200, 162]],
+            &[[36, 36, 40], [58, 58, 64], [228, 52, 52], [250, 200, 36], [40, 150, 230], [52, 190, 104], [240, 122, 32], [240, 240, 240]],
+        ],
         // Light browns and greys of weathered stone, mixed; then the browns
         // alone; then the greys alone. Eight tones to a set, so that the
         // stones of a path differ as real ones do. (A sandstone yellow
@@ -352,6 +366,14 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "sunflower" => &["Yellow", "Red-bronze", "Lemon"],
         "tulip" => &["Red", "Yellow", "Pink", "Purple", "White", "Orange flamed"],
         _ => &["Summer", "Early autumn", "Late autumn", "Spring"],
+    }
+}
+
+/// What each of a kind of furniture's sets of colours is called, in the
+/// order [`palettes`] has them.
+pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
+    match kind {
+        _ => &["Oak with mixed spines", "Dark walnut with leather", "White with pastels", "Black with brights"],
     }
 }
 
