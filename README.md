@@ -15,57 +15,18 @@ on a server.
 
 ## What algorithm does it use?
 
-arcs uses a small family of algorithms, because a sphere and an arch call
-for different methods. All of them rest on one description of a brick.
-
-### Bricks as corners of a box
-
-Bricks sit on a grid, and every brick shape is a box with some of its eight
-corners kept. For each box the program asks which corners are inside the
-form being built.
-
-| Corners inside | Brick |
-|---|---|
-| all eight | a cube |
-| seven | a cube with one corner sliced off |
-| six | a wedge |
-| four | a small pyramid in one corner of the box |
-
-Neighbouring bricks share corners, so when the corners are right the bricks
-meet face to face with no gaps. The remaining task is to choose where the
-grid is cut into boxes, so that the corners land on the true form. Each
-kind of form has its own way of choosing.
-
-### One method for each kind of form
-
-- **Sphere:** each direction is sliced at distances chosen so that the
-  corners on the surface sit on the sphere, as nearly as whole microbricks
-  allow.
-- **Arch or ring:** the program traces the outline and picks corner points
-  along it that follow the curve. Every corner has a price, so one long
-  slope is chosen over a staircase of short steps wherever it fits as well,
-  which also keeps the brick count down.
-- **Tube or torus:** the wide outline of the tube is fitted first, and its
-  edges are then cut back to a slope along the whole length.
-- **Anything else:** the program goes through the grid cell by cell and
-  picks whichever brick matches each cell best. The result is rougher,
-  because no cell knows what its neighbours hold.
-
-### Choosing the outline's corners
-
-The corner points of an outline are chosen with dynamic programming. The
-search works along the outline one point at a time and records, for each
-point, only the cheapest way of reaching it. Every new answer is built from
-answers it already has, so the search finds the best outline exactly
-without trying every combination.
-
-### Measuring the result
-
-The finished bricks are compared with the true form. The volume where the
-two disagree, as a share of the form's volume, is the discrepancy, and the
-editor reports it for every fit.
-
-The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
+Every brick shape is a box with some of its eight corners kept, so arcs
+chooses bricks by asking which corners of each box are inside the form.
+Neighbouring bricks share corners, and when the corners are right the
+bricks meet without gaps. Each kind of form has its own way of placing the
+boxes so that the corners land on the true surface. A sphere is sliced at
+chosen distances along each direction. An arch or ring has its outline
+traced by the cheapest chain of corner points, found exactly by dynamic
+programming, which favours one long slope over a staircase. A tube is that
+outline with its edges cut back to a slope. Any other form is fitted cell
+by cell, which is rougher. The result is then measured against the true
+form and the difference in volume is reported. The full explanation, with
+the equations, is in [docs/algorithm.md](docs/algorithm.md).
 
 ## What it makes
 
