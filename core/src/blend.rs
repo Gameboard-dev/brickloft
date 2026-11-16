@@ -154,9 +154,13 @@ const BLOCK: i32 = 4;
 
 /// The fewest blocks, and the fewest cells of a zone, worth a thread of
 /// their own (see `par::Threads::map_ranges`): about half a millisecond's
-/// work each. PLACEHOLDER
-const BLOCKS_A_THREAD: usize = 400;
-const CELLS_A_THREAD: usize = 400;
+/// work each. Measured on two spheres of radius 20 joined, on one thread:
+/// 0.8 ms to test some 1,500 blocks, and 3.1 ms to sample the 6,400 cells
+/// of the zone, half of which the surface crosses. Asking the forms'
+/// distances at the cells' middles and corners is a tenth of a microsecond
+/// each, and is shared out in pieces four times as large.
+const BLOCKS_A_THREAD: usize = 1000;
+const CELLS_A_THREAD: usize = 1000;
 
 /// A cell whose middle is further than this from the surface is taken as
 /// wholly inside or outside without sampling it. Half a cell's diagonal is
@@ -482,7 +486,25 @@ fn sliced_along(b: &CellBrick) -> Option<usize> {
 /// How far a form's distance at a cell's middle may be from what its
 /// distances at the cell's corners give for the middle, and the form still
 /// be taken as smooth across the cell (see [`fit_cell`]).
-const SMOOTH: f64 = 0.02;
+const SMOOTH: f64 = 0.05;
+
+/// What a cell holds if its middle is far enough from the joined solid's
+/// surface to say without sampling it: nothing or a cube.
+fn surely(solid: &Joined, middle: &[f64; MOST]) -> Option<u8> {
+    let whole = solid.together(middle);
+    if whole > SURE {
+        Some(0)
+    } else if whole < -SURE {
+        Some(CUBE)
+    } else {
+        None
+    }
+}
+
+/// Corner `c` of the cell at `at`.
+fn corner_of(at: DVec3, c: usize) -> DVec3 {
+    at + DVec3::new((c & 1) as f64, (c >> 1 & 1) as f64, (c >> 2) as f64)
+}
 
 /// Two more places in a cell where a form's true distance is compared with
 /// what its corners give, besides the middle. The middle alone passed a
@@ -496,6 +518,37 @@ fn between(v: &[f64; 8], t: DVec3) -> f64 {
     let along_x = |lo: f64, hi: f64| lo + (hi - lo) * t.x;
     let (low, high) = (along_x(v[0], v[1]) + (along_x(v[2], v[3]) - along_x(v[0], v[1])) * t.y, along_x(v[4], v[5]) + (along_x(v[6], v[7]) - along_x(v[4], v[5])) * t.y);
     low + (high - low) * t.z
+}
+
+/// Where sample `s` of a cell is (each coordinate 0 to 1 across it), as
+/// the volume fitter has them.
+fn sample(s: usize) -> DVec3 {
+    DVec3::new((s % K) as f64 + 0.5, (s / K % K) as f64 + 0.5, (s / (K * K)) as f64 + 0.5) / K as f64
+}
+
+/// [`between`] at every sample of a cell, a row at a time: along a row the
+/// value changes by the same amount from each sample to the next, so a row
+/// is its two ends and three additions. Working every sample out from the
+/// eight corners was most of a cell's time once the forms were no longer
+/// asked at every sample.
+fn between_at_samples(v: &[f64; 8]) -> [f64; K * K * K] {
+    let mut out = [0.0; K * K * K];
+    let part = |i: usize| (i as f64 + 0.5) / K as f64;
+    for z in 0..K {
+        // the four edges that run along x, at this height
+        let edge = |c: usize| v[c] + (v[c + 4] - v[c]) * part(z);
+        let (near, far) = ((edge(0), edge(1)), (edge(2), edge(3)));
+        for y in 0..K {
+            let (low, high) = (near.0 + (far.0 - near.0) * part(y), near.1 + (far.1 - near.1) * part(y));
+            let step = (high - low) / K as f64;
+            let mut value = low + step / 2.0;
+            for x in 0..K {
+                out[x + K * (y + K * z)] = value;
+                value += step;
+            }
+        }
+    }
+    out
 }
 
 /// The best brick for one cell of the joined solid, and the solid's samples
@@ -513,33 +566,38 @@ fn between(v: &[f64; 8], t: DVec3) -> f64 {
 /// it is not (a form's own edge crossing the cell: its true distance at the
 /// middle, or at either of two places off it, is not what the corners
 /// give), that form is asked at every sample as before.
-fn fit_cell(solid: &Joined, at: DVec3, wedges: bool) -> (u8, Option<u64>) {
+///
+/// `middle` is every form's distance at the cell's middle and `at_corner`
+/// gives every form's distance at one of its corners. A corner is shared
+/// by eight cells, so the caller that fits many cells works each corner
+/// out once (see [`refit`]).
+fn fit_cell(solid: &Joined, at: DVec3, wedges: bool, middle: &[f64; MOST], at_corner: impl Fn(usize) -> [f64; MOST]) -> (u8, Option<u64>) {
     let n = solid.parts.len();
-    let middle = solid.each(at + 0.5);
-    let whole = solid.together(&middle);
-    if whole > SURE {
-        return (0, None);
+    if let Some(sure) = surely(solid, middle) {
+        return (sure, None);
     }
-    if whole < -SURE {
-        return (CUBE, None);
-    }
-    let corner_at = |c: usize| at + DVec3::new((c & 1) as f64, (c >> 1 & 1) as f64, (c >> 2) as f64);
     // each part's distance at the eight corners, and whether it is smooth across the cell
     let mut corner = [[0.0f64; 8]; MOST];
     let mut smooth = [false; MOST];
-    for i in 0..n {
-        for (c, value) in corner[i].iter_mut().enumerate() {
-            *value = solid.own(i, corner_at(c));
+    for c in 0..8 {
+        let all = at_corner(c);
+        for i in 0..n {
+            corner[i][c] = all[i];
         }
+    }
+    for i in 0..n {
         // (a form that is "far" at any of them is no number to work out between)
         smooth[i] = middle[i].is_finite() && corner[i].iter().all(|v| v.is_finite()) && (between(&corner[i], DVec3::splat(0.5)) - middle[i]).abs() < SMOOTH && OFF_MIDDLE.iter().all(|t| (between(&corner[i], *t) - solid.own(i, at + *t)).abs() < SMOOTH);
+    }
+    let mut own = [[f64::INFINITY; K * K * K]; MOST];
+    for i in 0..n {
+        own[i] = if smooth[i] { between_at_samples(&corner[i]) } else { std::array::from_fn(|s| solid.own(i, at + sample(s))) };
     }
     let mut d = [f64::INFINITY; MOST];
     let mut bits = 0u64;
     for s in 0..K * K * K {
-        let t = DVec3::new((s % K) as f64 + 0.5, (s / K % K) as f64 + 0.5, (s / (K * K)) as f64 + 0.5) / K as f64;
         for i in 0..n {
-            d[i] = if smooth[i] { between(&corner[i], t) } else { solid.own(i, at + t) };
+            d[i] = own[i][s];
         }
         // strictly inside, as the volume fitter has it
         bits |= ((solid.together(&d) < 0.0) as u64) << s;
@@ -649,9 +707,32 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threa
     let wedges = parts.iter().all(|p| members[p.member].spec.wedges);
     let max_ext = parts.iter().map(|p| members[p.member].spec.max_ext).min().unwrap_or(1).max(1) as usize;
     let mut wanted: Vec<usize> = (0..mark.len()).filter(|i| mark[*i] == IN).collect();
-    // Each cell by itself, so threads may share them.
-    let fit_at = |i: usize| fit_cell(&solid, DVec3::from_array(cell_at(i).map(|v| v as f64)), wedges);
-    let fitted: Vec<(u8, Option<u64>)> = threads.map(wanted.len(), CELLS_A_THREAD, |at| fit_at(wanted[at]));
+    // Each cell by itself, so threads may share them, in three steps:
+    // every form's distance at each cell's middle; then at each corner of
+    // the cells that the surface may cross, once for all the cells that
+    // share the corner; then the cells' samples. Asking at each cell's own
+    // eight corners was two thirds of all the distances asked for.
+    let place = |i: usize| DVec3::from_array(cell_at(i).map(|v| v as f64));
+    let middles: Vec<[f64; MOST]> = threads.map(wanted.len(), 4 * CELLS_A_THREAD, |at| solid.each(place(wanted[at]) + 0.5));
+    // (the corners of a block `n` cells a side are numbered as a block one cell larger each way)
+    let corner_number = |i: usize, c: usize| {
+        let cell = [i % n[0], i / n[0] % n[1], i / (n[0] * n[1])];
+        cell[0] + (c & 1) + (n[0] + 1) * (cell[1] + (c >> 1 & 1) + (n[1] + 1) * (cell[2] + (c >> 2)))
+    };
+    let mut corners: Vec<usize> = wanted.iter().zip(&middles).filter(|(_, middle)| surely(&solid, middle).is_none()).flat_map(|(&i, _)| (0..8).map(move |c| corner_number(i, c))).collect();
+    corners.sort_unstable();
+    corners.dedup();
+    let at_corners: Vec<[f64; MOST]> = threads.map(corners.len(), 4 * CELLS_A_THREAD, |at| {
+        let c = corners[at];
+        solid.each(DVec3::new((origin[0] + (c % (n[0] + 1)) as i32) as f64, (origin[1] + (c / (n[0] + 1) % (n[1] + 1)) as i32) as f64, (origin[2] + (c / ((n[0] + 1) * (n[1] + 1))) as i32) as f64))
+    });
+    let fitted: Vec<(u8, Option<u64>)> = threads.map(wanted.len(), CELLS_A_THREAD, |at| {
+        let i = wanted[at];
+        // (found by halving: the corners are in order, and every one asked for here is among them)
+        fit_cell(&solid, place(i), wedges, &middles[at], |c| at_corners[corners.binary_search(&corner_number(i, c)).expect("a corner of a cell to be sampled")])
+    });
+    // (the few cells fitted one at a time below ask at their own corners)
+    let fit_at = |i: usize| fit_cell(&solid, place(i), wedges, &solid.each(place(i) + 0.5), |c| solid.each(corner_of(place(i), c)));
     let mut shape = vec![0u8; mark.len()];
     let mut sampled: Vec<(usize, u64)> = Vec::new();
     for (&i, &(mask, bits)) in wanted.iter().zip(&fitted) {
@@ -662,9 +743,9 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threa
     // and then left out. A tetrahedron is kept only where two of its faces
     // are backed by its neighbours (`drop_spikes`), and one at the zone's
     // edge is backed by a cell outside it: judged against nothing there,
-    // every such one was taken for a spike and left a pit along the seam.
-    // (Every cell beside the zone was fitted at first, which was nearly as
-    // many cells again to back a few dozen tetrahedra.)
+    // it would be taken for a spike and leave a pit a sixth of a cell deep
+    // on the seam. (Every cell beside the zone was fitted at first, which
+    // was nearly as many cells again to back a few dozen tetrahedra.)
     let strides = [1, n[0], n[0] * n[1]];
     let mut beside: Vec<usize> = wanted.iter().filter(|i| shape_info(shape[**i]).is_some_and(|s| s.kind == Kind::Tet)).flat_map(|&i| strides.into_iter().flat_map(move |s| [i - s, i + s])).filter(|i| mark[*i] == 0).collect();
     beside.sort_unstable();

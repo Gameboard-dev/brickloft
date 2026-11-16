@@ -329,7 +329,8 @@ fn an_ordinary_join_is_put_together_in_a_few_milliseconds() {
             let (one, all) = (time(&forms, blend, Threads::ONE), time(&forms, blend, Threads::available()));
             println!("{name}, blend {blend}: {one:.2} ms on one thread, {all:.2} ms on {}", Threads::available().count());
             // (an unoptimised build is many times slower, and is not what is being measured)
-            assert!(cfg!(debug_assertions) || all < 30.0, "{name}, blend {blend}: {all:.1} ms");
+            // (the better of the two: with every test running at once there may be no core free to share with)
+            assert!(cfg!(debug_assertions) || one.min(all) < 30.0, "{name}, blend {blend}: {one:.1} ms on one thread, {all:.1} ms on all");
         }
     }
 }
