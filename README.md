@@ -3,8 +3,6 @@
 Design a curved form, see exactly which microbricks it becomes, and paste it
 into [Brickadia](https://brickadia.com).
 
-
-
 Brickadia's microbricks are small boxes and wedges on a grid. Building an
 arch, a dome or a torus from them by hand means choosing thousands of bricks
 so that a curve comes out as slopes and not as a staircase. arcs does the
@@ -17,9 +15,55 @@ on a server.
 
 ## What algorithm does it use?
 
-> There isn't one algorithm, there's a small family of them, because a sphere and an arch need different algorithms. Bricks sit on a grid, and every brick shape is just a box with some of its corners "filled in". The program asks "which corners of this box are inside the shape I'm trying to build?" If all eight are, it's a cube. If one is missing, it's a cube with a corner sliced off. If only four are in, it's a wedge. Neighbouring bricks share corners, so if the corners are right, the bricks meet edge to edge. The clever part is choosing where to cut the grid so those corners land on the true shape. For a sphere, it slices each direction at carefully chosen distances so that every corner on the surface sits exactly on the sphere. For an arch, it traces the outline and picks the fewest corner points that still hug the curve, preferring one long slope over a staircase of short steps to minimize brick count. For a tube (or pipe), it fits the wide outline first and then cuts the edges down layer by layer. When none of those tricks apply, it falls back to going through the grid cell by cell and picking whichever brick matches best. That looks rougher, because no cell knows what its neighbours are doing. At the end it measures the result against the true shape, which is the volumetric discrepancy, and this is reported.
->
-> Picking those corner points is done with dynamic programming. It works along the outline one point at a time, recording for each point only the cheapest way of having reached it, so every new answer is built from the answers it already has. So it finds the best outline exactly without trying every combination.
+arcs uses a small family of algorithms, because a sphere and an arch call
+for different methods. All of them rest on one description of a brick.
+
+### Bricks as corners of a box
+
+Bricks sit on a grid, and every brick shape is a box with some of its eight
+corners kept. For each box the program asks which corners are inside the
+form being built.
+
+| Corners inside | Brick |
+|---|---|
+| all eight | a cube |
+| seven | a cube with one corner sliced off |
+| six | a wedge |
+| four | a small pyramid in one corner of the box |
+
+Neighbouring bricks share corners, so when the corners are right the bricks
+meet face to face with no gaps. The remaining task is to choose where the
+grid is cut into boxes, so that the corners land on the true form. Each
+kind of form has its own way of choosing.
+
+### One method for each kind of form
+
+- **Sphere:** each direction is sliced at distances chosen so that the
+  corners on the surface sit on the sphere, as nearly as whole microbricks
+  allow.
+- **Arch or ring:** the program traces the outline and picks corner points
+  along it that follow the curve. Every corner has a price, so one long
+  slope is chosen over a staircase of short steps wherever it fits as well,
+  which also keeps the brick count down.
+- **Tube or torus:** the wide outline of the tube is fitted first, and its
+  edges are then cut back to a slope along the whole length.
+- **Anything else:** the program goes through the grid cell by cell and
+  picks whichever brick matches each cell best. The result is rougher,
+  because no cell knows what its neighbours hold.
+
+### Choosing the outline's corners
+
+The corner points of an outline are chosen with dynamic programming. The
+search works along the outline one point at a time and records, for each
+point, only the cheapest way of reaching it. Every new answer is built from
+answers it already has, so the search finds the best outline exactly
+without trying every combination.
+
+### Measuring the result
+
+The finished bricks are compared with the true form. The volume where the
+two disagree, as a share of the form's volume, is the discrepancy, and the
+editor reports it for every fit.
 
 The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
 
