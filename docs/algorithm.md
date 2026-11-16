@@ -1153,12 +1153,60 @@ into them, since such a brick cannot be cut.
 
 #### A lifted flat band
 
-A lifted flat band keeps the flat band's own bricks, each raised to the
-curve's height where it stands (`fit_ribbon`). Where the curve climbs, a
-sloped brick goes on top and the matching brick underneath, wherever one
-brick can make the slope. In these lifted forms, and nowhere else, two
-bricks may share a box, as the two halves of a cell folded along its
-diagonal.
+A lifted flat band is built the same way as a lifted tube: its flat bricks
+are kept where the curve is still in its plane, and the rest is columns
+between an underside and a top (`lifted_band` in `spec.rs`). Only the
+section differs. A band's section is a rectangle, $`t`$ thick across the
+curve in the plane it lay in and $`D`$ deep the other way, and it stands
+square to the curve as the tube's octagon does. Where the curve climbs with
+slope $`m`$, the top and underside of an upright column are at
+
+```math
+z_{\pm} = \ell \pm \tfrac{D}{2}\sqrt{1 + m^2}
+```
+
+The band's two faces in its plane stay exactly upright however the curve
+climbs, so in upright columns they are walls, and the ground the columns
+stand on is the flat band's own outline. That outline has already been
+fitted, with long three-cornered bricks, by the outline fitter of 7.2. So
+the ground is taken from the flat band's bricks: one cell for each cell of a
+block, and half a box for each three-cornered brick, which is then given
+one sloped brick on top and one underneath, as long as the brick itself. A
+three-cornered brick is kept only where the band's top climbs no more than
+a cell and a half from one of its corners to another (`LONG_RISE`). One
+brick cannot follow a top that bends along it. Where a brick is given up,
+its ground is whole cells with their notches filled, as for a tube.
+
+Where the curve climbs steeply the columns are laid on their sides, as a
+tube's are. A rectangle has two pairs of faces, and for columns along any
+axis the pair that faces more nearly along the columns is their top and
+underside, and the other pair is the walls they stop at (`band_over` in
+`spec.rs`). The walls are taken to run straight along the columns. That is
+exact when the curve runs square to the columns as seen from above. When
+it does not, the rectangle is built as a slanted four-sided figure with the
+same top, underside and width through its middle.
+
+The band was first built from the flat band's own bricks, each moved up or
+down to the curve's height where it stood, with a sloped brick on top and
+the matching brick underneath where the curve climbed. That kept the
+fitted outline everywhere, and failed in two ways. A long three-cornered
+brick of the outline cannot be bent, so where the curve climbed along one
+it was moved whole and stood out of the band as a slab. And where the
+curve climbed more than a cell per cell, a cell's corners were further
+apart than the band was deep, and the cell became a plain block. The form
+was also measured as the flat band's rectangle slid straight up and down,
+which is thinner the steeper it climbs.
+
+| Form | Stepped before | Stepped now |
+|---|---|---|
+| ring of radius 8, 2 thick and 2 deep, pulled up by 7.5 and 3.5 | 23.9% | 11.2% |
+| the same ring 3.5 thick | 16.3% | 8.9% |
+| ring of radius 20, 4 thick and 3 deep, pulled up by 5 | 3.5% | 2.3% |
+| ring of radius 16, 4 thick and 4 deep, pulled up by 16 | 13.9% | 8.6% |
+| round arch of span 32, 3 thick and 4 deep, its crown pulled out by 8 | 10.9% | 5.7% |
+
+In these lifted forms, and nowhere else, two bricks may share a box, as
+the two halves of a cell folded along its diagonal.
 
 ## 8. Changing a form: added points, mirror, turning, grids
 
@@ -1476,6 +1524,18 @@ climbs. Where a tube is thinner than it climbs across one cell, that cell
 falls back to a plain block. Where a stretch built in upright columns
 meets one built lying down, the two surfaces do not meet to the cell, and
 the join shows as a seam.
+
+A lifted band keeps its fitted outline only where it climbs gently. Where
+a three-cornered brick of the outline is given up, and everywhere in a
+stretch built lying down, the band's edge is whole cells with their
+notches filled, which follows a slope of one in one and no other, so a
+band climbing two or three cells per cell shows a staircase along its
+edges. A three-cornered brick the band climbs along its long side is
+sloped on top or underneath but not both, and is a little too thick or too
+thin at one end. A band lying down whose curve does not run square to its
+columns is built slanted, as 7.7 describes. A band two cells deep is
+thinner than any of this can follow well: about a tenth of the outside of
+such a ring pulled up steeply is still stepped faces.
 
 A sphere's radius should end on the lattice. With the centre in the middle
 of a cell, a radius of 12.5 or 13.5 ends on a lattice plane, and 13 does
