@@ -600,6 +600,61 @@ says it may be tilted.
 **It is set on the ground and turned Y up**, as described under
 [`mesh`](#mesh).
 
+## What five prompts gave
+
+The trial's five prompts were run with four candidates each, twice,
+from seeds 7 and 21 (so pictures 7 to 10 and 21 to 24), on CUDA at the
+default settings. All 40 pictures and all 40 meshes were looked at,
+each mesh from the front, the side, the back, behind and to one side,
+and above. A mesh was counted good if it is one clean object,
+standing level, that reads as the thing asked for from every side.
+
+| Prompt | Seed 7: best-ranked | Seed 7: best of the four | Seed 21: best-ranked | Seed 21: best of the four |
+|---|---|---|---|---|
+| a small stone cottage | good | good | good | good |
+| an oak barrel | fair: a barrel lying open-ended | fair | good | good |
+| a wooden rowing boat | poor: a shell, still tipped | poor | poor: standing on end | fair: a shell, laid flat |
+| a red sports car | good | good | fair: laid flat, ragged beneath | fair |
+| a dragon statue | good | good | good | good |
+| Good meshes | 3 of 5 | 3 of 5 | 3 of 5 | 3 of 5 |
+
+Three of five prompts ended in a good mesh from the best-ranked
+picture, with either set of seeds, and a person choosing among the
+four did no better than the ranking on the count of good meshes. What
+a person adds is the choice among good ones (all four dragons from
+seed 21 were good, and they are four different dragons) and the
+occasional better second choice, as with the boat.
+
+The failures have one cause each.
+
+- **The boat is always seen from above.** Stable Diffusion shows a
+  boat's inside, which means from overhead, and no wording tried
+  changed that. TripoSR then builds it standing on end. Laying it
+  flat recovers a boat-shaped shell, tipped by ten or twenty degrees.
+  A boat photographed from the side would do better than any of these.
+- **Many pictures are of no use, and how many depends on the seeds.**
+  Of the 20 pictures from seeds 7 to 10, about 15 ran off the frame,
+  showed two objects or stood in a scene; of the 20 from seeds 21 to
+  24, about 6 did. The ranking put a usable picture first whenever
+  there was one, except for the boat from seed 21, where a picture
+  taken from straight overhead looked level to it: an object seen
+  from directly above shows no base to judge by.
+- **A like-coloured ground is not cut cleanly.** A slate roof against
+  a grey wall, or a white wall against a white ground, loses the roof
+  or the wall. The result says so ("the object and the ground are
+  alike in colour"), and such pictures rank low.
+
+Scraps and levelling were not what failed. No mesh among the 40 had
+pieces floating free of it. Ground stayed attached only where the
+cut-out had left it in the picture: a shadow under one car and a
+tabletop under one dragon. Every mesh with a plinth or a slab came out
+standing level, and two without one (a cropped cottage and an upright
+barrel) leaned by about ten degrees.
+
+Pictures were made here before two changes that lower the memory a
+picture takes (see [measurements](#measurements)). The same seeds now
+give the same pictures to the eye, with small differences in detail.
+
 ## Measurements
 
 Measured on an RTX 4060 Ti with 8 GB, of which about 1.1 GB was in
@@ -761,58 +816,3 @@ so is small because of how the pieces already fit:
   pinned by commit and hash, so what is downloaded is what was read.
   If a repository is taken down, `fetch` fails with a message and the
   pins need moving to another copy.
-## What five prompts gave
-
-The trial's five prompts were run with four candidates each, twice,
-from seeds 7 and 21 (so pictures 7 to 10 and 21 to 24), on CUDA at the
-default settings. All 40 pictures and all 40 meshes were looked at,
-each mesh from the front, the side, the back, behind and to one side,
-and above. A mesh was counted good if it is one clean object,
-standing level, that reads as the thing asked for from every side.
-
-| Prompt | Seed 7: best-ranked | Seed 7: best of the four | Seed 21: best-ranked | Seed 21: best of the four |
-|---|---|---|---|---|
-| a small stone cottage | good | good | good | good |
-| an oak barrel | fair: a barrel lying open-ended | fair | good | good |
-| a wooden rowing boat | poor: a shell, still tipped | poor | poor: standing on end | fair: a shell, laid flat |
-| a red sports car | good | good | fair: laid flat, ragged beneath | fair |
-| a dragon statue | good | good | good | good |
-| Good meshes | 3 of 5 | 3 of 5 | 3 of 5 | 3 of 5 |
-
-Three of five prompts ended in a good mesh from the best-ranked
-picture, with either set of seeds, and a person choosing among the
-four did no better than the ranking on the count of good meshes. What
-a person adds is the choice among good ones (all four dragons from
-seed 21 were good, and they are four different dragons) and the
-occasional better second choice, as with the boat.
-
-The failures have one cause each.
-
-- **The boat is always seen from above.** Stable Diffusion shows a
-  boat's inside, which means from overhead, and no wording tried
-  changed that. TripoSR then builds it standing on end. Laying it
-  flat recovers a boat-shaped shell, tipped by ten or twenty degrees.
-  A boat photographed from the side would do better than any of these.
-- **Many pictures are of no use, and how many depends on the seeds.**
-  Of the 20 pictures from seeds 7 to 10, about 15 ran off the frame,
-  showed two objects or stood in a scene; of the 20 from seeds 21 to
-  24, about 6 did. The ranking put a usable picture first whenever
-  there was one, except for the boat from seed 21, where a picture
-  taken from straight overhead looked level to it: an object seen
-  from directly above shows no base to judge by.
-- **A like-coloured ground is not cut cleanly.** A slate roof against
-  a grey wall, or a white wall against a white ground, loses the roof
-  or the wall. The result says so ("the object and the ground are
-  alike in colour"), and such pictures rank low.
-
-Scraps and levelling were not what failed. No mesh among the 40 had
-pieces floating free of it. Ground stayed attached only where the
-cut-out had left it in the picture: a shadow under one car and a
-tabletop under one dragon. Every mesh with a plinth or a slab came out
-standing level, and two without one (a cropped cottage and an upright
-barrel) leaned by about ten degrees.
-
-Pictures were made here before two changes that lower the memory a
-picture takes (see [measurements](#measurements)). The same seeds now
-give the same pictures to the eye, with small differences in detail.
-
