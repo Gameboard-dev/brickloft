@@ -750,7 +750,7 @@ The camera is flown.
 | Middle-click | turn to face what the cursor is on |
 | W A S D | move the way it looks, and sideways |
 | Space or E, Q | rise, sink |
-| Shift + scroll | faster or slower |
+| Shift held | fly faster |
 
 The rulers give the form's lengths in microbricks. **Floor below
 form** lowers the floor so a form can be looked at from underneath.
@@ -807,6 +807,6 @@ passes a megabyte.
 | Ctrl + scroll | resize a circle, sphere, pyramid, cube, plant or piece of furniture |
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
-| Shift + scroll | camera speed |
+| Shift held | fly faster |
 | F12, Shift+F12 | save a screenshot and copy it to the clipboard, with or without the panel |
 | Enter or Escape | close a message |

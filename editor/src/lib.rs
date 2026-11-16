@@ -459,9 +459,7 @@ pub fn run_form(form: usize, claude: bool) {
                 }
             }
         }
-        if let Some(speed) = controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing) {
-            state.toast = Some((format!("Camera speed: {speed:.0} microbricks a second"), None));
-        }
+        controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing);
         // A flight the camera has been sent on (see `mcp`), a leg at a time.
         // It sets out and arrives gently: its place along the leg follows
         // the smoothstep curve, which starts and ends with no speed.

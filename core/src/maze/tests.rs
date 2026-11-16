@@ -438,3 +438,17 @@ fn a_maze_of_too_much_hedge_for_single_microbricks_is_built_at_a_larger_size() {
     let thin = build(&Spec { grain: 0, thick: 8.0, ..thick }).unwrap();
     assert!(cells(&built) > cells(&thin) * 5 / 4, "{} cells at 14 thick, {} at 8", cells(&built), cells(&thin));
 }
+
+#[test]
+fn walls_asked_thicker_than_the_rings_allow_are_built_as_thick_as_they_allow() {
+    // rings 20 apart: walls of 17 leave the least corridor, and anything thicker is built as 17
+    for hedge in [false, true] {
+        let of = |thick: f64| build(&Spec { grain: 0, thick, rise: Some(12.0), ..spec(Maze { hedge, ..maze(Kind::Theta, 3, 5) }, 60.0) }).unwrap_or_else(|e| panic!("{thick} thick, hedge {hedge}: {e}"));
+        let (fits, over) = (of(17.0), of(40.0));
+        assert_eq!(over.bricks, fits.bricks, "hedge {hedge}");
+        assert_ne!(of(8.0).bricks, fits.bricks, "hedge {hedge}");
+    }
+    // rings too close for any hedge are still refused, and say so
+    let close = build(&Spec { thick: 6.0, rise: Some(12.0), ..spec(Maze { hedge: true, ..maze(Kind::Theta, 3, 5) }, 21.0) });
+    assert!(close.is_err_and(|e| e.contains("too close for hedges")));
+}

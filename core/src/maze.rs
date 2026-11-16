@@ -172,7 +172,18 @@ impl Layout {
         if !(radius.is_finite() && thick.is_finite() && radius > 0.0 && thick > 0.0) {
             return Err("a maze needs a size and a wall thickness".into());
         }
-        let thick = thick.round().max(1.0);
+        // Walls thicker than the rings leave room for are built as thick
+        // as there is room for, a corridor of the least width left between
+        // them. Refused instead, the maze stopped answering: a wall
+        // thickness dragged past what fitted left every later change, to
+        // any setting at all, refused with it, and the last maze that
+        // could be built standing there. Only rings too close for the
+        // thinnest wall are refused.
+        let between = match maze.kind {
+            Kind::Theta => radius / rings as f64,
+            Kind::Grid => (radius / (rings as f64 - 0.5)).round(),
+        };
+        let thick = thick.round().max(1.0).min((between - LEAST_PASSAGE).floor().max(1.0));
         let half = thick / 2.0;
         // A wall an even number of cells through has its middle on a
         // lattice line and an odd one down the middle of a row of cells,

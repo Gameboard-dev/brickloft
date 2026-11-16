@@ -120,6 +120,11 @@ impl Walls {
             height = height.max(Tree::least_height(crate::tree::Kind::Hedge));
         }
         let layout = Layout::new(&maze, centre.truncate(), radius, thick)?;
+        // (as thick as the rings left room for, which may be less than was asked: see `Layout::new`)
+        let thick = layout.half * 2.0;
+        if maze.hedge && thick < LEAST_HEDGE {
+            return Err(format!("the maze's rings are too close for hedges, which are {LEAST_HEDGE} microbricks thick at the least with a corridor of {} between them: make it larger, or give it fewer rings", crate::maze::LEAST_PASSAGE));
+        }
         let lines = layout.lines();
         let long: f64 = lines.iter().map(|(line, _)| line.windows(2).map(|pair| pair[0].distance(pair[1])).sum::<f64>()).sum();
         let fewer = "give it fewer rings, or make it smaller";

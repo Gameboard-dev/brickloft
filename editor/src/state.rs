@@ -2077,7 +2077,6 @@ impl State {
                 let apart = same.x.max(brickloft_core::tree::LEAST_RANGE) * 0.4;
                 if along > 0.0 && along < 2000.0 && here.truncate().distance(last.truncate()) >= apart {
                     self.spec.pulls.push((here, same));
-                    self.touched = Some(self.spec.pulls.len() - 1);
                 }
                 return;
             }
@@ -2085,7 +2084,6 @@ impl State {
             let floor = from.z.floor() - from.z;
             let amount = snap(up).clamp(-HANDLE_LIMIT, HANDLE_LIMIT);
             self.spec.pulls[i].1.z = if by.y != 0.0 { amount.max(floor.min(0.0)).max(0.0) } else { amount };
-            self.touched = Some(i);
             return;
         }
         let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
@@ -2273,7 +2271,14 @@ impl State {
                 Action::Flatten => DVec3::new(brush.range, FLATTENS, snap(brickloft_core::spec::grass_ground(&self.spec.snapped(), on))),
             };
             self.spec.pulls.push((on, by));
-            self.touched = Some(self.spec.pulls.len() - 1);
+            // The brush stays the brush: the panel's sliders set what the
+            // next touch will be, and change no touch already made. A
+            // touch just made, or one dragged, used to become the one the
+            // sliders changed, so widening the range for the next stroke
+            // widened the last one, which is not what a brush does. A
+            // touch is changed by the panel only when asked (see
+            // `panel::brush`).
+            self.touched = None;
             return Some(Handle::Pull(self.spec.pulls.len() - 1));
         }
         self.spec.pulls.push((on, DVec3::ZERO));
@@ -2751,9 +2756,12 @@ mod tests {
         assert_eq!((state.spec.radius, state.spec.maze.rings), (USUAL_SIZE.0 + 30.0, Maze::default().rings));
         assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
         assert_eq!(far(&state), (USUAL_SIZE.0 + 30.0 + USUAL_SIZE.1 / 2.0) as i32);
-        // dragged in until its corridors are too narrow, it is not built and says why; the last maze stands
-        let bricks = state.built.bricks.len();
+        // dragged in until its walls no longer fit, they are built thinner (see `brickloft_core::maze::Layout::new`)
         state.spec.radius = 30.0;
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // and further, until no wall leaves a corridor, it is not built and says why; the last maze stands
+        let bricks = state.built.bricks.len();
+        state.spec.radius = 18.0;
         state.refresh(|| 0.0);
         assert!(state.problem.as_deref().is_some_and(|why| why.contains("corridors")), "{:?}", state.problem);
         assert_eq!(state.built.bricks.len(), bricks);
@@ -2856,7 +2864,7 @@ mod tests {
         // a touch of the brush where it is clicked: as wide and as strong as the brush is, and the ground is a hill there
         state.brush = Brush { range: 20.0, amount: 6.0, action: Action::Up };
         let handle = state.add_pull(DVec3::new(10.5, 3.5, 2.0) + state.standing()).expect("grass could not be touched");
-        assert_eq!((state.spec.pulls[0].1, state.touched), (DVec3::new(20.0, 0.0, 6.0), Some(0)));
+        assert_eq!((state.spec.pulls[0].1, state.touched), (DVec3::new(20.0, 0.0, 6.0), None));
         // its dot is on the hilltop, and dragged up it pushes harder: where it is and how wide stay as they were
         let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
         assert_eq!(at.z - state.spec.points[0].z, 6.0);
