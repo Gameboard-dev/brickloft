@@ -3155,7 +3155,8 @@ mod tests {
         };
         let bell = Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, fill: false, simplify: 0.25, ..Spec::default() };
         let (built, steps) = stepped(&bell);
-        assert!(steps < 0.15, "the bell is {steps} steps");
+        // (0.118 while the lip's crest and the groove inside it were whole cubes)
+        assert!(steps < 0.08, "the bell is {steps} steps");
         for kind in [Kind::Ramp, Kind::Tet, Kind::Cut] {
             assert!(built.bricks.iter().any(|b| shape_info(b.mask).unwrap().kind == kind), "no {kind:?}");
         }
@@ -3177,7 +3178,15 @@ mod tests {
         // cubes alone are still the staircase, and an axis between the two grids is still fitted cell by cell
         let (_, cubes) = stepped(&Spec { wedges: false, ..bell.clone() });
         assert!(cubes > 0.4, "cubes {cubes}");
-        check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell });
+        check(&Spec { points: vec![DVec3::new(0.5, 0.0, 14.5), DVec3::new(9.5, 0.0, 11.5), DVec3::new(14.5, 0.0, 0.5)], fill: true, ..bell.clone() });
+        // Shells with creases: a bowl with a lip turned outwards, and a
+        // vase with a neck and a flared mouth. The crest of each lip, where
+        // the outer face and the hollow's wall end on one circle, was a ring
+        // of whole cubes until the two shared an outline there (9.5% and
+        // 6.0% stepped).
+        let (_, bowl) = stepped(&Spec { points: vec![at(0.0, 0.0, 4.0), at(14.0, 0.0, 6.0), at(22.0, 0.0, 14.0), at(21.0, 0.0, 22.0), at(26.0, 0.0, 25.0)], thick: 3.0, ..bell.clone() });
+        let (_, vase) = stepped(&Spec { points: vec![at(0.0, 0.0, 3.0), at(9.0, 0.0, 3.0), at(17.0, 0.0, 18.0), at(8.0, 0.0, 30.0), at(6.0, 0.0, 35.0), at(13.0, 0.0, 42.0)], thick: 3.0, ..bell });
+        assert!(bowl < 0.085 && vase < 0.05, "bowl {bowl}, vase {vase}");
     }
 
     #[test]

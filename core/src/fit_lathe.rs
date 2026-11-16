@@ -35,11 +35,26 @@
 //! air inside is the wall of a hollow. The same pieces serve both, since a
 //! hollow narrowing is solid growing inwards.
 //!
+//! Where an outer face and a hollow's wall end on one circle is a *crease*:
+//! the crest of a lip, where the solid between the two faces comes to an
+//! edge, or the bottom of a groove, where the air between them does. There
+//! a sliver between two outlines is not a ledge. The pieces of the two
+//! rings lie against each other all round the circle, and a sliver puts
+//! the boxes of one in the cells of the other, so that none of them fit;
+//! they were built as whole cells once, a ring of steps round every crease.
+//! The two rings of a crease are therefore built on one outline of its
+//! circle. Along a sloped side of that outline the pieces of both lie in
+//! one box, each on its own side of the diagonal, and share it. See
+//! `Crease` and `fit_lathe`.
+//!
 //! What is not done: a profile is not tried at several positions, and the
 //! circles are plain outlines, so a very thin wall, whose inner and outer
-//! pieces want the same cells, loses the inner ones there and stands a
-//! little thick. Where the layout cannot be made at all the caller fits the
-//! form cell by cell, as before.
+//! pieces want the same cells, loses the inner ones there and is built in
+//! whole cells along that face. The two rings of a crease share an outline
+//! fitted for the shallower of them, so the deeper one stands up to a cell
+//! proud just inside the crease. And two faces that end on one circle going
+//! the same way, a cusp, share nothing. Where the layout cannot be made at
+//! all the caller fits the form cell by cell, as before.
 
 use crate::fit_planar::{fit_planar, fit_planar_towards, Opts, Piece};
 use crate::fit_round::rest_of_box;
@@ -106,6 +121,7 @@ struct Crease {
     /// the circle they share, and the reach its outline is fitted for
     cells: i32,
     reach: i32,
+    /// whether it is solid that lies between the two faces, and not air
     ridge: bool,
 }
 
@@ -138,9 +154,11 @@ fn meets(ends: [((i32, i32), (i32, i32)); 2]) -> bool {
 /// `fit_lathe`), and a box is shared only by pieces of one height. A wall is
 /// cut anywhere. A sloped side taller than its neighbour is one cell across
 /// (see `stepped`), so one part of it has to become a wall and the other
-/// keep the cell: whichever leaves the side nearer where it was, but never
-/// a wall against a wall, which would be a crease between two upright
-/// faces with nothing to share.
+/// keep the cell: whichever leaves the side nearer where it was. Cut in the
+/// middle it is the same either way, and the part at the crease keeps the
+/// cell, so that a lip's crest has a slope on both sides. And never a wall
+/// against a wall, which would be a crease between two upright faces with
+/// nothing to share.
 fn level_creases(tracks: &mut [Track]) {
     for o in 0..tracks.len() {
         for h in 0..tracks.len() {

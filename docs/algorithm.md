@@ -1041,6 +1041,55 @@ form, since a straight cone suits one and a thin curved wall the other. So both
 are built, both are measured, and the one with the lower discrepancy is
 kept. While a form is being dragged, only the first is built, for speed.
 
+#### Creases
+
+A hollow form has two faces, the outer face and the wall of its hollow, and
+in two kinds of place they end on the same circle. One is the crest of a
+lip, where the solid between the faces comes to an edge. The other is the
+bottom of a groove, where the air between them does. Both are called a
+crease here.
+
+Since each ring's outline is fitted for that ring, the two rings that end on
+a crease's circle had two outlines of it, which differ by slivers. Along one
+face that is only a ledge a fraction of a cell wide. At a crease the bricks
+of the two rings lie against each other all the way round, and a sliver puts
+the boxes of one ring in the cells of the other, so none of them fit. They
+were built as whole cells, a ring of steps round every crease.
+
+The two rings of a crease are now built on one outline of its circle
+(`Crease` in `fit_lathe.rs`).
+
+1. The ring that narrows away from the crease is cut back from that outline,
+   as any ring is. The ring that widens away from it is grown outwards from
+   the same outline, which the chamfer's code (`grow`) does equally well. A
+   wall that ends in a crease stands on the outline.
+2. Under a level or upright side of the outline, the two rings' ramps lie
+   back to back in separate boxes. Under a sloped side they need the same
+   box, because that side crosses its box on the diagonal and each ring's
+   face comes to the diagonal from its own side. The two bricks share the
+   box, one on each side of the diagonal, as the two halves of a folded cell
+   do in a lifted band (7.7). In a groove they are two tetrahedra. On a
+   ridge they are two half outer corners, which together make a roof with
+   its ridge along the diagonal.
+3. Two bricks share a box only if they go through the same layers. Where
+   the two sides of the section that meet in a crease differ in height, the
+   taller is cut at the height of the shorter (`level_creases`). Part of it
+   becomes a wall, since a sloped side taller than its neighbour is only
+   one cell across.
+
+The shared outline is fitted for the shallower of the two rings, so that
+both can use every sloped side of it. The deeper ring then stands up to a
+cell proud just inside the crease, as a reused outline always does.
+
+On a bell with an upturned lip, built as a shell 3.5 cells thick, the
+stepped share of the surface fell from 11.8% to 5.6%, and the ring of whole
+cubes round the lip's crest is gone.
+
+A wall whose bricks will not fit, because the wall is so thin that the
+boxes of its two faces cross, is built cell by cell along that face: a
+staircase within half a cell of it. Its bricks' whole boxes were built solid
+before, and stood as far out as a box is deep.
+
 ### 7.7 Bands and tubes lifted out of their plane
 
 When a point added to a flat curve pulls it up out of its plane, the
@@ -1486,9 +1535,14 @@ wall of 2 above about radius 40 is fitted cell by cell and needs many
 bricks. Laid-out shells with thin walls come out slightly thicker or
 thinner than asked.
 
-Where two faces of a spun profile run into each other, at the bottom of a
-groove or the root of a lip, bricks that will not fit are built as whole
-cells.
+Where the two faces of a spun profile end on one circle, at the crest of a
+lip or the bottom of a groove, the two rings share one outline, fitted for
+the shallower of them. The deeper ring stands up to a cell proud just
+inside the crease. Two faces that reach one circle going the same way, a
+cusp, share nothing, and there the bricks that will not fit are still built
+as whole cells. So are the bricks of a rim one cell wide. A wall of a spun
+profile so thin that the boxes of its two faces cross is a staircase along
+one face.
 
 Thin forms read as a high discrepancy percentage. A band a few cells thick
 is nearly all surface, and the disagreement is all at the surface.
