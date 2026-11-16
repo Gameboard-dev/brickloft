@@ -530,7 +530,14 @@ fn changed(spec: &Spec, changes: &Map<String, Value>) -> Result<Spec, String> {
         };
         text += &format!("{key} = {value}\n");
     }
-    let spec = parse_spec(&text)?;
+    let mut spec = parse_spec(&text)?;
+    // A form of a mesh says which mesh by its name in the imports folder, and nothing reaches here that is not a name
+    // of that folder's own shape: the parser refuses the rest (`brickloft_core::mesh::Import::named`). The mesh is found
+    // by that name, and a name with no file behind it is refused here, before anything is added or changed.
+    crate::import::attach(&mut spec);
+    if spec.form == brickloft_core::spec::Form::Imported && !spec.import.name.is_empty() && spec.import.mesh.is_none() {
+        return Err(brickloft_core::mesh::MeshError::Missing { name: spec.import.name.clone() }.to_string());
+    }
     if spec.points.len() > MAX_POINTS || spec.pulls.len() > crate::state::most_pulls(&spec) {
         return Err(format!("a form takes at most {MAX_POINTS} points and {} added points", crate::state::most_pulls(&spec)));
     }
@@ -647,7 +654,7 @@ fn workspace(state: &State) -> Value {
         .enumerate()
         .map(|(index, ((spec, paint, place), built))| {
             let settings: Map<String, Value> = spec_text(spec).lines().filter_map(|line| line.split_once(" = ").or_else(|| line.split_once(" ="))).map(|(k, v)| (k.to_string(), Value::String(v.trim().to_string()))).collect();
-            let problem = if index == 0 { state.problem.clone() } else if built.bricks.is_empty() { brickloft_core::spec::build(spec).err() } else { None };
+            let problem = if index == 0 { state.problem.clone() } else if built.bricks.is_empty() { crate::import::built(spec).err() } else { None };
             json!({
                 "index": index,
                 "being_edited": index == 0,
@@ -741,6 +748,10 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.scene += 1;
             return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap }).to_string());
         }
+        "list_meshes" => {
+            let meshes: Vec<Value> = crate::import::listed().into_iter().map(|(name, bytes)| json!({ "name": name, "bytes": bytes })).collect();
+            return Ok(json!({ "meshes": meshes }).to_string());
+        }
         "measure_between" => {
             let which = |name: &str| -> Result<usize, String> {
                 let index = arguments.get(name).and_then(Value::as_u64).ok_or(format!("{name} is a form's place in the list get_workspace gives"))? as usize;
@@ -808,6 +819,19 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.rise = Some(USUAL_HEIGHT);
                 }
             }
+            let imported = spec.form == brickloft_core::spec::Form::Imported;
+            if imported {
+                if spec.import.name.is_empty() {
+                    return Err("an imported form needs `import`: the name of a mesh in the imports folder, as list_meshes gives it".into());
+                }
+                // (and a mesh given no size is the size the editor opens one at, filled, as the editor has it)
+                if !settings.contains_key("radius") {
+                    spec.radius = crate::state::USUAL_MESH_RADIUS;
+                }
+                if !settings.contains_key("fill") {
+                    spec.fill = true;
+                }
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
                 let form = crate::state::form_index(spec.form);
@@ -817,8 +841,10 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.weights = weights;
                 }
             }
-            brickloft_core::spec::build(&spec)?;
+            crate::import::built(&spec)?;
             let paint = arguments.get("colour").map(|c| recoloured(&Paint::default(), c)).transpose()?;
+            // (a mesh comes in its own colours)
+            let own_paint = crate::import::paint_of(&spec).filter(|_| imported);
             let place = arguments.get("place").map(placed).transpose()?;
             state.record();
             // set down beside what is there, and edited; then as asked
@@ -827,7 +853,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             // (a maze's colours go by what its walls are)
             let walls = maze.then(|| crate::paint::maze_palettes(crate::paint::maze_texture(&spec))[0].clone());
             state.add_form(spec);
-            if let Some(paint) = paint {
+            if let Some(paint) = paint.or(own_paint) {
                 state.paint = paint;
             } else if let Some(colours) = walls {
                 state.paint = Paint { mode: Mode::Pattern, colours, ..Paint::default() };
@@ -843,11 +869,15 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let (spec, paint, place) = &mut forms[at];
             let was = spec.form;
             let walls_were = crate::paint::maze_texture(spec);
+            let mesh_was = (spec.import.name.clone(), spec.import.colours);
             *spec = changed(spec, settings)?;
-            brickloft_core::spec::build(spec)?;
+            crate::import::built(spec)?;
             let maze = spec.form == brickloft_core::spec::Form::Maze;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
+            } else if spec.form == brickloft_core::spec::Form::Imported && (was != spec.form || mesh_was != (spec.import.name.clone(), spec.import.colours)) {
+                // (a form made into a mesh, or given another mesh or another number of colours, comes in the mesh's own)
+                *paint = crate::import::paint_of(spec).unwrap_or_default();
             } else if maze && (was != spec.form || walls_were != crate::paint::maze_texture(spec)) {
                 // (a form made into a maze, or a maze given other walls, comes in those walls' colours)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::maze_palettes(crate::paint::maze_texture(spec))[0].clone(), ..Paint::default() };
@@ -876,7 +906,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let spec = &mut forms[at].0;
             let count = spec.points.len();
             *spec.points.get_mut(which).ok_or(format!("the form has {count} points, numbered from 0"))? = DVec3::from_array(to);
-            brickloft_core::spec::build(spec)?;
+            crate::import::built(spec)?;
             state.open(forms);
         }
         "add_pull_point" => {
@@ -988,7 +1018,7 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 15);
+        assert_eq!(tool_names().len(), 16);
     }
 
     #[test]

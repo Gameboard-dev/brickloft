@@ -32,7 +32,7 @@ pub struct Stand<'a> {
     pub size: f64,
 }
 
-const PAD: f64 = 2.0;
+pub(super) const PAD: f64 = 2.0;
 
 impl Stand<'_> {
     /// How many cells are fitted along each axis, from 0.
@@ -116,14 +116,14 @@ pub fn fit(stand: &Stand, route: Route, max_ext: i32, threads: Threads) -> Fitte
     };
     error = (error as i64 + drop_spikes(&mut shape, &sampled, n)) as u64;
     let surface = |k: usize, middle: DVec3| facing.as_ref().map_or_else(|| stand.surface(middle), |facing| facing[k]);
-    let (mut bricks, saved, found, laid) = guided(&surface, &mut shape, &sampled, n, max_ext.max(1) as usize, threads);
+    let (mut bricks, saved, found, laid) = guided(&surface, &mut shape, &sampled, n, max_ext.max(1) as usize, 0, threads);
     stages.push(("stretched pieces found", found));
     stages.push(("stretched pieces laid", laid));
     lap();
     bricks.extend(merge(shape, n, max_ext.max(1) as usize));
     stages.push(("boxes joined", lap()));
     let per_cell = (K * K * K) as f64;
-    Fitted { bricks, solid: solid as f64 / per_cell, error: (error - saved) as f64 / per_cell, stages }
+    Fitted { bricks, solid: solid as f64 / per_cell, error: (error as i64 - saved) as f64 / per_cell, stages }
 }
 
 /// Longest stretched ramp tried across its slope, and longest stretched
@@ -229,7 +229,11 @@ fn candidates(normal: DVec3, poses: &[(u8, Kind, [i8; 3])], max_ext: usize) -> V
 }
 
 struct Cand {
-    saved: u32,
+    /// how many fewer samples are wrong with the piece than with the unit
+    /// pieces it replaces (less than nothing only where bricks are priced)
+    saved: i32,
+    /// that, and what the bricks it saves are priced at
+    gain: u32,
     cells: u32,
     start: usize,
     mask: u8,
@@ -248,7 +252,14 @@ struct Cand {
 /// that way, which is a handful where trying every rise and run and every
 /// corner piece would be thousands, and can afford pieces far larger: a
 /// roof at 1 in 2 is ramps twelve long and six high, not teeth.
-fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3], max_ext: usize, threads: Threads) -> (Vec<CellBrick>, u64, f64, f64) {
+///
+/// `price` is what a brick is worth in samples of disagreement (the form's
+/// Simplify setting, which prices a brick in cells: see `spec::Spec::simplify`).
+/// At 0 a piece is laid only if it is no further from the mesh than the unit
+/// pieces it replaces. Above 0 it may be further by `price` for each brick
+/// it saves, which is one for each cell of the surface it covers but the
+/// first.
+pub(super) fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3], max_ext: usize, price: u32, threads: Threads) -> (Vec<CellBrick>, i64, f64, f64) {
     let mut lap = clock();
     let strides = [1, n[0], n[0] * n[1]];
     let mut unit = [0u64; 256];
@@ -293,7 +304,8 @@ fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut
                         continue;
                     }
                     let first = start[0] + n[0] * (start[1] + n[1] * start[2]);
-                    let (mut now, mut then, mut reaches) = (0u32, 0u32, true);
+                    let (mut now, mut then, mut reaches, mut replaced) = (0u32, 0u32, true, 0u32);
+                    let slack = 64 + price * pattern.len() as u32;
                     for (i, piece) in pattern.iter().enumerate() {
                         let c = first + i % ext[0] + (i / ext[0] % ext[1]) * strides[1] + (i / (ext[0] * ext[1])) * strides[2];
                         let f = form(c);
@@ -301,12 +313,14 @@ fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut
                         reaches &= f != 0 || *piece == 0;
                         now += (f ^ unit[standing[c] as usize]).count_ones();
                         then += (f ^ piece).count_ones();
-                        if then > now + 64 {
+                        replaced += (slot[c] > 0 && standing[c] != 0) as u32;
+                        if then > now + slack {
                             break;
                         }
                     }
-                    if reaches && then <= now {
-                        cands.push(Cand { saved: now - then, cells: pattern.len() as u32, start: first, mask, ext: ext.map(|v| v as u8) });
+                    let allowed = now + price * replaced.saturating_sub(1);
+                    if reaches && then <= allowed {
+                        cands.push(Cand { saved: now as i32 - then as i32, gain: allowed - then, cells: pattern.len() as u32, start: first, mask, ext: ext.map(|v| v as u8) });
                     }
                 }
             }
@@ -334,11 +348,11 @@ fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut
     };
     let mut worth: HashMap<([i8; 3], [u8; 3], [u8; 3]), u64> = HashMap::new();
     for c in &cands {
-        *worth.entry(layout(c)).or_insert(0) += c.saved as u64 + c.cells as u64;
+        *worth.entry(layout(c)).or_insert(0) += c.gain as u64 + c.cells as u64;
     }
-    cands.sort_by_key(|c| (std::cmp::Reverse(worth[&layout(c)]), layout(c), std::cmp::Reverse(c.saved), c.start, c.mask));
+    cands.sort_by_key(|c| (std::cmp::Reverse(worth[&layout(c)]), layout(c), std::cmp::Reverse(c.gain), c.start, c.mask));
     let mut taken = vec![false; shape.len()];
-    let (mut bricks, mut saved) = (Vec::new(), 0u64);
+    let (mut bricks, mut saved) = (Vec::new(), 0i64);
     for c in &cands {
         let ext = c.ext.map(|v| v as usize);
         let cells = |i: usize| c.start + i % ext[0] + (i / ext[0] % ext[1]) * strides[1] + (i / (ext[0] * ext[1])) * strides[2];
@@ -349,7 +363,7 @@ fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut
             taken[cells(i)] = true;
             shape[cells(i)] = 0;
         }
-        saved += c.saved as u64;
+        saved += c.saved as i64;
         bricks.push(CellBrick { mask: c.mask, min: [c.start % n[0], c.start / n[0] % n[1], c.start / (n[0] * n[1])].map(|v| v as i32), ext: ext.map(|v| v as i32) });
     }
     // ramps side by side along their own axis are one longer ramp

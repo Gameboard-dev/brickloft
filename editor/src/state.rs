@@ -12,7 +12,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 11] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze"];
+pub const FORMS: [&str; 12] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze", "Imported"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -32,6 +32,8 @@ pub const TREE: usize = 8;
 // place does.)
 pub const FURNITURE: usize = 9;
 pub const MAZE: usize = 10;
+// (Last, as the newest. Its place may change like any other's: a save says `imported`.)
+pub const IMPORTED: usize = 11;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -176,6 +178,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Tree => TREE,
         Form::Furniture => FURNITURE,
         Form::Maze => MAZE,
+        Form::Imported => IMPORTED,
     }
 }
 
@@ -195,6 +198,8 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
         // cell below as a cube's is, since its height is whatever its
         // kind starts at and may be even.
         FURNITURE => (vec![DVec3::new(0.5, 0.5, radius)], Vec::new()),
+        // A mesh too: its point is the middle of its box, half its height up (see `half_height`).
+        IMPORTED => (vec![DVec3::new(0.5, 0.5, radius)], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
         BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
         // resting on the floor
@@ -207,7 +212,12 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
 /// or for furniture half its height, which is what stands it on the
 /// floor. Its radius is half its depth (see `State::usual_furniture`).
 pub fn half_height(form: usize, spec: &Spec) -> f64 {
-    if form == FURNITURE { (2.0 * spec.radius * spec.stretch.z).round() / 2.0 } else { spec.radius }
+    match (form, &spec.import.mesh) {
+        (FURNITURE, _) => (2.0 * spec.radius * spec.stretch.z).round() / 2.0,
+        // (a mesh's radius is half its longest side, which need not be its height)
+        (IMPORTED, Some(mesh)) => (2.0 * spec.radius * mesh.half.z * 2.0).round() / 2.0,
+        _ => spec.radius,
+    }
 }
 
 /// A brick of the workspace: the brick, its colour (`None` for the player's
@@ -260,6 +270,11 @@ struct Behind {
 /// its form made on another thread (see [`State::refresh_behind`]): three
 /// frames or so, past which a wait shows as a stutter.
 const SLOW_BUILD_MS: f64 = 50.0;
+
+/// Half the longest side a mesh is opened at, in microbricks: 48 long, a
+/// little over a player's height in the game, which shows most models'
+/// shape and is quick to fit. It is made larger from there.
+pub const USUAL_MESH_RADIUS: f64 = 24.0;
 
 pub struct State {
     pub spec: Spec,
@@ -354,6 +369,8 @@ pub struct State {
     pub save_name: String,
     pub new_folder: String,
     pub store_note: String,
+    /// the path typed for a mesh file to open (see [`State::open_mesh`])
+    pub mesh_path: String,
     /// the folders and the chosen folder's forms, read when they may have
     /// changed and not on every frame
     pub folders: Vec<String>,
@@ -550,6 +567,7 @@ impl State {
             save_name: String::new(),
             new_folder: String::new(),
             store_note: String::new(),
+            mesh_path: String::new(),
             folders: Vec::new(),
             forms: Vec::new(),
             built_from: None,
@@ -660,10 +678,15 @@ impl State {
         // the far side of everything there, in units
         let taken = self.others.iter().filter_map(|i| i.bounds.map(|b| 2 * b.1[0] + i.place[0])).chain(self.bounds.map(|b| 2 * b.1[0] + self.place[0])).max();
         // (built once, here: to find where it goes, and to be the bricks it has until its first build as the form being edited)
-        let fresh = build(&spec).unwrap_or_default();
-        let beside = match (taken, bounds_of(&fresh)) {
+        //
+        // But a mesh, which may take seconds: where it goes is known from
+        // its box without a brick being laid, and it is built behind the
+        // window once it is the form being edited (see `load_spec`).
+        let mesh_low = spec.import.mesh.as_ref().filter(|_| spec.form == Form::Imported).zip(spec.points.first()).map(|(mesh, middle)| (middle.x - 2.0 * spec.radius * mesh.half.x).round() as i32);
+        let fresh = if spec.form == Form::Imported { Built::default() } else { build(&spec).unwrap_or_default() };
+        let beside = match (taken, bounds_of(&fresh).map(|(lo, _)| lo[0]).or(mesh_low)) {
             // four microbricks of air between them
-            (Some(right), Some((lo, _))) => [right + 8 - 2 * lo[0], 0, 0],
+            (Some(right), Some(low)) => [right + 8 - 2 * low, 0, 0],
             _ => [0; 3],
         };
         self.catch_up();
@@ -686,7 +709,7 @@ impl State {
     /// microbricks allow). Returns whether it is. By whole cells, so that a
     /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | FURNITURE | MAZE);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | FURNITURE | MAZE | IMPORTED);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -847,7 +870,7 @@ impl State {
         self.others = forms
             .map(|(spec, paint, place)| {
                 let (built, bounds) = again(&spec).unwrap_or_else(|| {
-                    let built = build(&spec).unwrap_or_default();
+                    let built = crate::import::built(&spec).unwrap_or_default();
                     let bounds = bounds_of(&built);
                     (built, bounds)
                 });
@@ -861,6 +884,9 @@ impl State {
         if let Some((built, bounds)) = own {
             (self.built, self.bounds, self.problem) = (built, bounds, None);
             self.built_from = Some(fitted(&self.full_spec()));
+        } else if self.form == IMPORTED {
+            // (a mesh is built behind the window, and until it is, it is not drawn as the bricks of whatever was here before)
+            (self.built, self.bounds) = (Built::default(), None);
         }
         self.scene += 1;
         self.noted = snapshot;
@@ -1105,14 +1131,83 @@ impl State {
             Some((_, hi)) if hi == f64::INFINITY => (Cut::Dome, self.segment),
             Some(ends) => (Cut::Segment, ends),
         };
+        // A mesh is the exception to building the first time here and
+        // now: it may take seconds, which is seconds of a window that does
+        // not answer. Whoever loads one empties the bricks in hand where
+        // they are another form's (see `restore` and `add_form_at`).
+        if spec.form == Form::Imported {
+            self.build_ms = 4.0 * SLOW_BUILD_MS;
+        }
         self.spec = spec;
         // (a hedge saved before it had a line is given the line it was)
         self.lay_tree();
     }
 
+    /// Open the mesh file at `path` (see `crate::import`). With `add`, or
+    /// if the form being edited is not an Imported one, it is added to
+    /// the workspace as a new form; otherwise it takes the place of the
+    /// mesh of the form being edited, which keeps its size and settings.
+    ///
+    /// A file that cannot be read changes nothing, and why is said where
+    /// a form's problem is said if the form is an Imported one, and in a
+    /// notice otherwise.
+    pub fn open_mesh(&mut self, path: &str, add: bool) {
+        // (a path copied from a file manager comes in quotation marks)
+        let path = path.trim().trim_matches('"');
+        let opened = crate::import::adopt(std::path::Path::new(path)).and_then(|(name, up)| Ok((crate::import::open(&name, up)?, name, up)));
+        let (mesh, name, up) = match opened {
+            Ok(opened) => opened,
+            Err(why) if self.form == IMPORTED && !add => return self.problem = Some(why.to_string()),
+            Err(why) => return self.alert = Some(("Cannot open the mesh", why.to_string())),
+        };
+        self.toast = Some((format!("Opened a mesh of {} triangles{}", mesh.triangles(), if mesh.coloured() { ", with its colours" } else { "" }), None));
+        let import = brickloft_core::mesh::Import { name, up, mesh: Some(mesh), ..self.spec.import.clone() };
+        if add || self.form != IMPORTED {
+            // as the editor starts a form: a brick size chosen to keep within a budget
+            let mut spec = Spec { form: Form::Imported, radius: USUAL_MESH_RADIUS, fill: true, simplify: 0.25, grain: 0, import: brickloft_core::mesh::Import { fitter: Default::default(), loose: 0, colours: brickloft_core::mesh::form::USUAL_COLOURS, ..import }, ..Spec::default() };
+            spec.points = usual_points(IMPORTED, half_height(IMPORTED, &spec)).0;
+            self.add_form(spec);
+        } else {
+            self.spec.import = import;
+            // (built behind the window, like any change to a mesh)
+            self.build_ms = 4.0 * SLOW_BUILD_MS;
+            self.built_from = None;
+        }
+        self.paint = crate::import::paint_of(&self.spec).unwrap_or_default();
+        self.problem = None;
+        self.scene += 1;
+    }
+
+    /// A file dropped on the window: opened as a mesh. It becomes the mesh
+    /// of the form being edited if that is an Imported form still waiting
+    /// for its file, and a new form otherwise.
+    pub fn drop_mesh(&mut self, path: &std::path::Path) {
+        let waiting = self.form == IMPORTED && self.spec.import.name.is_empty();
+        self.open_mesh(&path.display().to_string(), !waiting);
+    }
+
+    /// Make the form an Imported one as it starts out: filled, at its
+    /// usual size, with no bricks until a file is opened for it. A mesh
+    /// already opened in this form before another form was chosen is kept.
+    fn usual_import(&mut self) {
+        let s = &mut self.spec;
+        (s.fill, s.radius, s.stretch) = (true, USUAL_MESH_RADIUS, DVec3::ONE);
+        (s.stones, s.mosaic) = (None, None);
+        (self.built, self.bounds) = (Built::default(), None);
+        self.build_ms = 4.0 * SLOW_BUILD_MS;
+        self.built_from = None;
+        if let Some(paint) = crate::import::paint_of(&self.spec) {
+            self.paint = paint;
+        }
+    }
+
     /// A number the best-fit search may change: one coordinate of a point,
     /// the radius, or an arch's rise.
     fn tunable(&self, only: Option<Handle>) -> Vec<Tune> {
+        // (not a mesh: the search builds the form dozens of times over, and a mesh is seconds a build)
+        if self.form == IMPORTED {
+            return Vec::new();
+        }
         let mut all = Vec::new();
         // A tree has nothing to tune: it fits no better a cell to one
         // side, and each try would be a second's building. Nor has a maze.
@@ -1378,6 +1473,7 @@ impl State {
                 self.usual_furniture(kind);
             }
             MAZE => self.usual_maze(),
+            IMPORTED => self.usual_import(),
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
@@ -1484,6 +1580,7 @@ impl State {
             TREE => Form::Tree,
             FURNITURE => Form::Furniture,
             MAZE => Form::Maze,
+            IMPORTED => Form::Imported,
             _ => Form::Revolve,
         };
         if self.form == CUBE {
@@ -1633,7 +1730,9 @@ impl State {
             return false;
         }
         let start = now_ms();
-        match brickloft_core::spec::build_as(&spec, !self.busy) {
+        // (a mesh by way of the one place that remembers the last one built: see `import::built`)
+        let result = if spec.form == Form::Imported { crate::import::built(&spec) } else { brickloft_core::spec::build_as(&spec, !self.busy) };
+        match result {
             Ok(built) => {
                 // worked out once per build, not once per frame
                 self.bounds = bounds_of(&built);
@@ -1658,6 +1757,8 @@ impl State {
     fn radius_dir(&self) -> DVec3 {
         match self.form {
             CIRCLE => Circle::axis_aligned(DVec3::ZERO, 1.0, self.spec.plane.min(2)).u,
+            // along a mesh's longest side, which is the side its size is the length of
+            IMPORTED => self.spec.import.mesh.as_ref().map_or(DVec3::X, |mesh| [DVec3::X, DVec3::Y, DVec3::Z][(0..3).max_by(|a, b| mesh.half[*a].total_cmp(&mesh.half[*b]).then(b.cmp(a))).unwrap_or(0)]),
             _ => DVec3::X,
         }
     }
@@ -1815,7 +1916,7 @@ impl State {
         let standing = self.standing();
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
-            CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            CIRCLE | SPHERE | PYRAMID | IMPORTED if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
             // A dot at the middle of each side, where the bricks end. No
             // radius dot: it would move all six sides at once, which
             // Ctrl + scroll does, and seven dots round a small cube leave
@@ -2379,7 +2480,8 @@ impl State {
         // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
         // (nor a maze, whose walls are where its cells are)
         // (nor furniture, which is boards: there is no curve in it to pull)
-        !matches!(self.form, MAZE | FURNITURE) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
+        // (nor a mesh, which is what its file says it is)
+        !matches!(self.form, MAZE | FURNITURE | IMPORTED) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -2586,7 +2688,8 @@ mod tests {
     #[test]
     fn every_preset_builds() {
         let mut state = State::new();
-        for form in 0..FORMS.len() {
+        // (but a mesh, which has nothing to build until a file is opened for it: see `import::tests`)
+        for form in (0..FORMS.len()).filter(|form| *form != IMPORTED) {
             state.form = form;
             state.preset();
             assert!(state.refresh(|| 0.0));

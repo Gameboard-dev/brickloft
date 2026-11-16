@@ -141,6 +141,164 @@ pub fn house() -> Mesh {
     Mesh::new(&parts.0, &parts.1, &[]).expect("a house")
 }
 
+/// A ball painted in three bands by its points: red over the top third of
+/// its bands of triangles, white round the middle, blue below. The colours
+/// run into each other across the one band of triangles between two.
+pub fn painted_ball(n: usize) -> Mesh {
+    let (points, triangles) = sphere_parts(n);
+    let colours: Vec<[u8; 3]> = points.iter().map(|p| if p[2] > 0.26 { [200, 30, 30] } else if p[2] < -0.26 { [30, 60, 200] } else { [240, 240, 240] }).collect();
+    Mesh::new(&points, &triangles, &colours).expect("a painted ball")
+}
+
+/// A ball with a different colour at every point, by where the point is:
+/// as many colours as a painted model has.
+pub fn rainbow_ball(n: usize) -> Mesh {
+    let (points, triangles) = sphere_parts(n);
+    let colours: Vec<[u8; 3]> = points.iter().map(|p| p.map(|v| ((v + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8)).collect();
+    Mesh::new(&points, &triangles, &colours).expect("a rainbow ball")
+}
+
+/// One sphere of `n` bands, `across` wide about `middle`, added to `parts`.
+fn add_ball(parts: &mut Parts, n: usize, middle: DVec3, across: f64) {
+    let (points, triangles) = sphere_parts(n);
+    let first = parts.0.len() as u32;
+    parts.0.extend(points.iter().map(|p| point(middle + DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64) * across)));
+    parts.1.extend(triangles.iter().map(|t| t.map(|v| v + first)));
+}
+
+/// A ball 50 across with three scraps floating beside it, 10, 6 and 3.4
+/// across: 100 along its longest side. What a model made from one
+/// photograph has round it.
+pub fn scattered() -> Mesh {
+    let mut parts = (Vec::new(), Vec::new());
+    add_ball(&mut parts, 16, DVec3::new(-25.0, 0.0, 0.0), 50.0);
+    add_ball(&mut parts, 8, DVec3::new(15.3, 0.3, 0.4), 10.0);
+    add_ball(&mut parts, 8, DVec3::new(32.3, 0.3, 0.4), 6.0);
+    add_ball(&mut parts, 6, DVec3::new(48.3, 0.5, 0.5), 3.4);
+    Mesh::new(&parts.0, &parts.1, &[]).expect("a ball and its scraps")
+}
+
+/// The surface where `solid` (negative inside, positive outside) is
+/// nothing, within the box from `lo` to `hi`, found on a grid of `n` cells
+/// along the box's longest side; each point coloured by `colour`.
+///
+/// This is how a model made by a network comes to be a mesh: the network
+/// answers "inside or outside" at the points of a grid, and the surface
+/// is drawn between the points that differ. So the meshes made here have
+/// what those have: one skin and no parts, many small triangles of much
+/// the same size whatever the surface does, flat faces that come out
+/// faintly ribbed, and corners rounded off to the grid's size.
+///
+/// Each cell of the grid is cut into six tetrahedra and the surface drawn
+/// through each (marching tetrahedra: Doi and Koide 1991, "An efficient
+/// method of triangulating equi-valued surfaces by using tetrahedral
+/// cells", IEICE Transactions E74). Marching cubes, which the networks'
+/// own code uses, has fifteen cases and a table of 256 rows to get them
+/// from; a tetrahedron has three cases and needs no table, and what comes
+/// out differs only in how the triangles are cut.
+pub fn surface_of(solid: impl Fn(DVec3) -> f64, colour: impl Fn(DVec3) -> [u8; 3], lo: DVec3, hi: DVec3, n: usize) -> Mesh {
+    use std::collections::HashMap;
+    let step = (hi - lo).max_element() / n as f64;
+    let counts = ((hi - lo) / step).ceil().to_array().map(|v| v as usize + 1);
+    let at = |i: [usize; 3]| lo + DVec3::new(i[0] as f64, i[1] as f64, i[2] as f64) * step;
+    let number = |i: [usize; 3]| (i[0] + (counts[0] + 1) * (i[1] + (counts[1] + 1) * i[2])) as u64;
+    let mut values: HashMap<u64, f64> = HashMap::new();
+    let mut points: Vec<[f32; 3]> = Vec::new();
+    let mut colours: Vec<[u8; 3]> = Vec::new();
+    // the point where the surface crosses the line between two points of the grid, made once for the two
+    let mut on_edge: HashMap<(u64, u64), u32> = HashMap::new();
+    let mut triangles: Vec<[u32; 3]> = Vec::new();
+    // a cube's corners, and the six tetrahedra that share its long diagonal from corner 0 to corner 7
+    let corner = |c: usize| [c & 1, c >> 1 & 1, c >> 2 & 1];
+    const TETRAHEDRA: [[usize; 4]; 6] = [[0, 1, 3, 7], [0, 3, 2, 7], [0, 2, 6, 7], [0, 6, 4, 7], [0, 4, 5, 7], [0, 5, 1, 7]];
+    for z in 0..counts[2] {
+        for y in 0..counts[1] {
+            for x in 0..counts[0] {
+                let places: [[usize; 3]; 8] = std::array::from_fn(|c| { let o = corner(c); [x + o[0], y + o[1], z + o[2]] });
+                let here: [f64; 8] = std::array::from_fn(|c| *values.entry(number(places[c])).or_insert_with(|| solid(at(places[c]))));
+                if here.iter().all(|v| *v < 0.0) || here.iter().all(|v| *v >= 0.0) {
+                    continue;
+                }
+                for tetrahedron in TETRAHEDRA {
+                    let inside: Vec<usize> = tetrahedron.iter().copied().filter(|c| here[*c] < 0.0).collect();
+                    let outside: Vec<usize> = tetrahedron.iter().copied().filter(|c| here[*c] >= 0.0).collect();
+                    let mut crossing = |a: usize, b: usize| -> u32 {
+                        let (na, nb) = (number(places[a]), number(places[b]));
+                        *on_edge.entry((na.min(nb), na.max(nb))).or_insert_with(|| {
+                            let (pa, pb) = (at(places[a]), at(places[b]));
+                            let p = pa + (pb - pa) * (here[a] / (here[a] - here[b]));
+                            points.push(point(p));
+                            colours.push(colour(p));
+                            points.len() as u32 - 1
+                        })
+                    };
+                    match (inside.as_slice(), outside.as_slice()) {
+                        ([i], [a, b, c]) | ([a, b, c], [i]) => triangles.push([crossing(*i, *a), crossing(*i, *b), crossing(*i, *c)]),
+                        ([i, j], [a, b]) => {
+                            let quad = [crossing(*i, *a), crossing(*i, *b), crossing(*j, *b), crossing(*j, *a)];
+                            triangles.push([quad[0], quad[1], quad[2]]);
+                            triangles.push([quad[0], quad[2], quad[3]]);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    // (which way each triangle faces is put right where the mesh is made: see `oriented`)
+    Mesh::new(&points, &triangles, &colours).expect("a surface")
+}
+
+/// A little figure standing on a disc: a head, a body, two arms and two
+/// legs run together into one skin, as a model made from a photograph of a
+/// toy is, with a colour for each part shaded as if lit from one side.
+/// 100 tall; `n` is how fine the grid it is drawn on is (see [`surface_of`]).
+pub fn figure(n: usize) -> Mesh {
+    // distance from the line between two points, less a radius: a limb
+    let limb = |p: DVec3, a: DVec3, b: DVec3, r: f64| {
+        let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+        (p - a - (b - a) * along).length() - r
+    };
+    // the smaller of two distances, rounded where they meet: https://iquilezles.org/articles/smin/
+    let run = |a: f64, b: f64, k: f64| {
+        let h = (k - (a - b).abs()).max(0.0) / k;
+        a.min(b) - h * h * k / 4.0
+    };
+    let parts = move |p: DVec3| -> [f64; 5] {
+        let head = (p - DVec3::new(0.0, 0.0, 82.0)).length() - 17.0;
+        let body = ((p - DVec3::new(0.0, 0.0, 50.0)) / DVec3::new(17.0, 12.0, 22.0)).length() * 12.0 - 12.0;
+        let arms = limb(p, DVec3::new(-16.0, 0.0, 62.0), DVec3::new(-30.0, 4.0, 40.0), 5.0).min(limb(p, DVec3::new(16.0, 0.0, 62.0), DVec3::new(32.0, -8.0, 70.0), 5.0));
+        let legs = limb(p, DVec3::new(-8.0, 0.0, 32.0), DVec3::new(-10.0, 0.0, 6.0), 6.5).min(limb(p, DVec3::new(8.0, 0.0, 32.0), DVec3::new(11.0, 2.0, 6.0), 6.5));
+        // (the disc: flat above and below, round at its rim)
+        let disc = (p.truncate().length() - 30.0).max((p.z - 2.0).abs() - 2.0);
+        [head, body, arms, legs, disc]
+    };
+    let solid = move |p: DVec3| {
+        let [head, body, arms, legs, disc] = parts(p);
+        run(run(run(run(head, body, 6.0), arms, 5.0), legs, 5.0), disc, 3.0)
+    };
+    let colour = move |p: DVec3| {
+        let of = parts(p);
+        let nearest = (0..5).min_by(|a, b| of[*a].total_cmp(&of[*b])).unwrap_or(0);
+        let mut base = [[232.0, 190.0, 150.0], [190.0, 40.0, 44.0], [190.0, 40.0, 44.0], [40.0, 70.0, 150.0], [90.0, 150.0, 80.0]][nearest];
+        // two eyes and a mouth on the face, which looks along -y; hands of the head's colour; hair above
+        let face = p - DVec3::new(0.0, 0.0, 82.0);
+        if nearest == 0 && face.y < -8.0 && ((face.x.abs() - 6.0).powi(2) + (face.z - 4.0).powi(2) < 6.0 || (face.x.abs() < 6.0 && (face.z + 6.0).abs() < 1.3)) {
+            base = [30.0, 24.0, 24.0];
+        } else if nearest == 0 && face.z > 7.0 + 0.4 * face.y {
+            base = [70.0, 44.0, 26.0];
+        } else if nearest == 2 && (p.x.abs() > 27.0) {
+            base = [232.0, 190.0, 150.0];
+        }
+        // lit from the front, the left and above: the way the surface faces is the way the distance grows
+        let e = 0.01;
+        let facing = DVec3::new(solid(p + DVec3::X * e) - solid(p - DVec3::X * e), solid(p + DVec3::Y * e) - solid(p - DVec3::Y * e), solid(p + DVec3::Z * e) - solid(p - DVec3::Z * e)).normalize_or_zero();
+        let light = 0.62 + 0.38 * facing.dot(DVec3::new(-0.4, -0.6, 0.7).normalize()).max(0.0);
+        base.map(|v| (v * light).round().clamp(0.0, 255.0) as u8)
+    };
+    surface_of(solid, colour, DVec3::new(-36.0, -32.0, -1.0), DVec3::new(40.0, 32.0, 101.0), n)
+}
+
 /// A mesh of about `count` triangles, for timing: the lumpy ball cut finer.
 pub fn large(count: usize) -> Mesh {
     lumpy(((count as f64 / 4.0).sqrt().ceil() as usize).max(4))

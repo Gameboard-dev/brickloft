@@ -85,7 +85,10 @@ pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
         // (as many as a paint may have: four was the most until a pattern could have eight, and a form in a pattern's eight colours could then be copied and not pasted)
         let colours = colours.filter(|c| c.len() <= crate::paint::MOST_COLOURS).ok_or("a form's colours cannot be read")?;
         let paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
-        forms.push((parse_spec(spec)?, paint, place));
+        let mut spec = parse_spec(spec)?;
+        // (a form of a mesh says only the mesh's name: the mesh is found in the imports folder, if it is there)
+        crate::import::attach(&mut spec);
+        forms.push((spec, paint, place));
     }
     Ok(forms)
 }

@@ -24,9 +24,15 @@
 
 use glam::DVec3;
 
+pub mod colour;
+pub mod error;
+pub mod form;
 pub mod made;
 pub mod scan;
 pub mod trial;
+
+pub use error::{Count, MeshError};
+pub use form::{Fitter, Import, Stood, Up};
 
 /// Most vertices and triangles a mesh may have. A reconstruction model's
 /// mesh is one to a few hundred thousand triangles; at the limit the mesh
@@ -91,6 +97,12 @@ pub struct Mesh {
     corners: Vec<[u32; 3]>,
     /// a colour for each vertex, or none
     colours: Vec<[u8; 3]>,
+    /// where each vertex is on its triangle's picture, or none
+    uvs: Vec<[f32; 2]>,
+    /// the pictures, and which of them each triangle is painted with
+    /// (`NO_IMAGE` for none), in the hierarchy's order; empty if there are none
+    images: Vec<Image>,
+    image_of: Vec<u16>,
     nodes: Vec<Node>,
     /// half the box's size along each axis: half of one along its longest
     pub half: DVec3,
@@ -104,6 +116,36 @@ impl std::fmt::Debug for Mesh {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Mesh({} triangles, {:016x})", self.tris.len(), self.id)
     }
+}
+
+/// A picture a mesh is painted with: `width` by `height` pixels of red,
+/// green and blue, a byte each, the top row first.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Image {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+}
+
+/// What a mesh says of a triangle painted with no picture.
+pub const NO_IMAGE: u16 = u16::MAX;
+
+/// A mesh as a file gives it, before it is checked: what a reader hands to
+/// [`Mesh::with`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Parts {
+    pub positions: Vec<[f32; 3]>,
+    /// three point numbers each
+    pub triangles: Vec<[u32; 3]>,
+    /// a colour for each point, or none at all
+    pub colours: Vec<[u8; 3]>,
+    /// where each point is on its triangles' picture (0 to 1 across and
+    /// down, repeating beyond), or none at all
+    pub uvs: Vec<[f32; 2]>,
+    pub images: Vec<Image>,
+    /// which picture each triangle is painted with, or [`NO_IMAGE`]; or
+    /// empty for no pictures
+    pub image_of: Vec<u16>,
 }
 
 fn d(p: [f32; 3]) -> DVec3 {
@@ -148,6 +190,11 @@ fn nearest_on(t: &[[f32; 3]; 3], p: DVec3) -> DVec3 {
 impl Mesh {
     /// A mesh from its points, its triangles (three vertex numbers each)
     /// and a colour for each vertex or none at all.
+    pub fn new(positions: &[[f32; 3]], triangles: &[[u32; 3]], colours: &[[u8; 3]]) -> Result<Mesh, MeshError> {
+        Mesh::with(Parts { positions: positions.to_vec(), triangles: triangles.to_vec(), colours: colours.to_vec(), ..Parts::default() })
+    }
+
+    /// A mesh from what a file gave.
     ///
     /// The numbers are from a file, which may be anyone's: counts are held
     /// to the limits, every coordinate must be a number, and every vertex
@@ -158,31 +205,46 @@ impl Mesh {
     /// over, and a whole shell that faces inwards is turned out (see
     /// `oriented`): the winding number adds each triangle with its sign, so
     /// a shell inside out counts as a hole in whatever it overlaps.
-    pub fn new(positions: &[[f32; 3]], triangles: &[[u32; 3]], colours: &[[u8; 3]]) -> Result<Mesh, String> {
-        if positions.len() > MAX_VERTICES || triangles.len() > MAX_TRIANGLES {
-            return Err(format!("the mesh has {} points and {} triangles, and the most that are read are {MAX_VERTICES} and {MAX_TRIANGLES}", positions.len(), triangles.len()));
+    pub fn with(parts: Parts) -> Result<Mesh, MeshError> {
+        let Parts { positions, triangles, colours, uvs, images, image_of } = parts;
+        for (what, found, most) in [(Count::Points, positions.len(), MAX_VERTICES), (Count::Triangles, triangles.len(), MAX_TRIANGLES)] {
+            if found > most {
+                return Err(MeshError::TooMany { what, found: found as u64, most: most as u64 });
+            }
         }
-        if !colours.is_empty() && colours.len() != positions.len() {
-            return Err("the mesh has colours for some of its points and not for others".into());
+        for (part, found) in [("colours", colours.len()), ("places on its picture", uvs.len())] {
+            if found != 0 && found != positions.len() {
+                return Err(MeshError::Uneven { part, found: found as u64, points: positions.len() as u64 });
+            }
         }
-        if positions.iter().any(|p| p.iter().any(|v| !v.is_finite())) {
-            return Err("one of the mesh's points is not a number".into());
+        if !image_of.is_empty() && image_of.len() != triangles.len() {
+            return Err(MeshError::Malformed { kind: "mesh", why: format!("{} of its {} triangles say which picture they are painted with", image_of.len(), triangles.len()) });
+        }
+        if let Some(bad) = image_of.iter().find(|i| **i != NO_IMAGE && **i as usize >= images.len()) {
+            return Err(MeshError::Malformed { kind: "mesh", why: format!("a triangle is painted with picture {bad}, and there are {}", images.len()) });
+        }
+        if let Some(bad) = images.iter().find(|i| i.width == 0 || i.height == 0 || i.rgb.len() as u64 != i.width as u64 * i.height as u64 * 3) {
+            return Err(MeshError::Malformed { kind: "mesh", why: format!("a picture {} by {} has {} bytes", bad.width, bad.height, bad.rgb.len()) });
+        }
+        if let Some(at) = positions.iter().position(|p| p.iter().any(|v| !v.is_finite())).or_else(|| uvs.iter().position(|p| p.iter().any(|v| !v.is_finite()))) {
+            return Err(MeshError::NotANumber { part: "points", at: at as u64 });
         }
         if let Some(bad) = triangles.iter().flatten().find(|v| **v as usize >= positions.len()) {
-            return Err(format!("a triangle of the mesh names point {bad}, and it has {}", positions.len()));
+            return Err(MeshError::NoSuchPoint { index: *bad as u64, points: positions.len() as u64 });
         }
         let lo = positions.iter().fold(DVec3::MAX, |a, p| a.min(d(*p)));
         let hi = positions.iter().fold(DVec3::MIN, |a, p| a.max(d(*p)));
         let longest = (hi - lo).max_element();
         if triangles.is_empty() || !(longest > 0.0) || !longest.is_finite() {
-            return Err("the mesh has no triangles, or no size".into());
+            return Err(MeshError::Empty);
         }
         let centre = (lo + hi) / 2.0;
         let points: Vec<[f32; 3]> = positions.iter().map(|p| ((d(*p) - centre) / longest).to_array().map(|v| v as f32)).collect();
         let area = |t: &[u32; 3]| (d(points[t[1] as usize]) - d(points[t[0] as usize])).cross(d(points[t[2] as usize]) - d(points[t[0] as usize])).length();
-        let mut corners: Vec<[u32; 3]> = triangles.iter().copied().filter(|t| area(t) > 0.0).collect();
+        let kept: Vec<usize> = (0..triangles.len()).filter(|t| area(&triangles[*t]) > 0.0).collect();
+        let mut corners: Vec<[u32; 3]> = kept.iter().map(|t| triangles[*t]).collect();
         if corners.is_empty() {
-            return Err("every triangle of the mesh is flat to nothing".into());
+            return Err(MeshError::Empty);
         }
         let turned = oriented(&points, &mut corners);
         let corner_points = |t: &[u32; 3]| t.map(|v| points[v as usize]);
@@ -194,13 +256,19 @@ impl Mesh {
         build(&mut nodes, &mut order, 0, &middles, &tri_points);
         let tris: Vec<[[f32; 3]; 3]> = order.iter().map(|&t| tri_points[t as usize]).collect();
         let corners: Vec<[u32; 3]> = order.iter().map(|&t| corners[t as usize]).collect();
+        // (no picture, no list: a mesh painted by its points alone keeps nothing for each triangle)
+        let image_of: Vec<u16> = if images.is_empty() || image_of.is_empty() || uvs.is_empty() { Vec::new() } else { order.iter().map(|&t| image_of[kept[t as usize]]).collect() };
+        let (uvs, images) = if image_of.is_empty() { (Vec::new(), Vec::new()) } else { (uvs, images) };
         // FNV-1a over everything that was kept: http://www.isthe.com/chongo/tech/comp/fnv/
         let mut id = 0xcbf29ce484222325u64;
         let mut mix = |bytes: &[u8]| bytes.iter().for_each(|b| id = (id ^ *b as u64).wrapping_mul(0x100000001b3));
         tris.iter().flatten().flatten().for_each(|v| mix(&v.to_le_bytes()));
         corners.iter().flatten().for_each(|v| mix(&v.to_le_bytes()));
         colours.iter().for_each(|c| mix(c));
-        Ok(Mesh { tris, corners, colours: colours.to_vec(), nodes, half: (hi - lo) / longest / 2.0, id, turned })
+        uvs.iter().flatten().for_each(|v| mix(&v.to_le_bytes()));
+        image_of.iter().for_each(|v| mix(&v.to_le_bytes()));
+        images.iter().for_each(|i| mix(&i.rgb));
+        Ok(Mesh { tris, corners, colours, uvs, images, image_of, nodes, half: (hi - lo) / longest / 2.0, id, turned })
     }
 
     pub fn triangles(&self) -> usize {
@@ -209,7 +277,29 @@ impl Mesh {
 
     /// How much memory the mesh and its hierarchy take, in bytes.
     pub fn bytes(&self) -> usize {
-        self.tris.len() * 48 + self.nodes.len() * std::mem::size_of::<Node>() + self.colours.len() * 3
+        self.tris.len() * 48 + self.nodes.len() * std::mem::size_of::<Node>() + self.colours.len() * 3 + self.uvs.len() * 8 + self.image_of.len() * 2 + self.images.iter().map(|i| i.rgb.len()).sum::<usize>()
+    }
+
+    /// The mesh as parts again, `scale` times the size it is kept at (which
+    /// is one unit along its longest side, about its middle): for writing
+    /// it to a file. Its triangles are in the hierarchy's order and face
+    /// the way they were turned to face.
+    pub fn parts(&self, scale: f64) -> Parts {
+        let points = self.corners.iter().flatten().map(|v| *v as usize + 1).max().unwrap_or(0);
+        let mut positions = vec![[0f32; 3]; points];
+        for (corners, tri) in self.corners.iter().zip(&self.tris) {
+            for k in 0..3 {
+                positions[corners[k] as usize] = tri[k].map(|v| (v as f64 * scale) as f32);
+            }
+        }
+        // (a point no triangle uses has no place here, and its colour goes with it: the lists are as long as each other)
+        let per_point = |list: usize| if list == 0 { 0 } else { points };
+        Parts { positions, triangles: self.corners.clone(), colours: self.colours[..per_point(self.colours.len()).min(self.colours.len())].to_vec(), uvs: self.uvs[..per_point(self.uvs.len()).min(self.uvs.len())].to_vec(), images: self.images.clone(), image_of: self.image_of.clone() }
+    }
+
+    /// Whether the mesh says anything of its colour: by its points, or by a picture.
+    pub fn coloured(&self) -> bool {
+        !self.colours.is_empty() || !self.image_of.is_empty()
     }
 
     /// The corners of a triangle, and the way it faces (of length one).
@@ -219,10 +309,19 @@ impl Mesh {
     }
 
     /// The colour of the surface at `point` of triangle `tri`: its
-    /// corners' colours, mixed by how near each the point is. `None` for a
-    /// mesh with no colours.
+    /// corners' colours, mixed by how near each the point is, times the
+    /// colour of its picture there if it has one (which is how glTF says
+    /// the two combine:
+    /// <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metallic-roughness-material>).
+    /// `None` for a mesh with neither.
+    ///
+    /// The picture is read at the one pixel the point falls in, with no
+    /// smoothing between pixels and no smaller copies for far-off views: a
+    /// brick takes one colour from one place, and the palette the colours
+    /// are reduced to afterwards (see [`colour`]) is far coarser than what
+    /// smoothing would change.
     pub fn colour(&self, tri: usize, point: DVec3) -> Option<[u8; 3]> {
-        if self.colours.is_empty() {
+        if !self.coloured() {
             return None;
         }
         let ([a, b, c], _) = self.triangle(tri);
@@ -230,8 +329,22 @@ impl Mesh {
         let whole = (b - a).cross(c - a).length().max(1e-30);
         let share = [(b - point).cross(c - point).length(), (c - point).cross(a - point).length(), (a - point).cross(b - point).length()].map(|s| s / whole);
         let total = share.iter().sum::<f64>().max(1e-30);
-        let of = self.corners[tri].map(|v| self.colours[v as usize]);
-        Some([0, 1, 2].map(|k| ((0..3).map(|i| share[i] * of[i][k] as f64).sum::<f64>() / total).round().clamp(0.0, 255.0) as u8))
+        let mut colour = [255.0; 3];
+        if !self.colours.is_empty() {
+            let of = self.corners[tri].map(|v| self.colours[v as usize]);
+            colour = [0, 1, 2].map(|k| (0..3).map(|i| share[i] * of[i][k] as f64).sum::<f64>() / total);
+        }
+        if let Some(image) = self.image_of.get(tri).and_then(|i| self.images.get(*i as usize)) {
+            let of = self.corners[tri].map(|v| self.uvs[v as usize]);
+            let at = [0, 1].map(|k| (0..3).map(|i| share[i] * of[i][k] as f64).sum::<f64>() / total);
+            // (a picture repeats beyond its edges, which is glTF's default: its other ways of wrapping are not read)
+            let pixel = |v: f64, size: u32| (((v - v.floor()) * size as f64) as u32).min(size - 1) as usize;
+            let first = 3 * (pixel(at[0], image.width) + image.width as usize * pixel(at[1], image.height));
+            for k in 0..3 {
+                colour[k] *= image.rgb[first + k] as f64 / 255.0;
+            }
+        }
+        Some(colour.map(|v| v.round().clamp(0.0, 255.0) as u8))
     }
 
     /// The nearest point of the surface to `p`, if one is within the
@@ -338,7 +451,8 @@ impl Mesh {
     /// Distance from the surface at `p`, negative inside, in the mesh's
     /// own units, with the nearest point of the surface.
     pub fn signed(&self, p: DVec3) -> (f64, Hit) {
-        let hit = self.nearest(p, f64::INFINITY).expect("a mesh has a triangle");
+        // (a mesh is never made with no triangle: see `with`)
+        let hit = self.nearest(p, f64::INFINITY).unwrap_or(Hit { d2: f64::INFINITY, tri: 0, point: p });
         let d = hit.d2.sqrt();
         (if self.winding(p) > 0.5 { -d } else { d }, hit)
     }
@@ -527,11 +641,35 @@ mod tests {
     #[test]
     fn a_file_that_lies_is_refused() {
         let (points, triangles) = made::sphere_parts(4);
-        assert!(Mesh::new(&points, &[[0, 1, points.len() as u32]], &[]).is_err(), "a triangle naming a point that is not there");
+        let count = points.len() as u64;
+        assert_eq!(Mesh::new(&points, &[[0, 1, points.len() as u32]], &[]).unwrap_err(), MeshError::NoSuchPoint { index: count, points: count });
         let mut bad = points.clone();
         bad[2][1] = f32::NAN;
-        assert!(Mesh::new(&bad, &triangles, &[]).is_err(), "a point that is not a number");
-        assert!(Mesh::new(&points, &[], &[]).is_err() && Mesh::new(&points, &[[0, 0, 1]], &[]).is_err(), "no triangle with any area");
-        assert!(Mesh::new(&points, &triangles, &[[1, 2, 3]]).is_err(), "colours for one point only");
+        assert_eq!(Mesh::new(&bad, &triangles, &[]).unwrap_err(), MeshError::NotANumber { part: "points", at: 2 });
+        assert_eq!(Mesh::new(&points, &[], &[]).unwrap_err(), MeshError::Empty);
+        assert_eq!(Mesh::new(&points, &[[0, 0, 1]], &[]).unwrap_err(), MeshError::Empty, "no triangle with any area");
+        assert_eq!(Mesh::new(&points, &triangles, &[[1, 2, 3]]).unwrap_err(), MeshError::Uneven { part: "colours", found: 1, points: count });
+        // more triangles than are read, refused by their count before any is looked at (they all name point 0)
+        let many = vec![[0u32; 3]; MAX_TRIANGLES + 1];
+        assert_eq!(Mesh::new(&points, &many, &[]).unwrap_err(), MeshError::TooMany { what: Count::Triangles, found: MAX_TRIANGLES as u64 + 1, most: MAX_TRIANGLES as u64 });
+        // a picture whose size is not what it says, and a triangle painted with one that is not there
+        let painted = |images: Vec<Image>, image_of: Vec<u16>| Mesh::with(Parts { positions: points.clone(), triangles: triangles.clone(), uvs: vec![[0.0; 2]; points.len()], images, image_of, ..Parts::default() });
+        assert!(matches!(painted(vec![Image { width: 2, height: 2, rgb: vec![0; 11] }], vec![0; triangles.len()]), Err(MeshError::Malformed { .. })));
+        assert!(matches!(painted(vec![Image { width: 1, height: 1, rgb: vec![0; 3] }], vec![1; triangles.len()]), Err(MeshError::Malformed { .. })));
+        assert!(painted(vec![Image { width: 1, height: 1, rgb: vec![0; 3] }], vec![0; triangles.len()]).is_ok());
+    }
+
+    #[test]
+    fn a_painted_mesh_has_its_pictures_colour_times_its_points() {
+        // one triangle, its picture two pixels side by side: red on the left, blue on the right
+        let image = Image { width: 2, height: 1, rgb: vec![255, 0, 0, 0, 0, 255] };
+        let parts = Parts { positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], triangles: vec![[0, 1, 2]], colours: vec![[255, 255, 255], [255, 255, 255], [128, 128, 128]], uvs: vec![[0.0, 0.5], [1.0, 0.5], [0.0, 0.5]], images: vec![image], image_of: vec![0] };
+        let mesh = Mesh::with(parts).unwrap();
+        let ([a, b, c], _) = mesh.triangle(0);
+        assert_eq!(mesh.colour(0, a * 0.9 + b * 0.1), Some([255, 0, 0]));
+        assert_eq!(mesh.colour(0, a * 0.1 + b * 0.9), Some([0, 0, 255]));
+        // at the dimmer corner, the picture's red at half strength
+        assert_eq!(mesh.colour(0, c), Some([128, 0, 0]));
+        assert!(mesh.coloured() && !made::sphere(4).coloured() && made::sphere(4).colour(0, DVec3::ZERO).is_none());
     }
 }

@@ -44,6 +44,8 @@ pub struct Scanned {
     pub solid: u64,
     pub error: u64,
     pub facing: Vec<(DVec3, DVec3)>,
+    /// and which triangle that point is on, for its colour
+    pub nearest: Vec<u32>,
     /// how long each part took, in milliseconds
     pub stages: Vec<(&'static str, f64)>,
 }
@@ -157,7 +159,7 @@ pub fn scan(stand: &Stand, n: [usize; 3], wedges: bool, threads: Threads) -> Sca
             let on = stand.from_mesh(super::nearest_on(&mesh.tris[p.1 as usize], stand.to_mesh(centre)));
             (on.distance_squared(centre), on, p.1)
         }).min_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2))).expect("a cell of the surface has a triangle");
-        (cell, bits, mask, (bits ^ pattern).count_ones(), (nearest.1, mesh.triangle(nearest.2 as usize).1))
+        (cell, bits, mask, (bits ^ pattern).count_ones(), (nearest.1, mesh.triangle(nearest.2 as usize).1), nearest.2)
     });
     stages.push(("samples of the surface's cells", lap()));
 
@@ -196,12 +198,14 @@ pub fn scan(stand: &Stand, n: [usize; 3], wedges: bool, threads: Threads) -> Sca
     stages.push(("runs of cells inside", lap()));
     let mut sampled = Vec::with_capacity(found.len());
     let mut facing = Vec::with_capacity(found.len());
-    for (cell, bits, mask, wrong, faces) in found {
+    let mut nearest = Vec::with_capacity(found.len());
+    for (cell, bits, mask, wrong, faces, tri) in found {
         shape[cell] = mask;
         solid += bits.count_ones() as u64;
         error += wrong as u64;
         sampled.push((cell, bits));
         facing.push(faces);
+        nearest.push(tri);
     }
-    Scanned { shape, sampled, solid, error, facing, stages }
+    Scanned { shape, sampled, solid, error, facing, nearest, stages }
 }

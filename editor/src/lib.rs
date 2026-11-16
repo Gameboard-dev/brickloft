@@ -11,6 +11,7 @@ pub mod camera;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crash;
 pub mod icon;
+pub mod import;
 pub mod material;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
@@ -23,6 +24,8 @@ pub mod ruler;
 pub mod send;
 pub mod state;
 pub mod store;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod window;
 
 use brickloft_core::shapes::all_masks;
 
@@ -50,8 +53,11 @@ pub fn start() {
 /// handed over; `Window::new` does exactly this minus the icon. In the
 /// browser the page's own icon (index.html) serves, and three-d makes the
 /// window from the page's canvas as before.
+///
+/// And it is drawn in through `window::Desk`, which is three-d's window
+/// with the files dropped on it reported (see `window`).
 #[cfg(not(target_arch = "wasm32"))]
-fn open_window() -> Result<Window, WindowError> {
+fn open_window() -> Result<window::Desk, WindowError> {
     use winit::window::{Icon, WindowBuilder};
     let event_loop = winit::event_loop::EventLoop::new();
     // 256 pixels: Windows scales it down for the title bar and up for Alt+Tab
@@ -66,7 +72,7 @@ fn open_window() -> Result<Window, WindowError> {
     };
     let winit_window = builder.build(&event_loop)?;
     winit_window.focus_window();
-    Window::from_winit_window(winit_window, event_loop, SurfaceSettings::default(), true)
+    window::Desk::from_winit_window(winit_window, event_loop, SurfaceSettings::default())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -232,7 +238,14 @@ pub fn run_form(form: usize, claude: bool) {
     // and the same for the bricks drawn as glass
     let mut ghost_owners: Vec<Vec<usize>> = vec![Vec::new(); masks.len()];
 
+    // mesh files dropped on the window, opened as the frame begins (see `State::drop_mesh`)
+    #[cfg(not(target_arch = "wasm32"))]
+    let dropped = window.dropped();
     window.render_loop(move |mut frame| {
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in dropped.take() {
+            state.drop_mesh(&path);
+        }
         camera.set_viewport(frame.viewport);
         let mut asked = panel::Asked::default();
         gui.update(&mut frame.events, frame.accumulated_time, frame.viewport, frame.device_pixel_ratio, |ui| {
