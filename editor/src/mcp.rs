@@ -667,7 +667,8 @@ fn workspace(state: &State) -> Value {
                     "next_node": outcome.doing.map(|(node, line)| format!("{node}, line {line}")),
                     "grid_cells": outcome.size,
                     "seed_shown": outcome.seed,
-                    "seeds_passed_over": if index == 0 { state.grow_note().map(str::to_string) } else { None },
+                    // (a run that passed over seeds itself says which; one that was watched had them written into its form as it went, and the editor kept the note)
+                    "seeds_passed_over": if !outcome.passed.is_empty() { Some(crate::state::grow::passed_over(&outcome.passed, outcome.seed)) } else if index == 0 { state.grow_note().map(str::to_string) } else { None },
                     "stopped_early": outcome.early.as_ref().map(|early| early.to_string()),
                 }),
                 _ => json!({ "playing": index == 0 && state.growing(), "turn": Value::Null }),

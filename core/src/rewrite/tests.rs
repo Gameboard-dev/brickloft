@@ -231,11 +231,20 @@ fn a_plain_finish_is_the_cells_joined_and_wedges_fill_only_flights_of_steps() {
     assert!(plain.bricks.iter().all(|b| b.mask == crate::shapes::CUBE) && plain.wedges == 0);
     let volume = |made: &Bricks| made.bricks.iter().map(|b| b.volume()).sum::<f64>();
     assert_eq!(volume(&plain), 8.0 * cells.iter().filter(|v| **v == 1).count() as f64);
-    // the flight has four notches (above steps 0 to 3), each a ramp three cells long: one brick each once joined, and half a cell of volume a cell of length
+    // The flight has four notches (above steps 0 to 3), each three cells across. The steps stand on solid cells of their own
+    // colour, so the four rows of ramps and the six cells a row under them are one ramp, four steps long and four high;
+    // and what is built is what four ramps and those cells filled: half a cell of volume more than the plain finish for each notch.
     let ramps: Vec<_> = wedged.bricks.iter().filter(|b| b.mask != crate::shapes::CUBE).collect();
-    assert_eq!((ramps.len(), wedged.wedges), (4, 4), "{ramps:?}");
-    assert!(ramps.iter().all(|b| b.ext == [2, 6, 2] && crate::shapes::shape_info(b.mask).is_some_and(|s| s.kind == crate::shapes::Kind::Ramp)));
+    assert_eq!((ramps.len(), wedged.wedges), (1, 1), "{ramps:?}");
+    assert!(ramps.iter().all(|b| b.min == [0, 0, 2] && b.ext == [8, 6, 8] && crate::shapes::shape_info(b.mask).is_some_and(|s| s.kind == crate::shapes::Kind::Ramp)));
     assert_eq!(volume(&wedged) - volume(&plain), 4.0 * 3.0 * 4.0);
+    // fewer bricks than a ramp to a step, which was the four ramps and the staircase under them a column at a time
+    assert!(wedged.bricks.len() <= plain.bricks.len(), "{} bricks with wedges, {} plain", wedged.bricks.len(), plain.bricks.len());
+    // a flight whose second step is another colour is not one ramp over both: a ramp is one colour
+    let striped: Vec<u8> = (0..size[0] * size[1] * size[2]).map(|i| if solid(i % 8, i / 8 % 9, i / 72) { 1 + ((i % 8) % 2) as u8 } else { 0 }).collect();
+    let two_tone = bricks(&View { size, cells: &striped, letters: &['B', 'W', 'R'] }, 2, Finish::Wedged, 80, &limits).unwrap();
+    assert_eq!(two_tone.wedges, 4);
+    assert!(two_tone.bricks.iter().zip(&two_tone.shades).filter(|(b, _)| b.mask != crate::shapes::CUBE).all(|(b, shade)| b.ext == [2, 6, 2] && *shade == 1 + (b.min[0] / 2 % 2) as u8));
     // nothing beside the slab or the wall: a single step is not a flight
     assert!(ramps.iter().all(|b| b.min[1] < 6 && b.min[0] < 10));
     // A slab one cell high lying on a floor has a step all round it, and no flight: it stays square.
@@ -271,7 +280,10 @@ fn stepped_pyramids_get_corner_pieces_and_a_flight_is_closed_underneath() {
     // a thin flight in the air, one cell thick: ramps above it and below it
     let thin: Vec<u8> = (0..6 * 1 * 6).map(|i| ((i % 6) == (i / 6)) as u8).collect();
     let made = bricks(&View { size: [6, 1, 6], cells: &thin, letters: &['B', 'W'] }, 1, Finish::Wedged, 80, &limits).unwrap();
-    assert_eq!(made.wedges, 10, "five notches above and five below");
+    // (five notches above and five below. Two steps go to a ramp, since under the second step of a pair there is that step
+    // and nothing more: three ramps above and three below, and the volume that of the six cells and ten half cells.)
+    assert_eq!(made.wedges, 6, "{:?}", made.bricks);
+    assert_eq!(made.bricks.iter().map(|b| b.volume()).sum::<f64>(), 6.0 + 10.0 * 0.5);
 }
 
 #[test]
@@ -516,7 +528,9 @@ fn a_program_form_stands_on_its_point_and_its_plan_is_drawn_at_the_size_of_the_b
     let turned = build(&Spec { turned: 1, ..spec(None, 3, Finish::Plain) }).unwrap();
     assert!(turned.bricks.len() == plain.bricks.len() && turned.bricks != plain.bricks);
     // two turns in, the grid is still the plan of six cells a side: drawn five times the size, in the room the building will take
-    let plan = build(&spec(Some(2), 3, Finish::Plain)).unwrap();
+    let plan = build(&spec(Some(2), 3, Finish::Wedged)).unwrap();
+    // (and plain, whatever finish is asked: wedges are read from a grid the program has finished with)
+    assert!(plan.bricks.iter().all(|b| b.mask == crate::shapes::CUBE) && build(&spec(Some(60), 3, Finish::Wedged)).unwrap().bricks.iter().all(|b| b.mask == crate::shapes::CUBE));
     let low = bounds(&plan);
     assert!(!plan.bricks.is_empty() && plan.bricks.iter().all(|b| b.ext.iter().all(|side| side % 15 == 0)), "{:?}", plan.bricks.first());
     assert!(low[0].0 >= 10 - 45 && low[0].1 <= 10 + 45 && low[2].0 >= 7 && low[2].1 <= 7 + 90, "{low:?}");
@@ -560,4 +574,28 @@ fn a_run_that_reaches_its_step_limit_keeps_what_it_made_and_a_missing_program_sa
     // a grid too large is refused with the figure and the limit
     let huge = fails(form::Program { size: [128, 128, 128], ..form::Program::of("Apartemazements", false) });
     assert!(huge.contains("cells") && huge.contains("the most allowed is") && huge.contains("make the size smaller"), "{huge}");
+}
+
+/// Not a test: the bricks each program that comes with the editor is
+/// built of at its usual size, plain and with wedges, and how long
+/// writing them takes. Run by name with `--release -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn the_bricks_of_the_bundled_programs_counted() {
+    for entry in &form::BUNDLED {
+        let program = form::Program::of(entry.name, false);
+        let outcome = form::grown(&program).unwrap_or_else(|fault| panic!("{}: {fault}", entry.name));
+        let view = View { size: outcome.size, cells: &outcome.cells, letters: &[] };
+        let made = [Finish::Plain, Finish::Wedged].map(|finish| {
+            let mut least = f64::MAX;
+            let mut made = None;
+            for _ in 0..5 {
+                let at = std::time::Instant::now();
+                made = Some(bricks(&view, entry.cell, finish, 80, &Limits::USUAL).unwrap());
+                least = least.min(at.elapsed().as_secs_f64() * 1e3);
+            }
+            (made.unwrap(), least)
+        });
+        println!("{}: seed {}, {} turns, grid {:?}; {} bricks plain in {:.1} ms; {} with wedges ({} sloped) in {:.1} ms", entry.name, outcome.seed, outcome.turns, outcome.size, made[0].0.bricks.len(), made[0].1, made[1].0.bricks.len(), made[1].0.wedges, made[1].1);
+    }
 }

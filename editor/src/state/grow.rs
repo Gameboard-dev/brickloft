@@ -70,6 +70,8 @@ pub struct Grow {
     /// when the run was last asked for turns it has not yet given, and whether that is longer ago than a moment: the panel then says it is working
     asked_at: Option<f64>,
     pub working: bool,
+    /// whether the form's last build was sent behind the window because its program had not been run, and not because building it is slow
+    forced: bool,
     /// a form of the workspace that is not the one being edited, being run on a thread of its own, and those that could not be
     #[cfg(not(target_arch = "wasm32"))]
     other: Option<(Program, std::thread::JoinHandle<()>)>,
@@ -94,6 +96,7 @@ impl Default for Grow {
             to_end: false,
             asked_at: None,
             working: false,
+            forced: false,
             #[cfg(not(target_arch = "wasm32"))]
             other: None,
             refused: Vec::new(),
@@ -247,7 +250,7 @@ fn stands_at(a: &Program, b: &Program) -> bool {
 }
 
 /// The seeds passed over, in words.
-fn passed_over(passed: &[(u64, Fault)], shown: u64) -> String {
+pub(crate) fn passed_over(passed: &[(u64, Fault)], shown: u64) -> String {
     let (first, why) = &passed[0];
     let which = if passed.len() == 1 { format!("Seed {first} was passed over") } else { format!("Seeds {first} to {} were passed over", passed[passed.len() - 1].0) };
     format!("{which} and seed {shown} is shown. Seed {first} could not be finished: {why}")
@@ -423,6 +426,10 @@ impl State {
         let unbuilt = self.built.bricks.is_empty() && self.built_from.is_some() && self.problem.is_none() && !self.fitting();
         match form::known(&self.spec.program) {
             Some(known) => {
+                // (run now, so building it is writing a grid out as bricks: done in the frame again, unless that proves slow in its own right)
+                if std::mem::take(&mut self.grow.forced) && !self.fitting() {
+                    self.build_ms = 0.0;
+                }
                 let outcome = known.as_ref().ok();
                 self.grow.caution = outcome.and_then(|outcome| outcome.early.as_ref()).map(|early| early.to_string());
                 if let Some(outcome) = outcome.filter(|outcome| !outcome.passed.is_empty()) {
@@ -443,6 +450,7 @@ impl State {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.build_ms = self.build_ms.max(SLOW_BUILD_MS);
+                    self.grow.forced = true;
                     // (and the bricks in hand, if they are another form's, are not shown as this one's while it runs)
                     if self.built_from.as_ref().is_none_or(|from| from.form != Form::Program) && !self.built.bricks.is_empty() {
                         (self.built, self.bounds) = (Built::default(), None);
@@ -728,6 +736,44 @@ mod tests {
         assert!(longest < std::time::Duration::from_millis(100), "a frame took {longest:?}");
         // where the run took long enough for anyone to wonder, the panel was told it was working
         assert!(said_working || began.elapsed() < std::time::Duration::from_millis(600), "a run of {:?} never said it was working", began.elapsed());
+    }
+
+    /// Not a test: what a frame costs while a program runs, for each
+    /// program that comes with the editor at its usual size. The frame's
+    /// share is hearing the run and building the grid's bricks; the turns
+    /// are another thread's. Run by name with `--release -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement, not a check"]
+    fn how_long_a_frame_of_a_run_takes() {
+        for entry in &form::BUNDLED {
+            let mut state = watching(entry.name, entry.size, 5);
+            (state.grow.speed, state.busy) = (240.0, false);
+            let (began, mut frames, mut building, mut longest, mut built, mut tiles) = (std::time::Instant::now(), 0u32, std::time::Duration::ZERO, std::time::Duration::ZERO, 0u32, crate::tiles::Tiles::default());
+            let (mut taking, mut most_bricks) = (std::time::Duration::ZERO, 0);
+            loop {
+                let now = began.elapsed().as_secs_f64() * 1000.0;
+                let at = std::time::Instant::now();
+                state.grow_frame(now);
+                let rebuilt = state.refresh_behind(move || now);
+                let took = at.elapsed();
+                if rebuilt {
+                    (built, building, longest) = (built + 1, building + took, longest.max(took));
+                    // (and what the view then does with them: finds which tiles changed)
+                    let at = std::time::Instant::now();
+                    std::hint::black_box(tiles.take(state.built.bricks.iter().map(|brick| (*brick, [1, 2, 3]))));
+                    taking += at.elapsed();
+                    most_bricks = most_bricks.max(state.built.bricks.len());
+                }
+                frames += 1;
+                if settled(&state) && state.spec.program.stop.is_none() {
+                    break;
+                }
+                // (a frame at sixty a second)
+                std::thread::sleep(std::time::Duration::from_millis(16).saturating_sub(at.elapsed()));
+            }
+            let turns = state.grow_outcome().map_or(0, |outcome| outcome.turns);
+            println!("{}: {turns} turns in {:.1} s over {frames} frames, {built} of them with new bricks: {:.2} ms a frame to hear the run and build (at most {:.1}), {:.2} ms to find the tiles that changed; {} bricks at the most", entry.name, began.elapsed().as_secs_f64(), building.as_secs_f64() * 1e3 / built.max(1) as f64, longest.as_secs_f64() * 1e3, taking.as_secs_f64() * 1e3 / built.max(1) as f64, most_bricks);
+        }
     }
 
     #[test]

@@ -526,7 +526,16 @@ pub fn built(spec: &Spec) -> Result<Built, String> {
     let point = spec.points.first().copied().unwrap_or_default();
     let grow = (0..3).map(|k| (outcome.full[k] / outcome.size[k].max(1)).max(1)).min().unwrap_or(1) as i32;
     let view = View { size: outcome.size, cells: &outcome.cells, letters: &[] };
-    let made = bricks_at(&view, program.cell * grow, program.finish, spec.max_ext, &Limits::USUAL)?;
+    // Wedges are read from a grid the program has finished with (or been
+    // stopped in at its limit), and a run still under way is built plain.
+    // A flight is told by its neighbours two steps off, so while a
+    // staircase is being drawn a cell at a time its ramps come and go
+    // with every cell; and a frame of a run being watched is then twice
+    // the work or more for bricks that are gone at the next (CarmaTower's
+    // grid part way through: 19 ms a frame with wedges and 10 plain,
+    // measured before cells were handed to the joiner in rows).
+    let finish = if outcome.running { Finish::Plain } else { program.finish };
+    let made = bricks_at(&view, program.cell * grow, finish, spec.max_ext, &Limits::USUAL)?;
     // the low corner of the room the last grid takes, and of this grid within it
     let room = outcome.full.map(|side| side as i32 * program.cell);
     let mine = outcome.size.map(|side| side as i32 * program.cell * grow);

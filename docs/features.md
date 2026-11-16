@@ -49,6 +49,7 @@ until you tick it.
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a single flower (a rose, a water lily or a gerbera); a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 | **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase, cupboards, tables, seating, lights, a bed, plants in pots and pictures. Width, depth and height in whole microbricks; a style and a seed; and a few settings of each kind's own (see [Furniture](#furniture)). |
 | **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
+| **Rule program** | the middle of its floor | A program from a list, or one imported from a file; the grid's size, the size of a cell, a seed, plain cells or wedges; and Play, Pause, Step and Restart to watch it grow (see [Rule programs](#rule-programs)). |
 
 ### The cube
 
@@ -848,6 +849,153 @@ microbricks wide, its walls over 40,000 microbricks long in all, or its
 hedge more than can be built in a few seconds. It can be turned,
 flipped, moved and put on a grid of its own. It cannot be mirrored and
 takes no added points.
+
+## Rule programs
+
+<img src="images/rule-program-panel.png" width="700" alt="The editor with a block of flats in the view and, in the panel, the Program list, the grid's size, the seed, the finish, and the Play, Step and Restart buttons">
+
+**Rule program** grows a building. It runs a small program that starts
+from an empty grid of cells and changes it a little each turn by rewrite
+rules, and you can watch it do so. When the program has finished, each
+cell of its grid is built as a block of microbricks, and the result is a
+form like any other: it can be moved, turned, coloured, joined to other
+forms, saved and copied to the game.
+
+The language of these programs and the seven programs on the list are
+from [MarkovJunior](https://github.com/mxgmn/MarkovJunior) by Maxim
+Gumin, under the MIT licence. CarmaTower is, in its author's words, "a
+proceduralization of a voxel scene by Antoine Lendrevie". How a program
+is run and how its grid becomes bricks is in
+[algorithm.md](algorithm.md), section 7.13.
+
+<img src="images/rule-program-house.png" width="340" alt="ModernHouse: a flat-roofed white house with a blue window and a wooden pergola, on a lawn"> <img src="images/rule-program-villa.png" width="340" alt="SeaVilla: a brown stone villa on arches over blue water, with green planting on its terraces"> <img src="images/rule-program-tower.png" width="340" alt="CarmaTower: a tall grey tower of stacked blocks with balconies and windows"> <img src="images/rule-program-pillars.png" width="340" alt="PillarsOfEternity: sloping white walkways crossing between thin columns round a green pillar">
+
+| Setting | What it does |
+|---|---|
+| **Program** | Which program runs. The four buildings come first: **Apartemazements** (a block of flats), **CarmaTower** (a tower), **ModernHouse** and **SeaVilla**. Then **PillarsOfEternity** and **Escher** (walkways and stairs) and **StrangeDungeon** (rooms and passages). Programs you have imported follow. Choosing one sets its usual grid and its own colours. |
+| **Import...** | Brings in a program from an `.xml` file (see [Importing a program](#importing-a-program)). |
+| **Grid** | How many cells the program's starting grid has along X, Y and Z, from 1 to 128 each. A larger grid is a larger building and a longer run. A program may build several cells for each cell of this grid: the four buildings build 5 or more. **Usual** puts back the size the program was written for. |
+| **Cell size** | How many microbricks each cell of the finished grid is built across, from 1 to 20. It changes the size of the building and nothing else, and the program is not run again for it. |
+| **Seed** | Which of the program's buildings this is. **Another** takes the next one. |
+| **Finish** | **Plain cells** builds every cell as a cube. **With wedges** also fills the notch above each step of a staircase with a ramp, so that stairs are slopes a player walks up, and gives stepped roofs their corner pieces. |
+| **Step limit** | The most turns a run may take, 50,000 unless you change it. |
+| **The program's own colours** | Puts the form's colours back to the program's own, one for each letter its grids use. Each can be changed in **Colour** above, as on any form. |
+
+### Watching it run
+
+| Control | What it does |
+|---|---|
+| **Play** / **Pause** | Play runs the program from where it stands. Pause stops it at the turn it has reached. Play on a run that has finished starts it again from the first turn. |
+| **Step** | Takes one turn and stops. |
+| **Restart** | Starts again from an empty grid with the same seed, and plays. |
+| **To the end** | Runs on to the end without drawing the turns between. |
+| **Turns a second** | How fast it plays, from 1 to 20,000. A program takes from about a hundred turns to a few thousand. |
+| **Watch a change grow** | Ticked, a change of program, grid, seed or step limit is played from its first turn. Unticked, the change is shown finished. |
+
+Under the controls the panel says which turn the run is at and which
+node of the program has the next turn, with its line in the program's
+file, for anyone reading the program alongside.
+
+<img src="images/rule-program-growing.gif" width="345" alt="A block of flats growing in the view: a plan, then floors and stairs, then columns, walls and grass"> <img src="images/rule-program-tower-growing.gif" width="345" alt="A tower growing in the view: blocks stacked from one cell, then covered in windows and balconies">
+
+<img src="images/rule-program-paused.png" width="700" alt="A run paused at turn 134: floors and stairs of plain cells with no columns yet, and the panel saying which node of the program has the next turn">
+
+A paused run is a form like any other. The bricks on screen are what
+**Copy to Clipboard** copies and what a save keeps, and the turn it was
+paused at is part of what is saved, so a save of it opens at the same
+turn. While a run is still under way it is built with the plain finish,
+and the wedges appear when it ends.
+
+A save keeps the program's name, the grid, the seed and the turn, and no
+bricks. Opened on any computer, it runs the program again to that turn
+and builds the same bricks, with no animation. Press **Restart** to
+watch it grow. The form you are editing stays empty for the moment the
+run takes, and the workspace's other rule programs fill in one after
+another, while the window keeps answering.
+
+One turn of some programs is long: the first turn of a wave function
+collapse node can take a second or more. The turn is taken behind the
+window, the panel says **Working on a long turn...**, and the building
+appears when the turn is done.
+
+### Seeds that are passed over
+
+Some seeds cannot be finished. ModernHouse finds no way to fit its tiles
+on about one seed in three, and SeaVilla gives up on about one in six.
+The editor then goes on to the next seed by itself. If you are watching,
+you see the run begin again, the **Seed** box shows the seed that is now
+on screen, and a note under the controls says which seeds were passed
+over and why the first could not be finished. If 16 seeds in a row
+cannot be finished, the form says so and suggests another size.
+
+### When a program is stopped
+
+A program that loops, or a grid too large to finish, is stopped at the
+step limit. What it had made stays on screen as the form's bricks, and
+an amber message at the top of the panel says that it stopped early and
+that raising **Step limit** lets it go on. A grid, a tileset or a file
+over the size the editor allows is refused, and the message gives the
+figure, the limit and what to change.
+
+<img src="images/rule-program-stopped.png" width="700" alt="A block of flats stopped at a step limit of 150: floors and stairs with no columns or walls, and an amber message at the top of the panel saying it stopped early">
+
+### Importing a program
+
+Type or paste the path of a program's `.xml` file into the box beside
+**Import...** and press the button or Enter. The editor checks that the
+program loads, copies it into `Documents/brickloft/programs/` with the
+files it reads, adds it to the **Program** list, and makes the form you
+are editing that program. A save that names an imported program opens
+again on this computer. On a computer that does not have the program,
+the form opens empty and says to import the file again.
+
+A program often reads other files: a tileset (an `.xml` file and a
+folder of `.vox` tiles) and rules kept as `.vox` files. They are looked
+for in two places only, in this order: beside the program's file, and in
+a folder called `resources` beside it. A file found in neither is taken
+from the files that come with the editor, which are the original's own
+tilesets and palette. So a program that uses one of the original's
+tilesets needs only its own `.xml` file.
+
+To import a program from a copy of the MarkovJunior repository, copy
+the program's file out of `models/` into the repository's top folder,
+so that it lies beside `resources/`, and import it from there:
+
+```
+MarkovJunior/
+  MyProgram.xml        <- the program, copied here from models/
+  models.xml           <- read for the program's usual size, if it lists one
+  resources/
+    palette.xml        <- its colours, if you have changed them
+    tilesets/Paths.xml
+    tilesets/Paths/Line.vox ...
+    rules/MyProgram/Roof.vox ...
+```
+
+If `models.xml` lies beside the program and lists it, the grid starts at
+the size given there (a flat program at a Z of 1). Otherwise it starts
+at 16 each way, and a flat program needs its Z set to 1 by hand.
+
+The editor runs most of the language: `one`, `all`, `prl`, `markov`,
+`sequence`, `path`, `map`, `convolution`, `wfc` with a tileset, fields
+and unions. It does not run `convchain`, `wfc` from a sample picture,
+`observe`, or rules kept as `.png` pictures. A program that uses one of
+these is refused, and the message names the part and its line. Many of
+the original's flat programs use `.png` rules or `observe`.
+
+To write a program of your own, read
+[MarkovJunior's README](https://github.com/mxgmn/MarkovJunior#readme),
+which explains the language with examples, and its
+[syntax guide](https://github.com/mxgmn/MarkovJunior/blob/main/syntax.md).
+
+### How the results differ from the original's
+
+A seed here gives a different building from the same seed in
+MarkovJunior, of the same kind. The original draws its random numbers
+from .NET's library, and this editor draws them from a generator of its
+own so that a seed gives the same bricks on every computer. The rules
+are applied as the original applies them. The original also draws
+cells only, and the wedges in a staircase are this editor's addition.
 
 ## Colour
 

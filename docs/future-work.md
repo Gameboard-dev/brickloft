@@ -1,9 +1,10 @@
 # Future work
 
 What is planned and not yet built: more for Claude to do, what remains
-for joined forms, the patterns, the plants and the furniture, and a plan
-for forms made by other programs (MarkovJunior models, and meshes
-generated from a prompt). None of it changes how forms are fitted today
+for joined forms, the patterns, the plants and the furniture, what
+remains for rule programs (MarkovJunior's language, which the editor now
+runs), and a plan for forms made by other programs (meshes generated
+from a prompt). None of it changes how forms are fitted today
 (see [algorithm.md](algorithm.md)).
 
 ## More for Claude to do through MCP
@@ -296,7 +297,8 @@ which carries no licence.
 Two requests share one piece of work. A MarkovJunior model produces a grid
 of coloured cells, and a text-to-3D model produces a triangle mesh. Neither
 is one of the editor's forms, so each needs a way in, and both then need
-fitting with bricks. The plan below is not built. It was written on
+fitting with bricks. Of the plan below, the MarkovJunior part is built
+and the rest is not. It was written on
 2026-11-16 from each project's public page and licence file, read that day.
 
 ### What the two need in common
@@ -359,69 +361,60 @@ triangle nearest its middle. A sloped brick is one colour, as everywhere.
 
 ### MarkovJunior
 
-[MarkovJunior](https://github.com/mxgmn/MarkovJunior) is a language of
-rewrite rules, read from an XML file, and an interpreter for it in C#. It
-is under the MIT licence, so it can be called, and it could be ported. Its
-models make mazes, dungeons, rivers and, in
-[Apartemazements](https://github.com/mxgmn/MarkovJunior/blob/main/models/Apartemazements.xml),
-buildings in three dimensions.
+This part is built, and differently from the plan that stood here. The
+plan was to start the original C# program and read the file it wrote,
+and to port the language to Rust later only if that was used. The port
+came first: an interpreter for the language is in
+[core/src/rewrite/](../core/src/rewrite.rs), the form is **Rule
+program**, and seven of the original's programs come with the editor
+(see [features.md](features.md#rule-programs) and
+[algorithm.md](algorithm.md), section 7.13). Starting the original was
+dropped because it needs .NET installed and gives a result only when it
+has finished, and the point of these programs in an editor is to watch
+them grow and stop them.
 
-The interpreter takes no arguments. It reads `models.xml` from the folder
-it is started in, runs every model listed there, deletes whatever is in
-`output/` and writes each result as `output/<name>_<seed>.png` for a flat
-model or `output/<name>_<seed>.vox` (the MagicaVoxel format) for one in
-three dimensions. A model may also read files from `resources/`, as
-Apartemazements reads its tiles. These facts shape the first stage.
+What remains:
 
-**Stage 1: call the program.** The panel gains, for an Imported form, a
-box for the path of a model's XML file, a size, a seed and the folder
-where MarkovJunior is installed. To run a model the editor:
-
-1. makes a folder of its own under the system's temporary folder
-   (see [`places.rs`](../editor/src/places.rs)), because the program
-   empties `output/` wherever it runs and would overwrite the player's own
-   `models.xml`;
-2. copies the model's file into `models/` there, writes a `models.xml`
-   naming that one model with the size, the dimension and the seed, and
-   copies `resources/` from the installed folder once, keeping the copy
-   for later runs;
-3. starts the installed program with that folder as its working folder,
-   as a program and a list of arguments and never through a shell, with a
-   limit on how long it may run and a Cancel button that stops it;
-4. reads the one file that appears in `output/`. A `.vox` file is read by
-   a reader written for it, which is small: the format is a list of sizes
-   and of cells, each a position and a palette number in one byte apiece,
-   so no grid is more than 256 cells along a side. A `.png` is read with
-   the `png` crate the editor already builds, the model having been run
-   with `pixelsize` 1 so that one pixel is one cell.
-
-What comes back is treated as data from a stranger: sizes and counts are
-checked against limits before anything is allocated, and a file that does
-not parse is reported and dropped. The seed is passed in `models.xml`, so a
-saved form names the model's file, its size and its seed and is run again
-when opened. If the program or the file is missing the form opens empty
-with a message, as a form with a problem does today.
-
-A flat model becomes a floor or a wall a chosen number of microbricks
-deep. One in three dimensions becomes a solid.
-
-Not in stage 1: the browser page, which cannot start a program; and
-animation, which the interpreter can save as a row of pictures.
-
-**Stage 2: read the language in Rust.** Calling the program needs .NET on
-the player's computer and a second or more to start each time. An
-interpreter in `core/` would run in the browser page, give the same grid
-from the same seed on every computer, and let a size slider rebuild as it
-is dragged. The language's nodes are few (one, all, prl, markov, sequence,
-then path, map, convolution, convchain and wfc), and the first five run
-most of the flat models. It would be written from the language's
-description and checked against the C# program's output for each model
-shipped with it, seed for seed. The original is MIT, so its structure may
-be followed with credit. Other ports exist, one of them in Rust, whose
-licence has not been checked; none is to be copied without that.
-
-Stage 2 is only worth its cost if stage 1 is used. It is the larger piece:
-the XML reader alone is a new dependency or a few hundred lines.
+- **`observe`.** A rule node may name an end state, and the original
+  then searches for a sequence of rule applications that reaches it.
+  Its Sokoban and path-finding programs depend on this. It is the
+  largest missing part for programs written by other people: about 400
+  lines in the original (`Observation.cs` and `Search.cs`), a backward
+  pass that finds how far each cell is from its goal and a best-first
+  search over whole grids. A program that uses it is refused today.
+- **Rules kept as `.png` pictures, `convchain`, and `wfc` from a sample
+  picture.** These three serve the original's flat programs. The first
+  needs only the `png` crate the editor already builds. Each is refused
+  today with a message that names it.
+- **A check against the original.** No run of the C# program has been
+  compared with this interpreter, because .NET was not installed where
+  it was written. The random numbers differ on purpose, so the check is
+  of kind and of rates: whether ModernHouse fails on about one seed in
+  three there too, and whether each program's results look alike.
+- **Brick shapes written for a tile.** A program's cornices, railings
+  and window sills are single cells. A tileset could carry, for each
+  tile, the bricks to build it from in place of its cells, so that a
+  cornice is a wedge. This was not tried: it needs shapes drawn by hand
+  for each of the original's tilesets, and it should be shown in
+  pictures to improve a building before it is kept.
+- **Roofs and slopes that are not flights.** The wedge finish fills
+  flights of two steps or more. A single step is left square, since it
+  is also the edge of every slab, so a low parapet or a one-step roof
+  edge stays stepped.
+- **A file dropped on the window.** The editor has a function that
+  takes a dropped `.xml` file (`State::drop_file`), and nothing calls
+  it yet. The windowing library reports dropped files only to a frame
+  loop written by hand, which the mesh import branch adds; when that is
+  merged, its loop over dropped files needs one line to offer each to
+  this function first.
+- **A picker for the file.** A path is typed or pasted. A file dialog
+  is a crate for each of three systems' dialogs, which the project has
+  so far done without.
+- **The time to open a save.** A save keeps settings and no bricks, so
+  opening one runs each program again: ten seconds for a CarmaTower.
+  The window keeps answering while it does. Keeping finished grids in a
+  folder beside the saves would make this instant, at the price of a
+  second place for a form to be read from.
 
 ### A form from a prompt
 
@@ -522,12 +515,12 @@ Nothing leaves the computer but the one download of the weights.
 | Step | What it gives | Depends on |
 |---|---|---|
 | 1 | The Imported form, the `.vox` and picture readers, the Blocks fitter, its own colours | nothing; any MagicaVoxel file can be opened |
-| 2 | Calling MarkovJunior (stage 1 above) | step 1 |
+| 2 | Calling MarkovJunior: dropped, since its language is now run in Rust (see MarkovJunior above) | |
 | 3 | The Smoothed fitter for grids, with repeats fitted once | step 1 |
 | 4 | The OBJ reader, a mesh's distance function, the Smoothed fitter for meshes | step 3 |
 | 5 | `brickloft-generate` and the panel's prompt box | step 4, and the trial above |
 | 6 | Planes snapped to the grid, thin features kept | step 4, and a reading of the paper |
-| 7 | MarkovJunior read in Rust (stage 2) | step 2 having been used |
+| 7 | MarkovJunior read in Rust: built, as the Rule program form | |
 
 The player asked for the prompt first (2026-11-16), so the order worked
 in is the trial of Candle and Lux3D, then steps 1, 4 and 5 with the Blocks
