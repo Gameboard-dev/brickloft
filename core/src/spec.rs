@@ -1443,7 +1443,9 @@ fn lifted(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, plane: f
             cells.dedup();
             cells
         };
-        let (pieces, blocks) = tube_columns(&curve, closed, lying, section, &cells, &within, spec.max_ext);
+        // a band standing upright has the flat band's own outline (see `tube_columns`)
+        let plan: &[CellBrick] = if lying == axis && matches!(section, Section::Band { .. }) { laid } else { &[] };
+        let (pieces, blocks) = tube_columns(&curve, closed, lying, section, &cells, plan, &within, spec.max_ext);
         bricks.extend(crate::fit_ribbon::in_rows(pieces, spec.max_ext));
         whole.extend(blocks);
     }
@@ -1772,7 +1774,14 @@ fn stretches(curve: &[DVec3], axis: usize, radius: f64) -> Vec<Stretch> {
 /// cell square: the sides came out as tall slivers standing proud of one
 /// another. On a tube 11 across, pulled up 25, a fifteenth of the outside
 /// was stepped faces that way.
-fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, cells: &[(i32, i32)], wanted: &dyn Fn((i32, i32), f64) -> bool, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+///
+/// `plan` is the bricks of a flat band whose ground this is, if the columns
+/// stand along the axis the band lay flat across (and nothing otherwise).
+/// Seen along that axis a lifted band has the outline it had flat, which
+/// those bricks fit with long three-cornered bricks as whole cells cannot.
+/// So the ground is then theirs: a cell for each cell of a block, and half
+/// a box for each three-cornered brick (see `LONG_RISE`).
+fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, cells: &[(i32, i32)], plan: &[CellBrick], wanted: &dyn Fn((i32, i32), f64) -> bool, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
     use std::collections::HashSet;
     let (ua, va) = plane_axes(axis);
     let radius = section.reach();
@@ -1905,7 +1914,49 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     // meet are the tube running through itself: the lower one is built and
     // the other left out there, since no cell can be in two bricks.
     let mut over: std::collections::HashMap<(i32, i32), Vec<f64>> = std::collections::HashMap::new();
-    for &(u, v) in cells {
+    // A flat band's own bricks, where they are given. `open` is then the
+    // ground left to the rule above: under the three-cornered bricks that
+    // are not kept. `long` is the ones that are, by their three corners
+    // (the square one first) and the pass of the curve they belong to.
+    let lifted: HashSet<(i32, i32)> = if plan.is_empty() { HashSet::new() } else { cells.iter().copied().collect() };
+    let mut open: HashSet<(i32, i32)> = HashSet::new();
+    let mut long: Vec<([(i32, i32); 3], f64)> = Vec::new();
+    for b in plan {
+        let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
+        let under = (0..wv).flat_map(move |j| (0..wu).map(move |i| (u + i, v + j)));
+        // the pass of the curve a point of the ground is nearest, and whether its columns are wanted here
+        let pass = |c: (i32, i32)| {
+            let about = near_about(c.0 as f64 + 0.5, c.1 as f64 + 0.5, None).3;
+            Some(about).filter(|a| wanted(c, length_at(*a)))
+        };
+        if b.mask == CUBE {
+            for c in under.filter(|c| lifted.contains(c)) {
+                if let Some(about) = pass(c) {
+                    over.insert(c, vec![about]);
+                }
+            }
+            continue;
+        }
+        // the corners of its box it stands on, numbered as a brick's are
+        let foot: Vec<usize> = (0..4usize).filter(|k| b.mask >> ((k & 1) << ua | (k >> 1) << va) & 1 == 1).collect();
+        let upright = crate::shapes::shape_info(b.mask).is_some_and(|i| i.kind == crate::shapes::Kind::Ramp && i.axis as usize == axis) && foot.len() == 3;
+        let about = pass((u + wu / 2, v + wv / 2)).filter(|_| upright && under.clone().all(|c| lifted.contains(&c) && pass(c).is_some()));
+        let corner = |k: usize| (u + (k as i32 & 1) * wu, v + (k as i32 >> 1) * wv);
+        let kept = about.filter(|about| {
+            let tops = foot.iter().map(|k| span(corner(*k).0 as f64, corner(*k).1 as f64, *about).1);
+            let (low, high) = tops.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(t), hi.max(t)));
+            high - low <= LONG_RISE
+        });
+        match kept {
+            Some(about) => {
+                let square = 3 - (0..4).find(|k| !foot.contains(k)).unwrap();
+                let ends: Vec<usize> = foot.iter().copied().filter(|k| *k != square).collect();
+                long.push(([corner(square), corner(ends[0]), corner(ends[1])], about));
+            }
+            None => open.extend(under.filter(|c| lifted.contains(c))),
+        }
+    }
+    for &(u, v) in cells.iter().filter(|c| plan.is_empty() || open.contains(c)) {
         let (mid_u, mid_v) = (u as f64 + 0.5, v as f64 + 0.5);
         let mut found: Vec<(f64, f64, f64)> = passes(mid_u, mid_v)
             .into_iter()
@@ -1965,7 +2016,7 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     let mut notches: Vec<(i32, i32)> = cells.iter().flat_map(|&(u, v)| [(u + 1, v), (u - 1, v), (u, v + 1), (u, v - 1)]).filter(|c| !inside.contains(c)).collect();
     notches.sort();
     notches.dedup();
-    for (u, v) in notches {
+    for (u, v) in notches.into_iter().filter(|c| plan.is_empty() || open.contains(c)) {
         for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
             if !(inside.contains(&(u + sx, v)) && inside.contains(&(u, v + sy)) && !inside.contains(&(u - sx, v)) && !inside.contains(&(u, v - sy))) {
                 continue;
@@ -1987,8 +2038,21 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
             break;
         }
     }
+    for (plan, about) in long {
+        let corners = plan.map(|p| corner(&mut ground, p, about));
+        ground.halves.push(corners);
+    }
     ground.lay(axis, max_ext)
 }
+
+/// How far the top of a lifted band may climb from one corner of a
+/// three-cornered brick of its flat outline to another, in cells, for the
+/// brick to be kept as half a box with one sloped brick on top and one
+/// underneath. One brick cannot follow a top that bends along it, and
+/// cannot be sloped both on top and underneath when the band climbs along
+/// its long side (see `fit_ribbon::cap_of`), so a brick the band climbs
+/// further over is given up for whole cells with their notches filled.
+const LONG_RISE: f64 = 1.5;
 
 /// A flat band whose curve has been pulled out of the plane it lay in, at
 /// `plane` along `axis`: the flat band's bricks where the curve is still in
@@ -3334,9 +3398,13 @@ mod tests {
         let (band_steps, tube_steps) = (stepped(&lifted, &leaning), stepped(&tube, &as_tube));
         // (the tube keeps its pipe where it was not lifted: see `patched`)
         assert!(band_steps < 0.12 && tube_steps < 0.12, "the band is {band_steps} steps, a tube {tube_steps}");
-        // seen along its axis it is the flat ring still: the same cells of the plane
+        // Seen along its axis it is the flat ring still: the same cells of
+        // the plane, but for a few under the three-cornered bricks of the
+        // outline it climbs too steeply over to keep (see `LONG_RISE`).
         let plan = |b: &Built| -> HashSet<[i32; 2]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[2] + z]))).collect() };
-        assert_eq!(plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+        let (now, flat) = (plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+        let changed = now.symmetric_difference(&flat).count();
+        assert!(changed * 50 <= flat.len(), "{changed} of the plan's {} cells are not the flat ring's", flat.len());
     }
 
     #[test]

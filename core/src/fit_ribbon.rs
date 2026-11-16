@@ -125,7 +125,10 @@ pub struct Ground {
     /// and the under side and top wanted over their middles
     pub squares: Vec<([usize; 4], (f64, f64))>,
     /// half cells, cut corner to corner: the square corner first, then the
-    /// two ends of the long side
+    /// two ends of the long side. Half a box longer than one cell may be
+    /// given the same way, by its three corners: a three-cornered brick of
+    /// a flat outline, whose top and under side are then one brick each
+    /// from end to end.
     pub halves: Vec<[usize; 3]>,
 }
 
@@ -323,7 +326,7 @@ impl Ground {
         let mut bricks: Vec<CellBrick> = Vec::new();
         let mut whole: Vec<[i32; 3]> = Vec::new();
         // a brick over the cell at (u, v), its mask given with the plane's corners first and the axis last
-        let mut brick = |u: i32, v: i32, local: u8, from: i32, to: i32| {
+        let mut brick = |[u, v, wu, wv]: [i32; 4], local: u8, from: i32, to: i32| {
             if to <= from || shape_info(local).is_none() {
                 return;
             }
@@ -335,7 +338,7 @@ impl Ground {
                 let run = if upright { (to - at).min(limit) } else { to - at };
                 let (mut min, mut ext) = ([0; 3], [0; 3]);
                 (min[ua], min[va], min[axis]) = (u, v, at);
-                (ext[ua], ext[va], ext[axis]) = (1, 1, run);
+                (ext[ua], ext[va], ext[axis]) = (wu, wv, run);
                 bricks.push(CellBrick { mask, min, ext });
                 at += run;
             }
@@ -376,17 +379,17 @@ impl Ground {
                 (Some(above), Some(below)) if top_lo >= under_hi => {
                     block(under_hi, top_lo);
                     for (foot, from, peak, up, in_valley) in above {
-                        brick(u, v, foot | foot << 4, top_lo, from);
+                        brick([u, v, 1, 1], foot | foot << 4, top_lo, from);
                         if up != 0 {
-                            brick(u, v, if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 }, from, peak);
+                            brick([u, v, 1, 1], if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 }, from, peak);
                         }
                     }
                     for (foot, from, peak, up, in_valley) in below {
                         // upside down: what was `from..peak` going up is `-peak..-from`, with the piece's two ends exchanged
-                        brick(u, v, foot | foot << 4, -from, under_hi);
+                        brick([u, v, 1, 1], foot | foot << 4, -from, under_hi);
                         if up != 0 {
                             let piece = if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 };
-                            brick(u, v, piece >> 4 | (piece & 15) << 4, -peak, -from);
+                            brick([u, v, 1, 1], piece >> 4 | (piece & 15) << 4, -peak, -from);
                         }
                     }
                 }
@@ -396,8 +399,10 @@ impl Ground {
         for corners in &self.halves {
             let plan = corners.map(|k| self.at[k]);
             let (u, v) = (plan.iter().map(|p| p.0).min().unwrap(), plan.iter().map(|p| p.1).min().unwrap());
+            // (its box is one cell square, or as long each way as a brick of the outline it is taken from)
+            let on = [u, v, (plan.iter().map(|p| p.0).max().unwrap() - u).max(1), (plan.iter().map(|p| p.1).max().unwrap() - v).max(1)];
             // each corner as a corner of the cell's box, at its foot
-            let bit = |k: usize| 1u8 << ((plan[k].0 - u) | (plan[k].1 - v) << 1);
+            let bit = |k: usize| 1u8 << ((plan[k].0 - u) / on[2] | (plan[k].1 - v) / on[3] << 1);
             let foot = bit(0) | bit(1) | bit(2);
             let raised = |which: u8| (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(k));
             let (tops, unders) = (corners.map(|k| top_at[k]), corners.map(|k| under_at[k]));
@@ -405,13 +410,13 @@ impl Ground {
             if low_top <= high_under {
                 continue;
             }
-            brick(u, v, foot | foot << 4, high_under, low_top);
+            brick(on, foot | foot << 4, high_under, low_top);
             // where the three corners cannot be joined, the half cell ends level at the lowest of them
             if let Some((which, from, tall)) = cap_of(tops) {
-                brick(u, v, foot | raised(which) << 4, from, from + tall);
+                brick(on, foot | raised(which) << 4, from, from + tall);
             }
             if let Some((which, from, tall)) = cap_of(unders.map(|h| -h)) {
-                brick(u, v, raised(which) | foot << 4, -from - tall, -from);
+                brick(on, raised(which) | foot << 4, -from - tall, -from);
             }
         }
         (bricks, whole)
