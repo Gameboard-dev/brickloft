@@ -1291,6 +1291,15 @@ fn curve(
 /// curve is still in the plane, and columns between the tube's under side
 /// and its top wherever it has left it (see `fit_ribbon::columns`).
 ///
+/// The lifted part has the flat pipe's eight-sided section, moved straight
+/// up with the curve: a level top, a chamfer at 45 degrees each side, and
+/// an upright wall. It was first given a round section. A round section's
+/// top falls away ever more steeply towards its sides, and a surface
+/// steeper than one cell up per cell across cannot be made of bricks one
+/// cell square: the sides came out as tall slivers standing proud of one
+/// another. On a tube 11 across, pulled up 25, a fifteenth of the outside
+/// was stepped faces that way and a twentieth is this way.
+///
 /// The ground is shared out a cell at a time: a cell under a lifted part of
 /// the curve is rebuilt from top to bottom, and so is every cell under a
 /// sloped brick of the pipe that reaches into one, since such a brick
@@ -1325,11 +1334,20 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
         }
         best
     };
-    // under side and top: the tube's section stands square to its curve, so
+    // the flat pipe's section: as tall as it was laid, its chamfer the
+    // regular octagon's (see `chamfer_of` where the pipe is laid out)
+    let count = (2.0 * radius).round() as i32;
+    let chamfer = ((count as f64 * (1.0 - std::f64::consts::FRAC_1_SQRT_2)).round() as i32).min((count - 1) / 2) as f64;
+    let half_tall = (laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap() - laid.iter().map(|b| b.min[axis]).min().unwrap()) as f64 / 2.0;
+    // Under side and top. Across the tube the top is level as far as the
+    // chamfer, falls one for one across it, and from the wall outwards
+    // stays at the wall's top, so that a cell at the wall has all four of
+    // its corners at the wall's height and not one of them at nothing. The
+    // tube's section stands square to its curve, so
     // where the curve climbs it is that much taller measured straight up
     let span = |u: f64, v: f64| {
         let (off, lift, slope) = near(u, v);
-        let tall = if off < radius { (radius * radius - off * off).sqrt() * (1.0 + slope * slope).sqrt() } else { 0.0 };
+        let tall = (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt();
         (centre + lift - tall, centre + lift + tall)
     };
     let ground = |b: &CellBrick| {
@@ -1383,10 +1401,98 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
             }
         }
     }
-    let mut cells: Vec<(i32, i32)> = lifted.into_iter().collect();
+    // the tube stands over the cells whose middles are within its wall
+    let mut cells: Vec<(i32, i32)> = lifted.into_iter().filter(|c| near(c.0 as f64 + 0.5, c.1 as f64 + 0.5).0 < radius).collect();
     cells.sort();
     let (pieces, blocks) = crate::fit_ribbon::columns(&cells, &span, axis, spec.max_ext);
     bricks.extend(pieces);
+    // The wall. Whole cells give it the outline of a staircase wherever the
+    // tube runs askew of the grid, every tread and riser of it an upright
+    // face pointing the wrong way. Each notch of that staircase, a cell
+    // outside the tube with the tube on two sides of it that meet, is
+    // filled with half a cell: a ramp standing on end, its sloped face
+    // closing the notch. A staircase of one across and one along becomes a
+    // flat wall at 45 degrees, and a shallower one loses its inside
+    // corners. The half cell's top and under side are the wall's, and
+    // where its three corners are not at one height they are joined by the
+    // one brick that can do it, if there is one.
+    {
+        let inside: HashSet<(i32, i32)> = cells.iter().copied().collect();
+        let mut notches: Vec<(i32, i32)> = cells.iter().flat_map(|&(u, v)| [(u + 1, v), (u - 1, v), (u, v + 1), (u, v - 1)]).filter(|c| !inside.contains(c)).collect();
+        notches.sort();
+        notches.dedup();
+        let level = |u: i32, v: i32| {
+            let (under, top) = span(u as f64, v as f64);
+            (under.round() as i32, top.round() as i32)
+        };
+        let world = |local: u8| (0..8u8).filter(|c| local >> c & 1 == 1).fold(0u8, |m, c| m | 1 << ((c & 1) << ua | (c >> 1 & 1) << va | (c >> 2) << axis));
+        for (u, v) in notches {
+            for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                if !(inside.contains(&(u + sx, v)) && inside.contains(&(u, v + sy)) && !inside.contains(&(u - sx, v)) && !inside.contains(&(u, v - sy))) {
+                    continue;
+                }
+                let (ox, oy) = ((sx > 0) as u8, (sy > 0) as u8);
+                // the half cell's corners on the ground: where the tube's two
+                // sides meet, then the far end of each of them
+                let plan = [(ox, oy), (1 - ox, oy), (ox, 1 - oy)];
+                let bit = |p: (u8, u8), z: u8| 1u8 << (p.0 | p.1 << 1 | z << 2);
+                let heights = plan.map(|p| level(u + p.0 as i32, v + p.1 as i32));
+                let (tops, unders) = (heights.map(|h| h.1), heights.map(|h| h.0));
+                let (low_top, high_under) = (*tops.iter().min().unwrap(), *unders.iter().max().unwrap());
+                if low_top <= high_under {
+                    continue;
+                }
+                let mut put = |local: u8, from: i32, to: i32| {
+                    let mask = world(local);
+                    if to <= from || crate::shapes::shape_info(mask).is_none() {
+                        return;
+                    }
+                    let mut at = from;
+                    while at < to {
+                        let run = (to - at).min(spec.max_ext.max(1));
+                        let (mut min, mut ext) = ([0; 3], [0; 3]);
+                        (min[ua], min[va], min[axis]) = (u, v, at);
+                        (ext[ua], ext[va], ext[axis]) = (1, 1, run);
+                        bricks.push(CellBrick { mask, min, ext });
+                        at += run;
+                    }
+                };
+                let base = |z: u8| plan.iter().fold(0u8, |m, p| m | bit(*p, z));
+                put(base(0) | base(1), high_under, low_top);
+                // A cap: the corners that stand clear of the rest by one height.
+                // One brick makes it when that is one corner (a tetrahedron or
+                // a half inner corner) or the two far ends (a half outer
+                // corner). The meeting corner with one far end has none.
+                let cap = |h: [i32; 3], flat: i32| -> Option<(u8, i32)> {
+                    let high: Vec<usize> = (0..3).filter(|k| h[*k] != flat).collect();
+                    let tall = (h[*high.first()?] - flat).abs();
+                    let allowed = matches!(high.as_slice(), [0] | [1] | [2] | [1, 2]);
+                    (allowed && high.iter().all(|k| (h[*k] - flat).abs() == tall)).then_some((high.iter().fold(0u8, |m, k| m | 1 << k), tall))
+                };
+                if let Some((which, tall)) = cap(tops, low_top) {
+                    let local = base(0) | (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(plan[k], 1));
+                    let mask = world(local);
+                    if crate::shapes::shape_info(mask).is_some() {
+                        let (mut min, mut ext) = ([0; 3], [0; 3]);
+                        (min[ua], min[va], min[axis]) = (u, v, low_top);
+                        (ext[ua], ext[va], ext[axis]) = (1, 1, tall);
+                        bricks.push(CellBrick { mask, min, ext });
+                    }
+                }
+                if let Some((which, tall)) = cap(unders, high_under) {
+                    let local = base(1) | (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(plan[k], 0));
+                    let mask = world(local);
+                    if crate::shapes::shape_info(mask).is_some() {
+                        let (mut min, mut ext) = ([0; 3], [0; 3]);
+                        (min[ua], min[va], min[axis]) = (u, v, high_under - tall);
+                        (ext[ua], ext[va], ext[axis]) = (1, 1, tall);
+                        bricks.push(CellBrick { mask, min, ext });
+                    }
+                }
+                break;
+            }
+        }
+    }
     whole.extend(blocks);
     if !whole.is_empty() {
         let lo = [0, 1, 2].map(|k| whole.iter().map(|c| c[k]).min().unwrap());
@@ -2731,6 +2837,18 @@ mod tests {
         // seen along its axis it is the flat ring still: the same cells of the plane
         let plan = |b: &Built| -> HashSet<[i32; 2]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[2] + z]))).collect() };
         assert_eq!(plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+    }
+
+    #[test]
+    fn a_thick_tube_pulled_up_steeply_keeps_its_sides_smooth() {
+        // (the form of a saved report: a ring 11 thick, one side pulled up 25)
+        let ring = Spec { form: Form::Circle, points: vec![at(0.5, 0.5, 0.5)], radius: 44.0, thick: 11.0, tube: true, simplify: 0.25, ..Spec::default() };
+        let pulled = Spec { pulls: vec![(DVec3::new(-18.5, -8.5, 0.5), DVec3::new(3.5, -7.0, 25.0))], pull_reach: 40.0, ..ring };
+        let built = build(&pulled).unwrap();
+        let survey = crate::surface::survey(&Probe::new(&pulled, built.grain).unwrap(), &built).unwrap();
+        // with a round section where it is lifted, 6.7% was stepped
+        assert!(survey.stepped / survey.area < 0.055, "{} stepped", survey.stepped / survey.area);
+        assert!(built.error < 0.16 * built.solid, "{} wrong of {}", built.error, built.solid);
     }
 
     #[test]

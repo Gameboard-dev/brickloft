@@ -1027,32 +1027,45 @@ along it. These forms are built by [core/src/fit_ribbon.rs](../core/src/fit_ribb
 
 #### A lifted tube
 
-A lifted round tube is treated as two surfaces over the ground it covers:
-its top and its underside. Take a point of the ground at distance $`d`$
-from the curve, where the curve is at height $`\ell`$ and climbing with
-slope $`m`$ (the height gained per cell travelled). The tube's top and
-underside there are at
+A lifted tube is treated as two surfaces over the ground it covers: its top
+and its underside. It keeps the eight-sided section of the flat pipe in
+7.5, moved straight up with the curve. Take a point of the ground at
+distance $`d`$ from the curve, where the curve is at height $`\ell`$ and
+climbing with slope $`m`$ (the height gained per cell travelled). Write
+$`r`$ for half the tube's width, $`H`$ for half its height and $`c`$ for
+its chamfer. The tube's top and underside there are at
 
 ```math
-z_{\pm} = \ell \pm \sqrt{r^2 - d^2}\,\sqrt{1 + m^2}
+z_{\pm} = \ell \pm \big(H - \min(\max(d - (r - c),\ 0),\ c)\big)\sqrt{1 + m^2}
 ```
 
-The first square root is the half-height of a circle of radius $`r`$ at a
-distance $`d`$ from its middle, from Pythagoras. The second square root is
-there because the tube's round section stands square to its curve. Where the
-curve climbs, a vertical line crosses the section at a slant, so the tube
-is taller measured straight up. For example, with $`r = 4`$ directly over
-the curve ($`d = 0`$) on a level stretch, the top is 4 above the curve. On
-a slope of 1 in 1 ($`m = 1`$) it is $`4\sqrt{2} \approx 5.7`$ above. This
-is `span` inside `lifted_tube` in `spec.rs`:
+The bracket is the half-height of the octagon at distance $`d`$ from its
+middle. It is $`H`$ across the level top, falls one for one across the
+chamfer, and is $`H - c`$ at the wall. The square root is there because
+the tube's section stands square to its curve. Where the curve climbs, a
+vertical line crosses the section at a slant, so the tube is taller
+measured straight up. For example, with $`H = 4`$ directly over the curve
+($`d = 0`$) on a level stretch, the top is 4 above the curve. On a slope of
+1 in 1 ($`m = 1`$) it is $`4\sqrt{2} \approx 5.7`$ above. This is `span`
+inside `lifted_tube` in `spec.rs`:
 
 ```rust
     let span = |u: f64, v: f64| {
         let (off, lift, slope) = near(u, v);
-        let tall = if off < radius { (radius * radius - off * off).sqrt() * (1.0 + slope * slope).sqrt() } else { 0.0 };
+        let tall = (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt();
         (centre + lift - tall, centre + lift + tall)
     };
 ```
+
+A round section was used first. Its top falls away ever more steeply
+towards its sides, and a surface steeper than one cell up per cell across
+cannot be made of bricks one cell square, so the sides came out as tall
+slivers standing proud of one another. With the octagon, the steep part is
+an upright wall. Whole cells would give that wall the outline of a
+staircase wherever the tube runs at an angle to the grid, so each notch of
+the staircase is filled with half a cell, a ramp standing on end. On a tube
+11 across pulled up by 25 cells, the stepped share of the outside fell from
+6.7% to 4.9%.
 
 Each surface is built one cell of ground at a time, from its heights at the
 cell's four corners rounded to whole cells (`columns` and `parts_of` in

@@ -111,6 +111,7 @@ and every key.
 | [docs/performance.md](docs/performance.md) | What makes it fast, with measurements |
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
+| [docs/future-work.md](docs/future-work.md) | Planned additions: Claude driving the editor, and generated patterns |
 
 ## Layout
 

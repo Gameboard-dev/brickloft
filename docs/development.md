@@ -70,6 +70,9 @@ cargo run --release -p arcs-core --example inspect -- arcs-report-1.txt simplify
 # just the brick count, extent and discrepancy
 cargo run --release -p arcs-core --example extent -- arcs-report-1.txt
 
+# draw the form's bricks as a picture, seen from 250 degrees round and 30 up
+cargo run --release -p arcs-editor --example form_picture -- arcs-report-1.txt fit.png 250 30
+
 # time a set of representative forms
 cargo run --release -p arcs-core --example timing
 
