@@ -333,9 +333,10 @@ pub struct State {
     /// it is dragged, into other forms if that is where, and is not set
     /// down clear of them: the two are to be one build.
     pub merge: bool,
-    /// the blend of the form being edited when the view was last told of
-    /// it: a change of blend builds nothing (see `refresh`)
-    blend_shown: Option<f64>,
+    /// the blend of the form being edited, and whether it is taken away
+    /// from the forms it joins, when the view was last told of them: a
+    /// change of either builds nothing (see `refresh`)
+    blend_shown: (Option<f64>, bool),
     /// The bricks of the workspace's joined forms as last put together,
     /// with what they were put together from (see `pieces`).
     joins: std::cell::RefCell<Option<(Vec<JoinKey>, std::rc::Rc<Vec<Piece>>)>>,
@@ -494,7 +495,7 @@ impl State {
             busy: false,
             lift: false,
             merge: false,
-            blend_shown: None,
+            blend_shown: (None, false),
             joins: std::cell::RefCell::new(None),
             follow: 0.5,
             spin_from: None,
@@ -534,7 +535,7 @@ impl State {
         self.bounds = item.bounds;
         self.problem = None;
         // its bricks are current: nothing to rebuild until it is changed
-        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() });
+        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() });
         self.scene += 1;
     }
 
@@ -797,6 +798,39 @@ impl State {
         self.spec.blend.is_some()
     }
 
+    /// Move every joined form that stands half a microbrick off the form it
+    /// is joined to onto that form's cells, by half a microbrick along each
+    /// axis it is off on (`brickloft_core::blend::settled`, which says why).
+    /// `lean` is the way the form being edited should move, for a drag.
+    /// Returns whether any form moved.
+    ///
+    /// Called when a drag joins a form and again on every `refresh`, so that
+    /// a join made any other way (by Claude, from a save made before forms
+    /// were settled, by pasting) is settled too, and there is one rule and
+    /// not one for each way in.
+    fn settle_joins(&mut self, lean: [i32; 3]) -> bool {
+        let count = 1 + self.others.len();
+        if (0..count).all(|n| if n == 0 { self.spec.blend.is_none() } else { self.others[n - 1].spec.blend.is_none() }) {
+            return false;
+        }
+        let mut moved = false;
+        // (one at a time, each from where the ones before it now stand)
+        for n in 0..count {
+            let to = {
+                let grid = |spec: &Spec| if on_own_grid(spec) { spec.on_grid + 1 } else { 0 };
+                let members: Vec<Member> = std::iter::once((&self.spec, &self.built, self.place)).chain(self.others.iter().map(|o| (&o.spec, &o.built, o.place))).map(|(spec, built, place)| Member { spec, built, place, grid: grid(spec) }).collect();
+                brickloft_core::blend::settled(&members, n, if n == 0 { lean } else { [0; 3] })
+            };
+            let place = if n == 0 { &mut self.place } else { &mut self.others[n - 1].place };
+            moved |= *place != to;
+            *place = to;
+        }
+        if moved {
+            self.scene += 1;
+        }
+        moved
+    }
+
     /// Why the form being edited, if it is joined, is cut where it meets
     /// another form and not fitted afresh with it: said in the panel under
     /// the blend, which would otherwise seem to do nothing. `None` if it is
@@ -814,9 +848,20 @@ impl State {
         let half_off = |place: [i32; 3]| (0..3).any(|k| (place[k] - self.place[k]).rem_euclid(2) == 1);
         let mut others = self.others.iter().filter(|o| self.in_my_way(&o.spec));
         if others.clone().any(|o| half_off(o.place)) {
-            return Some("A form on this grid stands half a microbrick off this one, so their bricks do not line up and the two are joined by cutting alone. Move either by half a microbrick to blend them.");
+            // (a joined form is settled onto the cells of the form it stands deepest in: this is one it could not also be lined up with)
+            return Some("Two of the forms this one meets stand half a microbrick off one another, so it lines up with one of them only and is joined to the other by cutting alone. Move either of those by half a microbrick to blend all three.");
         }
         others.any(|o| !o.built.shades.is_empty()).then_some("A form laid as a pattern is joined by cutting alone: the blend does nothing where this form meets one.")
+    }
+
+    /// The bricks of every form that is taken away from the forms it is
+    /// joined to (`Spec::carve`), with which form each belongs to and where
+    /// it stands. None of them is built, so none is among `painted`: the
+    /// view draws them as glass, so that the form can be seen and taken
+    /// hold of, and nothing else is given them.
+    pub fn ghosts(&self) -> Vec<(CellBrick, usize, [i32; 3])> {
+        let forms = std::iter::once((&self.built, self.place, &self.spec)).chain(self.others.iter().map(|i| (&i.built, i.place, &i.spec)));
+        forms.enumerate().filter(|(_, form)| brickloft_core::blend::carves(form.2)).flat_map(|(n, (built, place, _))| built.bricks.iter().map(move |b| (*b, n, place))).collect()
     }
 
     /// The workspace's bricks before they are coloured: each form's own,
@@ -1266,12 +1311,16 @@ impl State {
         // A change of blend changes no brick of the form itself, so nothing
         // is built for it, but the join is other bricks and the view must
         // draw them.
-        if self.blend_shown != self.spec.blend {
-            self.blend_shown = self.spec.blend;
+        // (outside a drag, which settles the form it moves as it goes, and says nothing: see `move_by`)
+        if !self.busy && self.settle_joins([0; 3]) {
+            self.toast = Some(("Moved a joined form half a microbrick, so that its bricks line up with those of the form it joins".to_string(), None));
+        }
+        if self.blend_shown != (self.spec.blend, self.spec.carve) {
+            self.blend_shown = (self.spec.blend, self.spec.carve);
             self.scene += 1;
         }
         // (the angle of its grid changes nothing about how a form is fitted, nor does what it is joined to)
-        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() };
+        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
         // (see `brickloft_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
@@ -1576,13 +1625,20 @@ impl State {
                 return;
             }
             let limit = (HANDLE_LIMIT * 2.0) as i32;
+            let from = self.place[axis];
             self.place[axis] = (self.place[axis] + units).clamp(-limit, limit);
             for other in self.others.iter_mut().filter(|o| goes(o)) {
                 other.place[axis] = (other.place[axis] + units).clamp(-limit, limit);
             }
+            // (a whole microbrick at a time once joined, as in `move_by`)
+            if self.merge {
+                let mut lean = [0; 3];
+                lean[axis] = -units;
+                self.settle_joins(lean);
+            }
             self.scene += 1;
             let mut held = held;
-            held[axis] += units as f64 / 2.0;
+            held[axis] += (self.place[axis] - from) as f64 / 2.0;
             self.grab = Some(held);
             return;
         }
@@ -1686,7 +1742,15 @@ impl State {
         // (joined with the blend it had if it was joined already, and a sharp crease if not)
         self.spec.blend = self.merge.then(|| self.spec.blend.unwrap_or(0.0));
         let limit = (HANDLE_LIMIT * 2.0) as i32;
+        let from = self.place;
         self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
+        // A joined form goes a whole microbrick at a time, to stay on the
+        // cells of the form it joins: an odd unit short of the pointer
+        // here, and the rest when the pointer has gone another unit.
+        if self.merge {
+            self.settle_joins(by.map(|v| -v));
+        }
+        let by = [0, 1, 2].map(|k| self.place[k] - from[k]);
         self.scene += 1;
         // what is held moves with the form
         self.grab = Some(held + DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64) / 2.0);
@@ -2736,6 +2800,73 @@ mod tests {
         opened.refresh(|| 0.0);
         assert_eq!(opened.spec.blend, Some(4.0));
         assert!(bricks_where_they_stand(&opened) == round, "a save opened again is not the same bricks");
+    }
+
+    #[test]
+    fn a_form_cut_out_of_another_builds_none_of_its_own_bricks_and_comes_back_with_undo_a_save_and_a_copy() {
+        let mut state = a_sphere_in_a_cube();
+        let joined = bricks_where_they_stand(&state);
+        let room = |all: &[(CellBrick, [i32; 3], Option<[u8; 3]>)]| all.iter().map(|b| b.0.volume()).sum::<f64>();
+        let cube: f64 = state.others[0].built.bricks.iter().map(|b| b.volume()).sum();
+        assert!(state.ghosts().is_empty());
+        state.spec.carve = true;
+        assert!(state.refresh(|| 0.0) || state.scene > 0);
+        state.record();
+        // the sphere is drawn as glass and none of it is built; the cube has a hollow where it stood
+        let cut = bricks_where_they_stand(&state);
+        assert!(state.painted().iter().all(|b| b.2 == 1), "a brick of the form cut out was built");
+        assert_eq!(state.ghosts().len(), state.built.bricks.len());
+        assert!(room(&cut) < cube - 200.0 && room(&cut) > cube / 2.0 && room(&joined) > cube + 200.0, "{} cells of a cube of {cube}, and {} joined", room(&cut), room(&joined));
+        // undo and redo
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert!(!state.spec.carve && bricks_where_they_stand(&state) == joined, "undo did not fill the hole");
+        assert!(state.redo());
+        state.refresh(|| 0.0);
+        assert!(state.spec.carve && bricks_where_they_stand(&state) == cut, "redo did not cut it again");
+        // a save, and a copy of both forms
+        let mut opened = State::new();
+        opened.open(crate::store::forms_in(&crate::store::describe(&state.forms())).unwrap());
+        opened.refresh(|| 0.0);
+        assert!(opened.spec.carve && bricks_where_they_stand(&opened) == cut, "a save opened again is not the same bricks");
+        state.pick_all();
+        let (bricks, forms) = state.copied();
+        assert!(bricks.len() == cut.len() && forms.len() == 2 && forms[0].0.carve && forms[0].0.blend == Some(0.0));
+        // moved without Ctrl it is set clear, and is a sphere of bricks again
+        state.move_by([2, 0, 0], DVec3::ZERO);
+        assert!(!state.joined() && state.ghosts().is_empty() && state.painted().iter().any(|b| b.2 == 0));
+    }
+
+    #[test]
+    fn a_form_joined_half_a_microbrick_off_is_moved_onto_the_other_forms_cells() {
+        let fresh = |state: &State| {
+            let own: Vec<&[CellBrick]> = std::iter::once(&state.built).chain(state.others.iter().map(|o| &o.built)).map(|b| b.bricks.as_slice()).collect();
+            state.painted().iter().filter(|b| b.0.mask != brickloft_core::shapes::CUBE && !own[b.2].contains(&b.0)).count()
+        };
+        let mut state = a_cube();
+        state.add_form(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        let cube = state.others[0].place;
+        let off = |state: &State| [0, 1, 2].map(|k| (state.place[k] - cube[k]).rem_euclid(2));
+        // dragged with Ctrl to a place an odd unit off along x and z, it stops a unit short of the pointer on each
+        state.merge = true;
+        let to = [0, 1, 2].map(|k| cube[k] + [21, 8, 31][k] - state.place[k]);
+        state.move_by(to, DVec3::ZERO);
+        assert_eq!((off(&state), [0, 1, 2].map(|k| state.place[k] - cube[k])), ([0; 3], [21 - to[0].signum(), 8, 31 - to[2].signum()]));
+        assert!(fresh(&state) > 20, "the join was not fitted afresh");
+        // and goes on a whole microbrick at a time: one more unit moves nothing, two move two
+        let at = state.place;
+        state.move_by([1, 0, -1], DVec3::ZERO);
+        assert_eq!(state.place, at);
+        state.move_by([2, 0, -3], DVec3::ZERO);
+        assert_eq!(state.place, [at[0] + 2, at[1], at[2] - 2]);
+        state.merge = false;
+        // set half off by other means (a save from before, or Claude), it is settled when next looked at, and that is said
+        state.place[1] += 1;
+        state.toast = None;
+        state.refresh(|| 0.0);
+        assert!(off(&state) == [0; 3] && state.toast.is_some() && fresh(&state) > 20);
+        assert!(state.unblended().is_none());
     }
 
     #[test]

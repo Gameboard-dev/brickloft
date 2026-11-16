@@ -37,6 +37,24 @@ impl Scene {
         Scene { specs, built, places: forms.iter().map(|f| f.1.map(|v| (v * 2.0).round() as i32)).collect() }
     }
 
+    /// The same, with the last form taken away from the others.
+    fn carved(forms: &[(Spec, [f64; 3])], blend: f64) -> Scene {
+        let mut forms = forms.to_vec();
+        forms.last_mut().unwrap().0.carve = true;
+        Scene::new(&forms, blend)
+    }
+
+    /// The joined solid's distance where the forms' own are `d`: the last
+    /// form joined to the others with `blend`, or taken away from them.
+    fn solid(&self, d: &[f64], blend: f64) -> f64 {
+        let (last, rest) = d.split_last().unwrap();
+        if self.specs.last().unwrap().carve {
+            let rest = rest.iter().copied().fold(f64::INFINITY, f64::min);
+            return -smooth_min(-rest, *last, blend);
+        }
+        d.iter().skip(1).fold(d[0], |all, d| smooth_min(all, *d, blend))
+    }
+
     fn members(&self) -> Vec<Member<'_>> {
         (0..self.specs.len()).map(|i| Member { spec: &self.specs[i], built: &self.built[i], place: self.places[i], grid: 0 }).collect()
     }
@@ -148,7 +166,7 @@ fn holes_and_spikes(scene: &Scene, pieces: &[Piece], blend: f64, clear: f64) -> 
     let (mut holes, mut spikes) = (0, 0);
     for p in scene.samples() {
         let d = distances(p);
-        let solid = d.iter().skip(1).fold(d[0], |all, d| smooth_min(all, *d, blend));
+        let solid = scene.solid(&d, blend);
         if solid.abs() > clear && solid < 4.0 && solid > -UNDER {
             let held = scene.held(pieces, p);
             holes += (solid < 0.0 && !held) as usize;
@@ -279,6 +297,115 @@ fn a_form_half_a_cell_off_another_is_joined_by_cutting_alone() {
     assert!(shares_room(&scene, &pieces).is_none());
     assert!(pieces.iter().all(|p| p.from.is_some()), "a brick was fitted afresh");
     assert_eq!(pieces.iter().filter(|p| p.member == 0).count(), scene.built[0].bricks.len(), "the form that is not joined was cut");
+}
+
+/// A long square bar, to put through things.
+fn bar() -> Spec {
+    Spec { form: Form::Cube, points: vec![DVec3::ZERO], radius: 20.0, stretch: DVec3::new(0.2, 0.2, 1.0), fill: true, ..Spec::default() }
+}
+
+/// The pairs with something taken away: a sphere out of a cube's corner, a
+/// sphere out of a sphere, a bar through a sphere, a ring out of a cube.
+fn holes() -> Vec<(&'static str, Vec<(Spec, [f64; 3])>)> {
+    vec![
+        ("a sphere out of a cube", vec![(cube(), [0.0; 3]), (ball(12.0), [12.0, 4.0, 18.0])]),
+        ("a sphere out of a sphere", vec![(ball(20.0), [0.0; 3]), (ball(12.0), [14.0, 4.0, 14.0])]),
+        ("a bar through a sphere", vec![(ball(20.0), [0.0; 3]), (bar(), [3.0, 2.0, 0.0])]),
+        ("a ring out of a cube", vec![(cube(), [0.0; 3]), (ring(), [0.0, 0.0, 19.0])]),
+    ]
+}
+
+#[test]
+fn a_form_taken_away_leaves_a_hole_of_its_own_shape_and_none_of_its_bricks() {
+    for (name, forms) in holes() {
+        for blend in [0.0, 2.0, 6.0] {
+            let scene = Scene::carved(&forms, blend);
+            let pieces = scene.pieces();
+            assert!(shares_room(&scene, &pieces).is_none(), "{name}, blend {blend}: {:?}", shares_room(&scene, &pieces));
+            assert!(pieces.iter().all(|p| p.member == 0), "{name}, blend {blend}: a brick of the form taken away was built");
+            let (holes, spikes) = holes_and_spikes(&scene, &pieces, blend, 0.9);
+            assert_eq!((holes, spikes), (0, 0), "{name}, blend {blend}: places inside what is left with no brick, and outside it with one");
+            // and it is a hole: joined instead, the same forms fill far more room
+            let room = |pieces: &[Piece]| pieces.iter().map(|p| p.brick.volume()).sum::<f64>();
+            let whole = scene.built[0].bricks.iter().map(|b| b.volume()).sum::<f64>();
+            assert!(room(&pieces) < whole - 100.0, "{name}, blend {blend}: {} cells left of {whole}", room(&pieces));
+        }
+    }
+}
+
+#[test]
+fn a_hole_is_the_same_whichever_form_is_listed_first_and_on_any_number_of_threads() {
+    for (name, forms) in holes() {
+        let scene = Scene::carved(&forms, 2.0);
+        let as_placed = |scene: &Scene, pieces: Vec<Piece>| {
+            let mut all: Vec<(CellBrick, [i32; 3], Option<usize>, bool)> = pieces.iter().map(|p| (p.brick, scene.places[p.member], p.from, p.loose)).collect();
+            all.sort_by_key(|(b, place, ..)| (*place, b.min, b.ext, b.mask));
+            all
+        };
+        let one = as_placed(&scene, union_with(&scene.members(), Threads::ONE));
+        for threads in [2, 3, 8] {
+            assert!(one == as_placed(&scene, union_with(&scene.members(), Threads::forced(threads))), "{name}: different bricks on {threads} threads");
+        }
+        let turned = Scene { specs: scene.specs.iter().rev().cloned().collect(), built: scene.built.iter().rev().cloned().collect(), places: scene.places.iter().rev().copied().collect() };
+        assert!(one == as_placed(&turned, union_with(&turned.members(), Threads::ONE)), "{name}: different bricks with the forms listed the other way round");
+    }
+}
+
+#[test]
+fn a_window_through_a_wall_is_a_few_blocks_and_nothing_sloped() {
+    let wall = Spec { form: Form::Cube, points: vec![DVec3::new(0.0, 0.0, 16.0)], radius: 16.0, stretch: DVec3::new(1.0, 0.2, 1.0), fill: true, ..Spec::default() };
+    let window = Spec { form: Form::Cube, points: vec![DVec3::ZERO], radius: 5.0, fill: true, ..Spec::default() };
+    let room = |pieces: &[Piece]| pieces.iter().map(|p| p.brick.volume()).sum::<f64>();
+    let mut left = Vec::new();
+    for blend in [0.0, 4.0] {
+        let scene = Scene::carved(&[(wall.clone(), [0.0; 3]), (window.clone(), [2.0, 0.0, 18.0])], blend);
+        let pieces = scene.pieces();
+        assert!(shares_room(&scene, &pieces).is_none());
+        if blend == 0.0 {
+            let blocks = crate::pattern::joined(pieces.iter().filter(|p| p.loose).map(|p| (p.brick, p.member as u8)).collect(), 80).len() + pieces.iter().filter(|p| !p.loose).count();
+            assert!(pieces.iter().all(|p| p.brick.mask == CUBE && p.member == 0) && blocks <= 8, "{blocks} blocks, or something sloped");
+        }
+        // the hole goes right through: nothing is left on a line through the window's middle, and the wall beside it is whole
+        let through = |x: f64, z: f64| (-8..8).filter(|y| scene.held(&pieces, DVec3::new(x, *y as f64 + 0.3, z))).count();
+        assert_eq!((through(2.2, 18.2), through(-10.2, 18.2)), (0, scene.built[0].bricks.iter().map(|b| b.ext[1]).max().unwrap() as usize));
+        left.push(room(&pieces));
+    }
+    // a blend rounds the window's rim, which takes a little more of the wall with sloped bricks
+    assert!(left[1] < left[0] - 10.0 && left[1] > left[0] - 400.0, "{left:?} cells left of the wall, sharp and rounded");
+}
+
+#[test]
+fn a_form_taken_away_cuts_the_forms_that_are_not_joined_and_a_mark_alone_cuts_nothing() {
+    // half a cell off the cube, it cannot be fitted as one with it, and cuts it by its bricks alone
+    let scene = Scene::carved(&[(cube(), [0.0; 3]), (ball(12.0), [12.5, 4.0, 18.0])], 0.0);
+    let pieces = scene.pieces();
+    assert!(pieces.iter().all(|p| p.member == 0) && pieces.len() > 20, "a form half a cell off the cube did not cut it");
+    assert!(!scene.held(&pieces, DVec3::new(7.3, 4.2, 15.2)) && scene.held(&pieces, DVec3::new(-7.3, -4.2, 3.2)));
+    // marked to be taken away, but standing clear and not joined: both are built whole
+    let mut apart = Scene::carved(&[(cube(), [0.0; 3]), (ball(12.0), [12.0, 4.0, 18.0])], 0.0);
+    apart.specs[1].blend = None;
+    assert_eq!(apart.pieces().len(), apart.built[0].bricks.len() + apart.built[1].bricks.len());
+}
+
+#[test]
+fn a_joined_form_half_a_cell_off_is_settled_onto_the_other_forms_cells_and_then_blends() {
+    let mut scene = Scene::new(&[(cube(), [0.0; 3]), (ball(12.0), [12.5, 4.0, 17.5])], 4.0);
+    // as it stands it is cut, with a notch, and nothing is fitted afresh
+    let cut = scene.pieces();
+    assert!(cut.iter().all(|p| p.from.is_some()) && holes_and_spikes(&scene, &cut, 4.0, 0.9).0 > 20);
+    // settled, it has moved half a cell along the two axes it was off on, the way it was leaning
+    let to = settled(&scene.members(), 1, [-1, 0, 0]);
+    assert_eq!(to, [24, 8, 36]);
+    // (the form that is not joined stays where it is, and so does a form already lined up)
+    assert_eq!(settled(&scene.members(), 0, [0; 3]), [0; 3]);
+    scene.places[1] = to;
+    assert_eq!(settled(&scene.members(), 1, [1; 3]), to);
+    let pieces = scene.pieces();
+    assert!(shares_room(&scene, &pieces).is_none() && pieces.iter().any(|p| p.from.is_none()), "nothing was fitted afresh");
+    assert_eq!(holes_and_spikes(&scene, &pieces, 4.0, 0.9), (0, 0));
+    // far from every other form there is nothing to line up with
+    scene.places[1] = [201, 8, 35];
+    assert_eq!(settled(&scene.members(), 1, [0; 3]), [201, 8, 35]);
 }
 
 #[test]

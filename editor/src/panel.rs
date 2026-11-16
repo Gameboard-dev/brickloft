@@ -582,6 +582,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // one more control that does nothing.
         if let Some(blend) = &mut s.blend {
             helped(ui, help("blend"), |ui| ui.add(Slider::new(blend, 0.0..=brickloft_core::blend::MAX_BLEND).step_by(0.5).text("Blend")));
+            helped(ui, help("carve"), |ui| ui.checkbox(&mut s.carve, "Cut out of what it joins"));
             if let Some(why) = unblended {
                 ui.label(why);
             }
