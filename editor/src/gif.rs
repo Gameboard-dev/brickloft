@@ -31,7 +31,10 @@
 //! call a screenshot makes: it waits for the graphics card to finish the
 //! frame, then copies the window's 7.7 MB out, again into the type asked
 //! for, and turns the rows the right way up. It is the same at every size
-//! because the whole window is read whatever is kept of it. Reading back
+//! because the whole window is read whatever is kept of it. The wait is
+//! most of it and is not the editor's to shorten: with a second copy of
+//! the editor open on the same graphics card, the same program took a
+//! steady 24 ms for each read. Reading back
 //! fewer pixels would take the picture made smaller on the graphics card
 //! (which rounds differently from one card to the next) or OpenGL's
 //! asynchronous read into a pixel buffer, which three-d does not offer
