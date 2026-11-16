@@ -709,6 +709,57 @@ mod tests {
     }
 
     #[test]
+    fn a_crease_is_sloped_pieces_and_no_whole_cells() {
+        // A ring that comes to a ridge 6 up, at radius 12, sloping down both
+        // ways to the ground; and a block with a groove cut in its top, 6
+        // deep, its bottom at radius 12. In each, an outer face and the wall
+        // of a hollow end on the circle of radius 12.
+        let ridge = |out: f64, up: f64| (up - (6.0 - (out - 12.0).abs())).max(-up);
+        let groove = |out: f64, up: f64| (up - (out - 12.0).abs()).max(up - 6.0).max(-2.0 - up).max(out - 18.0);
+        let forms: [(&dyn Fn(f64, f64) -> f64, f64, i32); 2] = [(&ridge, 0.0, 5), (&groove, -2.0, 0)];
+        for (number, (section, low, crease_layer)) in forms.into_iter().enumerate() {
+            for short_sides in [false, true] {
+                let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section, far: 18.0, low, high: 6.0, brick_cost: 0.0, short_sides, max_ext: 80 };
+                let bricks = fit_lathe(&lathe).unwrap();
+                assert!(bricks.iter().all(|b| b.ext.iter().all(|e| (1..=80).contains(e)) && shape_info(b.mask).is_some()));
+                // No whole cell in the layer next to the crease, within a
+                // cell of its circle: the pieces of the two rings all fit.
+                // (Each ring had its own outline of that circle once, and
+                // every piece of one that crossed the other's was built as
+                // its whole box.)
+                for b in bricks.iter().filter(|b| b.mask == CUBE && b.min[2] <= crease_layer && crease_layer < b.min[2] + b.ext[2]) {
+                    for y in 0..b.ext[1] {
+                        for x in 0..b.ext[0] {
+                            let from_axis = (b.min[0] as f64 + x as f64 + 0.5).hypot(b.min[1] as f64 + y as f64 + 0.5);
+                            assert!((from_axis - 12.0).abs() >= 1.0, "form {number}, short sides {short_sides}: a whole cell {from_axis} from the axis, in {b:?}");
+                        }
+                    }
+                }
+                // Along a sloped side of that circle's outline the two rings
+                // share a box: two half outer corners under a ridge.
+                if number == 0 {
+                    assert!(count(&bricks, Kind::HalfOuter) >= 8, "{} half outer corners", count(&bricks, Kind::HalfOuter));
+                }
+                // No point in two bricks, though a box may hold two; close
+                // to the form everywhere; and the same in all four quarters.
+                for i in 0..54 * 54 * 20 {
+                    let p = [(i % 54) as f64 * 0.7 - 18.57, (i / 54 % 54) as f64 * 0.7 - 18.57, (i / 2916) as f64 * 0.45 - 2.3];
+                    let holding = bricks.iter().filter(|b| {
+                        let t = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+                        t.iter().all(|v| (0.0..1.0).contains(v)) && inside_shape(shape_info(b.mask).unwrap(), t[0], t[1], t[2])
+                    });
+                    let built = holding.count();
+                    assert!(built <= 1, "form {number}: {built} bricks hold {p:?}");
+                    let d = section(p[0].hypot(p[1]), p[2]);
+                    assert!(!(built == 1 && d > 1.5) && !(built == 0 && d < -1.5), "form {number}, short sides {short_sides}: {p:?} is {d} from the surface and {}", if built == 1 { "built" } else { "not built" });
+                    assert_eq!(built == 1, solid(&bricks, [-p[0], p[1], p[2]]), "not the same mirrored in x at {p:?}");
+                    assert_eq!(built == 1, solid(&bricks, [p[1], p[0], p[2]]), "not the same with x and y exchanged at {p:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn an_axis_off_the_grid_is_left_to_the_other_fitter() {
         let cone = |out: f64, up: f64| (out - (12.0 - up)).max(-up).max(up - 12.0);
         for axis in [DVec2::new(0.5, 0.0), DVec2::new(0.3, 0.3)] {
