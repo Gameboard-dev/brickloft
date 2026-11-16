@@ -84,23 +84,30 @@ the case it still suits, and no such pattern is planned yet.
 
 What remains:
 
-- **Seams between fitted stones.** Stepping stones with the gap at 0 keep
-  seams, most of them hairline and some up to a cell wide. Each stone is
-  fitted by itself, and a stone whose bricks would overlap a neighbour's is
-  drawn in. Closing the seams needs the two stones either side of an edge
-  to be given the same edge, which fitting each stone by itself does not
-  do.
-- **A small rug.** The rug shows its detail on a floor 100 tiles or more
-  across. Below that its medallion has one or two layers and its guards
-  are plain lines.
-- **A pattern with depth.** The one-cell bevel of bricks is the only depth
-  a pattern has. Every other pattern is one layer of tiles pushed through
-  the form.
+- **Slivers between fitted stones.** Stepping stones with the gap at 0
+  share their edges, each outline's corners moved to the grid
+  ([algorithm.md](algorithm.md), 7.8). Slivers remain where an edge ends
+  on the rim of the region and not on a corner of the grid, and along an
+  edge that is nearly level, which is fitted as a slope from one side and
+  a step from the other now and then. Ending each edge at a corner of the
+  grid on the rim, and holding the fitter to one reading of a nearly level
+  edge, would close them.
+- **More depth.** Depth is one cell and one kind to a style: bevelled
+  bricks, grooved planks from size 3, and cobblestone's sunk mortar.
+  Medallions and a rug have none, and planks of the usual size are flat,
+  because a board two tiles broad would be half ramp.
 - **Patterns on curved surfaces.** A tile pattern is laid on the flat part
-  of a form and on the sides of a box, and the curved part stays plain. A
-  mosaic on a dome needs the pattern mapped onto a curved surface and the
-  surface cut into bricks small enough to carry it. Stepping stones are
-  laid only through a flat form.
+  of a form and on the sides of a box, and the curved part stays plain.
+  Laying it over a sphere, a turned profile, a tube and a torus was built
+  and taken out: the form's own bricks were kept and each given the
+  pattern's colour at its place on a sheet laid over the form. It does not
+  work, because a sloped brick is one colour and a curved form's bricks
+  are large and stretched (a sphere's are 2 cells by 3 by 10 and cannot be
+  cut smaller without changing the surface), so the pattern's lines fall
+  on brick edges that do not follow them: saw teeth for courses of bricks
+  and fragments for a rug. Cutting the surface into bricks small enough
+  to carry the lines multiplies the count and gives up the smooth fit.
+  Stepping stones are laid only through a flat form.
 
 ## More plants
 

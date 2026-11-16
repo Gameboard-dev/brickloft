@@ -598,11 +598,16 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
 /// bricks of a rounded rim, and whatever is under or over them) is left
 /// as it was fitted, in the pattern's ground colour.
 ///
-/// A pattern wrapped onto a curved surface was not attempted. A sloped
-/// brick is one colour and often many cells long, so a pattern there
-/// would need the surface cut into bricks a cell across, which is many
-/// times the bricks and gives up the smooth fit the sloped bricks are
-/// there for.
+/// A pattern wrapped onto a curved surface was built and taken out. The
+/// form's bricks were kept as fitted and each given the pattern's colour
+/// at its place on a sheet laid over the form. A sloped brick is one
+/// colour, and a curved form's are large and stretched (a sphere's are
+/// corner pieces 2 cells by 3 by 10, which cannot be cut smaller without
+/// changing the surface), so a pattern's lines fell on brick edges that
+/// do not follow them: saw teeth for courses of bricks on a dome,
+/// fragments for a rug. Carrying the lines would need the surface cut
+/// into bricks a cell across, which is many times the bricks and gives
+/// up the smooth fit the sloped bricks are there for.
 fn pattern_flat_faces(spec: &Spec, built: &mut Built, threads: Threads) {
     let Some(mosaic) = &spec.mosaic else { return };
     if !built.shades.is_empty() || built.bricks.is_empty() {
@@ -843,32 +848,23 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g, threads),
     };
-    // A form that is not flat has its pattern laid over it, further down
-    // (see `crate::wrap`). Any other has it pushed through its flat part.
-    let wrapped = grain == 1 && crate::wrap::wraps(&coarse);
-    // A pattern that colours and cuts nothing away is laid after the form
-    // is measured, and one that slopes or sinks the top cell (a bevel)
-    // before, since that one does change what the bricks fill. Laid
-    // first, a pattern's tiles cut in two were measured a few percent
-    // further from a rounded form than the same form plain, by the places
-    // that fall on the face two half bricks share (see `report::scan`):
-    // a difference in the figure for no difference in the bricks' shape.
-    let reshapes = coarse.mosaic.is_some_and(|mosaic| mosaic.bevel);
-    let lay_through = |built: &mut Built| {
-        if grain == 1 && !wrapped {
-            pattern_flat_faces(&coarse, built, threads);
-            pattern_side_faces(&coarse, built, threads);
-        }
-    };
-    if reshapes {
-        lay_through(&mut built);
+    // The form's bricks before a pattern that only colours them, to be
+    // measured in place of the patterned ones. A pattern's tiles cut in
+    // two were measured a few percent further from a rounded form than
+    // the same form plain, by the places that fall on the face two half
+    // bricks share (see `report::scan`): a difference in the figure for
+    // no difference in what the bricks fill. A pattern with depth (a
+    // bevel, grooves, sunk mortar) does change what they fill, and is
+    // measured as it is.
+    let unpatterned = (grain == 1 && measured && built.unmeasured && coarse.mosaic.is_some_and(|mosaic| !mosaic.bevel)).then(|| built.bricks.clone());
+    if grain == 1 {
+        pattern_flat_faces(&coarse, &mut built, threads);
+        pattern_side_faces(&coarse, &mut built, threads);
     }
-    // (a form with a pattern still to lay is no more to be made its own mirror image brick by brick than one whose pattern is laid)
-    let patterned = grain == 1 && coarse.mosaic.is_some();
     let form = Probe::of(solid);
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
-    if built.shades.is_empty() && (!patterned || wrapped) && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| form.solid.distance(p)) {
+    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| form.solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
     }
@@ -881,7 +877,8 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::measure(&form, &built, threads) {
+        let plain = unpatterned.filter(|_| !built.shades.is_empty()).map(|bricks| Built { bricks, ..Built::default() });
+        match crate::report::measure(&form, plain.as_ref().unwrap_or(&built), threads) {
             Ok((volume, wrong)) => {
                 built.solid = volume;
                 built.error = wrong;
@@ -900,17 +897,6 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
             },
         }
         built.unmeasured = false;
-    }
-    // After the measuring, which is of the form's bricks as they were
-    // fitted: laying a pattern over a form cuts some of them smaller and
-    // moves no face of any, so the figures are the same before and after,
-    // and the bricks before are fewer to measure.
-    if !reshapes {
-        lay_through(&mut built);
-    }
-    if wrapped {
-        let path = built.path.clone();
-        crate::wrap::colour(&coarse, &path, &|p| form.solid.distance(p), &mut built, threads);
     }
     for (k, twice) in mirrors(&coarse).into_iter().enumerate() {
         let Some(twice) = twice else { continue };
@@ -3425,17 +3411,13 @@ mod tests {
     #[test]
     fn a_pattern_of_cut_tiles_measures_as_close_to_a_rounded_form_as_no_pattern() {
         // a disc with a rounded rim: the pattern is on its flat top and does not change its shape
-        let disc = |mosaic| Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 40.0, thick: 10.0, fill: true, tube: true, mosaic, ..Spec::default() };
+        let disc = |mosaic| Spec { form: Form::Torus, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 40.0, thick: 10.0, fill: true, tube: true, mosaic, ..Spec::default() };
         let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
         let plain = build(&disc(None)).unwrap();
         let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         assert!(built.bricks.iter().any(|b| b.mask != CUBE && b.ext == [1, 1, built.bricks.iter().map(|b| b.ext[2]).max().unwrap()]), "no tile is cut in two");
-        // (the very same figure: the pattern is laid after the form is measured)
+        // (the very same figure: it is the form's bricks as they were before the pattern that are measured)
         assert!(built.error == plain.error && built.solid == plain.solid, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
-        // and so does a pattern laid over a form with nothing flat
-        let torus = |mosaic| Spec { form: Form::Torus, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 30.0, thick: 10.0, mosaic, ..Spec::default() };
-        let (plain, built) = (build(&torus(None)).unwrap(), build(&torus(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap());
-        assert!(built.shades.iter().any(|shade| *shade != 0) && built.error == plain.error && built.solid == plain.solid, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
     }
 
     #[test]
@@ -4480,11 +4462,6 @@ mod tests {
             ("planks", Spec { mosaic: Some(mosaic(2)), ..floor.clone() }),
             ("bricks", Spec { mosaic: Some(mosaic(3)), ..floor.clone() }),
             ("bricks with bevelled tops", Spec { mosaic: Some(Mosaic { bevel: true, ..mosaic(3) }), ..floor.clone() }),
-            // a pattern laid over a form that is not flat: its bricks cut and coloured together
-            ("cobblestone over a sphere", Spec { mosaic: Some(mosaic(4)), ..ball.clone() }),
-            ("bricks over a bell", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, mosaic: Some(mosaic(3)), ..Spec::default() }),
-            ("planks over a ring", Spec { mosaic: Some(mosaic(2)), ..ring.clone() }),
-            ("a rug over a pyramid", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 12.0, fill: true, mosaic: Some(mosaic(1)), ..Spec::default() }),
             ("bevelled bricks with no mortar on a band", Spec { mosaic: Some(Mosaic { bevel: true, mortar: false, uneven: [0; 2], stagger: 50, ..mosaic(3) }), depth: 4, ..band }),
             ("cobblestone", Spec { mosaic: Some(mosaic(4)), ..floor.clone() }),
             // a pattern on the flat part of a form that is not flat all over, and on a form's sides

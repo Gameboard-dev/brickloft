@@ -534,7 +534,7 @@ pub struct Mosaic {
 /// the sampled styles were taken out.
 pub struct Style {
     pub name: &'static str,
-    pub(crate) drawn: Drawn,
+    drawn: Drawn,
 }
 
 /// The styles on offer.
@@ -678,56 +678,37 @@ fn tile_at(colour: &impl Fn(f64, f64) -> u8, x: f64, y: f64) -> Tile {
 /// slope. Deeper bevels and uneven heights read as clutter at a
 /// microbrick to a tile. What is left is the one case that comes out
 /// clean: a brick, one cell, on or off.
-#[derive(Clone, Copy)]
-pub(crate) struct Masonry {
+struct Masonry {
     cobbles: bool,
     /// how many tiles a brick is long and a course deep, each with its
     /// mortar; for cobbles, how far apart the points are each way
-    pub(crate) long: f64,
-    pub(crate) deep: f64,
+    long: f64,
+    deep: f64,
     /// how many tiles of mortar lie between two pieces: 1 or 0
-    pub(crate) mortar: f64,
+    mortar: f64,
     /// 0 to 1: along and across
-    pub(crate) uneven: [f64; 2],
+    uneven: [f64; 2],
     stagger: i32,
-    pub(crate) upright: bool,
+    upright: bool,
     seed: u64,
-    /// Round a form that closes on itself (see [`crate::wrap`]): after how
-    /// many courses the wall comes back to its first, and after how many
-    /// bricks a course does. Each is nothing for a wall that does not
-    /// close that way, as no flat wall does. Course `rows` is then course
-    /// 0 again and brick `round` brick 0, in everything that is theirs:
-    /// where their lines and joints are moved to, and their shades.
-    pub(crate) rows: i64,
-    pub(crate) round: i64,
 }
 
 impl Masonry {
-    pub(crate) fn new(settings: &Mosaic, cobbles: bool) -> Masonry {
+    fn new(settings: &Mosaic, cobbles: bool) -> Masonry {
         let size = settings.size.clamp(1, 16) as f64;
         let mortar = if settings.mortar { 1.0 } else { 0.0 };
         let (long, deep) = if cobbles { (2.0 * size + 3.0 + mortar, 2.0 * size + 3.0 + mortar) } else { (4.0 * size + mortar, (1.5 * size).round() + mortar) };
-        Masonry { cobbles, long, deep, mortar, uneven: settings.uneven.map(|u| u.clamp(0, 100) as f64 / 100.0), stagger: settings.stagger.min(100), upright: settings.upright, seed: settings.seed, rows: 0, round: 0 }
+        Masonry { cobbles, long, deep, mortar, uneven: settings.uneven.map(|u| u.clamp(0, 100) as f64 / 100.0), stagger: settings.stagger.min(100), upright: settings.upright, seed: settings.seed }
     }
 
-    /// The same wall closing on itself after so many courses and so many
-    /// bricks to a course (see `rows` and `round`), its courses running
-    /// the way the caller calls along.
-    pub(crate) fn closing(&self, rows: i64, round: i64) -> Masonry {
-        Masonry { rows, round, upright: false, ..*self }
-    }
-
-    /// A number from 0 to 1 that belongs to a pair of whole numbers: a
-    /// course and a brick of it, each counted round again where the wall
-    /// closes on itself.
-    pub(crate) fn number(&self, a: i64, b: i64, which: u64) -> f64 {
-        let (a, b) = (if self.rows > 0 { a.rem_euclid(self.rows) } else { a }, if self.round > 0 { b.rem_euclid(self.round) } else { b });
+    /// A number from 0 to 1 that belongs to a pair of whole numbers.
+    fn number(&self, a: i64, b: i64, which: u64) -> f64 {
         Numbers(self.seed ^ (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ which.wrapping_mul(0x1656_67B1_9E37_79F9)).unit()
     }
 
     /// How far a course is moved along. (Every other row of cobbles is
     /// moved by half a stone, so that four never meet at one corner.)
-    pub(crate) fn moved(&self, row: i64) -> f64 {
+    fn moved(&self, row: i64) -> f64 {
         if self.cobbles {
             if row.rem_euclid(2) == 1 { (self.long / 2.0).floor() } else { 0.0 }
         } else if self.stagger < 0 {
@@ -750,7 +731,7 @@ impl Masonry {
     /// moved by a whole number of tiles of its own. (By less than half of
     /// what a course has to spare over one tile of brick, so that no
     /// course is squeezed to nothing.)
-    pub(crate) fn course(&self, row: i64) -> f64 {
+    fn course(&self, row: i64) -> f64 {
         let spare = (self.deep - self.mortar - 1.0).max(0.0);
         row as f64 * self.deep + ((self.number(row, 0, 7) - 0.5) * 0.9 * self.uneven[1] * spare).round()
     }
@@ -781,7 +762,7 @@ impl Masonry {
 
     /// The course of bricks a height is in, the height being the wall's
     /// own (see [`Masonry::own`]): the one whose two lines it is between.
-    pub(crate) fn course_at(&self, height: f64) -> i64 {
+    fn course_at(&self, height: f64) -> i64 {
         let about = (height / self.deep).floor() as i64;
         (about - 1..=about + 1).rev().find(|row| self.course(*row) <= height).unwrap_or(about - 2)
     }
@@ -824,12 +805,12 @@ impl Masonry {
         if self.cobbles {
             1 + (self.number(row, nth, 3) * 7.0) as u8 % 7
         } else {
-            1 + 2 * ((self.number(row, nth, 3) * 3.0) as u8 % 3) + (if self.round > 0 { nth.rem_euclid(self.round) } else { nth }).rem_euclid(2) as u8
+            1 + 2 * ((self.number(row, nth, 3) * 3.0) as u8 % 3) + nth.rem_euclid(2) as u8
         }
     }
 
     /// The colour at a place: its piece's number, or the mortar's, 0.
-    pub(crate) fn colour(&self, p: DVec2) -> u8 {
+    fn colour(&self, p: DVec2) -> u8 {
         let piece = self.piece(p);
         if self.inside(piece, p) > 1e-9 || self.mortar == 0.0 {
             self.shade(piece)
@@ -972,6 +953,32 @@ fn planks([across, down]: [usize; 2], seed: u64, size: i32) -> Vec<Tile> {
 /// another rug: the size and number of lobes of the medallion, which
 /// grounds its layers take, the size of the corners, and where every
 /// scroll falls.
+///
+/// ## A small rug
+///
+/// A rug under 48 tiles across its shorter way has no room for the parts
+/// above at their own sizes. Drawn by the same rules, they came out cut
+/// short: a corner piece that was three tiles of a lobe, pendants that
+/// were blots, a border whose knots fell at uneven steps because its
+/// swing did not divide the side. A small rug is set out as a small
+/// woven rug is, with the same parts made simpler and each of them
+/// whole:
+///
+/// - The guards are single lines.
+/// - The border is lozenges four tiles across, set out from the middle
+///   of each side, and a square with a star in it at each corner. (Under
+///   24 tiles across it is a chain of lozenges two tiles across, which
+///   divides any side.)
+/// - The medallion has one layer or two, as its size allows, and no
+///   pendants.
+/// - Each corner of the field is cut off on the diagonal behind a line,
+///   with one lozenge in it where there is room.
+/// - The field has scrolls where they fit and small flowers elsewhere,
+///   as on a large rug.
+///
+/// Nothing is changed for a rug of 48 tiles or more: every sum above is
+/// the same sum, and the numbers drawn from the seed are drawn in the
+/// same order, so a large rug is tile for tile what it was.
 ///
 /// ## Cost
 ///
@@ -1158,6 +1165,11 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
     let main = if least < 12.0 { 2.0 } else { (2.0 * (least * 0.09).round()).clamp(4.0, 14.0) };
     let guard = if least >= 24.0 { 4.0 } else { 1.0 };
     let frame = 2.0 * guard + main;
+    // A small rug: under 48 tiles across its shorter way, where the guards
+    // are single lines. It has the same parts as a large one, fewer of
+    // them, and each of them whole (see "A small rug", above). Nothing
+    // about a rug of 48 tiles or more turns on this.
+    let small = least < 24.0;
     let (wide, deep) = (half_wide - frame, half_deep - frame);
     let field = wide.min(deep);
     let along_wide = wide >= deep;
@@ -1171,7 +1183,7 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
     let medallion = figure(0.0, 0.0, reach, lobes, star, grounds, 4);
     // what hangs from it at each end of the rug's longer way: a pointed leaf shape and two lozenges beyond it
     let hung = (reach * 0.22).round().max(3.0);
-    let pendant = (long - reach >= 2.0 * hung + 8.0).then(|| {
+    let pendant = (long - reach >= 2.0 * hung + 8.0 && !small).then(|| {
         let half = hung * 0.6;
         let size = (hung * hung + half * half) / (2.0 * half);
         // (its middle along the rug, the two discs' middles to the side and their size, half its length)
@@ -1179,7 +1191,18 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
     });
     // the corner pieces: a quarter of such a figure about each corner of the field
     let corner_reach = (field * roll(0.6, 0.75)).min(wide.hypot(deep) - reach - 4.0).max(0.0);
-    let corner = figure(wide, deep, corner_reach, lobes, star, [if roll(0.0, 1.0) < 0.6 { SHADE } else { grounds[0] }, grounds[1], grounds[2], grounds[3]], if corner_reach < 16.0 { 1 } else if corner_reach < 34.0 { 2 } else { 3 });
+    let mut corner = figure(wide, deep, corner_reach, lobes, star, [if roll(0.0, 1.0) < 0.6 { SHADE } else { grounds[0] }, grounds[1], grounds[2], grounds[3]], if corner_reach < 16.0 { 1 } else if corner_reach < 34.0 { 2 } else { 3 });
+    // A small rug's corners: the corner of the field cut off on the
+    // diagonal, a line along the cut and a ground of its own behind it,
+    // so many tiles along each side of the field (nothing, where the
+    // medallion leaves no room). The diagonal is whole tiles and tiles
+    // cut in two, exactly.
+    let spandrel = if small { (field * 0.5).floor().min(((wide + deep - reach * 1.5) / 1.0).floor() - 2.0) } else { 0.0 };
+    let spandrel = if spandrel >= 3.0 { spandrel } else { 0.0 };
+    let behind = corner.layers.first().map_or(SHADE, |layer| layer.ground);
+    if small {
+        corner.layers.clear();
+    }
 
     // The scrolls of the field, and the small flowers between them
     // (which are scrolls with no stem).
@@ -1208,7 +1231,8 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
         .map(|k| {
             let (x, y) = ((k % cols) as f64 + 0.5, (k / cols) as f64 + 0.5);
             let about = |figure: &Figure| figure.layers.first().map_or(f64::INFINITY, |outer| -depth(outer, (x - figure.x).hypot(y - figure.y), (y - figure.y).atan2(x - figure.x)).0);
-            (wide - x - 1.0).min(deep - y - 1.0).min(x).min(y).min(about(&medallion) - 1.0).min(about(&corner) - 1.0).min(pendant_room(x, y) - 1.0)
+            let cut_off = if spandrel > 0.0 { ((wide - x) + (deep - y) - spandrel) / std::f64::consts::SQRT_2 - 1.0 } else { f64::INFINITY };
+            (wide - x - 1.0).min(deep - y - 1.0).min(x).min(y).min(about(&medallion) - 1.0).min(about(&corner) - 1.0).min(pendant_room(x, y) - 1.0).min(cut_off)
         })
         .collect();
     // The largest circle is not always taken, but the largest after each
@@ -1297,6 +1321,23 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
             if main < 4.0 {
                 return chain(t + 1.0, [HEART, DEEP]);
             }
+            if small {
+                // A small rug's border: lozenges four tiles across,
+                // one at the middle of each side and one every four
+                // tiles from it, and a square with a star in it at each
+                // corner. Counted from the middle, a side of any length
+                // is its own mirror image with a whole lozenge at its
+                // middle. What does not divide is taken up beside the
+                // corner squares, where a lozenge that would run into
+                // one is left out and not cut short.
+                let from_middle = (if from_deep < from_wide { half_wide } else { half_deep }) - along;
+                if along < guard + main {
+                    return bloom(along - guard - 2.0, t, 2.0, 4.0, [PETAL, PETAL, PALE]).unwrap_or(DEEP);
+                }
+                let nearest = 4.0 * (from_middle / 4.0).round();
+                let clear = (if from_deep < from_wide { half_wide } else { half_deep }) - guard - main - nearest >= 3.0;
+                return if clear { bloom(from_middle - nearest, t, 2.0, 4.0, [PALE, PALE, HEART]).unwrap_or(DEEP) } else { DEEP };
+            }
             // The stem crosses the middle line at the corner, at the
             // middle of the side and a whole number of times between,
             // so a side is a whole number of swings and no flower is
@@ -1342,6 +1383,14 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
         }
         if let Some(colour) = figure_at(&corner, u, v) {
             return colour;
+        }
+        if spandrel > 0.0 {
+            let (dx, dy) = (wide - u, deep - v);
+            if dx + dy < spandrel {
+                // (a lozenge in it where it is large enough to hold one clear of its line)
+                let at = ((spandrel - 4.0) / 2.0).floor();
+                return if dx + dy >= spandrel - 1.0 { LINE } else if at >= 1.0 { bloom(dx - at, dy - at, 1.0, 4.0, [PALE; 3]).unwrap_or(behind) } else { behind };
+            }
         }
         let here = &near[((v / SQUARE) as usize).min(squares.1 - 1) * squares.0 + ((u / SQUARE) as usize).min(squares.0 - 1)];
         let mut leaf = 0;
@@ -1495,11 +1544,9 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
 /// many tiles a repeat of the medallions is (nothing for a rug, which
 /// does not repeat).
 ///
-/// Apart from [`drawn`], which asks it at the tiles of a flat floor, so
-/// that a form that is not flat can ask it at the places of its own
-/// bricks (see [`crate::wrap`]). One rule for both is what keeps a rug on
-/// a dome the rug a floor of that size would have.
-pub(crate) fn figured(kind: Drawn, half_wide: f64, half_deep: f64, seed: u64) -> (Box<dyn Fn(f64, f64) -> u8 + Send + Sync>, f64) {
+/// Apart from [`drawn`], which asks it at each tile of a floor: the rule
+/// is of places, and knows nothing of the grid it is asked at.
+fn figured(kind: Drawn, half_wide: f64, half_deep: f64, seed: u64) -> (Box<dyn Fn(f64, f64) -> u8 + Send + Sync>, f64) {
     let least = half_wide.min(half_deep);
     let mut numbers = Numbers(seed ^ 0x6A09_E667_F3BC_C908);
     // a whole number from `low` to `high`
@@ -2066,6 +2113,9 @@ mod tests {
 
     const BOX: ([i32; 2], [i32; 2]) = ([-62, -10], [62, 10]);
 
+    /// Rugs 48 tiles or more the shorter way, and what each was (see `rug_number`).
+    const LARGE_RUGS: [(usize, usize, u64, u64); 6] = [(96, 72, 1, 0x0e04fa1ba657eb81), (120, 80, 5, 0xd495c88598bb8b11), (250, 160, 2, 0x172d2df38a8e7dcd), (48, 200, 3, 0x76b1593786c6ad11), (100, 100, 7, 0xdd4923c63360acf9), (64, 48, 1, 0x7a1ea8a8ab7da9d9)];
+
     fn usual() -> Stones {
         Stones { size: 7.0, gap: 1.5, uneven: 0.5, seed: 3 }
     }
@@ -2218,6 +2268,59 @@ mod tests {
                     let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: false, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }, Threads::ONE);
                     assert!(tiles.iter().flatten().all(|colour| *colour < 8 || *colour == ON_CUT), "{across} by {down}, seed {seed}");
                 }
+            }
+        }
+    }
+
+    /// A rug's tiles as one number, to tell whether any has changed.
+    /// (FNV-1a, <http://www.isthe.com/chongo/tech/comp/fnv/>: the standard
+    /// library's own hash is free to change from one version to the next.)
+    fn rug_number(across: usize, down: usize, seed: u64) -> u64 {
+        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: false, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }, Threads::ONE);
+        tiles.iter().flatten().fold(0xcbf2_9ce4_8422_2325u64, |hash, colour| (hash ^ *colour as u64).wrapping_mul(0x0100_0000_01b3))
+    }
+
+    #[test]
+    fn a_large_rug_is_tile_for_tile_what_it_was_before_small_rugs_were_set_out_anew() {
+        // 48 tiles or more the shorter way: none of these may ever change by a tile
+        for (across, down, seed, was) in LARGE_RUGS {
+            assert_eq!(rug_number(across, down, seed), was, "the rug {across} by {down}, seed {seed}, has changed");
+        }
+    }
+
+    #[test]
+    fn a_small_rug_is_whole_parts_and_its_own_mirror_image() {
+        for (across, down) in [(36, 28), (40, 31), (47, 30), (33, 44), (46, 46), (60, 26)] {
+            for seed in [1, 4, 9] {
+                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: false, border: 0, seed, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }, Threads::ONE);
+                // (the rectangle the rug is set out in: an even number of tiles each way)
+                let (wide, deep) = (across / 2 * 2, down / 2 * 2);
+                let tile = |i: usize, j: usize| tiles[j * across + i];
+                for j in 0..deep {
+                    for i in 0..wide {
+                        let [a, b, c, d] = tile(i, j);
+                        assert_eq!(tile(wide - 1 - i, j), [b, a, d, c], "{across} by {down}, seed {seed}: left to right at {i}, {j}");
+                        assert_eq!(tile(i, deep - 1 - j), [c, d, a, b], "{across} by {down}, seed {seed}: top to bottom at {i}, {j}");
+                    }
+                }
+                // The border is the four rows inside the one-tile guard.
+                // Between the corner squares its lozenges are whole: a
+                // lozenge four tiles across lies on twelve tiles (a
+                // square of sixteen less its corners), so the tiles with
+                // a lozenge's colours on them are so many twelves, one of
+                // them at the middle of the side.
+                let lozenge = |i: usize, j: usize| tile(i, j).iter().any(|colour| *colour == 3 || *colour == 7);
+                let top = (5..wide - 5).flat_map(|i| (1..5).map(move |j| (i, j))).filter(|(i, j)| lozenge(*i, *j)).count();
+                let left = (5..deep - 5).flat_map(|j| (1..5).map(move |i| (i, j))).filter(|(i, j)| lozenge(*i, *j)).count();
+                assert!(top >= 12 && top % 12 == 0 && left >= 12 && left % 12 == 0, "{across} by {down}, seed {seed}: {top} and {left} tiles of lozenges");
+                assert!(lozenge(wide / 2 - 1, 2) && lozenge(wide / 2, 2) && lozenge(2, deep / 2 - 1) && lozenge(2, deep / 2), "{across} by {down}: no lozenge at the middle of a side");
+                // a star in each corner square, and nothing else of the border in it
+                assert!((1..5).flat_map(|j| (1..5).map(move |i| (i, j))).filter(|(i, j)| tile(*i, *j).iter().any(|colour| *colour == 4)).count() == 12, "{across} by {down}: the corner square's star is not whole");
+                // Each corner of the field (six tiles in: a guard, the border, a guard) is cut off on the
+                // diagonal: its corner tile is the ground behind the cut, and out along the field's edge
+                // from it comes the cut's line, a tile cut in two with the line's colour on its far half.
+                assert!(matches!(tile(6, 6), [2, 2, 2, 2] | [3, 3, 3, 3] | [6, 6, 6, 6]), "{across} by {down}, seed {seed}: the field's corner is {:?}", tile(6, 6));
+                assert!((7..wide / 2).any(|i| tile(i, 6) == [tile(6, 6)[0], ON_CUT, ON_CUT, 1]), "{across} by {down}, seed {seed}: no line cuts the field's corner off");
             }
         }
     }

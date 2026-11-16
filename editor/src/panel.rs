@@ -767,6 +767,16 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
             helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
             helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
         }
+        // The one depth each of these two styles has, off unless asked
+        // for (see `brickloft_core::pattern::Mosaic::bevel`). Each is
+        // offered only where it would do something: sunk mortar needs
+        // mortar, and grooves boards three microbricks broad or more.
+        if style == "cobblestone" && laid.mortar {
+            helped(ui, help("pattern_sunk"), |ui| ui.checkbox(&mut laid.bevel, "Mortar sunk"));
+        }
+        if style == "planks" && laid.size >= 3 {
+            helped(ui, help("pattern_grooved"), |ui| ui.checkbox(&mut laid.bevel, "Grooved"));
+        }
         if style == "bricks" {
             helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
             // below nothing, every course is moved along by an amount of its own

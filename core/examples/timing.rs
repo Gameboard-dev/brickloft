@@ -51,13 +51,6 @@ fn threads(runs: usize) {
         ("cube 120 by 84 by 48", cube.clone()),
         ("cobblestone on that cube, sides too", Spec { mosaic: mosaic(4, false), ..cube.clone() }),
         ("bevelled bricks on that cube", Spec { mosaic: mosaic(3, true), ..cube }),
-        // a pattern laid over a form that is not flat (see `wrap`)
-        ("bricks over the hollow sphere of 80", Spec { mosaic: mosaic(3, false), ..sphere(80.0, false, 4.0) }),
-        ("cobblestone over the solid sphere of 80", Spec { mosaic: mosaic(4, false), ..sphere(80.0, true, 2.0) }),
-        ("bricks over the bell", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 60.0), at(30.0, 0.0, 40.0), at(50.0, 0.0, 0.0)], thick: 4.0, mosaic: mosaic(3, false), ..Spec::default() }),
-        ("planks over the ring as a pipe", Spec { mosaic: mosaic(2, false), ..ring.clone() }),
-        ("a rug over a pyramid 160 across", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 80.0, rise: Some(60.0), fill: true, mosaic: mosaic(1, false), ..Spec::default() }),
-        ("that pyramid plain", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 80.0, rise: Some(60.0), fill: true, ..Spec::default() }),
     ];
     let all = Threads::available();
     println!("least of {runs} builds; all threads: {}", all.count());
