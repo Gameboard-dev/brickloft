@@ -2564,38 +2564,181 @@ everything on the grid stays where it is.
 
 Forms on one grid are normally kept clear of each other. A form dragged
 with Ctrl held is moved into the others instead and marked as joined
-(`merge` and `joined` in [editor/src/state.rs](../editor/src/state.rs)).
-The two forms then overlap, and the game refuses a brick whose box overlaps
-another's, so the joined form gives up the room they share. This is done
-when the bricks are gathered for drawing, copying and saving
-(`State::painted`),
-and the forms' own fits are left as they are.
+(`merge` in [editor/src/state.rs](../editor/src/state.rs)). The mark is the
+form's **blend**, a length kept in its settings (`Spec::blend`), so undo, a
+save and the clipboard all keep it. Joined forms overlap, and the game
+refuses a brick whose box overlaps another's, so the overlap has to be
+resolved before the bricks are drawn, copied or saved. That is done by
+`union` in [core/src/blend.rs](../core/src/blend.rs), which the editor calls
+with every form in the workspace when it gathers their bricks
+(`State::painted`).
 
-Each brick of the joined form is treated one of three ways.
+Each form is still fitted by itself first, by the fitter that suits it. A
+join then does two things. Where the forms' surfaces meet, it fits the two
+as one solid with fresh bricks. Everywhere else each form keeps its own
+bricks, because a sphere or a flat outline laid out by its own fitter is
+smoother than anything fitted cell by cell, and only one of two overlapping
+blocks has to give way.
 
-| The brick | What becomes of it |
+#### The joined solid
+
+A form is a distance function (section 5), negative inside. The union of two
+solids is the smaller of their two distances at each place. A smooth union
+replaces "the smaller" with a
+[smooth minimum](https://iquilezles.org/articles/smin/), which dips below
+both distances where they are nearly equal. For distances $`a`$ and $`b`$
+and a blend $`k`$,
+
+```math
+h = \max\left(k - \lvert a - b\rvert,\ 0\right), \qquad \mathrm{smin}(a, b) = \min(a, b) - \frac{h^2}{4k}
+```
+
+Where the two distances differ by $`k`$ or more, $`h`$ is zero and the
+result is the plain union. Where they are equal it is lower by $`k / 4`$,
+which fills the crease with a fillet. The fillet leaves each form's surface
+where the other form is $`k`$ away, so the blend is how far the rounding
+reaches along each form, in microbricks. A blend of 0 is the plain union
+with a sharp crease.
+
+The blend between two forms is the larger of their two, since either may be
+the one that was moved. With more than two forms in one join, each form's
+distance is lowered by the largest of its fillets with the others, and the
+least of the results is taken. The usual way, folding the smooth minimum
+over the forms one after another, gives a solid that depends on the order
+of the forms, and the editor reorders its list whenever another form is
+chosen to edit.
+
+The blend stops at 6. A form's distance is exact only out to 8 cells from
+its surface and is reported as "far" beyond (`FAR_MARGIN` in
+[core/src/sdf.rs](../core/src/sdf.rs)). The fillet's
+surface lies where the further form is at most $`1.25k`$ away, which is 7.5
+cells at a blend of 6. A larger blend would have its rim cut short wherever
+a curve's distance gave out.
+
+#### The zone
+
+The joined solid differs from the two forms fitted separately only near
+where their surfaces meet. The cells there are the **zone**, and only the
+zone is fitted afresh. A cell is in it if, at its middle, the two forms'
+distances $`a`$ and $`b`$ satisfy three conditions:
+
+| Condition | What it says |
 |---|---|
-| shares no room with another form | kept whole |
-| a plain block that shares some room | cut down to the cells that share none, as rows of cells |
-| a sloped brick that shares any room | left out |
+| $`\lvert a - b\rvert < \max(2,\ k - \sqrt{0.4k} + 1.74)`$ | the two surfaces are near one another: near enough for each form's own sloped bricks to overlap the other's, or for a fillet at least a tenth of a cell thick somewhere in the cell |
+| $`\min(a, b) > -2.5`$ | the cell is not deep inside either form |
+| $`\mathrm{smin}(a, b) < 1`$ | the joined solid's surface is no more than a cell away |
 
-A sloped brick is left out because a slope cannot be cut down to cells.
-The join therefore has a notch a cell or two deep wherever the joined
-form's sloped surface meets the other form. A joined form gives room up to
-every form on its grid that is not joined, and to the joined forms before
-it in the list, so of any two overlapping forms exactly one is cut.
+The first bound drops the thin rim of a fillet. A fillet thins to nothing
+at its edge, and its last tenth of a cell is less than a brick can show, so
+the forms keep their own bricks there and the zone at a blend of 6 is a
+third narrower. Blocks of 4 by 4 by 4 cells are tested first by their
+middles and passed over whole where no cell in them can meet the bounds,
+since a distance changes by at most 1 from one cell to the next.
 
-Fitting the two forms afresh as one solid would leave no notch, and is the
-blending described in [future-work.md](future-work.md). It was not used
-here for two reasons. It is a different build, with different bricks
-everywhere near the join and not only where the forms overlap. It would
-also make every form on a grid one form to edit, where cutting bricks
-leaves each form its own dots and settings.
+A box round the seam was the alternative. It needs no test for each cell,
+but the seam of a sphere sunk into a floor is a ring, and a box round a
+ring takes in the whole disc inside it and refits surface that has not
+changed.
+
+The zone is fitted by the volume fitter's method (section 7): the best
+brick for each cell, tetrahedra with fewer than two backed faces removed,
+ramps stretched where that fits closer, and ramps joined along their
+ridges. One step is done differently, because it was most of a join's
+time. The volume fitter asks the solid for its distance at each of a
+cell's 64 samples. Here each form's distance is asked at the cell's eight
+corners, once for all the cells that share a corner, and worked out at the
+samples
+[between the corners](https://en.wikipedia.org/wiki/Trilinear_interpolation).
+The forms are then combined exactly at every sample, so the crease of the
+join stays sharp. A form whose own distance is not smooth across a cell (an
+edge of its own crosses it) is detected by comparing three true values in
+the cell with what the corners give, and is asked at every sample there as
+before.
+
+#### The seam
+
+The zone's bricks and the forms' own must meet with no gap and no shared
+room. Three rules see to it.
+
+| Rule | Why |
+|---|---|
+| Every form in the join gives up the cells of the zone. A block is cut down to the cells outside it. | The zone is whole cells of the lattice the forms share, so what is left of a block and what the zone puts beside it share a face exactly. |
+| A sloped brick that lies partly in the zone is swallowed: the zone grows to take all of it, or whole slices of it along the one axis a ramp is the same all the way along. This repeats until no sloped brick lies across the zone's edge. | A slope cannot be cut across. Left out instead, as it was before the zone existed, it was a notch a cell or two deep all round the seam. |
+| A cell of the zone that is fitted as a whole cube, where one of the forms already had a block, goes back to that block. | The block is then not cut there. Two cubes joined have no zone left at all and are cut into a few blocks, as before. |
+
+At the zone's edge the joined solid is the nearer form alone, to within the
+tenth of a cell that the first bound allows. What meets there is two fits
+of one solid, the form's own and the cell by cell one, and they agree to
+within a sliver. The same holds round a point added to a sphere ("Added
+points" above), which keeps the sphere's own bricks in the same way.
+
+Each brick of the zone belongs to the form whose own distance is the least
+at the brick's middle, and is coloured as that form's bricks are.
+
+#### What is still cut
+
+Deep inside, blocks of one form overlap blocks of another, and one of them
+gives way: a block is cut down to the cells that share no room, and a
+sloped brick that shares any is left out, which inside the other form is
+not seen. Forms that are not joined give way to nobody. Joined forms give
+way to those that are not and to one another in an order fixed by where
+they stand, so the result is the same whichever form is being edited.
+
+Three kinds of form are joined by this cutting alone, with no zone and no
+effect from the blend.
+
+| Form | Why it is not fitted as one with the others |
+|---|---|
+| a form standing an odd unit (half a microbrick) off the other along any axis | Its cells straddle the other's, and no brick is half a microbrick wide to fill the difference, so no set of bricks can meet both forms' own without a gap or an overlap. The panel says so under the blend. |
+| a form laid as a pattern (a mosaic, stepping stones) | Its bricks are not its distance function: refitting it would fill the gaps between its stones and lose its colours. |
+| a plant | Its bricks are leaves and branches coloured one by one, for the same reason. |
+
+Forms on different grids are never joined: grids pass through one another.
+The zone is fitted at single microbricks whatever brick size the forms were
+built at.
+
+#### How long it takes, and why not on the graphics card
+
+A join is put together again whenever one of its forms, its place or its
+blend changes, which while a form is dragged is every frame. Measured on a
+desktop with 16 logical cores, otherwise idle, as the least of seven runs:
+
+| Join | Blend 0 | Blend 2 | Blend 6 |
+|---|---|---|---|
+| a sphere of radius 20 in a cube 17 a side, one thread | 3.9 ms | 5.7 ms | 11.5 ms |
+| the same, all cores | 4.4 ms | 4.3 ms | 7.9 ms |
+| two spheres of radius 20, one thread | 8.7 ms | 10.0 ms | 14.0 ms |
+| the same, all cores | 6.9 ms | 7.4 ms | 9.7 ms |
+
+Testing the blocks and sampling the zone's cells are shared among threads
+(see [performance.md](performance.md), "Threads"), and the bricks are the
+same on any number of them. The editor keeps the last join and reuses it
+when only a colour or a pick has changed.
+
+Doing the sampling on the graphics card was considered and set aside.
+Choosing a brick for each cell is a small part of the work. Removing
+spikes, stretching ramps and merging bricks all branch and depend on the
+order things are taken in, so they would stay on the processor, with the
+samples read back from the card on every change. Graphics cards also round
+differently from one another, so two machines could get different bricks
+from the same forms, and saves, reports and tests rely on a build being the
+same everywhere. And the editor draws through WebGL2, which has no compute
+shaders, while the fitting library runs with no graphics at all for its
+tests and tools, so a processor path would have to exist and match exactly
+in any case.
+
+#### Where it falls short
+
+The zone is fitted cell by cell, so it is rougher than a sphere's or a
+turned form's own layout, and the band of refitted bricks round a seam
+shows against them. It is also wider than the seam itself wherever a form's
+own bricks are large, since a sloped brick the zone touches is swallowed
+whole. A small blend on a curved seam comes out as a ring of single wedges
+and tetrahedra, since a fillet half a microbrick deep is less than one
+brick can follow.
 
 A joined form is not pushed clear when a form it sits in is reshaped, and
-moving it without Ctrl sets it clear again. The mark is held by the
-workspace alone. Undo rebuilds the forms from their settings, and a save
-holds only settings, colours and places, so neither brings the mark back.
+moving it without Ctrl sets it clear again.
 
 ## 9. Fit against brick count
 

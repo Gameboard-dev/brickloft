@@ -73,6 +73,10 @@ cargo run --release -p brickloft-core --example extent -- brickloft-report-1.txt
 # draw the form's bricks as a picture, seen from 250 degrees round and 30 up
 cargo run --release -p brickloft-editor --example form_picture -- brickloft-report-1.txt fit.png 250 30
 
+# draw two forms joined: a cube, and a ball 12 along x and 18 up with a blend of 2,
+# the whole of both (zoom 0), with the bricks the join changed drawn darker
+cargo run --release -p brickloft-editor --example join_picture -- join.png 250 30 0 0 0 0 cube.txt@0,0,0 ball.txt@12,0,18@blend=2 zone
+
 # time a set of representative forms
 cargo run --release -p brickloft-core --example timing
 

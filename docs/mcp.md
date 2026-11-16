@@ -131,7 +131,17 @@ The settings Claude can give:
 | `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
 | `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven` after it or not, lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
+| `blend` | Joins the form to the forms it stands in: `0` for a sharp crease, up to `6` for a fillet that many microbricks wide, `none` for a form that stands apart (see below) |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
+
+Forms are fitted one at a time, so two forms set in the same place
+overlap, and the game refuses a brick that overlaps another. To build one
+thing out of two forms, give the second a `place` partly inside the first
+and a `blend`. The two are then fitted as one solid where they meet (see
+[features.md](features.md), "Joining forms"). Both must stand a whole
+number of microbricks apart along every axis, so a `place` ending in a half
+on one form needs the same on the other. A pattern or a plant is joined by
+cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is refused.
 
 A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 `colours` written `#rrggbb`, the axis it `runs_along`, and a

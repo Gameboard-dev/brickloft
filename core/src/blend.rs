@@ -114,8 +114,8 @@ const MOST: usize = 8;
 
 /// How far outside the joined solid's surface a cell's middle may be and
 /// the cell still be looked at, in cells. A form's own sloped bricks lie
-/// within about a cell and a half of its surface.
-const OUTSIDE: f64 = 1.5;
+/// within about a cell of its surface.
+const OUTSIDE: f64 = 1.0;
 
 /// How far inside the nearer form's surface a cell's middle may be and the
 /// cell still be looked at, in cells. A cell further in than `OUTSIDE`:
@@ -126,9 +126,13 @@ const OUTSIDE: f64 = 1.5;
 const INSIDE: f64 = 2.5;
 
 /// How far two forms' distances may differ at a cell's middle and the
-/// forms' own sloped bricks still overlap there, in cells: twice `INSIDE`,
-/// since each form's sloped bricks reach that far from its own surface.
-const APART: f64 = 3.0;
+/// forms' own sloped bricks still overlap there, in cells: twice
+/// `OUTSIDE`, since each form's sloped bricks reach that far from its own
+/// surface. The zone need not find every such cell by this alone, since it
+/// grows to whole sloped bricks afterwards (see [`refit`]). At 3 it was a
+/// fifth more bricks refitted on two spheres, and no fewer places left
+/// unfilled: none either way.
+const APART: f64 = 2.0;
 
 /// The thinnest a fillet may be and still be fitted, in cells. A fillet
 /// thins to nothing at its rim, and the last part of it is less than any
