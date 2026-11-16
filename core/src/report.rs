@@ -34,6 +34,7 @@ fn form_name(form: Form) -> String {
         Form::Tree => "tree".into(),
         Form::Furniture => "furniture".into(),
         Form::Maze => "maze".into(),
+        Form::Imported => "imported".into(),
     }
 }
 
@@ -117,6 +118,8 @@ pub fn spec_text(spec: &Spec) -> String {
     // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
     let m = &spec.maze;
     line("maze", format!("{},{},{},{},{},{},{},{},{}", crate::maze::KINDS[m.kind as usize].1, m.rings, m.divisions, m.grow, m.seed, m.entrance, m.floor, m.solution as u8, m.hedge as u8));
+    // a mesh from a file: its name in the imports folder (or `none`), which way is up in the file (x, y or z), the fitter (smoothed or blocks), the size under which loose pieces are dropped (0 keeps all), and how many colours its own are reduced to (0 for none). A save from before meshes could be opened has no such line.
+    line("import", spec.import.text());
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -184,6 +187,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("tree" | "plant", _) => Form::Tree,
                     ("furniture", _) => Form::Furniture,
                     ("maze", _) => Form::Maze,
+                    ("imported", _) => Form::Imported,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -454,6 +458,8 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 spec.maze = maze.clamped();
             }
+            // (the mesh itself is found by whoever holds the files, by this name: see `mesh::Import`)
+            "import" => spec.import = crate::mesh::Import::read(value).map_err(|e| bad(&e.to_string()))?,
             "stones" => {
                 spec.stones = if value == "none" {
                     None
@@ -1273,7 +1279,9 @@ mosaic = {values}
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false, bloom: crate::tree::Bloom { flower: crate::tree::Flower::Gerbera, tilt: 35, turn: 250, stem: true, fallen: true } },
                 furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
+                import: crate::mesh::Import { name: "0123456789abcdef.glb".into(), mesh: None, up: crate::mesh::Up::X, fitter: crate::mesh::Fitter::Blocks, loose: 9, colours: 21 },
             },
+            Spec { form: Form::Imported, points: vec![at(0.5, 0.5, 20.0)], radius: 20.0, fill: true, import: crate::mesh::Import { name: "fedcba9876543210.ply".into(), mesh: None, up: crate::mesh::Up::Z, fitter: crate::mesh::Fitter::Smoothed, loose: 0, colours: 0 }, ..Spec::default() },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, hang: 80, lights: 0, shine: true, bloom: Default::default() }, ..Spec::default() },
             Spec { form: Form::Tree, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, rise: Some(24.0), tree: crate::tree::Tree { seed: 4, fullness: 80, bend: 15, extras: true, bloom: crate::tree::Bloom { flower: crate::tree::Flower::WaterLily, tilt: 90, turn: 359, stem: false, fallen: true }, ..crate::tree::Tree::of(crate::tree::Kind::Flower) }, ..Spec::default() },
             Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) }, ..Spec::default() },
@@ -1296,6 +1304,10 @@ tree = pine,1,60,15,50,0").unwrap().tree;
         assert_eq!(parse_spec("form = sphere").unwrap().blend, None);
         assert_eq!(parse_spec("blend = 0").unwrap().blend, Some(0.0));
         assert!(["blend = 7", "blend = -1", "blend = inf", "blend = nan", "blend = round"].iter().all(|line| parse_spec(line).is_err()));
+        // a save from before meshes could be opened has no line for one; a name that is not a mesh's own name is refused, a path most of all
+        assert_eq!(parse_spec("form = sphere").unwrap().import, Spec::default().import);
+        assert_eq!(parse_spec("form = imported").unwrap().import.name, "");
+        assert!(["import = ../../x.glb", "import = C:\\x.glb", "import = model.glb", "import = 0123456789abcdef.glb,q"].iter().all(|line| parse_spec(line).is_err()));
         // nor has one from before a form could be taken away
         assert!(!parse_spec("blend = 2").unwrap().carve && parse_spec("carve = true").unwrap().carve && parse_spec("carve = 1").is_err());
         let old = parse_spec("form = furniture
