@@ -38,7 +38,7 @@ until you tick it.
 
 | Form | Points | Options |
 |---|---|---|
-| **Arch** | two feet, and a height | Kind: round, pointed, triangular, elliptical, parabolic, catenary. Shift + click adds a point that pulls it out of shape (see [Added points](#added-points)). |
+| **Arch** | two feet, and a height | Kind: round, pointed, triangular, elliptical, parabolic, catenary. Alt + click adds a point that pulls it out of shape (see [Added points](#added-points)). |
 | **Circle** | a centre, and a radius | **Facing**: which axis it faces (Z is lying flat). Stretch within its plane makes an ellipse. |
 | **Spline** | any number, passed through | **Closed loop** joins its end to its start. |
 | **Bézier** | any number, pulled towards | A weight per point: how hard it pulls. |
@@ -106,7 +106,7 @@ becomes a disc, and a round-tube ring a disc with a rounded rim.
 
 ### Added points
 
-**Shift + click** on any form adds an orange point there. Dragging it pulls
+**Alt + click** on any form adds an orange point there. Dragging it pulls
 that part of the form out of shape; the form around it follows by less the
 further off it is, out to **Reach of added points**.
 
@@ -118,7 +118,7 @@ further off it is, out to **Reach of added points**.
 - On a sphere or pyramid it takes hold of the surface where you clicked.
 
 The form keeps its own points and sizes, so a pulled circle is still a
-circle whose radius can be changed. **Shift + right-click** an orange point
+circle whose radius can be changed. **Alt + right-click** an orange point
 to take it off, or use **Remove the last added point**. Up to 12 per form.
 
 ### Mirror
@@ -138,7 +138,7 @@ Several forms can be worked on together.
 - Forms on the same grid are kept clear of each other: one dragged into
   another stops beside it or comes to rest on top of it, and one reshaped
   until it reaches another pushes that one away.
-- **Ctrl + drag the form being edited** to move it into another form on
+- **Ctrl + drag a form** to move it into another form on
   its grid and join the two into one build (see [Joining forms](#joining-forms)).
 - **Delete** removes the form being edited. **Ctrl+Z** and **Ctrl+Y** undo
   and redo.
@@ -163,9 +163,7 @@ sets it clear of the others. Being joined is not remembered by undo or by a
 save. After Ctrl+Z, or when a save is opened again, drag the form with
 Ctrl once more to join it.
 
-Ctrl + click on a form that is not being edited marks it for copying, so
-click the form first to edit it and then drag it with Ctrl. Ctrl can also
-be pressed after the drag has begun.
+Ctrl can also be pressed after the drag has begun.
 
 ### Grids
 
@@ -207,7 +205,7 @@ an angle is copied as a grid of its own, frozen in place.
 | Key | What it does |
 |---|---|
 | **Ctrl+C** | copies the form being edited, and any others marked `+`, as a Brickadia prefab (`brickloft-build.brz`) on the clipboard |
-| **Ctrl + click** another form | marks it `+` to be copied too, or unmarks it |
+| **Shift + click** another form | picks it as well as the one being edited (it is marked `+`), or lets it go |
 | **Ctrl+A** | marks every form |
 | **Ctrl+V** | adds the forms of a copied prefab back to the workspace, as forms that can still be reshaped, on the grid being worked on |
 | **Ctrl+D** | duplicates the form being edited, as **Duplicate** does, without using the clipboard |
@@ -423,13 +421,13 @@ passes a megabyte.
 |---|---|
 | Click a form | edit it |
 | Drag a form by its bricks | move it within its grid |
-| Ctrl + drag the form being edited | move it into another form and join the two |
+| Ctrl + drag a form | move it into another form and join the two |
 | Drag a dot | reshape the form; on a cube, move one side |
 | Drag an arrow, a ring | move, turn the whole grid |
-| Shift + click a form | add a point to it |
-| Shift + right-click an added point | take it off |
+| Alt + click a form | add a point to it |
+| Alt + right-click an added point | take it off |
 | Ctrl + drag an added point on a circle | move it out of the circle's plane |
-| Ctrl + click another form | mark it to be copied too |
+| Shift + click another form | pick it as well as the one being edited |
 | Ctrl+A | mark every form |
 | Ctrl+C, Ctrl+V | copy, paste |
 | Ctrl+D | duplicate the form being edited |

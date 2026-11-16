@@ -188,7 +188,7 @@ pub enum Handle {
     Move,
     /// moves the whole form along x, y or z alone: one of its three arrows
     Slide(usize),
-    /// a point added to a curve with Shift + click, which pulls the curve
+    /// a point added to a curve with Alt + click, which pulls the curve
     /// out of shape where it was added
     Pull(usize),
     /// one of the three rings, which turn the form's own grid about x, y or z
@@ -515,7 +515,7 @@ impl State {
     }
 
     /// Pick another form to be copied along with the one being edited, or
-    /// let it go if it is picked already: Ctrl + click.
+    /// let it go if it is picked already: Shift + click.
     pub fn toggle_pick(&mut self, other: usize) {
         if let Some(item) = self.others.get_mut(other) {
             item.picked = !item.picked;

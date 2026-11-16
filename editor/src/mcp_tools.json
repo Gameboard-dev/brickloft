@@ -373,7 +373,7 @@
     {
       "name": "add_pull_point",
       "title": "Add a point that pulls a form out of shape",
-      "description": "Add a point to a form and pull the form out of shape there, as Shift + click and a drag do in the editor (the orange dot). The form moves by `pulled_by` at the place nearest `at`, and by less the further away, out to `reach`. Works on every form; a form takes up to 12. A pull within a flat curve's plane keeps it smooth; a pull out of the plane is built of sloped pieces and is rougher. Returns the workspace afresh.",
+      "description": "Add a point to a form and pull the form out of shape there, as Alt + click and a drag do in the editor (the orange dot). The form moves by `pulled_by` at the place nearest `at`, and by less the further away, out to `reach`. Works on every form; a form takes up to 12. A pull within a flat curve's plane keeps it smooth; a pull out of the plane is built of sloped pieces and is rougher. Returns the workspace afresh.",
       "inputSchema": {
         "type": "object",
         "properties": {
