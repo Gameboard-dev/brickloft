@@ -1063,10 +1063,39 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 state.activate(at - 1);
             }
         }
+        "randomize_lawn" => {
+            let at = index(&forms)?;
+            if !(forms[at].0.form == brickloft_core::spec::Form::Tree && forms[at].0.tree.kind == brickloft_core::tree::Kind::Grass) {
+                return Err("that form is not a patch of grass: Randomize makes a landscape of a lawn".into());
+            }
+            let seed = match arguments.get("seed") {
+                None | Some(Value::Null) => state.landscape + 1,
+                Some(given) => given.as_u64().ok_or("seed is a whole number, not negative")?,
+            };
+            let density = match arguments.get("foliage") {
+                None | Some(Value::Null) => state.foliage as i64,
+                Some(given) => given.as_i64().filter(|d| (0..=100).contains(d)).ok_or("foliage is a whole number from 0, for no plants, to 100")?,
+            };
+            if at > 0 {
+                state.activate(at - 1);
+            }
+            let made = state.randomize_lawn(seed, density as i32)?;
+            // (every plant is built before the workspace is told: Claude is given brick counts and boxes, which a plant still waiting has none of)
+            state.build_owed_now();
+            state.scene += 1;
+            state.refresh(now_ms);
+            let names = brickloft_core::tree::KINDS;
+            let plants: Vec<Value> = made.plants.iter().map(|(kind, place, height, spread)| json!({ "kind": names[*kind as usize].1, "place": place.map(|u| u as f64 / 2.0), "height": height, "spread": spread })).collect();
+            let mut told = workspace(state);
+            told["landscape"] = json!({ "seed": made.seed, "touches": made.touches, "ponds": made.ponds, "waterfall_height": made.fall, "tries": made.tries, "plants": plants, "plants_replaced": made.replaced });
+            return Ok(told.to_string());
+        }
         other => return Err(format!("Unknown tool: {other}")),
     }
     state.scene += 1;
     state.refresh(now_ms);
+    // (a landscape opened or put back has plants waiting to be built: all of them now, since Claude is told the bricks)
+    state.build_owed_now();
     // A form just added, or just chosen to be edited, is brought to the
     // middle of the view: the camera flies to face it from where it now
     // looks, far enough off to take it all in. A form is set down beside
@@ -1115,7 +1144,30 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 20);
+        assert_eq!(tool_names().len(), 21);
+    }
+
+    #[test]
+    fn a_lawn_is_made_a_landscape_and_what_was_made_is_told() {
+        let mut state = State::new();
+        let corners = json!([[-89.5, -59.5, 0.5], [90.5, -59.5, 0.5], [90.5, 60.5, 0.5], [-89.5, 60.5, 0.5]]);
+        apply(&mut state, "add_form", &json!({ "settings": { "form": "tree", "tree": "grass", "points": corners, "closed": true, "protrude": true, "radius": 4 } }), || 0.0).unwrap();
+        let said: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0, "seed": 7, "foliage": 40 }), || 0.0).unwrap()).unwrap();
+        let made = &said["landscape"];
+        let plants = made["plants"].as_array().unwrap();
+        assert!(made["seed"] == 7 && made["waterfall_height"].as_i64().is_some_and(|tall| tall >= 6) && made["ponds"].as_u64().is_some_and(|ponds| ponds >= 2) && plants.len() >= 4, "{made}");
+        assert!(plants.iter().all(|plant| plant["kind"].is_string() && plant["place"].as_array().is_some_and(|at| at.len() == 3) && plant["height"].as_f64().is_some_and(|tall| tall >= 9.0)));
+        // every plant is in the workspace told, built: the lawn first, then a form for each
+        let forms = said["forms"].as_array().unwrap();
+        let built = forms.iter().filter(|form| form["settings"]["tree"].as_str().is_some_and(|tree| !tree.starts_with("grass")) && form["bricks"].as_u64().is_some_and(|bricks| bricks > 50)).count();
+        assert!(forms[0]["settings"]["tube"] == "true" && built == plants.len(), "{built} forms with bricks for {} plants", plants.len());
+        // the same seed again: the same landscape, its plants in place of the last ones and no more forms than before
+        let again: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0, "seed": 7, "foliage": 40 }), || 0.0).unwrap()).unwrap();
+        assert!(again["landscape"]["plants"] == made["plants"] && again["landscape"]["plants_replaced"] == plants.len() && again["forms"].as_array().unwrap().len() == forms.len());
+        // with no seed, the next one; and not for a form that is no lawn
+        let next: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0 }), || 0.0).unwrap()).unwrap();
+        assert!(next["landscape"]["seed"] == 8);
+        assert!(apply(&mut state, "randomize_lawn", &json!({ "index": 1 }), || 0.0).is_err() && apply(&mut state, "randomize_lawn", &json!({ "index": 0, "foliage": 500 }), || 0.0).is_err());
     }
 
     #[test]

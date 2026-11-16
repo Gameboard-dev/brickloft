@@ -620,7 +620,19 @@ with a brush:
   1, 45 and 61 at 2, 36 and 53 at 3. The grass thins as the ground
   steepens. A new lawn starts at 2, a lawn saved before there were
   cliffs has 0, and at 0 grass grows on any slope.
+- **Randomize** makes the lawn a landscape in one press. Its ground is
+  sculpted afresh, in place of any touches it has: a table of rock with
+  a pond on it and a waterfall over its side to a pond below, a river,
+  hills, mounds and two to six ponds as the patch has room for. Trees,
+  bushes and flowers are set where each belongs, as forms of their own
+  that you can pick, move, change or delete. **Foliage density** sets
+  how many, up to 40. Press again for another landscape: the last one's
+  plants are replaced, except any you have changed. One Ctrl + Z takes
+  it all back. The plants appear one by one as they are built. **Another**
+  beside the seed still changes the blades alone.
 - The view draws water see-through, so the basin shows under it.
+
+<img src="images/plant-landscape.png" width="420" alt="A lawn made a landscape by Randomize, with a waterfall, a river, trees and flowers"> <img src="images/plant-landscape-large.png" width="420" alt="A lawn 300 by 240 made a landscape: oaks, pines, birches and cherries round a table of rock with a fall">
 
 <img src="images/plant-stream.png" width="420" alt="A lawn with a small pond in a hollow on a hill and a larger pond below it, joined by a narrow stream of water that steps down the slope in a sandy channel">
 

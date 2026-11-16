@@ -586,6 +586,21 @@
         "properties": {},
         "additionalProperties": false
       }
+    },
+    {
+      "name": "randomize_lawn",
+      "title": "Make a lawn a landscape",
+      "description": "Make a patch of grass a landscape, composed from a seed. Its ground is sculpted afresh, in place of any touches it has: a table of raised ground with a sharp edge, a pond on it and a waterfall over its cliff to a pond below; a river from that pond to the low edge; a broad tilt that gives the patch a high side and a low side; a ridge of two or three hills; one mound for every 6,000 microbricks squared of the patch (1 to 7); and ponds, one for every 9,000 and one more, 2 to 6, the others by turns a pond on a hill of its own with a stream down from it and a pond in the low ground. Raised ponds are turned on, cliffs set to 2 if they were lower, and water set to stand 3 below the lawn if it had none. Trees, bushes and flowers are then set where each belongs, as forms of their own on the lawn's grid and joined into it: willows by water, pines and birches on high ground, oaks, beeches, birches and cherries on the rest, bushes and flowers at the edges of the clearings, none in water, on a cliff or on steep ground; 40 plants at the most, each with a seed and a size of its own and colours that go with the lawn's set (bare trees and no flowers in Winter). The plants the last randomize_lawn made are taken away first, unless they have been changed since. The lawn becomes the form being edited. The same seed on the same lawn always gives the same landscape. Returns the workspace afresh, with `landscape`: the seed, how many touches and ponds, `waterfall_height` in microbricks (null if the patch is too small for one: under about 28 across), and each plant's kind, place, height and spread.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": { "type": "integer", "minimum": 0, "description": "The lawn's place in the list get_workspace gives." },
+          "seed": { "type": "integer", "minimum": 0, "description": "Which landscape: any whole number. One more than the last, if not given." },
+          "foliage": { "type": "integer", "minimum": 0, "maximum": 100, "description": "How thickly it is planted, 0 for no plants to 100. 50, or what was last used, if not given." }
+        },
+        "required": ["index"],
+        "additionalProperties": false
+      }
     }
   ]
 }

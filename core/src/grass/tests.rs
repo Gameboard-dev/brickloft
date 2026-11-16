@@ -876,3 +876,114 @@ fn a_touch_on_a_large_lawn_is_quicker_from_what_was_kept() {
     let kept = (0..8).map(|n| { let at = Instant::now(); std::hint::black_box(laid_from(&mut lawn, if n % 2 == 0 { &touched } else { &spec }, Threads::ONE)); at.elapsed() }).min().unwrap();
     assert!(kept * 2 < whole, "a touch took {kept:?} from what was kept and {whole:?} from nothing");
 }
+
+/// A lawn `long` by `wide` with square corners and nothing done to it, as the editor makes one.
+fn plain(long: f64, wide: f64) -> Spec {
+    Spec { protrude: true, depth: 4, tree: Tree { seed: 1, baubles: 2, ..Tree::of(Kind::Grass) }, ..along(&[(-long / 2.0, -wide / 2.0), (long / 2.0, -wide / 2.0), (long / 2.0, wide / 2.0), (-long / 2.0, wide / 2.0)], 4.0, true) }
+}
+
+/// Not a test: landscapes of several seeds at three sizes, written as spec files to the folder named by `LAND_OUT`, to be drawn with the `form_picture` example. Run by name with `-- --ignored --nocapture`.
+#[test]
+#[ignore = "writes files to look at"]
+fn landscapes_to_look_at() {
+    let Some(out) = std::env::var_os("LAND_OUT") else { return };
+    for (name, long, wide) in [("small", 80.0, 60.0), ("middling", 180.0, 120.0), ("large", 300.0, 240.0)] {
+        for seed in 1..=10u64 {
+            let lawn = land::settings(&plain(long, wide));
+            let made = land::compose(&lawn, seed);
+            let spec = Spec { pulls: made.pulls.clone(), ..lawn };
+            let ground = crate::spec::lawn_ground(&spec).unwrap();
+            let plants = land::planting(&ground, seed, 60);
+            println!("LAND {name} {seed}: {} touches, {} ponds, fall {:?}, try {}, {} plants", made.pulls.len(), made.ponds, made.fall, made.tries, plants.len());
+            std::fs::write(std::path::Path::new(&out).join(format!("{name}-{seed}.txt")), format!("[spec]
+{}", crate::report::spec_text(&spec))).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_landscape_from_a_seed_has_a_waterfall_ponds_at_several_heights_and_is_the_same_each_time() {
+    for (name, long, wide, seeds) in [("small", 80.0, 60.0, 1..=8u64), ("middling", 180.0, 120.0, 1..=8), ("large", 300.0, 240.0, 1..=3)] {
+        for seed in seeds {
+            let lawn = land::settings(&plain(long, wide));
+            let made = land::compose(&lawn, seed);
+            // always a fall, of six cells or more; touches within what a lawn takes; ponds by the rule (one for every 9,000 cells and one more, from two to six)
+            let tall = made.fall.unwrap_or_else(|| panic!("{name}, seed {seed}: no waterfall after {} tries", made.tries + 1));
+            // (the patch reaches four cells past its outline each way)
+            let wanted = (((long + 8.0) * (wide + 8.0) / 9000.0).round() as usize + 1).clamp(2, 6);
+            assert!(tall >= land::TALL && made.pulls.len() <= 240 && (2..=wanted).contains(&made.ponds), "{name}, seed {seed}: a fall of {tall}, {} touches, {} ponds of {wanted}", made.pulls.len(), made.ponds);
+            // and it is there in the ground the touches make: water falling, rock under it, and water standing at two heights or more
+            let spec = Spec { pulls: made.pulls.clone(), ..lawn.clone() }.snapped();
+            let ground = crate::spec::lawn_ground(&spec).unwrap();
+            let (lo, hi) = ground.cells();
+            let places: Vec<Place> = (lo[1]..hi[1]).flat_map(|y| (lo[0]..hi[0]).map(move |x| (x, y))).filter_map(|(x, y)| ground.at(x, y)).collect();
+            assert_eq!(land::fall_of(&ground), Some(tall), "{name}, seed {seed}");
+            assert!(places.iter().any(|p| p.falls_from.zip(p.water).is_some_and(|(from, level)| from - level >= 2) && p.cliff == 2), "{name}, seed {seed}: no rock under the fall");
+            let levels: std::collections::BTreeSet<i32> = places.iter().filter(|p| !p.stream).filter_map(|p| p.water).collect();
+            assert!(levels.len() >= 2 && levels.iter().next_back().unwrap() - levels.iter().next().unwrap() >= land::TALL, "{name}, seed {seed}: ponds at {levels:?}");
+            // hills as well as hollows: ground well above the lawn's level and well below it
+            let (low, high) = places.iter().filter(|p| p.covered).fold((f64::MAX, f64::MIN), |(low, high), p| (low.min(p.height), high.max(p.height)));
+            assert!(high >= 9.0 && low <= -5.0, "{name}, seed {seed}: the ground is from {low} to {high}");
+            // the same seed is the same landscape, and another seed another
+            assert_eq!(land::compose(&lawn, seed), made, "{name}, seed {seed}");
+            assert!(land::compose(&lawn, seed + 100).pulls != made.pulls);
+            // whatever touches the lawn had, and whatever its other settings: only its outline and its water are read
+            let other = Spec { pulls: vec![touch(3.0, 3.0, 9.0, 5.0, 0.0)], tree: Tree { fullness: 90, bend: 5, ..lawn.tree }, rise: Some(9.0), ..lawn.clone() };
+            assert_eq!(land::compose(&other, seed).pulls, made.pulls);
+            if seed == 1 {
+                // and built, it is the same bricks on one thread and on five
+                let (one, five) = (build_with(&spec, true, Threads::ONE).unwrap(), build_with(&spec, true, Threads::forced(5)).unwrap());
+                assert!(one.bricks == five.bricks && one.shades == five.shades && one.shades.contains(&FOAM), "{name}");
+            }
+        }
+    }
+    // a patch with no room for a fall is given touches all the same, and is said to have none; one that is no lawn at all is given nothing
+    let tiny = land::compose(&plain(12.0, 12.0), 1);
+    assert!(tiny.fall.is_none() && !tiny.pulls.is_empty(), "{tiny:?}");
+    // (a patch 20 across, 28 with its reach to each side, is the least that has one)
+    assert!((1..=6).all(|seed| land::compose(&plain(20.0, 20.0), seed).fall.is_some()));
+}
+
+#[test]
+fn the_plants_of_a_landscape_stand_where_their_kind_grows_and_clear_of_one_another() {
+    use crate::tree::Kind;
+    for seed in 1..=5u64 {
+        let lawn = land::settings(&plain(180.0, 120.0));
+        let spec = Spec { pulls: land::compose(&lawn, seed).pulls, ..lawn }.snapped();
+        let ground = crate::spec::lawn_ground(&spec).unwrap();
+        let plants = land::planting(&ground, seed, 100);
+        let tree = |kind: Kind| matches!(kind, Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::Cherry | Kind::Pine | Kind::ScotsPine);
+        let trees: Vec<&land::Planted> = plants.iter().filter(|p| tree(p.kind)).collect();
+        let kinds: std::collections::HashSet<u8> = plants.iter().map(|p| p.kind as u8).collect();
+        assert!(plants.len() <= land::MOST_PLANTS && trees.len() >= 4 && plants.len() >= trees.len() + 4 && kinds.len() >= 5, "seed {seed}: {} plants, {} of them trees, of {} kinds", plants.len(), trees.len(), kinds.len());
+        let highest = { let (lo, hi) = ground.cells(); (lo[1]..hi[1]).flat_map(|y| (lo[0]..hi[0]).map(move |x| (x, y))).filter_map(|(x, y)| ground.at(x, y)).filter(|p| p.covered).map(|p| p.height).fold(1.0, f64::max) };
+        for plant in &plants {
+            let place = ground.at(plant.cell[0], plant.cell[1]).unwrap();
+            // on dry ground the lawn covers, that is no cliff and not steep, at the height of the soil there
+            assert!(place.covered && place.water.is_none() && place.cliff == 0 && plant.top == place.top, "seed {seed}: {plant:?} stands on {place:?}");
+            assert!(ground.slope(plant.cell[0], plant.cell[1]).unwrap().length() <= 0.45, "seed {seed}: {plant:?} on a slope");
+            // no falling water within ten cells
+            assert!((-9..=9).all(|dy| (-9..=9).all(|dx: i32| dx * dx + dy * dy > 81 || !ground.at(plant.cell[0] + dx, plant.cell[1] + dy).is_some_and(|p| p.falls_from.zip(p.water).is_some_and(|(from, level)| from - level >= 2)))), "seed {seed}: {plant:?} by a fall");
+            // a size of its own, in range: a tree 40 to 130 tall, a bush or a flower under half that
+            assert!(if tree(plant.kind) { (40.0..=130.0).contains(&plant.height) } else { (9.0..=40.0).contains(&plant.height) } && plant.spread >= 2.0, "seed {seed}: {plant:?}");
+            // pines on the high ground, and no willow far from water
+            if matches!(plant.kind, Kind::Pine | Kind::ScotsPine) {
+                assert!(place.height > 0.5 * highest, "seed {seed}: {plant:?} at {} of {highest}", place.height);
+            }
+            if plant.kind == Kind::Willow {
+                assert!((-8..=8).any(|dy| (-8..=8).any(|dx| ground.at(plant.cell[0] + dx, plant.cell[1] + dy).is_some_and(|p| p.water.is_some()))), "seed {seed}: {plant:?} far from water");
+            }
+        }
+        // trunks apart: no two trees nearer than four fifths of their two spreads, so crowns overlap by a fifth at the most; and no two plants in one place
+        for (n, a) in plants.iter().enumerate() {
+            for b in &plants[n + 1..] {
+                let far = DVec2::new((a.cell[0] - b.cell[0]) as f64, (a.cell[1] - b.cell[1]) as f64).length();
+                assert!(far >= if tree(a.kind) && tree(b.kind) { 0.8 * (a.spread + b.spread) - 1.5 } else { 3.0 }, "seed {seed}: {a:?} and {b:?} are {far} apart");
+            }
+        }
+        // each with a seed of its own; the same again from the same seed; fewer when thinner, and none at none
+        assert!(plants.iter().map(|p| p.seed).collect::<std::collections::HashSet<_>>().len() == plants.len());
+        assert_eq!(land::planting(&ground, seed, 100), plants);
+        assert!(land::planting(&ground, seed, 25).len() < plants.len() && land::planting(&ground, seed, 0).is_empty());
+    }
+}

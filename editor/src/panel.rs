@@ -127,6 +127,8 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut state.save_name).hint_text("name").desired_width(110.0));
         if helped(ui, help("saved_save"), |ui| ui.button("Save")).clicked() {
+            // (every brick, those of plants still waiting to be built among them)
+            state.build_owed_now();
             state.store_note = crate::store::save(&state.folder, &state.save_name, &state.painted(), &state.forms()).unwrap_or_else(|e| format!("Not saved: {e}"));
             state.list_saved();
         }
@@ -1262,6 +1264,32 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         }
         hint(ui, help("tree_seed"));
     });
+    // A landscape from one press, for grass: beside the seed's Another,
+    // which goes on meaning other blades on the same ground. Each press
+    // is the next landscape, so pressing again is how to see another.
+    if kind == Kind::Grass {
+        helped(ui, help("grass_foliage"), |ui| ui.add(Slider::new(&mut state.foliage, 0..=100).suffix("%").text("Foliage density")));
+        let mut pressed = false;
+        ui.horizontal(|ui| {
+            pressed = helped(ui, help("grass_randomize"), |ui| ui.button("Randomize")).clicked();
+            if state.landscape > 0 {
+                ui.label(format!("Landscape {}", state.landscape));
+            }
+            let waiting = state.owed();
+            if waiting > 0 {
+                ui.label(format!("({waiting} plants still to build)"));
+            }
+        });
+        if pressed {
+            match state.randomize_lawn(state.landscape + 1, state.foliage) {
+                Ok(made) => {
+                    let fall = made.fall.map_or("no room for a waterfall".to_string(), |tall| format!("a waterfall {tall} high"));
+                    state.toast = Some((format!("Landscape {}: {} ponds, {fall}, {} plants", made.seed, made.ponds, made.plants.len()), None));
+                }
+                Err(why) => state.toast = Some((why, None)),
+            }
+        }
+    }
 }
 
 /// The controls of a piece of furniture: its kind, its style, its
