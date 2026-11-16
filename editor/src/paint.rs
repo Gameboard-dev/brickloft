@@ -301,6 +301,45 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
     }
 }
 
+/// The colour the strip that marks a maze's way through starts in: a
+/// yellow that shows on brick red, stone grey, wood brown and hedge green
+/// alike.
+pub const WAY: [u8; 3] = [246, 204, 46];
+
+/// The sets of colours a maze may be given, by the texture of its walls:
+/// `none` for plain walls, `hedge`, or a pattern's name.
+///
+/// Plain walls have three colours: the floor, the walls and the strip
+/// that marks the way through. Every other texture has its own sets
+/// (see [`palettes`]), spread over eight colours as its features share
+/// them, with the first for the floor too (it is the mortar's, or a
+/// hedge's stems') and the last given to the strip.
+pub fn maze_palettes(texture: &str) -> Vec<Vec<[u8; 3]>> {
+    if texture == "none" {
+        // pale stone on grey; sandstone; dark stone
+        return vec![vec![[128, 124, 116], [214, 208, 196], WAY], vec![[150, 126, 98], [214, 188, 144], WAY], vec![[96, 98, 104], [62, 64, 72], WAY]];
+    }
+    palettes(texture)
+        .iter()
+        .map(|set| {
+            let mut colours: Vec<[u8; 3]> = (0..MOST_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
+            colours[MOST_COLOURS - 1] = WAY;
+            colours
+        })
+        .collect()
+}
+
+/// What a maze's walls are, as the name its colours go by (see
+/// [`maze_palettes`]): `hedge`, the name of the pattern wrapped along
+/// them, or `none` for plain walls.
+pub fn maze_texture(spec: &brickloft_core::spec::Spec) -> &'static str {
+    match spec.mosaic {
+        _ if spec.maze.hedge => "hedge",
+        Some(laid) if brickloft_core::maze::walls::wrapped(&laid) => brickloft_core::pattern::STYLES[laid.style].name,
+        _ => "none",
+    }
+}
+
 /// What each of a tree's sets of colours is called, in the order
 /// [`palettes`] has them, for the list they are chosen from.
 pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {

@@ -125,22 +125,39 @@ pub fn run_form(form: usize, claude: bool) {
     // whole build is drawn in at most that many draw calls, one for each
     // pose in use, however many bricks it has. A mesh per brick would be a
     // draw call per brick, which is what limits WebGL long before triangles do.
+    //
+    // Two sets of them: one for the form being edited and one for all the
+    // others, the first after the second in `brick_meshes`. With one set,
+    // every change to the workspace gave every brick of every form to the
+    // graphics card again: measured with a lawn of 86,000 bricks standing
+    // by, 35 to 200 ms for each step of dragging a single cube. A set is
+    // now made again only when what it shows has changed (see
+    // `State::drawn_from`), and the form being edited is moved by moving
+    // its set, which gives the card one matrix. A set for every form would
+    // spare a little more, when one of the others changes while not being
+    // edited, at 125 more draw calls a form.
     let masks = all_masks();
-    let mut brick_meshes: Vec<Gm<InstancedMesh, material::BrickMaterial>> = masks
-        .iter()
-        .map(|&mask| {
-            let shape = mesh::shape_mesh(mask);
-            let cpu = CpuMesh {
-                positions: Positions::F32(shape.positions.iter().map(|p| vec3(p[0], p[1], p[2])).collect()),
-                normals: Some(shape.normals.iter().map(|n| vec3(n[0], n[1], n[2])).collect()),
-                // the first texture coordinate carries how near the rim of
-                // its face a vertex is; the second is unused
-                uvs: Some(shape.rim.iter().map(|r| vec2(*r, 0.0)).collect()),
-                ..Default::default()
-            };
-            Gm::new(InstancedMesh::new(&context, &Instances::default(), &cpu), material::BrickMaterial::default())
-        })
-        .collect();
+    let shape_of = |mask: u8| {
+        let shape = mesh::shape_mesh(mask);
+        CpuMesh {
+            positions: Positions::F32(shape.positions.iter().map(|p| vec3(p[0], p[1], p[2])).collect()),
+            normals: Some(shape.normals.iter().map(|n| vec3(n[0], n[1], n[2])).collect()),
+            // the first texture coordinate carries how near the rim of
+            // its face a vertex is; the second is unused
+            uvs: Some(shape.rim.iter().map(|r| vec2(*r, 0.0)).collect()),
+            ..Default::default()
+        }
+    };
+    let mut brick_meshes: Vec<Gm<InstancedMesh, material::BrickMaterial>> = (0..2).flat_map(|_| masks.iter()).map(|&mask| Gm::new(InstancedMesh::new(&context, &Instances::default(), &shape_of(mask)), material::BrickMaterial::default())).collect();
+    // what each set was last made from
+    let mut shown_from: [Option<Vec<state::DrawnFrom>>; 2] = [None, None];
+    // The bricks of a form that is taken away from others (`State::ghosts`):
+    // none of them is built, and with nothing drawn there would be nothing
+    // to see of the form, or to take hold of, but its dots. They are drawn
+    // as tinted glass, unlit, so the hole shows through its own form. The
+    // meshes are a second set and not more instances of the first: a mesh
+    // is drawn with one material, and glass is drawn after everything solid.
+    let mut ghost_meshes: Vec<Gm<InstancedMesh, ColorMaterial>> = masks.iter().map(|&mask| Gm::new(InstancedMesh::new(&context, &Instances::default(), &shape_of(mask)), ColorMaterial::new_transparent(&context, &CpuMaterial { albedo: Srgba::new(255, 255, 255, 255), ..Default::default() }))).collect();
     let mut handle_mesh = Gm::new(
         InstancedMesh::new(&context, &Instances::default(), &CpuMesh::sphere(16)),
         ColorMaterial::new_opaque(&context, &CpuMaterial { albedo: Srgba::WHITE, ..Default::default() }),
@@ -203,7 +220,9 @@ pub fn run_form(form: usize, claude: bool) {
     let mut shown_scene = state.scene;
     // for each shape's mesh, which of the workspace's forms each of its
     // bricks belongs to, so that a click on a brick says which form was hit
-    let mut owners: Vec<Vec<usize>> = vec![Vec::new(); masks.len()];
+    let mut owners: Vec<Vec<usize>> = vec![Vec::new(); 2 * masks.len()];
+    // and the same for the bricks drawn as glass
+    let mut ghost_owners: Vec<Vec<usize>> = vec![Vec::new(); masks.len()];
 
     window.render_loop(move |mut frame| {
         camera.set_viewport(frame.viewport);
@@ -270,11 +289,12 @@ pub fn run_form(form: usize, claude: bool) {
                     // being edited, and either way dragging from there moves
                     // it. Where the press landed is what the drag holds on to.
                     if dragging.is_none() && !*handled {
-                        // the meshes that have bricks, in the order they are given to `pick`
-                        let drawn: Vec<usize> = (0..brick_meshes.len()).filter(|&m| brick_meshes[m].geometry.instance_count() > 0).collect();
-                        let hit = pick(&context, &camera, *position, drawn.iter().map(|&m| &brick_meshes[m].geometry), Cull::Back);
+                        // the meshes that have bricks, in the order they are given to `pick`: the solid ones, then the glass ones
+                        // (a form that is taken away is taken hold of by its glass, whichever of it or the bricks round its hole is nearer)
+                        let drawn: Vec<(&InstancedMesh, &Vec<usize>)> = brick_meshes.iter().map(|m| &m.geometry).zip(&owners).chain(ghost_meshes.iter().map(|m| &m.geometry).zip(&ghost_owners)).filter(|(m, _)| m.instance_count() > 0).collect();
+                        let hit = pick(&context, &camera, *position, drawn.iter().map(|(m, _)| *m), Cull::Back);
                         if let Ok(Some(hit)) = hit {
-                            let form = drawn.get(hit.geometry_id as usize).and_then(|&m| owners[m].get(hit.instance_id as usize));
+                            let form = drawn.get(hit.geometry_id as usize).and_then(|(_, owners)| owners.get(hit.instance_id as usize));
                             if let Some(&form) = form {
                                 // With Alt, on the form being edited: a new
                                 // point is added there, and dragged from there.
@@ -493,18 +513,56 @@ pub fn run_form(form: usize, claude: bool) {
                 .into_iter()
                 .map(|(at, q)| (q != state::LEVEL).then(|| Mat4::from_translation(vec3(at[0] as f32, at[1] as f32, at[2] as f32)) * Mat4::from(Quat::new(q[3] as f32, q[0] as f32, q[1] as f32, q[2] as f32))))
                 .collect();
-            for ((object, &mask), owner) in brick_meshes.iter_mut().zip(&masks).zip(owners.iter_mut()) {
+            let ghosts = state.ghosts();
+            for ((object, &mask), owner) in ghost_meshes.iter_mut().zip(&masks).zip(ghost_owners.iter_mut()) {
                 let mut instances = Instances::default();
                 let mut colours = Vec::new();
                 owner.clear();
-                for (b, colour, form, place) in bricks.iter().filter(|b| b.0.mask == mask) {
+                for (b, form, place) in ghosts.iter().filter(|b| b.0.mask == mask) {
+                    let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
+                    let on_lattice = Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32);
+                    instances.transformations.push(match grids.get(*form).copied().flatten() {
+                        Some(turn) => turn * on_lattice,
+                        None => on_lattice,
+                    });
+                    // red, as what is taken away; fainter for a form that is not the one being edited
+                    colours.push(Srgba::new(235, 90, 70, if *form == 0 { 90 } else { 45 }));
+                    owner.push(*form);
+                }
+                instances.colors = Some(colours);
+                object.geometry.set_instances(&instances);
+            }
+            // The form being edited is drawn from where it stands: its
+            // bricks are placed as if it stood at the origin of a level
+            // grid, and its whole set is then moved there and turned.
+            let stands = vec3(state.place[0] as f32 / 2.0, state.place[1] as f32 / 2.0, state.place[2] as f32 / 2.0);
+            let own_way = grids.first().copied().flatten().unwrap_or(Mat4::identity()) * Mat4::from_translation(stands);
+            let (own_from, rest_from) = state.drawn_from();
+            let now_from = [rest_from, vec![own_from]];
+            // which mask is which place in a set
+            let place_of: std::collections::HashMap<u8, usize> = masks.iter().enumerate().map(|(n, &mask)| (mask, n)).collect();
+            for (set, now) in now_from.into_iter().enumerate() {
+                let own = set == 1;
+                let meshes = &mut brick_meshes[set * masks.len()..(set + 1) * masks.len()];
+                if own {
+                    meshes.iter_mut().for_each(|object| object.geometry.set_transformation(own_way));
+                }
+                if shown_from[set].as_ref() == Some(&now) {
+                    continue;
+                }
+                shown_from[set] = Some(now);
+                // (each brick is put with the others of its shape in one pass over them all)
+                let mut sorted: Vec<(Instances, Vec<Srgba>, Vec<usize>)> = (0..masks.len()).map(|_| (Instances::default(), Vec::new(), Vec::new())).collect();
+                for (b, colour, form, place) in bricks.iter().filter(|b| (b.2 == 0) == own) {
+                    let Some((instances, colours, owner)) = place_of.get(&b.mask).map(|&n| &mut sorted[n]) else { continue };
                     // the mesh is a unit box at the origin: scale it to the
                     // brick's extent, then move it to the brick's corner
                     // (its form may stand an odd unit, half a cell, off the cells)
+                    let place = if own { [0, 1, 2].map(|k| place[k] - state.place[k]) } else { *place };
                     let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
                     let on_lattice = Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32);
                     // then turned with its form's grid, if that is at an angle
-                    instances.transformations.push(match grids.get(*form).copied().flatten() {
+                    instances.transformations.push(match grids.get(*form).copied().flatten().filter(|_| !own) {
                         Some(turn) => turn * on_lattice,
                         None => on_lattice,
                     });
@@ -518,8 +576,11 @@ pub fn run_form(form: usize, claude: bool) {
                     colours.push(Srgba::new_opaque(shade(r), shade(g), shade(b)));
                     owner.push(*form);
                 }
-                instances.colors = Some(colours);
-                object.geometry.set_instances(&instances);
+                for ((object, (mut instances, colours, owner)), owned) in meshes.iter_mut().zip(sorted).zip(&mut owners[set * masks.len()..]) {
+                    instances.colors = Some(colours);
+                    object.geometry.set_instances(&instances);
+                    *owned = owner;
+                }
             }
             // The shadow map is redrawn only here, when the bricks change, not
             // every frame: turning the camera does not move a shadow.
@@ -577,6 +638,7 @@ pub fn run_form(form: usize, claude: bool) {
         screen.clear(ClearState::color_and_depth(0.17, 0.19, 0.23, 1.0, 1.0));
         screen.render(&camera, &ground, &lights);
         screen.render(&camera, brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
+        screen.render(&camera, ghost_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &[]);
         if let Some((middle, wide)) = state.rings().filter(|_| state.show_rings) {
             // the ring's mesh lies about z, one wide: turned to face its axis and grown to clear the form
             let faces = [Mat4::from_angle_y(degrees(90.0)), Mat4::from_angle_x(degrees(90.0)), Mat4::identity()];

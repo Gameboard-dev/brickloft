@@ -31,29 +31,65 @@ which the present tools deliberately do not.
 
 Forms joined with Ctrl + drag are fitted as one solid where they meet, as a
 smooth union with a blend the player sets, and keep their own bricks
-everywhere else. How it is done, what it costs and where it falls short are
-in [algorithm.md](algorithm.md), "Forms joined on purpose". What remains:
+everywhere else. A joined form can also be cut out of the others, is
+settled onto the cells of the form it joins, and is joined at the forms'
+own brick size where they share one. How it is done, what it costs and
+where it falls short are in [algorithm.md](algorithm.md), "Forms joined on
+purpose". What remains:
 
-- **A smoother fit at the seam.** The join is fitted cell by cell, with
-  single wedges and ramps stretched one way, and it shows as a rough band
-  against a sphere's own facets. Fitting the seam with the stretched corner
-  pieces the sphere fitter uses would need a layout for a surface that is
-  no sphere, which nothing here has yet.
+- **A layout for the seam.** The seam is evened out and laid with
+  stretched ramps and corner pieces, which took a tenth off its
+  disagreement with the joined surface and a sixth off its steps, and it is
+  still a rough band against a sphere's own facets. The measurements in
+  algorithm.md say why: a sphere's facets are smooth because they meet edge
+  to edge, at the cost of closeness, and bricks chosen one at a time for
+  closeness do not. Three ways of trading closeness for smoothness without
+  a layout were tried and none lowered the steps. What is needed is the
+  bricks of a patch chosen together. One way to try: over a patch where the
+  surface is a height above a plane, snap the heights at the corners of a
+  grid of rectangles to whole cells, and fill each rectangle with the brick
+  its four corners call for (a tetrahedron or a hip for one high corner, a
+  ramp for two, a cut cube or an inner corner for three). Neighbours then
+  share the line between their common corners. Open questions it leaves:
+  which way a patch faces where the surface turns over, how two patches of
+  different grids meet, what to do with a rectangle whose high corners are
+  opposite, and how the patch meets the forms' own bricks at the zone's
+  edge.
 - **A narrower band.** A sloped brick the join touches is refitted whole,
   so the band is as wide as the form's own bricks are large. Cutting a
-  stretched brick into shorter ones of the same slope, where the game has
-  such a brick, would let the band stop nearer the seam.
-- **Forms half a microbrick off one another.** They are joined by cutting
-  alone, with a notch at the seam, because their cells do not line up. The
-  editor could offer to move the joined form by half a microbrick.
-- **Brick size.** A join is fitted at single microbricks even between forms
-  built at a larger brick size.
-- **Taking material away.** A join only adds. A form subtracted from
-  another (a window cut through a wall) is the same method with the
-  distance of one form negated, and is not built.
+  stretched brick into the shorter bricks of its slope was built, measured
+  and taken out. A brick can be cut only where its slope crosses whole
+  cells, which needs its lengths to share a factor: none of the sloped
+  bricks of a sphere of radius 12 or of a turned form do, 45% of a sphere
+  of radius 20, 68% of a ring. On two spheres of radius 20 it left 4.6%
+  fewer cells to refit, with more bricks and more single wedges at the
+  band's new edge. A narrower band would have to come from the fitters
+  laying bricks near a seam that can be cut, or from the layout above
+  reaching to the forms' own facets.
+- **A hole's wall.** The wall of a hole is fitted cell by cell all the way
+  through the form it is cut in, where the form that made it has a layout
+  of its own for the same surface. Turning that layout inside out is not
+  possible brick for brick, since the hollow side of a sloped brick is not
+  a brick. A fitter run on the hole's inside as a solid of its own would
+  be.
 - **A blend above 6.** It needs the forms' distances to stay exact further
-  than 8 microbricks from their surfaces, which costs every curve's
-  distance search.
+  than 8 microbricks from their surfaces. Widening that for every form was
+  measured: curves took 1.5 to 8 times as long to build
+  ([algorithm.md](algorithm.md), "The joined solid"). Two ways are left.
+  A form's distance could be made a second time with a wider margin, for
+  joins alone and only when a blend above 6 is asked for. And forms joined
+  at a brick size above 1 already have a margin that many times as wide,
+  so their blend could go to 6 bricks of that size for nothing: it needs
+  the slider, the saved form and Claude's tools to take a limit that
+  depends on the brick size.
+- **Brick sizes out of step.** Forms of one brick size are settled to whole
+  bricks apart and joined at that size. Forms of two different sizes are
+  joined at single microbricks, with a band of fine bricks round the seam.
+  Joining them at the smaller of the two, where it divides the larger,
+  would be coarser and is not built.
+- **Seeing what is cut out.** A form that is cut out is drawn as plain red
+  glass, without edge lines, and its glass is not sorted by depth, so
+  through several layers of it the tint is uneven.
 
 ## Patterns
 
@@ -84,23 +120,48 @@ the case it still suits, and no such pattern is planned yet.
 
 What remains:
 
-- **Seams between fitted stones.** Stepping stones with the gap at 0 keep
-  seams, most of them hairline and some up to a cell wide. Each stone is
-  fitted by itself, and a stone whose bricks would overlap a neighbour's is
-  drawn in. Closing the seams needs the two stones either side of an edge
-  to be given the same edge, which fitting each stone by itself does not
-  do.
-- **A small rug.** The rug shows its detail on a floor 100 tiles or more
-  across. Below that its medallion has one or two layers and its guards
-  are plain lines.
-- **A pattern with depth.** The one-cell bevel of bricks is the only depth
-  a pattern has. Every other pattern is one layer of tiles pushed through
-  the form.
+- **Slivers between fitted stones.** Stepping stones with the gap at 0
+  share their edges, each outline's corners moved to the grid
+  ([algorithm.md](algorithm.md), 7.8). Slivers remain where an edge ends
+  on the rim of the region and not on a corner of the grid, and along an
+  edge that is nearly level, which is fitted as a slope from one side and
+  a step from the other now and then. Ending each edge at a corner of the
+  grid on the rim, and holding the fitter to one reading of a nearly level
+  edge, would close them.
+- **More depth.** Depth is one cell and one kind to a style: bevelled
+  bricks, grooved planks from size 3, and cobblestone's sunk mortar.
+  Medallions and a rug have none, and planks of the usual size are flat,
+  because a board two tiles broad would be half ramp.
 - **Patterns on curved surfaces.** A tile pattern is laid on the flat part
-  of a form and on the sides of a box, and the curved part stays plain. A
-  mosaic on a dome needs the pattern mapped onto a curved surface and the
-  surface cut into bricks small enough to carry it. Stepping stones are
-  laid only through a flat form.
+  of a form and on the sides of a box, and the curved part stays plain.
+  Laying it over a sphere, a turned profile, a tube and a torus was built
+  and taken out: the form's own bricks were kept and each given the
+  pattern's colour at its place on a sheet laid over the form. It does not
+  work, because a sloped brick is one colour and a curved form's bricks
+  are large and stretched (a sphere's are 2 cells by 3 by 10 and cannot be
+  cut smaller without changing the surface), so the pattern's lines fall
+  on brick edges that do not follow them: saw teeth for courses of bricks
+  and fragments for a rug. Cutting the surface into bricks small enough
+  to carry the lines multiplies the count and gives up the smooth fit.
+  Stepping stones are laid only through a flat form.
+
+## Mazes
+
+A maze of rings or of squares is built, with plain, patterned or hedge
+walls ([algorithm.md](algorithm.md), section 7.11). What remains:
+
+- **A texture on curved faces.** A pattern on a ring wall is as coarse
+  as the long sloped bricks of its face, because a pattern may not move
+  a form's outline. A pattern mapped onto curved surfaces, which the
+  patterns still need for domes, would serve walls too.
+- **Hedge corners and feet.** A hedge wall is the Plant form's hedge
+  along each wall's line, joined to the next by running into it. A hedge
+  that turns a sharp corner would make a ring wall and its spoke one
+  hedge. The stems at a hedge's foot are few on a long wall.
+- **More mazes.** A room larger than one ring, more than one way in,
+  loops (a braid maze), cells of six sides, and a maze on several floors
+  joined by stairs. Each is a change to the cells and their walls; the
+  carving and the building would stand.
 
 ## More plants
 

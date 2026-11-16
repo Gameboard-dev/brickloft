@@ -11,6 +11,7 @@
 //! - [`pattern`] fills a flat region with stepping stones in place of solid brick
 //! - [`tree`] grows a pine, a palm or an oak as one solid of many parts
 //! - [`furniture`] lays out a bookcase board by board and book by book, with no fitting
+//! - [`maze`] lays out a maze and builds its walls
 //! - [`wfc`] fills a grid with tiles that agree with their neighbours (wave function collapse)
 //! - [`spec`] ties them together: a [`spec::Spec`] in, bricks out
 //! - [`par`] shares a build's work out over the processor's cores
@@ -28,6 +29,7 @@ pub mod fit_round;
 pub mod fit_stack;
 pub mod fit_volume;
 pub mod furniture;
+pub mod maze;
 pub mod orient;
 pub mod par;
 pub mod pattern;

@@ -53,6 +53,10 @@ pub enum Form {
     /// 1 point, its middle: the furniture `furniture` describes, filling
     /// the box a `Cube` of the same `radius` and `stretch` would fill
     Furniture,
+    /// 1 point, the middle of its floor: the maze `maze` describes,
+    /// `radius` to the middle of its outside wall, with walls `thick`
+    /// through and `rise` tall
+    Maze,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -159,10 +163,18 @@ pub struct Spec {
     /// clipboard) remembers its spec, and a join that undo forgot was the
     /// fault this replaced.
     pub blend: Option<f64>,
+    /// Whether a joined form is taken away from the forms it is joined to,
+    /// and not added to them: a window through a wall, a hole through a
+    /// sphere. It means something only with `blend` set, which is then how
+    /// far the rim of the hole is rounded. None of the form's own bricks are
+    /// built (see [`crate::blend`]). Kept here for the reason `blend` is.
+    pub carve: bool,
     /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
     pub tree: crate::tree::Tree,
     /// Which furniture a `Form::Furniture` is (see [`crate::furniture`]). Other forms take no notice of it.
     pub furniture: crate::furniture::Furniture,
+    /// Which maze a `Form::Maze` is (see [`crate::maze`]). Other forms take no notice of it.
+    pub maze: crate::maze::Maze,
 }
 
 impl Default for Spec {
@@ -195,8 +207,10 @@ impl Default for Spec {
             stones: None,
             mosaic: None,
             blend: None,
+            carve: false,
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
+            maze: crate::maze::Maze::default(),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -411,6 +425,13 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     if spec.mosaic.is_some() {
         return build_at(spec, 1, measured, threads);
     }
+    // And a maze. Its walls are a few cells thick and its corridors are
+    // sized to be walked down, so at a coarser size the walls are another
+    // thickness and the corridors another width: a different maze. Fewer
+    // bricks come from fewer rings.
+    if spec.form == Form::Maze {
+        return build_at(spec, 1, measured, threads);
+    }
     // So is a tree, for the same reason: its boughs, twigs and leaflets
     // are a cell or two thick, and at a coarser size they are gone and
     // what is left is a trunk in a cloud. A tree is tens of thousands of
@@ -487,7 +508,7 @@ impl Spec {
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree | Form::Maze) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -613,11 +634,16 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
 /// bricks of a rounded rim, and whatever is under or over them) is left
 /// as it was fitted, in the pattern's ground colour.
 ///
-/// A pattern wrapped onto a curved surface was not attempted. A sloped
-/// brick is one colour and often many cells long, so a pattern there
-/// would need the surface cut into bricks a cell across, which is many
-/// times the bricks and gives up the smooth fit the sloped bricks are
-/// there for.
+/// A pattern wrapped onto a curved surface was built and taken out. The
+/// form's bricks were kept as fitted and each given the pattern's colour
+/// at its place on a sheet laid over the form. A sloped brick is one
+/// colour, and a curved form's are large and stretched (a sphere's are
+/// corner pieces 2 cells by 3 by 10, which cannot be cut smaller without
+/// changing the surface), so a pattern's lines fell on brick edges that
+/// do not follow them: saw teeth for courses of bricks on a dome,
+/// fragments for a rug. Carrying the lines would need the surface cut
+/// into bricks a cell across, which is many times the bricks and gives
+/// up the smooth fit the sloped bricks are there for.
 fn pattern_flat_faces(spec: &Spec, built: &mut Built, threads: Threads) {
     let Some(mosaic) = &spec.mosaic else { return };
     if !built.shades.is_empty() || built.bricks.is_empty() {
@@ -858,13 +884,26 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g, threads),
     };
-    if grain == 1 {
+    // The form's bricks before a pattern that only colours them, to be
+    // measured in place of the patterned ones. A pattern's tiles cut in
+    // two were measured a few percent further from a rounded form than
+    // the same form plain, by the places that fall on the face two half
+    // bricks share (see `report::scan`): a difference in the figure for
+    // no difference in what the bricks fill. A pattern with depth (a
+    // bevel, grooves, sunk mortar) does change what they fill, and is
+    // measured as it is.
+    let unpatterned = (grain == 1 && measured && built.unmeasured && coarse.mosaic.is_some_and(|mosaic| !mosaic.bevel)).then(|| built.bricks.clone());
+    // (not a maze, which wraps its pattern along its own walls: left to
+    // these, the outside of a grid maze was taken for the side of a box and
+    // patterned over, in colour numbers the maze keeps for other things)
+    if grain == 1 && coarse.form != Form::Maze {
         pattern_flat_faces(&coarse, &mut built, threads);
         pattern_side_faces(&coarse, &mut built, threads);
     }
+    let form = Probe::of(solid);
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
-    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
+    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| form.solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
     }
@@ -873,11 +912,12 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         // with no figure for how well they fit it. Measure them against the
         // form itself. A build too large to measure that way is fitted cell
         // by cell after all, which does have its own figures.
-        let (field, min, max) = match &solid {
+        let (field, min, max) = match &form.solid {
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::measure(&Probe::of(solid), &built, threads) {
+        let plain = unpatterned.filter(|_| !built.shades.is_empty()).map(|bricks| Built { bricks, ..Built::default() });
+        match crate::report::measure(&form, plain.as_ref().unwrap_or(&built), threads) {
             Ok((volume, wrong)) => {
                 built.solid = volume;
                 built.error = wrong;
@@ -990,6 +1030,9 @@ pub enum Solid {
     /// Furniture, which comes with its bricks and their colours and is
     /// its bricks exactly (see [`crate::furniture`]).
     Furniture(Box<crate::furniture::Model>),
+    /// A maze, which is several outlines and colours at once and is built
+    /// by its own code (see [`crate::maze::walls`]).
+    Maze(Box<crate::maze::walls::Walls>),
 }
 
 /// The two axes a flat form's outline is drawn in, given the one it lies across.
@@ -1009,6 +1052,7 @@ impl Solid {
             | Solid::Lathe { field, .. }
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Furniture(model) => model.distance(p),
+            Solid::Maze(walls) => walls.distance(p),
             Solid::Flat {
                 region,
                 axis,
@@ -1076,6 +1120,7 @@ impl Probe {
             | Solid::Pyramid { .. }
             | Solid::Lathe { .. }
             | Solid::Furniture(_)
+            | Solid::Maze(_)
             | Solid::Pipe { .. } => None,
         }
     }
@@ -1340,6 +1385,13 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
         Form::Cube => cube::cube(spec, need(1)?[0], threads),
         // (its box is a cube's, so that its dots and sizes are a cube's too; it has no curve to draw)
         Form::Furniture => Ok((Solid::Furniture(Box::new(crate::furniture::Model::new(&spec.furniture, cube::sides(spec, need(1)?[0]), spec.max_ext, spec.wedges)?)), Vec::new())),
+        Form::Maze => {
+            // (a rug is not wrapped along walls, and a hedge takes no pattern: see `maze::walls`)
+            let walls = crate::maze::walls::Walls::new(&spec.maze, need(1)?[0], spec.radius, spec.thick, spec.rise, &spec.tree, spec.mosaic.is_some())?;
+            let (lo, hi) = walls.bounds();
+            check_size(&[(hi.x - lo.x) as i64, (hi.y - lo.y) as i64, (hi.z - lo.z) as i64])?;
+            Ok((Solid::Maze(Box::new(walls)), Vec::new()))
+        }
         Form::Tree => {
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
@@ -2729,6 +2781,10 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -
     match solid {
         // nothing to fit, and nothing to measure: the furniture is these bricks
         Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
+        Solid::Maze(walls) => {
+            let (bricks, shades, solid, error) = walls.built(spec.mosaic.as_ref(), spec.wedges, spec.max_ext, threads);
+            Built { bricks, solid, error, path, grain: 1, unmeasured: false, shades }
+        }
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,
@@ -3424,7 +3480,8 @@ mod tests {
         let plain = build(&disc(None)).unwrap();
         let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         assert!(built.bricks.iter().any(|b| b.mask != CUBE && b.ext == [1, 1, built.bricks.iter().map(|b| b.ext[2]).max().unwrap()]), "no tile is cut in two");
-        assert!((built.error - plain.error).abs() < 0.1 * plain.error, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
+        // (the very same figure: it is the form's bricks as they were before the pattern that are measured)
+        assert!(built.error == plain.error && built.solid == plain.solid, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
     }
 
     #[test]

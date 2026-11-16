@@ -12,7 +12,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 10] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture"];
+pub const FORMS: [&str; 11] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -26,11 +26,12 @@ pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
 pub const CUBE: usize = 7;
 pub const TREE: usize = 8;
-// (At the end, after Plant. A save names its forms in words and not by
-// these places (see `brickloft_core::report::spec_text`), so a place could
-// be changed without harm to one; the end is chosen all the same, so that
-// no other place moves.)
+// (After Plant, as it was asked for, with the maze after it. A save names
+// its forms in words and not by these places (see
+// `brickloft_core::report::spec_text`), so no save changes meaning when a
+// place does.)
 pub const FURNITURE: usize = 9;
+pub const MAZE: usize = 10;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -174,6 +175,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Cube => CUBE,
         Form::Tree => TREE,
         Form::Furniture => FURNITURE,
+        Form::Maze => MAZE,
     }
 }
 
@@ -185,7 +187,7 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
-        CIRCLE | PYRAMID | TREE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        CIRCLE | PYRAMID | TREE | MAZE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         // Standing on the floor too. Its point is its middle, as a
@@ -352,9 +354,10 @@ pub struct State {
     /// it is dragged, into other forms if that is where, and is not set
     /// down clear of them: the two are to be one build.
     pub merge: bool,
-    /// the blend of the form being edited when the view was last told of
-    /// it: a change of blend builds nothing (see `refresh`)
-    blend_shown: Option<f64>,
+    /// the blend of the form being edited, and whether it is taken away
+    /// from the forms it joins, when the view was last told of them: a
+    /// change of either builds nothing (see `refresh`)
+    blend_shown: (Option<f64>, bool),
     /// The bricks of the workspace's joined forms as last put together,
     /// with what they were put together from (see `pieces`).
     joins: std::cell::RefCell<Option<(Vec<JoinKey>, std::rc::Rc<Vec<Piece>>)>>,
@@ -379,6 +382,11 @@ type Snapshot = Vec<Placed>;
 /// What a join was put together from: each form, where it stands, and
 /// enough of its bricks to tell a build from the one before it.
 type JoinKey = (Spec, [i32; 3], usize, bool);
+/// What a form's drawn bricks depend on (see [`State::drawn_from`]): how it
+/// is described and coloured, where it stands, whether it is picked, and
+/// how many bricks it was built of and how; and, while forms are joined,
+/// the number of the workspace's last change.
+pub type DrawnFrom = (Spec, Paint, [i32; 3], bool, usize, bool, Option<u64>);
 
 /// How far along the line through `from` in direction `a` the ray from
 /// `origin` along `dir` comes nearest it; `None` if the ray runs along the
@@ -525,7 +533,7 @@ impl State {
             busy: false,
             lift: false,
             merge: false,
-            blend_shown: None,
+            blend_shown: (None, false),
             joins: std::cell::RefCell::new(None),
             follow: 0.5,
             spin_from: None,
@@ -565,7 +573,7 @@ impl State {
         self.bounds = item.bounds;
         self.problem = None;
         // its bricks are current: nothing to rebuild until it is changed
-        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() });
+        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() });
         self.scene += 1;
     }
 
@@ -644,7 +652,7 @@ impl State {
     /// microbricks allow). Returns whether it is. By whole cells, so that a
     /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | FURNITURE);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | FURNITURE | MAZE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -780,18 +788,46 @@ impl State {
 
     /// Put the workspace back as a snapshot has it.
     fn restore(&mut self, snapshot: Snapshot) {
+        // The bricks the workspace has now are kept for whichever of the
+        // snapshot's forms are the same forms: a form's bricks follow from
+        // how it is described, wherever it stands and whatever its grid.
+        // Every form was built again, always. Taking back the move of a
+        // cube then built the lawn beside it afresh, a second or more for
+        // a large one, and so did every change Claude made through MCP,
+        // which puts the workspace back whole each time.
+        let fitted = |spec: &Spec| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..spec.clone() };
+        let mut kept: Vec<(Spec, Built, Option<Bounds>)> = std::mem::take(&mut self.others).into_iter().map(|o| (fitted(&o.spec), o.built, o.bounds)).collect();
+        let mine = fitted(&self.full_spec());
+        if self.built_from.as_ref() == Some(&mine) && self.problem.is_none() && !self.built.unmeasured {
+            kept.push((mine, std::mem::take(&mut self.built), self.bounds));
+        }
+        let mut again = |spec: &Spec| -> Option<(Built, Option<Bounds>)> {
+            let wanted = fitted(spec);
+            let at = kept.iter().position(|(from, ..)| *from == wanted)?;
+            // (taken, not copied, unless another of the snapshot's forms is the same again)
+            Some(kept.iter().skip(at + 1).any(|(from, ..)| *from == wanted).then(|| (kept[at].1.clone(), kept[at].2)).unwrap_or_else(|| { let (_, built, bounds) = kept.swap_remove(at); (built, bounds) }))
+        };
         let mut forms = snapshot.clone().into_iter();
         let Some((spec, paint, place)) = forms.next() else { return };
+        let own = again(&spec);
         self.others = forms
             .map(|(spec, paint, place)| {
-                let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false }
+                let (built, bounds) = again(&spec).unwrap_or_else(|| {
+                    let built = build(&spec).unwrap_or_default();
+                    let bounds = bounds_of(&built);
+                    (built, bounds)
+                });
+                Item { bounds, spec, paint, place, built, picked: false }
             })
             .collect();
         self.load_spec(spec);
         self.paint = paint;
         self.place = place;
         self.built_from = None;
+        if let Some((built, bounds)) = own {
+            (self.built, self.bounds, self.problem) = (built, bounds, None);
+            self.built_from = Some(fitted(&self.full_spec()));
+        }
         self.scene += 1;
         self.noted = snapshot;
     }
@@ -828,6 +864,39 @@ impl State {
         self.spec.blend.is_some()
     }
 
+    /// Move every joined form that stands half a microbrick off the form it
+    /// is joined to onto that form's cells, by half a microbrick along each
+    /// axis it is off on (`brickloft_core::blend::settled`, which says why).
+    /// `lean` is the way the form being edited should move, for a drag.
+    /// Returns whether any form moved.
+    ///
+    /// Called when a drag joins a form and again on every `refresh`, so that
+    /// a join made any other way (by Claude, from a save made before forms
+    /// were settled, by pasting) is settled too, and there is one rule and
+    /// not one for each way in.
+    fn settle_joins(&mut self, lean: [i32; 3]) -> bool {
+        let count = 1 + self.others.len();
+        if (0..count).all(|n| if n == 0 { self.spec.blend.is_none() } else { self.others[n - 1].spec.blend.is_none() }) {
+            return false;
+        }
+        let mut moved = false;
+        // (one at a time, each from where the ones before it now stand)
+        for n in 0..count {
+            let to = {
+                let grid = |spec: &Spec| if on_own_grid(spec) { spec.on_grid + 1 } else { 0 };
+                let members: Vec<Member> = std::iter::once((&self.spec, &self.built, self.place)).chain(self.others.iter().map(|o| (&o.spec, &o.built, o.place))).map(|(spec, built, place)| Member { spec, built, place, grid: grid(spec) }).collect();
+                brickloft_core::blend::settled(&members, n, if n == 0 { lean } else { [0; 3] })
+            };
+            let place = if n == 0 { &mut self.place } else { &mut self.others[n - 1].place };
+            moved |= *place != to;
+            *place = to;
+        }
+        if moved {
+            self.scene += 1;
+        }
+        moved
+    }
+
     /// Why the form being edited, if it is joined, is cut where it meets
     /// another form and not fitted afresh with it: said in the panel under
     /// the blend, which would otherwise seem to do nothing. `None` if it is
@@ -845,9 +914,20 @@ impl State {
         let half_off = |place: [i32; 3]| (0..3).any(|k| (place[k] - self.place[k]).rem_euclid(2) == 1);
         let mut others = self.others.iter().filter(|o| self.in_my_way(&o.spec));
         if others.clone().any(|o| half_off(o.place)) {
-            return Some("A form on this grid stands half a microbrick off this one, so their bricks do not line up and the two are joined by cutting alone. Move either by half a microbrick to blend them.");
+            // (a joined form is settled onto the cells of the form it stands deepest in: this is one it could not also be lined up with)
+            return Some("Two of the forms this one meets stand half a microbrick off one another, so it lines up with one of them only and is joined to the other by cutting alone. Move either of those by half a microbrick to blend all three.");
         }
         others.any(|o| !o.built.shades.is_empty()).then_some("A form laid as a pattern is joined by cutting alone: the blend does nothing where this form meets one.")
+    }
+
+    /// The bricks of every form that is taken away from the forms it is
+    /// joined to (`Spec::carve`), with which form each belongs to and where
+    /// it stands. None of them is built, so none is among `painted`: the
+    /// view draws them as glass, so that the form can be seen and taken
+    /// hold of, and nothing else is given them.
+    pub fn ghosts(&self) -> Vec<(CellBrick, usize, [i32; 3])> {
+        let forms = std::iter::once((&self.built, self.place, &self.spec)).chain(self.others.iter().map(|i| (&i.built, i.place, &i.spec)));
+        forms.enumerate().filter(|(_, form)| brickloft_core::blend::carves(form.2)).flat_map(|(n, (built, place, _))| built.bricks.iter().map(move |b| (*b, n, place))).collect()
     }
 
     /// The workspace's bricks before they are coloured: each form's own,
@@ -967,9 +1047,9 @@ impl State {
     fn tunable(&self, only: Option<Handle>) -> Vec<Tune> {
         let mut all = Vec::new();
         // A tree has nothing to tune: it fits no better a cell to one
-        // side, and each try would be a second's building.
+        // side, and each try would be a second's building. Nor has a maze.
         // (Nor has furniture, which is exact wherever it stands.)
-        if matches!(self.form, TREE | FURNITURE) {
+        if matches!(self.form, TREE | FURNITURE | MAZE) {
             return all;
         }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
@@ -1226,6 +1306,7 @@ impl State {
                 let kind = s.furniture.kind;
                 self.usual_furniture(kind);
             }
+            MAZE => self.usual_maze(),
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
@@ -1277,6 +1358,25 @@ impl State {
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
 
+    /// Make the form a maze as one starts out: its usual size, plain
+    /// walls, and a maze's own colours. The seed is kept, as a tree's is.
+    ///
+    /// The colours come with it because a maze is told its parts by
+    /// colour: the strip that marks the way through is one of them.
+    pub fn usual_maze(&mut self) {
+        use brickloft_core::maze::{Maze, USUAL_HEIGHT, USUAL_SIZE};
+        let s = &mut self.spec;
+        s.maze = Maze { seed: s.maze.seed, ..Maze::default() };
+        (s.radius, s.thick, s.rise) = (USUAL_SIZE.0, USUAL_SIZE.1, Some(USUAL_HEIGHT));
+        (s.stones, s.mosaic, s.stretch) = (None, None, DVec3::ONE);
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::maze_palettes("none")[0].clone(), ..Paint::default() };
+    }
+
+    /// How tall a maze's walls stand, and how thick the floor under them is.
+    pub fn maze_height(&self) -> (f64, f64) {
+        (brickloft_core::maze::walls::height_of(&self.spec.maze, self.spec.rise), self.spec.maze.clamped().floor as f64)
+    }
+
     /// A tree's height.
     pub fn tree_height(&self) -> f64 {
         self.spec.rise.unwrap_or(brickloft_core::tree::Tree::usual_size(self.spec.tree.kind).0)
@@ -1307,6 +1407,7 @@ impl State {
             CUBE => Form::Cube,
             TREE => Form::Tree,
             FURNITURE => Form::Furniture,
+            MAZE => Form::Maze,
             _ => Form::Revolve,
         };
         if self.form == CUBE {
@@ -1327,15 +1428,30 @@ impl State {
 
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
+        let rebuilt = self.rebuild(now_ms);
+        // Joined forms are settled once the form being edited has been
+        // built, since where a form lines up goes by where its bricks are:
+        // before, a workspace just opened was settled against the bricks
+        // of the form the editor starts with, and a form half a microbrick
+        // off stayed there until the next frame.
+        // (outside a drag, which settles the form it moves as it goes, and says nothing: see `move_by`)
+        if !self.busy && self.built_from.is_some() && self.settle_joins([0; 3]) {
+            self.toast = Some(("Moved a joined form a little, so that its bricks line up with those of the form it joins".to_string(), None));
+        }
+        rebuilt
+    }
+
+    /// [`State::refresh`], less the settling of joined forms.
+    fn rebuild(&mut self, now_ms: impl Fn() -> f64) -> bool {
         // A change of blend changes no brick of the form itself, so nothing
         // is built for it, but the join is other bricks and the view must
         // draw them.
-        if self.blend_shown != self.spec.blend {
-            self.blend_shown = self.spec.blend;
+        if self.blend_shown != (self.spec.blend, self.spec.carve) {
+            self.blend_shown = (self.spec.blend, self.spec.carve);
             self.scene += 1;
         }
         // (the angle of its grid changes nothing about how a form is fitted, nor does what it is joined to)
-        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..self.full_spec() };
+        let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
         // (see `brickloft_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
@@ -1391,6 +1507,23 @@ impl State {
     pub fn rings(&self) -> Option<(DVec3, f64)> {
         let (lo, hi) = self.grid_box()?;
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), self.gizmo()?.1[0]))
+    }
+
+    /// What the bricks drawn for the form being edited depend on, and what
+    /// those of all the others do: the view keeps the two apart and makes
+    /// again only the one whose answer here has changed (see `lib.rs`).
+    ///
+    /// The form being edited is drawn where it stands by one move of all
+    /// its bricks together, so where it stands, and its grid's place and
+    /// angle, are no part of what its bricks depend on: dragging it makes
+    /// nothing again. Forms joined on purpose are bricks of each other's
+    /// making, so while any is joined both answers change with every change
+    /// to the workspace.
+    pub fn drawn_from(&self) -> (DrawnFrom, Vec<DrawnFrom>) {
+        let joined = (self.spec.blend.is_some() || self.others.iter().any(|o| o.spec.blend.is_some())).then_some(self.scene);
+        let own = (Spec { grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() }, self.paint.clone(), [0; 3], false, self.built.bricks.len(), self.built.unmeasured, joined);
+        let rest = self.others.iter().map(|o| (o.spec.clone(), o.paint.clone(), o.place, o.picked, o.built.bricks.len(), o.built.unmeasured, joined)).collect();
+        (own, rest)
     }
 
     /// Each form's grid, the one being edited first: where it is, and its angle.
@@ -1531,6 +1664,14 @@ impl State {
                 all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
                 all.push((Handle::Radius, foot + across * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
             }
+            // a maze: one dot over its middle at the top of its walls, for
+            // their height, and one on its rim, half way up, for its size
+            MAZE if !p.is_empty() => {
+                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                let (height, floor) = self.maze_height();
+                all.push((Handle::Rise, foot + DVec3::Z * (floor + height)));
+                all.push((Handle::Radius, foot + DVec3::X * self.spec.radius + DVec3::Z * (floor + (height / 2.0).round())));
+            }
             _ => {}
         }
         // where they are in the workspace, which is where they are drawn and dragged
@@ -1641,13 +1782,20 @@ impl State {
                 return;
             }
             let limit = (HANDLE_LIMIT * 2.0) as i32;
+            let from = self.place[axis];
             self.place[axis] = (self.place[axis] + units).clamp(-limit, limit);
             for other in self.others.iter_mut().filter(|o| goes(o)) {
                 other.place[axis] = (other.place[axis] + units).clamp(-limit, limit);
             }
+            // (a whole microbrick at a time once joined, as in `move_by`)
+            if self.merge {
+                let mut lean = [0; 3];
+                lean[axis] = -units;
+                self.settle_joins(lean);
+            }
             self.scene += 1;
             let mut held = held;
-            held[axis] += units as f64 / 2.0;
+            held[axis] += (self.place[axis] - from) as f64 / 2.0;
             self.grab = Some(held);
             return;
         }
@@ -1751,7 +1899,15 @@ impl State {
         // (joined with the blend it had if it was joined already, and a sharp crease if not)
         self.spec.blend = self.merge.then(|| self.spec.blend.unwrap_or(0.0));
         let limit = (HANDLE_LIMIT * 2.0) as i32;
+        let from = self.place;
         self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
+        // A joined form goes a whole microbrick at a time, to stay on the
+        // cells of the form it joins: an odd unit short of the pointer
+        // here, and the rest when the pointer has gone another unit.
+        if self.merge {
+            self.settle_joins(by.map(|v| -v));
+        }
+        let by = [0, 1, 2].map(|k| self.place[k] - from[k]);
         self.scene += 1;
         // what is held moves with the form
         self.grab = Some(held + DVec3::new(by[0] as f64, by[1] as f64, by[2] as f64) / 2.0);
@@ -2018,6 +2174,10 @@ impl State {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
+            Handle::Rise if self.form == MAZE => {
+                let height = (hit.z - self.spec.points[0].z.floor() - self.maze_height().1).round();
+                self.spec.rise = Some(height.clamp(1.0, HANDLE_LIMIT));
+            }
             Handle::Rise if self.form == TREE => {
                 let height = snap(hit.z - self.spec.points[0].z.floor()).round();
                 self.spec.rise = Some(height.clamp(brickloft_core::tree::Tree::least_height(self.spec.tree.kind), HANDLE_LIMIT));
@@ -2040,8 +2200,9 @@ impl State {
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
         // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
+        // (nor a maze, whose walls are where its cells are)
         // (nor furniture, which is boards: there is no curve in it to pull)
-        self.form != FURNITURE && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
+        !matches!(self.form, MAZE | FURNITURE) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -2525,6 +2686,54 @@ mod tests {
     }
 
     #[test]
+    fn a_maze_starts_at_its_usual_size_with_dots_for_its_radius_and_wall_height() {
+        use brickloft_core::maze::{Maze, USUAL_HEIGHT, USUAL_SIZE};
+        let mut state = State::new();
+        state.spec.maze.seed = 5;
+        state.form = MAZE;
+        state.preset();
+        assert_eq!((state.spec.radius, state.spec.thick, state.spec.rise), (USUAL_SIZE.0, USUAL_SIZE.1, Some(USUAL_HEIGHT)));
+        assert_eq!(state.spec.maze, Maze { seed: 5, ..Maze::default() }, "the seed is not kept, or the rest is not as a maze starts");
+        assert_eq!((state.paint.mode, &state.paint.colours), (crate::paint::Mode::Pattern, &crate::paint::maze_palettes("none")[0]));
+        assert_eq!(state.full_spec().form, Form::Maze);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // a dot at its middle, one over it at the top of the walls and one on the rim, half way up
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Rise, Handle::Radius]);
+        let (top, rim) = (dots[1].1, dots[2].1);
+        assert_eq!((top.x, top.y, top.z), (0.5, 0.5, USUAL_HEIGHT));
+        assert_eq!((rim.x, rim.y, rim.z), (0.5 + USUAL_SIZE.0, 0.5, USUAL_HEIGHT / 2.0));
+        let high = |state: &State| state.built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        let far = |state: &State| state.built.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap();
+        assert_eq!((high(&state), far(&state)), (USUAL_HEIGHT as i32, (USUAL_SIZE.0 + USUAL_SIZE.1 / 2.0) as i32), "the dots are not where the bricks end");
+        // the top dot dragged down ten cells lowers the walls by ten, and the bricks follow
+        let eye = DVec3::new(0.5, -400.0, top.z);
+        state.drag(Handle::Rise, eye, (top - DVec3::Z * 10.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(USUAL_HEIGHT - 10.0));
+        // with a floor under them the walls are as tall as they were, and the dot is at their top
+        state.spec.maze.floor = 2;
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert_eq!((high(&state), state.handles()[1].1.z), (USUAL_HEIGHT as i32 - 8, USUAL_HEIGHT - 8.0));
+        let top = state.handles()[1].1;
+        state.drag(Handle::Rise, DVec3::new(0.5, -400.0, top.z), (top + DVec3::Z * 3.0 - DVec3::new(0.5, -400.0, top.z)).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(USUAL_HEIGHT - 7.0));
+        // the rim dot dragged out thirty cells makes the maze thirty larger: wider corridors, the same rings
+        let eye = DVec3::new(rim.x, -400.0, rim.z);
+        state.drag(Handle::Radius, eye, (rim + DVec3::X * 30.0 - eye).normalize(), DVec3::Y);
+        assert_eq!((state.spec.radius, state.spec.maze.rings), (USUAL_SIZE.0 + 30.0, Maze::default().rings));
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert_eq!(far(&state), (USUAL_SIZE.0 + 30.0 + USUAL_SIZE.1 / 2.0) as i32);
+        // dragged in until its corridors are too narrow, it is not built and says why; the last maze stands
+        let bricks = state.built.bricks.len();
+        state.spec.radius = 30.0;
+        state.refresh(|| 0.0);
+        assert!(state.problem.as_deref().is_some_and(|why| why.contains("corridors")), "{:?}", state.problem);
+        assert_eq!(state.built.bricks.len(), bricks);
+        // no points are added to a maze, and nothing about it is searched for
+        assert!(!state.can_pull() && state.tunable(None).is_empty());
+    }
+
+    #[test]
     fn a_tree_starts_at_its_usual_size_with_dots_for_its_height_and_spread() {
         use brickloft_core::tree::{Kind, Tree};
         let mut state = State::new();
@@ -2843,6 +3052,86 @@ mod tests {
     }
 
     #[test]
+    fn a_form_cut_out_of_another_builds_none_of_its_own_bricks_and_comes_back_with_undo_a_save_and_a_copy() {
+        let mut state = a_sphere_in_a_cube();
+        let joined = bricks_where_they_stand(&state);
+        let room = |all: &[(CellBrick, [i32; 3], Option<[u8; 3]>)]| all.iter().map(|b| b.0.volume()).sum::<f64>();
+        let cube: f64 = state.others[0].built.bricks.iter().map(|b| b.volume()).sum();
+        assert!(state.ghosts().is_empty());
+        state.spec.carve = true;
+        assert!(state.refresh(|| 0.0) || state.scene > 0);
+        state.record();
+        // the sphere is drawn as glass and none of it is built; the cube has a hollow where it stood
+        let cut = bricks_where_they_stand(&state);
+        assert!(state.painted().iter().all(|b| b.2 == 1), "a brick of the form cut out was built");
+        assert_eq!(state.ghosts().len(), state.built.bricks.len());
+        assert!(room(&cut) < cube - 200.0 && room(&cut) > cube / 2.0 && room(&joined) > cube + 200.0, "{} cells of a cube of {cube}, and {} joined", room(&cut), room(&joined));
+        // undo and redo
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert!(!state.spec.carve && bricks_where_they_stand(&state) == joined, "undo did not fill the hole");
+        assert!(state.redo());
+        state.refresh(|| 0.0);
+        assert!(state.spec.carve && bricks_where_they_stand(&state) == cut, "redo did not cut it again");
+        // a save, and a copy of both forms
+        let mut opened = State::new();
+        opened.open(crate::store::forms_in(&crate::store::describe(&state.forms())).unwrap());
+        opened.refresh(|| 0.0);
+        assert!(opened.spec.carve && bricks_where_they_stand(&opened) == cut, "a save opened again is not the same bricks");
+        state.pick_all();
+        let (bricks, forms) = state.copied();
+        assert!(bricks.len() == cut.len() && forms.len() == 2 && forms[0].0.carve && forms[0].0.blend == Some(0.0));
+        // moved without Ctrl it is set clear, and is a sphere of bricks again
+        state.move_by([2, 0, 0], DVec3::ZERO);
+        assert!(!state.joined() && state.ghosts().is_empty() && state.painted().iter().any(|b| b.2 == 0));
+    }
+
+    #[test]
+    fn a_form_joined_half_a_microbrick_off_is_moved_onto_the_other_forms_cells() {
+        let fresh = |state: &State| {
+            let own: Vec<&[CellBrick]> = std::iter::once(&state.built).chain(state.others.iter().map(|o| &o.built)).map(|b| b.bricks.as_slice()).collect();
+            state.painted().iter().filter(|b| b.0.mask != brickloft_core::shapes::CUBE && !own[b.2].contains(&b.0)).count()
+        };
+        let mut state = a_cube();
+        state.add_form(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        let cube = state.others[0].place;
+        let off = |state: &State| [0, 1, 2].map(|k| (state.place[k] - cube[k]).rem_euclid(2));
+        // dragged with Ctrl to a place an odd unit off along x and z, it stops a unit short of the pointer on each
+        state.merge = true;
+        let to = [0, 1, 2].map(|k| cube[k] + [21, 8, 31][k] - state.place[k]);
+        state.move_by(to, DVec3::ZERO);
+        assert_eq!((off(&state), [0, 1, 2].map(|k| state.place[k] - cube[k])), ([0; 3], [21 - to[0].signum(), 8, 31 - to[2].signum()]));
+        assert!(fresh(&state) > 20, "the join was not fitted afresh");
+        // and goes on a whole microbrick at a time: one more unit moves nothing, two move two
+        let at = state.place;
+        state.move_by([1, 0, -1], DVec3::ZERO);
+        assert_eq!(state.place, at);
+        state.move_by([2, 0, -3], DVec3::ZERO);
+        assert_eq!(state.place, [at[0] + 2, at[1], at[2] - 2]);
+        state.merge = false;
+        // set half off by other means (a save from before, or Claude), it is settled when next looked at, and that is said
+        state.place[1] += 1;
+        state.toast = None;
+        state.refresh(|| 0.0);
+        assert!(off(&state) == [0; 3] && state.toast.is_some() && fresh(&state) > 20);
+        assert!(state.unblended().is_none());
+    }
+
+    #[test]
+    fn a_workspace_opened_with_a_form_joined_half_a_microbrick_off_is_settled_the_first_time_it_is_built() {
+        // the joined form is not the one being edited, and the one that is has not been built when the workspace is opened
+        let cube = Spec { form: Form::Cube, points: vec![cell(0.0, 0.0, 8.0)], radius: 8.5, fill: true, ..Spec::default() };
+        let ball = Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, blend: Some(3.0), ..Spec::default() };
+        let mut state = State::new();
+        state.open(vec![(cube, Paint::default(), [0; 3]), (ball, Paint::default(), [9, 4, 31])]);
+        state.refresh(|| 0.0);
+        assert_eq!(state.others[0].place, [10, 4, 32], "the joined form was left half a microbrick off");
+        let own = &state.others[0].built.bricks;
+        assert!(state.painted().iter().filter(|b| b.2 == 1 && b.0.mask != brickloft_core::shapes::CUBE && !own.contains(&b.0)).count() > 20, "the join was not fitted afresh");
+    }
+
+    #[test]
     fn a_join_is_the_same_bricks_whichever_of_its_forms_is_being_edited() {
         let mut state = a_sphere_in_a_cube();
         state.spec.blend = Some(2.0);
@@ -3132,6 +3421,86 @@ mod tests {
         let before = places(&state);
         pull(&mut state, 0, 4.0);
         assert!(places(&state).iter().zip(&before).all(|(now, was)| now[0] - was[0] == 8));
+    }
+
+    #[test]
+    fn taking_a_change_back_builds_only_the_forms_it_changed() {
+        let mut state = State::new();
+        state.load_spec(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 12.0)], radius: 12.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        state.record();
+        state.add_cube();
+        state.refresh(|| 0.0);
+        state.record();
+        // the cube is moved, and the move taken back: the sphere's bricks are the very ones it had
+        let bricks = state.others[0].built.bricks.as_ptr();
+        let was = state.place;
+        state.merge = false;
+        state.move_by([0, 0, 6], DVec3::ZERO);
+        state.record();
+        assert!(state.undo() && state.place == was);
+        assert_eq!(state.others[0].built.bricks.as_ptr(), bricks, "the sphere was built again for a move of the cube");
+        // and the cube's own, with nothing owed to be built
+        assert!(!state.built.bricks.is_empty() && !state.refresh(|| 0.0));
+        // a form that did change is built: the cube resized, and the resize taken back
+        let size = state.built.bricks[0].ext;
+        state.spec.radius += 4.0;
+        state.refresh(|| 0.0);
+        state.record();
+        assert_ne!(state.built.bricks[0].ext, size);
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.built.bricks[0].ext, size);
+        assert_eq!(state.others[0].built.bricks.as_ptr(), bricks);
+    }
+
+    /// Not a test: what moving and reshaping a form beside a large lawn
+    /// costs, part by part. Run by name, with `--release -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn timing_a_cube_on_a_lawn() {
+        use std::time::Instant;
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        state.spec.radius = 60.0;
+        state.refresh(|| 0.0);
+        println!("lawn: {} bricks, box {:?}", state.built.bricks.len(), state.bounds);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        // onto the lawn
+        let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        state.move_by([towards[0], towards[1], 40], DVec3::ZERO);
+        println!("cube at {:?}, lawn at {:?}", state.place, state.others[0].place);
+        let time = |what: &str, mut run: Box<dyn FnMut() + '_>| {
+            let at = Instant::now();
+            for _ in 0..20 {
+                run();
+            }
+            println!("{what}: {:.2} ms each", at.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        };
+        let mut n = 0;
+        time("move the cube a unit", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("painted", Box::new(|| { std::hint::black_box(state.painted().len()); }));
+        time("push_others", Box::new(|| state.push_others()));
+        // down among the blades, inside the lawn's box
+        state.merge = true;
+        state.move_by([0, 0, -30], DVec3::ZERO);
+        state.merge = false;
+        state.spec.blend = None;
+        println!("cube at {:?}", state.place);
+        let mut n = 0;
+        time("move the cube a unit, among the blades", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("push_others, among the blades", Box::new(|| state.push_others()));
+        let mut n = 0;
+        time("resize the cube and refresh", Box::new(|| { n += 1; state.spec.radius += if n % 2 == 0 { 1.0 } else { -1.0 }; state.refresh(|| 0.0); }));
+        time("record a step to undo", Box::new(|| state.record()));
+        state.activate(0);
+        state.refresh(|| 0.0);
+        let mut n = 0;
+        time("move the lawn a unit", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("push_others from the lawn", Box::new(|| state.push_others()));
     }
 
     #[test]
