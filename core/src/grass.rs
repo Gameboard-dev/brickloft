@@ -43,12 +43,46 @@
 use crate::par::Threads;
 use crate::shapes::{CellBrick, CUBE};
 use crate::tree::{ground, ground_on, hash, Lay, Run, Sculpt, Tree, BED, LEAF, LEAF_DARK, LEAF_LIGHT, LEAST_RANGE, LEAST_SPREAD, SAND, STONE, TRUNK, WATER};
+
+/// The parts a lawn has besides those every plant has
+/// ([`crate::tree::TRUNK`] to [`crate::tree::STONE`], which for a lawn are
+/// its soil, three greens, the bed of a pond, water, sand and stones).
+/// The darker of the two tones of a cliff of bare soil; the other is the soil's own.
+pub const CLIFF: u8 = 8;
+/// A cliff of rock: most of its beds, the darker beds, and the paler.
+pub const ROCK: u8 = 9;
+pub const ROCK_DARK: u8 = 10;
+pub const ROCK_LIGHT: u8 = 11;
+/// The top of a rock: a ledge, weathered or mossy, and snow in winter.
+pub const LEDGE: u8 = 12;
+/// White water, where a fall lands.
+pub const FOAM: u8 = 13;
+
+/// The most [`Lay::cliffs`] may be.
+pub const MOST_CLIFFS: i32 = 3;
+
+/// How steep the ground is, as rise over run, where grass gives way to
+/// bare soil and where soil gives way to rock, for each setting of
+/// [`Lay::cliffs`] from 1: 52 and 68 degrees, 45 and 61, 36 and 53.
+///
+/// 45 and 61 for the middle setting were chosen by looking, starting
+/// from 40 and 60. At 40 a hill 16 high made with a brush 24 in range,
+/// which is 46 degrees at its steepest and a hill anyone might push up,
+/// was bare soil nearly all over: a mound of earth and no cliff. At 45
+/// it keeps its grass but for a narrow band, a hill pushed half as high
+/// again has a face of soil, and rock begins on a hill taller than its
+/// brush's range or on ground cut with a sharp edge.
+const STEEP: [(f64, f64); 3] = [(1.28, 2.48), (1.0, 1.8), (0.73, 1.33)];
+
+/// How far apart, in cells of height, the ledges of a rock face are.
+const LEDGES: i32 = 4;
 use glam::{DVec2, DVec3};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
 use std::sync::{Arc, OnceLock};
 
 mod kept;
+pub mod land;
 
 /// How many cells a tile of ground is along each side.
 ///
@@ -83,12 +117,51 @@ const STONES: f64 = 0.06 / (2.4 * 2.4);
 /// may be set far beyond what grass is.
 const TALLEST: i32 = 200;
 
-/// What water a place is beside: its level, and when that water is a
-/// stream's, how far the place is from the middle of it.
-type Wet = (f64, Option<f64>);
+/// What water a place is beside.
+struct Wet {
+    /// the level the water stands at
+    level: f64,
+    /// when that water is a stream's, how far the place is from the middle of it
+    by: Option<f64>,
+    /// The level water comes down onto the place from: that of the reach
+    /// above, where the place is in a stream's channel and is the first
+    /// of a lower reach, and `level` anywhere else.
+    over: f64,
+    /// how far the place is from where falling water lands, if that is near
+    foot: Option<f64>,
+    /// whether the place is on or beside falling water: bare rock
+    face: bool,
+}
 
-/// Where water stands in a patch of grass that has two levels of it, and
-/// the streams that run from the upper to the lower.
+/// One place along a stream.
+#[derive(Clone, Copy)]
+struct Flow {
+    at: DVec3,
+    /// the level of the water here
+    level: f64,
+    /// the level of the water at the place before: what comes down here comes from there
+    from: f64,
+    /// whether a fall lands here: the last place of a run of drops that is three cells or more in all
+    foot: bool,
+}
+
+/// How far a stream's water reaches to each side of its middle.
+///
+/// It was 3.0, five or six cells of water across, when the soil was balls
+/// on a grid 2.4 apart and a narrower channel closed over. The soil is a
+/// column under each cell now, and a channel three cells across stays
+/// open: a stream to step over, where the wider one was a canal.
+const STREAM_WIDE: f64 = 1.7;
+
+/// How much a stream's water drops from one place to the next before the
+/// drop is a fall: bare rock about it, and white water where a run of
+/// such drops lands if they are [`LANDS`] in all.
+const FALLS: f64 = 2.0;
+/// See [`FALLS`].
+const LANDS: f64 = 3.0;
+
+/// Where water stands in a patch of grass that has raised ponds, and the
+/// streams and falls that run down from them.
 ///
 /// The rule. The ground is flooded from the edge of the patch inwards
 /// (priority flood: Barnes, Lehman and Mulla 2014,
@@ -97,28 +170,43 @@ type Wet = (f64, Option<f64>);
 /// height. A hollow is the places lying under their spill height that
 /// touch one another. Water stands in a hollow as far below its rim as it
 /// stands below the lawn in a pond, so a hollow whose rim is on raised
-/// ground holds its water higher than the lawn's ponds do. All such raised
-/// hollows share one height, that of the lowest of them, so there are two
-/// levels and no more, and none of them can overflow. Asked which pond is
-/// at which level, the answer is read off the ground the user sculpted
-/// and never typed.
+/// ground holds its water higher than the lawn's ponds do, each at the
+/// level its own rim gives it, and none of them can overflow. Asked which
+/// pond is at which level, the answer is read off the ground the user
+/// sculpted and never typed.
 ///
-/// A stream leaves each raised pond for the nearest water at the lower
-/// level by the cheapest way over the ground (Dijkstra's), where a step
-/// costs its length and three times as much again for each cell the
-/// ground there stands above the upper water: it goes round a rise sooner
-/// than through it. Its water starts at the upper level and at each cell
-/// of its length is the lower of what it was and the ground there, in
-/// whole cells: flat reaches with a step down between them, never a rise.
-/// The alternative, water sloping with the ground, cannot be built of
-/// bricks with level tops. A way that would have to climb over ground
-/// higher than the pond's own rim is no way downhill, and that pond has no
-/// stream.
+/// (Every raised pond stood at one height, that of the lowest of them, so
+/// that there were two levels and no more. A hollow on a much higher
+/// hill then held a puddle at the bottom of a deep pit, or nothing.)
+///
+/// A stream leaves each raised pond for the nearest water that stands
+/// lower, the lawn's own or another raised pond's, by the cheapest way
+/// over the ground (Dijkstra's), where a step costs its length and three
+/// times as much again for each cell the ground there stands above the
+/// pond's water: it goes round a rise sooner than through it. A way that
+/// would have to climb over ground higher than the pond's own rim is no
+/// way downhill, and that pond has no stream.
+///
+/// The water's level starts at the pond's and at each cell of the
+/// stream's length is the lower of what it was and what the ground there
+/// allows, in whole cells: flat reaches with a step down between them,
+/// never a rise. The alternative, water sloping with the ground, cannot
+/// be built of bricks with level tops. On gentle ground the water lies in
+/// a channel, half a cell or more under the lower of its banks here and
+/// for two cells on. Where the ground falls away by four fifths of a cell
+/// or more for each cell along, it lies on the ground: level with the
+/// soil to each side of it, so that it is seen from the side and not
+/// hidden in a trench down the face. Each place's water reaches up to the
+/// level of the place before (`Flow::from`), so the stream is one piece
+/// of water from the pond it leaves to the water it reaches: where the
+/// ground is a cliff that piece is a sheet standing against the face,
+/// which is the waterfall. Nothing else makes one, and so a stream that
+/// meets a cliff part way down becomes a fall there and a stream again
+/// below it.
 ///
 /// The flood is on a grid of places 2.4 cells apart, which is the grid
 /// the soil was laid on when it was fitted. It is kept, though the soil
-/// is now laid cell by cell: on it a lawn saved before has the levels and
-/// the streams it had, and a flood of every cell would be six times the
+/// is now laid cell by cell: a flood of every cell would be six times the
 /// work for water whose level is a whole number either way.
 #[derive(Clone)]
 struct Waters {
@@ -126,14 +214,15 @@ struct Waters {
     step: f64,
     nx: usize,
     ny: usize,
-    /// whether a place is in or beside a raised hollow
-    high: Vec<bool>,
-    upper: f64,
+    /// which raised pond a place is in or beside: one more than its number in `ponds`, and 0 for none
+    pond: Vec<u16>,
+    /// the level each raised pond's water stands at
+    ponds: Vec<f64>,
     lower: f64,
     /// the stream's place nearest each cell of the grid, if one is near
     near: Vec<u32>,
-    /// the streams, a cell apart along their lengths: where, and how high the water is there
-    stream: Vec<(DVec3, f64)>,
+    /// the streams, a cell apart along their lengths
+    stream: Vec<Flow>,
     /// What the flood was made from, kept for the next: whether the lawn
     /// covers each place of the grid, and how high the sculpted ground is
     /// there. Empty where there was no flood.
@@ -147,17 +236,18 @@ impl Waters {
     /// was made from are not.
     fn same_water(&self, other: &Waters) -> bool {
         let bits = |v: DVec3| v.to_array().map(f64::to_bits);
-        bits(self.lo) == bits(other.lo) && self.step.to_bits() == other.step.to_bits() && (self.nx, self.ny) == (other.nx, other.ny) && self.high == other.high && self.upper.to_bits() == other.upper.to_bits() && self.lower.to_bits() == other.lower.to_bits() && self.near == other.near
-            && self.stream.len() == other.stream.len() && self.stream.iter().zip(&other.stream).all(|(a, b)| bits(a.0) == bits(b.0) && a.1.to_bits() == b.1.to_bits())
+        let levels = |levels: &[f64]| levels.iter().map(|level| level.to_bits()).collect::<Vec<u64>>();
+        bits(self.lo) == bits(other.lo) && self.step.to_bits() == other.step.to_bits() && (self.nx, self.ny) == (other.nx, other.ny) && self.pond == other.pond && levels(&self.ponds) == levels(&other.ponds) && self.lower.to_bits() == other.lower.to_bits() && self.near == other.near
+            && self.stream.len() == other.stream.len() && self.stream.iter().zip(&other.stream).all(|(a, b)| bits(a.at) == bits(b.at) && a.level.to_bits() == b.level.to_bits() && a.from.to_bits() == b.from.to_bits() && a.foot == b.foot)
     }
 
     /// Water at one level and no more: every pond at `lower`, and no stream.
     fn still(lower: f64, lo: DVec3, step: f64) -> Waters {
-        Waters { lo, step, nx: 0, ny: 0, high: Vec::new(), upper: lower, lower, near: Vec::new(), stream: Vec::new(), inside: Vec::new(), lifted: Vec::new() }
+        Waters { lo, step, nx: 0, ny: 0, pond: Vec::new(), ponds: Vec::new(), lower, near: Vec::new(), stream: Vec::new(), inside: Vec::new(), lifted: Vec::new() }
     }
 
     /// Whether a lawn with this lay has a flood made of it, on a grid of
-    /// `nx` by `ny` places: only one with two levels of water.
+    /// `nx` by `ny` places: only one with raised ponds.
     /// (A patch past six hundred cells square keeps one level: the flood is a grid of the whole patch in memory.)
     fn floods(lay: &Lay, nx: usize, ny: usize) -> bool {
         lay.levels >= 2 && nx * ny <= 400_000
@@ -168,25 +258,32 @@ impl Waters {
         (i >= 0.0 && j >= 0.0 && (i as usize) < self.nx && (j as usize) < self.ny).then(|| j as usize * self.nx + i as usize)
     }
 
-    /// The stream beside a place: how far its middle, and its water's level there.
-    fn beside(&self, p: DVec3) -> Option<(f64, f64)> {
+    /// The stream beside a place: how far its middle, the place of it
+    /// that is nearest, and how far off the nearest foot of a fall is
+    /// and the nearest place the water falls at.
+    fn beside(&self, p: DVec3) -> Option<(f64, Flow, [Option<f64>; 2])> {
         let k = *self.near.get(self.cell(p)?)? as usize;
         if k >= self.stream.len() {
             return None;
         }
-        (k.saturating_sub(5)..(k + 6).min(self.stream.len())).map(|n| ((self.stream[n].0 - p).truncate().length(), self.stream[n].1)).min_by(|a, b| a.0.total_cmp(&b.0))
+        let about = k.saturating_sub(5)..(k + 6).min(self.stream.len());
+        let far = |n: usize| (self.stream[n].at - p).truncate().length();
+        let nearest = about.clone().map(|n| (far(n), n)).min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let foot = about.clone().filter(|n| self.stream[*n].foot).map(far).min_by(|a, b| a.total_cmp(b));
+        let fall = about.filter(|n| self.stream[*n].from - self.stream[*n].level >= FALLS).map(far).min_by(|a, b| a.total_cmp(b));
+        Some((nearest.0, self.stream[nearest.1], [foot, fall]))
     }
 
     /// The ground at a place with the streams' channels cut into it: a
-    /// bed [`BED_UNDER`] the water, four and a half cells
-    /// wide, and banks that rise to the ground as it was over the next
-    /// two and a quarter, or over more where the cut is deep.
+    /// bed [`BED_UNDER`] the water, two cells wide, and banks that rise
+    /// to the ground as it was over the next cell and a half, or over
+    /// more where the cut is deep.
     fn ground(&self, p: DVec3, was: f64) -> f64 {
         match self.beside(p) {
-            Some((far, level)) if was > level - BED_UNDER => {
-                // (where it cuts deep, through the rim of the pond it leaves, the banks lie back further: upright, the soil of the two would close over the water)
-                let t = ((far - 2.2) / (1.5 * (was - level + BED_UNDER)).max(2.25)).clamp(0.0, 1.0);
-                level - BED_UNDER + (was - level + BED_UNDER) * t * t * (3.0 - 2.0 * t)
+            Some((far, flow, _)) if was > flow.level - BED_UNDER => {
+                let deep = was - flow.level + BED_UNDER;
+                let t = ((far - 1.0) / (0.6 * deep).max(1.5)).clamp(0.0, 1.0);
+                flow.level - BED_UNDER + deep * t * t * (3.0 - 2.0 * t)
             }
             _ => was,
         }
@@ -194,15 +291,23 @@ impl Waters {
 
     /// The water a place is beside, given the ground there as it was sculpted.
     fn level(&self, p: DVec3, was: f64) -> Wet {
-        let pond = if self.cell(p).is_some_and(|c| self.high[c]) { self.upper } else { self.lower };
-        match self.beside(p) {
-            // (in a pond, the pond's water)
-            Some((far, level)) if far < 5.0 && was + 1.0 >= pond => (level, Some(far)),
-            _ => (pond, None),
+        let pond = match self.cell(p).map(|c| self.pond[c]) {
+            Some(raised) if raised > 0 => self.ponds[raised as usize - 1],
+            _ => self.lower,
+        };
+        let Some((far, flow, [foot, fall])) = self.beside(p) else { return Wet { level: pond, by: None, over: pond, foot: None, face: false } };
+        let foot = foot.filter(|far| *far < 3.6);
+        if far < 5.0 && was + 1.0 >= pond {
+            let over = if far < STREAM_WIDE { flow.from } else { flow.level };
+            // (Rock for six cells round wherever the water falls, the channel's bed and its banks: sand does not lie on a face. Six, because ground within five of a stream and low beside it is sand, and at four a strip of sand was left down each side of the fall.)
+            return Wet { level: flow.level, by: Some(far), over, foot, face: fall.is_some_and(|far| far < 6.5) };
         }
+        // (in a pond, the pond's water: and where a stream comes down into it, what comes down)
+        let lands = flow.level == pond && far < STREAM_WIDE;
+        Wet { level: pond, by: None, over: if lands { flow.from } else { pond }, foot: foot.filter(|_| flow.level == pond), face: false }
     }
 
-    /// The water of a lawn with two levels of it, from the grid's samples:
+    /// The water of a lawn with raised ponds, from the grid's samples:
     /// `inside`, whether the lawn covers each place, and `high`, how high
     /// the sculpted ground is at each it covers (0 at the others). `lifted`
     /// is the sculpted ground anywhere, for the banks of a stream.
@@ -234,8 +339,8 @@ impl Waters {
                 }
             }
         }
-        // the hollows, and of them the raised ones deep enough to hold water
-        let (mut hollow, mut raised) = (vec![u32::MAX; nx * ny], Vec::<(f64, usize)>::new());
+        // the hollows, and of them the raised ones deep enough to hold water: each with the level its water stands at
+        let (mut hollow, mut raised) = (vec![u32::MAX; nx * ny], Vec::<(f64, u32)>::new());
         let mut hollows = 0;
         for c in 0..nx * ny {
             if !inside[c] || hollow[c] != u32::MAX || fill[c] - high[c] <= 0.05 {
@@ -253,31 +358,35 @@ impl Waters {
                 }
             }
             let own = (fill[c] + lower).floor();
-            if deep > 1.0 - lower && own > lower + 1.5 {
-                raised.push((own, hollows as usize));
+            // (as many as a place of the grid can be numbered among)
+            if deep > 1.0 - lower && own > lower + 1.5 && raised.len() < u16::MAX as usize - 1 {
+                raised.push((own, hollows));
             }
             hollows += 1;
         }
         waters.nx = nx;
         waters.ny = ny;
-        waters.high = vec![false; nx * ny];
+        waters.pond = vec![0; nx * ny];
         waters.near = vec![u32::MAX; nx * ny];
         if raised.is_empty() {
             return waters;
         }
-        waters.upper = raised.iter().map(|r| r.0).fold(f64::MAX, f64::min);
-        let upper = waters.upper;
+        waters.ponds = raised.iter().map(|pond| pond.0).collect();
         // each raised hollow and its banks, three cells of the grid out but not over its rim and down the far side
-        let mut edge: Vec<usize> = (0..nx * ny).filter(|c| hollow[*c] != u32::MAX && raised.iter().any(|r| r.1 == hollow[*c] as usize)).collect();
-        for c in &edge {
-            waters.high[*c] = true;
+        let number: std::collections::HashMap<u32, u16> = raised.iter().enumerate().map(|(n, pond)| (pond.1, n as u16 + 1)).collect();
+        let mut edge: Vec<usize> = Vec::new();
+        for c in 0..nx * ny {
+            if let Some(n) = number.get(&hollow[c]) {
+                waters.pond[c] = *n;
+                edge.push(c);
+            }
         }
         for _ in 0..3 {
             let mut next = Vec::new();
             for c in edge {
                 for n in around(c).flatten() {
-                    if inside[n] && !waters.high[n] && fill[n] >= fill[c] - 0.05 {
-                        waters.high[n] = true;
+                    if inside[n] && waters.pond[n] == 0 && fill[n] >= fill[c] - 0.05 {
+                        waters.pond[n] = waters.pond[c];
                         fill[n] = fill[n].min(fill[c] + 0.04);
                         next.push(n);
                     }
@@ -285,16 +394,29 @@ impl Waters {
             }
             edge = next;
         }
-        let pond = |c: usize| inside[c] && !waters.high[c] && high[c] + 1.0 < lower;
-        // the streams: at most eight, each a search of the whole grid
+        // the level of the water standing at a place of the grid, if any does: a raised pond's in its own hollow, the lawn's anywhere that is no raised pond's
+        let ponds = waters.ponds.clone();
+        let belongs = waters.pond.clone();
+        let standing = |c: usize| {
+            if !inside[c] {
+                None
+            } else if belongs[c] > 0 {
+                let level = ponds[belongs[c] as usize - 1];
+                (number.get(&hollow[c]) == Some(&belongs[c]) && high[c] + 1.0 < level).then_some(level)
+            } else {
+                (high[c] + 1.0 < lower).then_some(lower)
+            }
+        };
+        // the streams: at most twelve, each a search of the whole grid
         let mut near = vec![f32::MAX; nx * ny];
-        for &(_, which) in raised.iter().take(8) {
+        for (pond, &(own, which)) in raised.iter().enumerate().take(12) {
+            let mine = pond as u16 + 1;
             let (mut cost, mut from) = (vec![f64::MAX; nx * ny], vec![u32::MAX; nx * ny]);
             let mut heap = BinaryHeap::new();
             let mut rim = f64::MIN;
-            for c in (0..nx * ny).filter(|c| hollow[*c] == which as u32) {
+            for c in (0..nx * ny).filter(|c| hollow[*c] == which) {
                 rim = rim.max(fill[c]);
-                if high[c] + 1.0 < upper {
+                if high[c] + 1.0 < own {
                     cost[c] = 0.0;
                     heap.push(Reverse((0i64, c)));
                 }
@@ -304,13 +426,14 @@ impl Waters {
                 if k > key(cost[c]) {
                     continue;
                 }
-                if pond(c) {
+                // (water that stands lower, and is not this pond's own)
+                if belongs[c] != mine && standing(c).is_some_and(|level| level < own - 0.5) {
                     end = Some(c);
                     break;
                 }
                 for n in around(c).flatten().filter(|n| inside[*n]) {
                     let long = if n % nx != c % nx && n / nx != c / nx { step * std::f64::consts::SQRT_2 } else { step };
-                    let to = cost[c] + long * (1.0 + 3.0 * (high[n] - upper).max(0.0));
+                    let to = cost[c] + long * (1.0 + 3.0 * (high[n] - own).max(0.0));
                     if key(to) < key(cost[n]) {
                         cost[n] = to;
                         from[n] = c as u32;
@@ -319,6 +442,7 @@ impl Waters {
                 }
             }
             let Some(mut c) = end else { continue };
+            let reached = standing(c).unwrap_or(lower);
             let mut way = vec![at(c)];
             let mut top = high[c];
             while from[c] != u32::MAX {
@@ -352,19 +476,22 @@ impl Waters {
                 let along = (b - a).normalize_or_zero();
                 let across = DVec3::new(-along.y, along.x, 0.0);
                 let p = a.lerp(b, ((s - lengths[leg]) / (lengths[leg + 1] - lengths[leg]).max(1e-9)).clamp(0.0, 1.0)) + across * swing * (std::f64::consts::PI * s / long).sin() * (phase + s * TAU / 28.0).sin();
-                // (under the lower of its two banks, so that it stands above neither)
-                let bank = [-4.4, -2.2, 0.0, 2.2, 4.4].iter().map(|side| lifted(p + across * *side)).fold(f64::MAX, f64::min);
+                // (the lower of its two banks, so that it stands above neither)
+                let bank = [-1.8, -0.9, 0.0, 0.9, 1.8].iter().map(|side| lifted(p + across * *side)).fold(f64::MAX, f64::min);
                 places.push((p, bank));
             }
-            let mut level = upper;
-            for (n, &(p, _)) in places.iter().enumerate() {
-                // (Still at the pond's own level until it is out through the rim. From there, under its banks here and for three cells on: a cell of water takes the level of the place on the stream nearest it, which may be a little upstream of it.)
-                if !waters.cell(p).is_some_and(|c| waters.high[c]) {
-                    let bank = places[n..(n + 4).min(places.len())].iter().map(|place| place.1).fold(f64::MAX, f64::min);
-                    level = level.min((bank - 0.5).floor()).max(lower);
+            let first = waters.stream.len();
+            let mut level = own;
+            let steep: Vec<bool> = (0..places.len()).map(|n| (places[n.saturating_sub(1)].1 - places[(n + 1).min(places.len() - 1)].1) / 2.0 >= 0.8).collect();
+            for (n, &(p, bank)) in places.iter().enumerate() {
+                let before = level;
+                // (Still at the pond's own level until it is out through the rim. From there, on gentle ground under its banks here and for two cells on, as far as the ground stays gentle: a cell of water takes the level of the place on the stream nearest it, which may be a little upstream of it. On steep ground level with the soil beside it: see `Waters`.)
+                if !waters.cell(p).is_some_and(|c| waters.pond[c] == mine) {
+                    let allowed = if steep[n] { (bank + SOIL_OVER).round() } else { ((n..(n + 3).min(places.len())).take_while(|m| !steep[*m]).map(|m| places[m].1).fold(f64::MAX, f64::min) - 0.5).floor() };
+                    level = level.min(allowed).max(reached);
                 }
                 let k = waters.stream.len() as u32;
-                waters.stream.push((p, level));
+                waters.stream.push(Flow { at: p, level, from: before, foot: false });
                 let reach = (16.0 / step).ceil() as i64;
                 let (ci, cj) = (((p.x - lo.x) / step).round() as i64, ((p.y - lo.y) / step).round() as i64);
                 for j in (cj - reach).max(0)..=(cj + reach).min(ny as i64 - 1) {
@@ -378,9 +505,29 @@ impl Waters {
                     }
                 }
             }
+            // Where falls land: the last place of each run of places the
+            // water drops at, if one of the drops is a fall and the run
+            // comes down far enough in all. (A run and not a single drop:
+            // down a face at 60 degrees the water drops two cells, two
+            // cells, one cell, and that is one fall landing once.)
+            let (mut top, mut fell) = (None, false);
+            for n in first..waters.stream.len() {
+                let flow = waters.stream[n];
+                let drop = flow.from - flow.level;
+                if drop >= 1.0 {
+                    top.get_or_insert(flow.from);
+                    fell |= drop >= FALLS;
+                }
+                if n + 1 == waters.stream.len() || waters.stream[n + 1].level > flow.level - 1.0 {
+                    if let Some(from) = top.take() {
+                        waters.stream[n].foot = fell && from - flow.level >= LANDS;
+                    }
+                    fell = false;
+                }
+            }
             // (a gap in the numbering, so that one stream's places are not taken for the next's)
             for _ in 0..12 {
-                waters.stream.push((DVec3::splat(f64::MAX / 4.0), lower));
+                waters.stream.push(Flow { at: DVec3::splat(f64::MAX / 4.0), level: lower, from: lower, foot: false });
             }
         }
         waters
@@ -402,6 +549,10 @@ pub struct Place {
     pub stream: bool,
     /// which part the soil's skin is here: [`TRUNK`] for soil, [`SAND`] or [`BED`]
     pub skin: u8,
+    /// what the ground's steepness makes of it: 0 for ground grass grows on, 1 for a cliff of bare soil, 2 for rock
+    pub cliff: u8,
+    /// the height water comes down onto the cell from, as a cell's floor, where a stream drops here: the water in the cell reaches up to it
+    pub falls_from: Option<i32>,
 }
 
 /// water stands in the cell
@@ -412,6 +563,25 @@ const STREAM: u8 = 2;
 const REED: u8 = 4;
 /// the lawn covers the cell
 const COVERED: u8 = 8;
+/// the water in the cell is white on top: a fall lands by it
+const FOAMS: u8 = 16;
+/// the cell is on or beside falling water, and bare rock
+const ROCKY: u8 = 32;
+
+/// A number from 0 to 1 that changes slowly from cell to cell: the
+/// numbers thrown at the corners of squares seven cells a side, eased
+/// between (value noise: https://en.wikipedia.org/wiki/Value_noise). By
+/// it the edge of a cliff wanders, where steepness alone would draw it
+/// as a ring at one height round every hill.
+fn wander(x: i32, y: i32, which: i32, seed: u32) -> f64 {
+    const SIDE: i32 = 7;
+    let (i, j) = (x.div_euclid(SIDE), y.div_euclid(SIDE));
+    let ease = |t: f64| t * t * (3.0 - 2.0 * t);
+    let (u, v) = (ease(x.rem_euclid(SIDE) as f64 / SIDE as f64), ease(y.rem_euclid(SIDE) as f64 / SIDE as f64));
+    let at = |i: i32, j: i32| hash(i, j, which, seed);
+    let (low, high) = (at(i, j) + (at(i + 1, j) - at(i, j)) * u, at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * u);
+    low + (high - low) * v
+}
 
 /// The ground under a patch of grass: for each cell of it, how high it
 /// is, what its skin is, and what water stands on it.
@@ -440,10 +610,16 @@ pub struct Ground {
     top: Vec<i32>,
     /// the level of the water the place is beside, as a cell's floor; unused where the lawn has no water
     level: Vec<i32>,
+    /// the top of the water in the cell, as a cell's floor: the level, or higher where a stream comes down onto the cell
+    over: Vec<i32>,
     skin: Vec<u8>,
     flags: Vec<u8>,
     /// the size of the stone whose middle is here, 0 for none
     stone: Vec<f32>,
+    /// what the ground's steepness makes of the cell: 0, 1 for a cliff of soil, 2 for rock
+    face: Vec<u8>,
+    /// how bare of grass the cell's steepness leaves it: 0 for not at all to 255 for wholly
+    bare: Vec<u8>,
     /// whether the lawn has water at all
     watered: bool,
 }
@@ -460,13 +636,14 @@ struct Site {
     closed: bool,
     water: Option<u64>,
     levels: u8,
+    cliffs: u8,
     seed: u32,
 }
 
 impl Site {
     fn of(base: DVec3, spread: f64, lay: &Lay, seed: u32) -> Site {
         let bits = |v: DVec3| v.to_array().map(f64::to_bits);
-        Site { base: bits(base), spread: spread.max(LEAST_SPREAD).to_bits(), run: lay.run.iter().map(|p| bits(*p)).collect(), closed: lay.closed, water: lay.water.map(f64::to_bits), levels: lay.levels, seed }
+        Site { base: bits(base), spread: spread.max(LEAST_SPREAD).to_bits(), run: lay.run.iter().map(|p| bits(*p)).collect(), closed: lay.closed, water: lay.water.map(f64::to_bits), levels: lay.levels, cliffs: lay.cliffs, seed }
     }
 }
 
@@ -484,7 +661,7 @@ struct Made {
 
 /// Whether two touches are the very same: every number of them, bit for bit.
 fn same_touch(a: &Sculpt, b: &Sculpt) -> bool {
-    let bits = |t: &Sculpt| (t.at.to_array().map(f64::to_bits), t.range.to_bits(), t.amount.to_bits(), t.flatten);
+    let bits = |t: &Sculpt| (t.at.to_array().map(f64::to_bits), t.range.to_bits(), t.amount.to_bits(), t.flatten, t.sharp);
     bits(a) == bits(b)
 }
 
@@ -614,7 +791,7 @@ impl Ground {
                 }
                 (ground, Some(was_made))
             }
-            None => (Ground { made: None, stand, lo, n, high: vec![0.0; cells], top: vec![0; cells], level: vec![0; cells], skin: vec![TRUNK; cells], flags: vec![0; cells], stone: vec![0.0; cells], watered: false }, None),
+            None => (Ground { made: None, stand, lo, n, high: vec![0.0; cells], top: vec![0; cells], level: vec![0; cells], over: vec![0; cells], skin: vec![TRUNK; cells], flags: vec![0; cells], stone: vec![0.0; cells], face: vec![0; cells], bare: vec![0; cells], watered: false }, None),
         };
         let touches_were = was_made.as_mut().map(|m| std::mem::take(&mut m.touches));
         let change = touches_were.as_ref().map_or_else(|| Change::whole(&lay.mounds), |were| Change::between(were, &lay.mounds));
@@ -666,7 +843,7 @@ impl Ground {
         // whole lawn were worth a thread; of a few cells a row, as many
         // more as make up those cells.)
         let least = if to[0] - from[0] == n[0] { 16 } else { (16 * 180 / (to[0] - from[0]).max(1)).max(16) };
-        let rows: Vec<Vec<(f64, f64, i32, i32, u8, u8, f32)>> = threads.map(to[1] - from[1], least, |row| {
+        let rows: Vec<Vec<(f64, f64, i32, i32, i32, u8, u8, f32)>> = threads.map(to[1] - from[1], least, |row| {
             let j = from[1] + row;
             (from[0]..to[0])
                 .filter(|i| !still || touched.marked[j * n[0] + i])
@@ -679,13 +856,16 @@ impl Ground {
                     let top = floor + (here + SOIL_OVER).round() as i32;
                     // (whether the lawn covers a cell goes by its line, which is the site's: as it was, if it was kept)
                     let mut flags = if known { made.flags[c] & COVERED } else if covered(p) { COVERED } else { 0 };
-                    let Some((level, by)) = waters.as_ref().map(|w| w.level(p, was)) else { return (was, here, top, 0, TRUNK, flags, 0.0) };
+                    let Some(Wet { level, by, over, foot: lands, face }) = waters.as_ref().map(|w| w.level(p, was)) else { return (was, here, top, 0, 0, TRUNK, flags, 0.0) };
                     let surface = floor + level.round() as i32;
                     if by.is_some() {
                         flags |= STREAM;
                     }
+                    if face {
+                        flags |= ROCKY;
+                    }
                     // (a stream's water only in its channel, and not wherever the ground beside it happens to lie lower)
-                    let wet = flags & COVERED != 0 && here + 1.0 < level && by.is_none_or(|far| far < 3.0) && top < surface;
+                    let wet = flags & COVERED != 0 && here + 1.0 < level && by.is_none_or(|far| far < STREAM_WIDE) && top < surface;
                     // By the water it is sand, and under it the bed of the pond.
                     // (A stream's bed is sand and stones all through: it runs too fast for mud to settle.
                     // And the bed is only where water lies on it: the soil's top is a whole cell, so at
@@ -698,12 +878,16 @@ impl Ground {
                         TRUNK
                     };
                     if !wet {
-                        return (was, here, top, surface, skin, flags, 0.0);
+                        return (was, here, top, surface, surface, skin, flags, 0.0);
+                    }
+                    // (white where a fall lands, most of the water within two cells of it and less further off)
+                    if lands.is_some_and(|far| hash(x - foot[0], y - foot[1], 14, seed) < 1.0 - 0.25 * far) {
+                        flags |= FOAMS;
                     }
                     // and here and there a stone on the bed
                     let chance = hash(x - foot[0], y - foot[1], 3, seed);
                     let stone = if here <= level - 1.5 && chance < STONES { 1.4 + 1.08 * chance / STONES } else { 0.0 };
-                    (was, here, top, surface, skin, flags | WET, stone as f32)
+                    (was, here, top, surface, surface.max(floor + over.round() as i32), skin, flags | WET, stone as f32)
                 })
                 .collect()
         });
@@ -711,9 +895,65 @@ impl Ground {
         for (row, cells) in rows.into_iter().enumerate() {
             let j = from[1] + row;
             let places: Vec<usize> = (from[0]..to[0]).filter(|i| !still || touched.marked[j * n[0] + i]).collect();
-            for (i, (raw, here, top, level, skin, flags, stone)) in places.into_iter().zip(cells) {
+            for (i, (raw, here, top, level, over, skin, flags, stone)) in places.into_iter().zip(cells) {
                 let c = j * n[0] + i;
-                (was[c], made.high[c], made.top[c], made.level[c], made.skin[c], made.flags[c], made.stone[c]) = (raw, here, top, level, skin, flags, stone);
+                (was[c], made.high[c], made.top[c], made.level[c], made.over[c], made.skin[c], made.flags[c], made.stone[c]) = (raw, here, top, level, over, skin, flags, stone);
+            }
+        }
+        // The cliffs: what each cell's steepness makes of it, for the
+        // cells worked out. (And for no others, though a cell's steepness
+        // goes by the heights of the cells beside it: the box of cells
+        // worked out reaches a cell further each way than any touch that
+        // differs, see `Change::marks`, so a cell outside it has no cell
+        // beside it whose height changed.) By the ground as it was sculpted and not
+        // as the streams cut it, or every stream would run between cliffs
+        // of its own banks. The steepness is the rise each way over the
+        // cells to each side
+        // (https://en.wikipedia.org/wiki/Finite_difference#Basic_types),
+        // made more or less by up to a quarter by a number that changes
+        // slowly over the ground, so that the cliff's edge wanders. Grass
+        // thins from three quarters of the steepness at which soil is bare.
+        if lay.cliffs > 0 && from[0] < to[0] && from[1] < to[1] {
+            let (soil, rock) = STEEP[(lay.cliffs as usize).min(STEEP.len()) - 1];
+            let rows: Vec<Vec<(u8, u8, i32)>> = threads.map(to[1] - from[1], 64, |row| {
+                let j = from[1] + row;
+                (from[0]..to[0])
+                    .map(|i| {
+                        let c = j * n[0] + i;
+                        let (x, y) = (lo[0] + i as i32 - foot[0], lo[1] + j as i32 - foot[1]);
+                        let at = |i: usize, j: usize| was[j * n[0] + i];
+                        let rise = DVec2::new(at((i + 1).min(n[0] - 1), j) - at(i.saturating_sub(1), j), at(i, (j + 1).min(n[1] - 1)) - at(i, j.saturating_sub(1))) / 2.0;
+                        let steep = rise.length() * (0.85 + 0.3 * wander(x, y, 30, seed));
+                        // (the top of the soil as the ground's height gives it, which is what it is anywhere but on rock)
+                        let top = floor + (made.high[c] + SOIL_OVER).round() as i32;
+                        if steep >= rock {
+                            // Rock stands in ledges: its top is brought
+                            // down to the next of a set of levels LEDGES
+                            // apart, which rise and dip slowly across the
+                            // ground. A face is then risers a few cells
+                            // tall with its beds showing in them, and
+                            // treads between; left a cell's step for each
+                            // cell, it was a grey slope with no face to
+                            // show a bed. Only dry rock that is soil
+                            // otherwise: sand and a pond's bed keep the
+                            // height the water was found by.
+                            let dry = made.skin[c] == TRUNK && made.flags[c] & (WET | ROCKY) == 0;
+                            let lift = (LEDGES as f64 * wander(x, y, 32, seed)) as i32;
+                            (2, 255, if dry { (top + lift).div_euclid(LEDGES) * LEDGES - lift } else { top })
+                        } else if steep >= soil {
+                            // (the odd tuft on a cliff of soil: about one place in fourteen keeps its grass)
+                            (1, 237, top)
+                        } else {
+                            (0, (237.0 * ((steep - 0.75 * soil) / (0.25 * soil)).clamp(0.0, 1.0)) as u8, top)
+                        }
+                    })
+                    .collect()
+            });
+            for (row, cells) in rows.into_iter().enumerate() {
+                for (i, (face, bare, top)) in (from[0]..to[0]).zip(cells) {
+                    let c = (from[1] + row) * n[0] + i;
+                    (made.face[c], made.bare[c], made.top[c]) = (face, bare, top);
+                }
             }
         }
         made.watered = waters.is_some();
@@ -730,13 +970,16 @@ impl Ground {
     fn cut(&self, lo: [i32; 2], hi: [i32; 2]) -> Ground {
         let (lo, n) = self.window(lo, hi);
         let cells = n[0] * n[1];
-        let mut cut = Ground { made: None, stand: self.stand, lo, n, high: Vec::with_capacity(cells), top: Vec::with_capacity(cells), level: Vec::with_capacity(cells), skin: Vec::with_capacity(cells), flags: Vec::with_capacity(cells), stone: Vec::with_capacity(cells), watered: self.watered };
+        let mut cut = Ground { made: None, stand: self.stand, lo, n, high: Vec::with_capacity(cells), top: Vec::with_capacity(cells), level: Vec::with_capacity(cells), over: Vec::with_capacity(cells), skin: Vec::with_capacity(cells), flags: Vec::with_capacity(cells), stone: Vec::with_capacity(cells), face: Vec::with_capacity(cells), bare: Vec::with_capacity(cells), watered: self.watered };
         for j in 0..n[1] {
             let from = self.index(lo[0], lo[1] + j as i32).unwrap_or(0);
             let row = from..from + n[0];
             cut.high.extend_from_slice(&self.high[row.clone()]);
             cut.top.extend_from_slice(&self.top[row.clone()]);
             cut.level.extend_from_slice(&self.level[row.clone()]);
+            cut.over.extend_from_slice(&self.over[row.clone()]);
+            cut.face.extend_from_slice(&self.face[row.clone()]);
+            cut.bare.extend_from_slice(&self.bare[row.clone()]);
             cut.skin.extend_from_slice(&self.skin[row.clone()]);
             cut.flags.extend_from_slice(&self.flags[row.clone()]);
             cut.stone.extend_from_slice(&self.stone[row]);
@@ -771,6 +1014,9 @@ impl Ground {
             self.top[row.clone()] == cut.top[of_cut.clone()]
                 && self.flags[row.clone()] == cut.flags[of_cut.clone()]
                 && self.level[row.clone()] == cut.level[of_cut.clone()]
+                && self.over[row.clone()] == cut.over[of_cut.clone()]
+                && self.face[row.clone()] == cut.face[of_cut.clone()]
+                && self.bare[row.clone()] == cut.bare[of_cut.clone()]
                 && self.skin[row.clone()] == cut.skin[of_cut.clone()]
                 && self.high[row.clone()].iter().zip(&cut.high[of_cut.clone()]).fold(0, |differ, (a, b)| differ | (a.to_bits() ^ b.to_bits())) == 0
                 && self.stone[row].iter().zip(&cut.stone[of_cut]).fold(0, |differ, (a, b)| differ | (a.to_bits() ^ b.to_bits())) == 0
@@ -779,7 +1025,7 @@ impl Ground {
 
     /// How many bytes the tables take, near enough.
     fn bytes(&self) -> usize {
-        self.high.len() * 30 + self.made.as_ref().map_or(0, |made| made.was.len() * 8 + made.waters.as_ref().map_or(0, |w| w.inside.len() * 14))
+        self.high.len() * 36 + self.made.as_ref().map_or(0, |made| made.was.len() * 8 + made.waters.as_ref().map_or(0, |w| w.inside.len() * 14))
     }
 
     /// The cells the table covers: the first each way, and one past the last.
@@ -796,7 +1042,10 @@ impl Ground {
     pub fn at(&self, x: i32, y: i32) -> Option<Place> {
         let c = self.index(x, y)?;
         let flags = self.flags[c];
-        Some(Place { covered: flags & COVERED != 0, height: self.high[c], top: self.top[c], water: (flags & WET != 0).then_some(self.level[c]), stream: flags & STREAM != 0, skin: self.skin[c] })
+        let wet = flags & WET != 0;
+        // (rock where the ground is steep enough for it and is soil, and wherever water falls)
+        let cliff = if self.skin[c] == BED { 0 } else if flags & ROCKY != 0 { 2 } else if self.skin[c] == TRUNK { self.face[c] } else { 0 };
+        Some(Place { covered: flags & COVERED != 0, height: self.high[c], top: self.top[c], water: wet.then_some(self.level[c]), stream: flags & STREAM != 0, skin: self.skin[c], cliff, falls_from: (wet && self.over[c] > self.level[c]).then_some(self.over[c]) })
     }
 
     /// How steeply the ground rises at cell `(x, y)`, and which way: the
@@ -923,7 +1172,8 @@ impl Rule<'_> {
     /// shallows and on the bank, by a throw of its own for each place.
     fn reed_at(&self, tuft: &Tuft) -> bool {
         let g = self.ground;
-        let Some(c) = g.index(tuft.cell[0], tuft.cell[1]).filter(|c| g.flags[*c] & COVERED != 0) else { return false };
+        // (none on rock, where a fall is)
+        let Some(c) = g.index(tuft.cell[0], tuft.cell[1]).filter(|c| g.flags[*c] & (COVERED | ROCKY) == COVERED && g.bare[*c] < 255) else { return false };
         let Some(level) = g.beside(c) else { return false };
         // (a third as many along a stream as round a pond)
         let thick = self.reeds * if g.flags[c] & STREAM != 0 { 0.05 } else { 0.14 };
@@ -1090,13 +1340,18 @@ impl Rule<'_> {
                 // (on a slope, soil down to the ground beside it as well, so that the skin has no tear in it)
                 let lowest = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().filter_map(|(dx, dy)| g.index(x + dx, y + dy)).map(|n| g.top[n]).fold(top, i32::min);
                 let under = (top - SKIN).min(lowest - 1);
-                solid.push((CellBrick { mask: CUBE, min: [x, y, under], ext: [1, 1, top - under] }, g.skin[c]));
                 let wet = g.flags[c] & WET != 0;
+                match g.at(x, y).map_or(0, |place| place.cliff) {
+                    0 => solid.push((CellBrick { mask: CUBE, min: [x, y, under], ext: [1, 1, top - under] }, g.skin[c])),
+                    cliff => self.beds([x, y], under, top, cliff == 2, wet, &mut solid),
+                }
                 let reeded = g.flags[c] & REED != 0;
                 // (a stone only in water, and never taller than three cells whatever it lies on)
                 let stone = if wet { stones[slot(x, y)].clamp(top, top + 3) } else { top };
-                let surface = if wet { g.level[c].max(stone) } else { stone };
-                for (what, from, to) in [(STONE, top, stone), (WATER, stone, surface)] {
+                let surface = if wet { g.over[c].max(stone) } else { stone };
+                // (white on top where a fall lands, in place of the water's top cell, and not under water that is still coming down)
+                let white = if wet && g.flags[c] & FOAMS != 0 && g.over[c] == g.level[c] && surface > stone { surface - 1 } else { surface };
+                for (what, from, to) in [(STONE, top, stone), (WATER, stone, white), (FOAM, white, surface)] {
                     // (a reed standing here has its own cells, and nothing else is laid in them)
                     for (from, to) in if reeded { self.free_of_reeds([x, y], from, to) } else { vec![(from, to)] }.into_iter().filter(|(from, to)| from < to) {
                         if what == WATER {
@@ -1106,12 +1361,63 @@ impl Rule<'_> {
                         }
                     }
                 }
-                floor[slot(x, y)] = surface;
+                // (and none over rock, though one may lean that way from the grass beside it)
+                floor[slot(x, y)] = if g.at(x, y).is_some_and(|place| place.cliff == 2) { i32::MAX } else { surface };
             }
         }
         let mut bricks = crate::pattern::joined(solid, self.longest.max(1));
         self.blades(lo, &floor, &mut bricks);
         (bricks, water)
+    }
+
+    /// The soil or the rock under one cell of a cliff, from `under` to
+    /// before `top`, added to `solid`.
+    ///
+    /// A cliff is in beds, as a cut bank or a rock face is: level layers,
+    /// each of one tone, that rise and dip a little across the ground
+    /// (by [`wander`]). Rock is in beds three cells thick, mostly of one
+    /// grey with darker and paler ones among them, and its top cell is a
+    /// ledge, a part of its own: weathered in summer, and what snow lies
+    /// on in winter. Soil is in beds two thick, the soil's own tone and
+    /// a darker one. Columns side by side are in the same bed at the
+    /// same height, so the beds join into long slabs
+    /// (`pattern::joined`), which is what makes a face read as rock and
+    /// not as grey soil: a face of one tone, a column to a cell, was a
+    /// grey hill.
+    ///
+    /// Rock's beds rise and dip as its ledges do (`LEDGES`, which is two
+    /// beds), so a ledge's top is the top of a bed; and a column of rock
+    /// goes down to the foot of the bed its foot is in, a cell or so
+    /// further into the hill than its skin need go. Every piece of a
+    /// column is then a whole bed, or the half bed under a ledge, and is
+    /// the same piece in the columns beside it: left to end where the
+    /// column happened to, a face was 2.5 cells of rock to a brick (2,225
+    /// cells in 874 bricks), and so it is 3.4 (2,635 in 766).
+    fn beds(&self, at: [i32; 2], under: i32, top: i32, rock: bool, wet: bool, solid: &mut Vec<(CellBrick, u8)>) {
+        let g = self.ground;
+        let (thick, which) = if rock { (2, 40) } else { (2, 41) };
+        let here = [at[0] - g.stand.x.floor() as i32, at[1] - g.stand.y.floor() as i32];
+        let lift = if rock { (LEDGES as f64 * wander(here[0], here[1], 32, self.seed)) as i32 } else { (thick as f64 * 2.0 * wander(here[0], here[1], 31, self.seed)) as i32 };
+        // (the ledge on a rock's top, unless water lies on it)
+        let ledge = if rock && !wet && top > under { top - 1 } else { top };
+        let mut z = if rock { (under + lift).div_euclid(thick) * thick - lift } else { under };
+        while z < ledge {
+            let bed = (z + lift).div_euclid(thick);
+            let end = ((bed + 1) * thick - lift).min(ledge);
+            let tone = hash(bed, 0, which, self.seed);
+            let shade = match (rock, tone) {
+                (true, t) if t < 0.5 => ROCK,
+                (true, t) if t < 0.8 => ROCK_DARK,
+                (true, _) => ROCK_LIGHT,
+                (false, t) if t < 0.45 => CLIFF,
+                (false, _) => TRUNK,
+            };
+            solid.push((CellBrick { mask: CUBE, min: [at[0], at[1], z], ext: [1, 1, end - z] }, shade));
+            z = end;
+        }
+        if ledge < top {
+            solid.push((CellBrick { mask: CUBE, min: [at[0], at[1], ledge], ext: [1, 1, top - ledge] }, LEDGE));
+        }
     }
 
     /// The blades standing in the tile whose first cell is `lo`, added to
@@ -1156,6 +1462,11 @@ impl Rule<'_> {
             let Some(c) = g.index(tuft.cell[0], tuft.cell[1]).filter(|c| g.flags[*c] & COVERED != 0) else { continue };
             let number = |n: i32| hash(tuft.a, tuft.b, n, self.seed);
             let here = g.high[c];
+            // (no grass on rock, nor where water falls; and less of it the nearer the ground is to a cliff: a tuft has one number, and stands only on ground less bare than that)
+            let hardy = number(13) * 255.0;
+            if g.flags[c] & ROCKY != 0 || (g.bare[c] > 0 && hardy < g.bare[c] as f64) {
+                continue;
+            }
             if let Some(level) = g.beside(c) {
                 if self.reed_at(&tuft) {
                     continue;
@@ -1171,8 +1482,8 @@ impl Rule<'_> {
                 // (the first on the tuft's own cell, the rest on the cells round it)
                 let from = if blade == 0 { tuft.at } else { tuft.at + DVec2::new(number(6) - 0.5, number(7) - 0.5) * 2.6 };
                 let cell = [(g.stand.x + from.x).floor() as i32, (g.stand.y + from.y).floor() as i32];
-                // (it stands on the ground of its own cell, which is lawn and not under water)
-                let Some(base) = g.index(cell[0], cell[1]).filter(|n| g.flags[*n] & (COVERED | WET) == COVERED).map(|n| g.top[n]) else { continue };
+                // (it stands on the ground of its own cell, which is lawn and not under water, nor rock)
+                let Some(base) = g.index(cell[0], cell[1]).filter(|n| g.flags[*n] & (COVERED | WET | ROCKY) == COVERED && (g.bare[*n] == 0 || hardy >= g.bare[*n] as f64)).map(|n| g.top[n]) else { continue };
                 let (first, second, long, tone) = (any_way(number(0), number(1)), any_way(number(2), number(3)), 0.5 + 0.5 * number(4), number(5));
                 let up = (DVec3::Z + self.downwind * 0.45 * self.lean + first * 0.3).normalize();
                 let over = (up + self.downwind * 0.5 * self.lean + second * 0.25).normalize();
@@ -1269,8 +1580,9 @@ impl Rule<'_> {
             }
             let higher = |way: [i32; 2]| g.index(x + way[0], y + way[1]).is_some_and(|n| g.flags[n] & COVERED != 0 && g.top[n] > top);
             let ways: Vec<[i32; 2]> = [[1, 0], [-1, 0], [0, 1], [0, -1]].into_iter().filter(|way| higher(*way)).collect();
-            if let [way] = ways[..] {
-                slopes.push((CellBrick { mask: tip(way), min: [x, y, top], ext: [1; 3] }, g.skin[c]));
+            // (and not on a cliff: a rock's ledges are square, and a bank of sand on a face is no rock)
+            if let ([way], Some(0)) = (&ways[..], g.at(x, y).map(|place| place.cliff)) {
+                slopes.push((CellBrick { mask: tip(*way), min: [x, y, top], ext: [1; 3] }, g.skin[c]));
             }
         }
         bricks.extend(crate::pattern::joined(slopes, self.longest.max(1)));
@@ -1457,7 +1769,7 @@ impl Model {
             lawn.site = Some(site.clone());
         }
         // (the rule but for its ground and reeds, which are not yet known: its numbers are)
-        let blank = Ground { made: None, stand: DVec3::ZERO, lo: [0; 2], n: [0; 2], high: Vec::new(), top: Vec::new(), level: Vec::new(), skin: Vec::new(), flags: Vec::new(), stone: Vec::new(), watered: false };
+        let blank = Ground { made: None, stand: DVec3::ZERO, lo: [0; 2], n: [0; 2], high: Vec::new(), top: Vec::new(), level: Vec::new(), over: Vec::new(), skin: Vec::new(), flags: Vec::new(), stone: Vec::new(), face: Vec::new(), bare: Vec::new(), watered: false };
         let sown = Rule { ground: &blank, seed, height, gap, lean, downwind, reeds: lay.reeds, longest, stems: &none }.bits();
         // The very lawn that was built last, as when a lawn built while
         // the mouse was down is built again on letting go, or its parts

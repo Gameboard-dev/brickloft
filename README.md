@@ -104,6 +104,15 @@ at it (see [docs/features.md](docs/features.md#meshes-from-files)).
 
 <img src="docs/images/mesh/figure-12-colours.png" width="345" alt="A figure with brown hair, a red shirt and blue trousers on a green disc, built from a mesh of 124,000 triangles in twelve colours"> <img src="docs/images/mesh/house.png" width="345" alt="A house built from a mesh in ten bricks, its roof two slopes of long ramps">
 
+A rule program grows a building on a grid, a little each turn, and you
+can watch it: a block of flats, a tower, a house, a villa over the sea.
+Its stairs are built as slopes. The language and the programs are from
+[MarkovJunior](https://github.com/mxgmn/MarkovJunior) by Maxim Gumin, and
+a program of your own can be imported from its `.xml` file (see
+[docs/features.md](docs/features.md#rule-programs)).
+
+<img src="docs/images/rule-program-flats.png" width="345" alt="A block of flats built of bricks, with red wall panels, thin columns and stairs built as slopes"> <img src="docs/images/rule-program-growing.gif" width="345" alt="The same block of flats growing a tile at a time">
+
 <img src="docs/images/stepping-stones.png" width="345" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-box-sides.png" width="345" alt="A box laid as bricks: the top of each brick on its upper face is bevelled down to the mortar, and the four sides carry the same pattern flat">
 
 ## How good the result is
@@ -162,7 +171,7 @@ colours, saved forms, the camera and every key.
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
 | [docs/generate.md](docs/generate.md) | The generator, a separate program not yet used by the editor: a mesh from a picture or a prompt, with models run on this computer |
-| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns, the plants and the furniture |
+| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns, the plants, the furniture and rule programs |
 
 ## Layout
 
@@ -170,6 +179,7 @@ colours, saved forms, the camera and every key.
 |---|---|
 | `core/` | The geometry: curves, solids as distance functions, the fitters, the measurements. No game or interface code, and one dependency (`glam`). |
 | `editor/` | The program: the 3D view, the panel, the workspace, and the `.brz` file it copies. |
+| `generate/` | The generator: a program of its own, built apart from the other two (see [docs/generate.md](docs/generate.md)). |
 
 The project began as omegga-arcs, an omegga plugin that placed arcs of
 bricks on a running server. The plugin was removed, because copy and paste
@@ -181,3 +191,14 @@ smooth curves out at full size before anything is cut.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+The rule programs that come with the editor, their tilesets and their
+palette are copied unchanged from
+[MarkovJunior](https://github.com/mxgmn/MarkovJunior) by Maxim Gumin,
+which is also under the MIT licence. They are in
+[core/models/markov/](core/models/markov/), with the original's licence
+file and a note of the commit they were taken from, and they are
+compiled into the program. The language those programs are written in
+is MarkovJunior's, and the interpreter in `core/src/rewrite/` was
+written from the original's source. CarmaTower is credited in the
+original as "a proceduralization of a voxel scene by Antoine Lendrevie".

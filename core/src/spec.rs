@@ -53,6 +53,11 @@ pub enum Form {
     /// 1 point, its middle: the furniture `furniture` describes, filling
     /// the box a `Cube` of the same `radius` and `stretch` would fill
     Furniture,
+    /// 1 point, the middle of its floor: the rule program `program`
+    /// names, run as far as it says, each cell of its grid so many
+    /// microbricks (see [`crate::rewrite`]). Built by its own code and
+    /// not fitted: `radius`, `thick` and the rest are not its settings.
+    Program,
     /// 1 point, the middle of its floor: the maze `maze` describes,
     /// `radius` to the middle of its outside wall, with walls `thick`
     /// through and `rise` tall
@@ -189,6 +194,8 @@ pub struct Spec {
     pub maze: crate::maze::Maze,
     /// Which mesh a `Form::Imported` is, and how it is fitted (see [`crate::mesh`]). Other forms take no notice of it.
     pub import: crate::mesh::Import,
+    /// Which rule program a `Form::Program` is, and how far it has run (see [`crate::rewrite::form`]). Other forms take no notice of it.
+    pub program: crate::rewrite::form::Program,
 }
 
 impl Default for Spec {
@@ -227,6 +234,7 @@ impl Default for Spec {
             furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
             maze: crate::maze::Maze::default(),
             import: crate::mesh::Import { colours: crate::mesh::form::USUAL_COLOURS, ..crate::mesh::Import::default() },
+            program: crate::rewrite::form::Program::default(),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -408,6 +416,12 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     }
     if spec.points.iter().any(|p| !p.is_finite()) {
         return Err("a point is not a number".into());
+    }
+    // A rule program is its grid written as bricks, with nothing fitted
+    // and nothing measured: built here, before any of what follows is
+    // asked of it, since none of it is (see `crate::rewrite::form`).
+    if spec.form == Form::Program {
+        return crate::rewrite::form::built(spec);
     }
     let lo = spec.points.iter().fold(DVec3::MAX, |a, p| a.min(*p));
     let hi = spec.points.iter().fold(DVec3::MIN, |a, p| a.max(*p));
@@ -1450,6 +1464,8 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
         Form::Cube => cube::cube(spec, need(1)?[0], threads),
         // (its box is a cube's, so that its dots and sizes are a cube's too; it has no curve to draw)
         Form::Furniture => Ok((Solid::Furniture(Box::new(crate::furniture::Model::new(&spec.furniture, cube::sides(spec, need(1)?[0]), spec.max_ext, spec.wedges)?)), Vec::new())),
+        // (built before it comes to this: see `build_upright`)
+        Form::Program => Err("a rule program is not a solid to fit".into()),
         Form::Maze => {
             // (a rug is not wrapped along walls, and a hedge takes no pattern: see `maze::walls`)
             let walls = crate::maze::walls::Walls::new(&spec.maze, need(1)?[0], spec.radius, spec.thick, spec.rise, &spec.tree, spec.mosaic.is_some())?;
@@ -3133,13 +3149,23 @@ pub(crate) fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Ve
     let mounds = if grass { grass_touches(spec, foot) } else { Vec::new() };
     // (grass: water stands `count` below it, 0 for none; and `depth`, which a plant has no other use for, is how thickly reeds stand round it: one more than so many tenths, since a depth is 1 at least)
     let water = (grass && spec.tree.count > 0).then(|| -(spec.tree.count as f64));
-    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, levels: if grass && spec.tube { 2 } else { 1 }, mounds };
+    // (and its `baubles`, which only a pine has otherwise, is how readily its steep ground is a cliff)
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, levels: if grass && spec.tube { 2 } else { 1 }, cliffs: if grass { spec.tree.baubles.clamp(0, crate::grass::MOST_CLIFFS) as u8 } else { 0 }, mounds };
     Ok((lay, path))
 }
 
+/// What a touch of a brush on grass has in the middle number of its
+/// added point: this if it flattens, [`SHARP`] more if its edge is sharp
+/// (see [`crate::tree::Sculpt`]). A touch saved before there were sharp
+/// edges has this or 0, and is what it was.
+pub const FLATTENS: f64 = 16.0;
+/// See [`FLATTENS`].
+pub const SHARP: f64 = 32.0;
+
 /// The touches on a patch of grass's ground, as its added points have them.
 fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
-    spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y != 0.0, amount: by.z }).collect()
+    // (anything from 32 up is sharp, and of what is left anything but 0 flattens, as anything but 0 always did)
+    spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y % SHARP != 0.0, sharp: by.y >= SHARP, amount: by.z }).collect()
 }
 
 /// The plant a spec describes, as the solid its bricks were fitted to:

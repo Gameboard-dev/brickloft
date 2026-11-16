@@ -180,7 +180,8 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
         let Some(lawn) = brickloft_core::spec::lawn(spec) else { return Box::new(|_| Stuff::Solid) };
         // Soil, sand, stones and the bed of a pond are solid; so is whatever is no brick of the lawn's own (the fillet of a join).
         return Box::new(move |cell| match lawn.part(middle_of(cell)) {
-            Some(tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
+            // (the white water under a fall is water as the fall is: walked through, and ice with it)
+            Some(tree::WATER | brickloft_core::grass::FOAM) => if frozen { Stuff::Ice } else { Stuff::Water },
             Some(tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
             _ => Stuff::Solid,
         });
@@ -457,6 +458,37 @@ mod tests {
     }
 
     /// Read back out of the file itself, chunk by chunk: what the game is given.
+    #[test]
+    fn a_waterfall_is_written_as_the_ponds_water_and_as_ice_when_frozen_and_its_rock_is_solid() {
+        use brickloft_core::grass::{FOAM, LEDGE, ROCK, ROCK_DARK, ROCK_LIGHT};
+        use brickloft_core::spec::{build, Form, Spec, SHARP};
+        use brickloft_core::tree::{Kind, Tree, WATER};
+        use brickloft_core::DVec3;
+        // a table 16 high cut with a sharp edge, a hollow on it, and a hollow in the low ground beside it: raised ponds on, and cliffs
+        let touch = |x: f64, y: f64, range: f64, amount: f64, how: f64| (DVec3::new(x + 0.5, y + 0.5, 0.5), DVec3::new(range, how, amount));
+        let corners = [(-60.0, -40.0), (60.0, -40.0), (60.0, 40.0), (-60.0, 40.0)];
+        let lawn = Spec { form: Form::Tree, points: corners.iter().map(|(x, y)| DVec3::new(x + 0.5, y + 0.5, 0.5)).collect(), closed: true, radius: 4.0, rise: Some(5.0), tube: true, depth: 4, tree: Tree { seed: 3, baubles: 2, ..Tree::of(Kind::Grass) }, pulls: vec![touch(-31.0, 0.0, 30.0, 16.0, SHARP), touch(-18.0, 0.0, 9.0, -8.0, 0.0), touch(22.0, 2.0, 17.0, -9.0, 0.0)], ..Spec::default() };
+        let built = build(&lawn).unwrap();
+        // the fall: the bricks of water that stand well above the lower pond (at -3) and below the upper (at 13)
+        let falling: Vec<&brickloft_core::shapes::CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(b, s)| **s == WATER && b.min[2] >= 0 && b.min[2] + b.ext[2] <= 12).map(|(b, _)| b).collect();
+        let white: Vec<&brickloft_core::shapes::CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(_, s)| **s == FOAM).map(|(b, _)| b).collect();
+        let rock: Vec<&brickloft_core::shapes::CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(_, s)| matches!(**s, ROCK | ROCK_DARK | ROCK_LIGHT | LEDGE)).map(|(b, _)| b).collect();
+        assert!(falling.len() >= 2 && !white.is_empty() && rock.len() > 100, "{} bricks of falling water, {} of white water, {} of rock", falling.len(), white.len(), rock.len());
+        let of = stuff_of(&lawn);
+        assert!(falling.iter().chain(&white).all(|b| of(b) == Stuff::Water), "falling water that is not written as water");
+        assert!(rock.iter().all(|b| of(b) == Stuff::Solid), "rock that is not solid");
+        // frozen: the fall and the white water under it are ice, to stand on and climb
+        let of = stuff_of(&Spec { fill: true, ..lawn.clone() });
+        assert!(falling.iter().chain(&white).all(|b| of(b) == Stuff::Ice), "a frozen fall that is not all ice");
+        // and in the file: glass with its collision off, and on when frozen
+        let bricks: Vec<Painted> = built.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+        for (frozen, solid) in [(false, false), (true, true)] {
+            let world = prefab(&bricks, &[(Spec { fill: frozen, ..lawn.clone() }, Paint::default(), [0; 3])]).unwrap();
+            let fall: Vec<&Brick> = world.bricks.iter().zip(&built.bricks).zip(&built.shades).filter(|((_, c), s)| (**s == WATER && c.min[2] >= 0 && c.min[2] + c.ext[2] <= 12) || **s == FOAM).map(|((b, _), _)| b).collect();
+            assert!(fall.len() >= 3 && fall.iter().all(|b| b.material == brdb::assets::materials::GLASS && b.collision.player == solid && b.collision.physics == solid), "frozen {frozen}");
+        }
+    }
+
     #[test]
     fn blades_of_grass_are_written_to_be_walked_through_and_the_soil_is_not() {
         use brickloft_core::spec::{build, Form};

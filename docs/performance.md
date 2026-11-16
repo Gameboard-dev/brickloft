@@ -38,7 +38,7 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
 | Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms), and 4 ms (2.4 ms) for one more touch | 27,600 | 0% |
-| Lawn, 128 by 88, ponds at two levels and a stream | 24 ms (8 ms) | 20,900 | 0% |
+| Lawn, 128 by 88, a raised pond and a stream | 24 ms (8 ms) | 20,900 | 0% |
 | Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
 | Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
 | Dining table, sofa, cupboard, chandelier | under 0.01 ms each | 8 to 46 | 0% |
@@ -331,19 +331,30 @@ second and a stroke of ten was five.
 
 A lawn's bricks are now written down from the height of its ground, with
 no samples ([algorithm.md](algorithm.md), section 7.10, Grass). The same
-lawn, and one 128 by 88 with ponds at two levels and a stream:
+lawn, and one 128 by 88 with a raised pond and a stream down from it:
 
 | Lawn | One thread | 16 threads | Bricks |
 |---|---|---|---|
 | 180 by 120, 24 touches, fitted | 3.5 s | 0.53 s | 63,500 |
 | The same, laid out | 14 ms | 4 ms | 27,600 |
-| Two pond levels and a stream, fitted | 2.0 s | 0.36 s | 37,700 |
+| A raised pond and a stream, fitted | 2.0 s | 0.36 s | 37,700 |
 | The same, laid out | 24 ms | 8 ms | 20,900 |
 
 Of the 14 ms, about 5 are the ground: for every cell, whether the lawn
 covers it and how high every touch leaves it. The other 9 are the tiles'
 bricks. The lawn with a stream takes longer because the flood that finds
-its two levels and the search for each stream's way are on one thread.
+its raised ponds and the search for each stream's way are on one thread.
+Those two rows were measured when every raised pond shared one level and
+a stream was six cells wide. Each pond has its own level now and a
+stream is three wide, which is the same flood and the same search.
+
+Cliffs cost nothing that could be measured. A lawn 120 by 80 with a
+table cut by a sharp edge, a pond on it, a fall over its side and a pond
+below took 28 ms on one thread and 9.5 ms on sixteen, with **Cliffs** at
+2 and at 0 alike (20,800 bricks). Those two figures are from a machine
+busy with other builds, where the lawn of 24 touches took 24 ms on one
+thread and not 14, so they are an upper bound and the comparison between
+the two settings is what they show.
 
 The bricks are fewer because a blade is one cell through, a column and a
 sloped tip, where a fitted one was nearly two cells through with sloped
@@ -373,15 +384,15 @@ threads, with one thread in brackets.
 | 300 by 240 | 86,000 | 9 of 80 | 10 to 14 ms (56 ms) | 2.5 to 3.3 ms (5 to 6 ms) |
 | 600 by 480 | 335,000 | 6 of 320 | 38 ms (207 ms) | 4 to 6 ms (5 to 8 ms) |
 | 600 by 480, 120 touches | 342,000 | 6 of 320 | 44 to 55 ms (303 ms) | 4 to 8 ms (9 to 13 ms) |
-| 300 by 240, two pond levels | 86,000 | 9 of 80 | 17 ms (58 ms) | 3.6 to 4.2 ms (5 to 6 ms) |
-| 600 by 480, two pond levels | 335,000 | 6 of 320 | 52 ms (218 ms) | 7 to 9 ms (9 to 11 ms) |
+| 300 by 240, raised ponds on | 86,000 | 9 of 80 | 17 ms (58 ms) | 3.6 to 4.2 ms (5 to 6 ms) |
+| 600 by 480, raised ponds on | 335,000 | 6 of 320 | 52 ms (218 ms) | 7 to 9 ms (9 to 11 ms) |
 
 A touch no longer costs by the number of touches already made: its cells
 start from the heights kept. Three parts of a kept touch still grow with
 the lawn. Comparing the tiles took 1.3 to 2.8 ms for the 320 tiles of
 the largest lawn. Putting every tile's bricks end to end in one list is
 1.5 ms for its 335,000 bricks, and handing that list to the caller is a
-second copy of about the same. With two pond levels the flood is made
+second copy of about the same. With raised ponds the flood is made
 again at each touch, 4 to 6 ms on the largest lawn. Laying the six
 tiles the touch reaches is 1 to 4 ms.
 
@@ -710,6 +721,15 @@ timed. A quarter to a third of the threads' time is used. The rest is
 the laying of the stretched pieces, which is on one thread (696 ms of
 the last row's 2,315), and threads waiting for their turn on a
 processor that other work held.
+
+A mesh with holes takes longer: its runs of empty cells are tried at
+five places each, and the skin over each hole is worked out at every
+corner of its cells. The ball with two wide holes, 96 across, went from
+2.0 to 7.7 seconds on one thread (1.6 on 16) when its holes began to be
+closed properly. Real meshes from a reconstruction network have a few
+hundred open edges and small holes, and five of them fitted 60 long took
+0.9 to 4.0 seconds on one thread and 0.2 to 1.5 on 16, with 20 to 45 MB
+at their peak, the processor being at 90 to 100% from other work.
 
 Opening the figure's file, which is 2.4 MB, reading it, indexing its
 124,136 triangles, fitting it 80 long and drawing it took 0.76 seconds

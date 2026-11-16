@@ -226,14 +226,19 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[98, 140, 70], [74, 128, 72], [54, 102, 60], [114, 160, 90], [100, 140, 66], [250, 246, 240], [240, 150, 180], [248, 210, 80]],
             &[[98, 140, 70], [74, 128, 72], [54, 102, 60], [114, 160, 90], [100, 140, 66], [230, 60, 40], [250, 170, 30], [250, 226, 80]],
         ],
-        // grass: its soil first, then three greens, then its pond: the bed (and the heads of reeds), the water, sand and stones. A lawn; a meadow; dry
+        // Grass: its soil first, then three greens, then its pond: the bed
+        // (and the heads of reeds), the water, sand and stones. Then its
+        // cliffs (`brickloft_core::grass::CLIFF` and on): the darker tone
+        // of bare soil, three greys of rock, the ledges on top of the
+        // rock, and the white water under a fall. A lawn; a meadow; dry,
+        // with rock the colour of sandstone
         "grass" => &[
-            &[[92, 70, 46], [76, 150, 58], [54, 122, 48], [112, 176, 72], [70, 54, 40], [70, 130, 190], [214, 196, 150], [132, 130, 124]],
-            &[[100, 78, 50], [96, 148, 62], [70, 118, 54], [150, 176, 86], [74, 58, 42], [64, 120, 170], [206, 190, 146], [126, 124, 118]],
-            &[[132, 106, 70], [176, 164, 96], [146, 132, 78], [204, 192, 124], [96, 76, 52], [84, 130, 160], [222, 204, 160], [140, 136, 128]],
-            // autumn: tawny and russet with some green left, and the reeds' heads dark; winter: frosted blades, pale sand and stones, and the pond ice
-            &[[96, 72, 46], [176, 140, 62], [150, 96, 44], [134, 150, 72], [84, 58, 36], [72, 112, 150], [204, 184, 140], [128, 122, 114]],
-            &[[120, 104, 88], [214, 226, 222], [168, 186, 180], [240, 246, 248], [150, 130, 96], [206, 228, 240], [226, 222, 208], [176, 178, 182]],
+            &[[92, 70, 46], [76, 150, 58], [54, 122, 48], [112, 176, 72], [70, 54, 40], [70, 130, 190], [214, 196, 150], [132, 130, 124], [68, 50, 34], [126, 124, 120], [96, 95, 94], [154, 151, 144], [140, 146, 126], [236, 244, 248]],
+            &[[100, 78, 50], [96, 148, 62], [70, 118, 54], [150, 176, 86], [74, 58, 42], [64, 120, 170], [206, 190, 146], [126, 124, 118], [74, 56, 38], [122, 120, 114], [94, 92, 88], [148, 146, 138], [138, 146, 118], [236, 244, 248]],
+            &[[132, 106, 70], [176, 164, 96], [146, 132, 78], [204, 192, 124], [96, 76, 52], [84, 130, 160], [222, 204, 160], [140, 136, 128], [102, 80, 52], [160, 146, 124], [128, 114, 96], [186, 172, 148], [178, 166, 130], [240, 244, 244]],
+            // autumn: tawny and russet with some green left, and the reeds' heads dark; winter: frosted blades, pale sand and stones, the pond ice, and snow on the ledges
+            &[[96, 72, 46], [176, 140, 62], [150, 96, 44], [134, 150, 72], [84, 58, 36], [72, 112, 150], [204, 184, 140], [128, 122, 114], [70, 52, 34], [122, 118, 112], [94, 90, 86], [148, 144, 136], [152, 134, 98], [236, 244, 248]],
+            &[[120, 104, 88], [214, 226, 222], [168, 186, 180], [240, 246, 248], [150, 130, 96], [206, 228, 240], [226, 222, 208], [176, 178, 182], [94, 82, 70], [138, 142, 150], [106, 110, 120], [168, 172, 180], [244, 248, 250], [250, 252, 255]],
         ],
         // hydrangeas: blue; pink; white; blue running to pink, as on middling ground
         "hydrangea" => &[
@@ -533,6 +538,25 @@ pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
 /// The colours a mosaic of a style starts in.
 pub fn palette(style: &str) -> &'static [[u8; 3]] {
     palettes(style)[0]
+}
+
+/// Give a lawn saved before it had cliffs the colours its cliffs and
+/// falls are painted in.
+///
+/// A lawn's parts were eight and its paint had eight colours. A part
+/// numbered past a paint's colours goes round them again
+/// (`brickloft_core::pattern::colour_of`), so in such a paint rock would
+/// be the green of a blade and the white water under a fall the colour
+/// of sand. The six colours added are those of the set its eight are the
+/// start of, or, for colours of the user's own, of the first set.
+pub fn with_cliffs(spec: &brickloft_core::spec::Spec, paint: &mut Paint) {
+    let grass = spec.form == brickloft_core::spec::Form::Tree && spec.tree.kind == brickloft_core::tree::Kind::Grass;
+    if !grass || paint.mode != Mode::Pattern || paint.colours.len() != USUAL_COLOURS {
+        return;
+    }
+    let sets = palettes("grass");
+    let set = sets.iter().find(|set| set[..USUAL_COLOURS] == paint.colours[..]).unwrap_or(&sets[0]);
+    paint.colours.extend_from_slice(&set[USUAL_COLOURS..]);
 }
 
 /// The most colours a paint may have: one for each number a form may

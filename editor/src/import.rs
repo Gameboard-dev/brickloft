@@ -100,13 +100,91 @@ pub fn read(bytes: &[u8], kind: Kind) -> Result<Parts, MeshError> {
     }
 }
 
-/// The mesh in a file's bytes, stood with `up` upwards and indexed.
-pub fn mesh_of(bytes: &[u8], kind: Kind, up: Up) -> Result<Mesh, MeshError> {
+/// The mesh in a file's bytes, stood with `up` upwards, its surface
+/// smoothed `smooth` times over (see `brickloft_core::mesh::Mesh::smoothed`),
+/// and indexed.
+pub fn mesh_of(bytes: &[u8], kind: Kind, up: Up, smooth: i32) -> Result<Mesh, MeshError> {
     let mut parts = read(bytes, kind)?;
     for p in &mut parts.positions {
         *p = up.stood(*p);
     }
-    Mesh::with(parts)
+    Mesh::smoothed(parts, smooth.clamp(0, brickloft_core::mesh::form::MOST_SMOOTH) as usize)
+}
+
+/// Which way is up in a mesh, guessed from the mesh: the axis along which
+/// it has most of its surface lying flat at its low end, as a thing that
+/// stands on a floor has. `None` if it has no such end (a ball, a thing
+/// floating), and the file's kind is then gone by (`Kind::usual_up`).
+///
+/// A file's kind says little. glTF's text says y is up, and the program
+/// that makes most of the meshes opened here writes z up in its `.glb`
+/// files all the same: by the file's ending a chair came in lying on its
+/// back. What stands on the ground has a flat underside, or feet that end
+/// at one height, and that is cheap to look for: for each axis, the area
+/// of the triangles that lie wholly within a two-hundredth of the mesh's
+/// height of its lowest point and face down that axis, over the area of
+/// the mesh's box seen along it. The axis with the most wins, if it has
+/// at least three hundredths of its box covered (a ball drawn in bands
+/// has half that at each pole) and half as much again as the
+/// next. Only the low end is looked at: a model the wrong way up is rare
+/// next to one lying on its side, and the form can be flipped.
+pub fn guess_up(parts: &Parts) -> Option<Up> {
+    let at = |v: u32| parts.positions.get(v as usize).map(|p| p.map(f64::from));
+    let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for p in &parts.positions {
+        for k in 0..3 {
+            (lo[k], hi[k]) = (lo[k].min(p[k] as f64), hi[k].max(p[k] as f64));
+        }
+    }
+    let mut flat = [0f64; 3];
+    for t in &parts.triangles {
+        let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { continue };
+        let (u, v) = ([0, 1, 2].map(|k| b[k] - a[k]), [0, 1, 2].map(|k| c[k] - a[k]));
+        // (twice the triangle's area as seen along each axis)
+        let seen = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        for k in 0..3 {
+            let near = lo[k] + (hi[k] - lo[k]) / 200.0;
+            if a[k] <= near && b[k] <= near && c[k] <= near {
+                flat[k] += seen[k].abs() / 2.0;
+            }
+        }
+    }
+    // each as a share of its box's area seen that way
+    let share = [0, 1, 2].map(|k| flat[k] / ((hi[(k + 1) % 3] - lo[(k + 1) % 3]) * (hi[(k + 2) % 3] - lo[(k + 2) % 3])).max(1e-300));
+    let best = (0..3).max_by(|a, b| share[*a].total_cmp(&share[*b])).unwrap_or(2);
+    let next = (0..3).filter(|k| *k != best).map(|k| share[k]).fold(0.0, f64::max);
+    (share[best] >= 0.03 && share[best] >= 1.5 * next).then(|| [Up::X, Up::Y, Up::Z][best])
+}
+
+/// Whether a mesh looks like one a network made from a picture: it has a
+/// colour at every point and lies within a box a little over one unit across
+/// about the origin (0.6 each way: the surface is drawn a little outside the
+/// unit box where the model fills it), at least half a unit long. Those programs (TripoSR and what is
+/// built on it) work in such a box, draw the surface on a grid inside it
+/// and write what they find, with z up whatever the file's kind says. A
+/// model drawn by hand in a modelling program is almost never both
+/// coloured by its points and exactly that size.
+///
+/// On the 29 files of such a program's output this was tried on, all 29
+/// are told so, where the guess from a flat underside ([`guess_up`]) put
+/// 17 the right way up, 7 on their sides and had no answer for 5: they
+/// are cut off flat by their box on other sides too.
+pub fn looks_reconstructed(parts: &Parts) -> bool {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in &parts.positions {
+        for k in 0..3 {
+            (lo[k], hi[k]) = (lo[k].min(p[k]), hi[k].max(p[k]));
+        }
+    }
+    let longest = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f32::max);
+    !parts.colours.is_empty() && parts.images.is_empty() && (0..3).all(|k| lo[k] >= -0.6 && hi[k] <= 0.6) && longest >= 0.5
+}
+
+/// Which way is up in a mesh just read from a file of kind `kind`: z for
+/// one that looks made by a network, else what its underside says, else
+/// what its kind says.
+pub fn up_of(parts: &Parts, kind: Kind) -> Up {
+    if looks_reconstructed(parts) { Up::Z } else { guess_up(parts).unwrap_or(kind.usual_up()) }
 }
 
 /// The name a file of these bytes is kept under.
@@ -132,18 +210,18 @@ fn file_error(path: &Path, error: std::io::Error) -> MeshError {
     MeshError::File { path: path.display().to_string(), why: error.to_string() }
 }
 
-type InHand = Mutex<Vec<(String, Up, Arc<Mesh>)>>;
+type InHand = Mutex<Vec<(String, Up, i32, Arc<Mesh>)>>;
 
 fn in_hand() -> &'static InHand {
     static MESHES: InHand = Mutex::new(Vec::new());
     &MESHES
 }
 
-fn keep(name: &str, up: Up, mesh: Arc<Mesh>) {
+fn keep(name: &str, up: Up, smooth: i32, mesh: Arc<Mesh>) {
     // (a thread that failed while holding the list left it as it was: it is still a list of meshes)
     let mut held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    held.retain(|(known, way, _)| !(known == name && *way == up));
-    held.insert(0, (name.to_string(), up, mesh));
+    held.retain(|(known, way, times, _)| !(known == name && *way == up && *times == smooth));
+    held.insert(0, (name.to_string(), up, smooth, mesh));
     held.truncate(IN_HAND);
 }
 
@@ -162,40 +240,46 @@ fn bytes_of(path: &Path) -> Result<Vec<u8>, MeshError> {
 
 /// Take in the mesh file at `path`: read it, and if it is a mesh that can
 /// be built, copy it into the imports folder. Returns the name it is kept
-/// under and which way up a file of its kind usually is.
+/// under, which way is up in it (see [`up_of`]), and whether it looks made
+/// by a network from a picture (see [`looks_reconstructed`]).
 ///
 /// It is read before it is copied, so that the folder holds only files
 /// that were once read whole; and the mesh made in reading it is kept in
 /// hand, so that the form it is opened for does not read it again.
-pub fn adopt(path: &Path) -> Result<(String, Up), MeshError> {
+pub fn adopt(path: &Path) -> Result<(String, Up, bool), MeshError> {
     adopt_into(&folder()?, path)
 }
 
-fn adopt_into(folder: &Path, path: &Path) -> Result<(String, Up), MeshError> {
+fn adopt_into(folder: &Path, path: &Path) -> Result<(String, Up, bool), MeshError> {
     let kind = Kind::of(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())?;
     let bytes = bytes_of(path)?;
-    let up = kind.usual_up();
-    let mesh = mesh_of(&bytes, kind, up)?;
+    // (read once here for the guess of which way is up, and again by `mesh_of`: a second of reading for the largest file, once, to keep one way of making a mesh)
+    let parts = read(&bytes, kind)?;
+    let (up, reconstructed) = (up_of(&parts, kind), looks_reconstructed(&parts));
+    drop(parts);
+    // (smoothed as a mesh of its kind starts out, which is what the form it is opened for will ask for)
+    let smooth = if reconstructed { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 };
+    let mesh = mesh_of(&bytes, kind, up, smooth)?;
     let name = name_of(&bytes, kind);
     let kept = folder.join(&name);
     if !kept.exists() {
         std::fs::create_dir_all(folder).map_err(|e| file_error(folder, e))?;
         std::fs::write(&kept, &bytes).map_err(|e| file_error(&kept, e))?;
     }
-    keep(&name, up, Arc::new(mesh));
-    Ok((name, up))
+    keep(&name, up, smooth, Arc::new(mesh));
+    Ok((name, up, reconstructed))
 }
 
-/// The mesh kept under `name`, stood with `up` upwards: the one in hand,
-/// or read from the imports folder.
-pub fn open(name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> {
-    open_from(&folder()?, name, up)
+/// The mesh kept under `name`, stood with `up` upwards and smoothed
+/// `smooth` times over: the one in hand, or read from the imports folder.
+pub fn open(name: &str, up: Up, smooth: i32) -> Result<Arc<Mesh>, MeshError> {
+    open_from(&folder()?, name, up, smooth)
 }
 
-fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> {
+fn open_from(folder: &Path, name: &str, up: Up, smooth: i32) -> Result<Arc<Mesh>, MeshError> {
     // nothing but a name of the folder's own shape is ever joined to its path
     Import::named(name)?;
-    let held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(known, way, _)| known == name && *way == up).map(|found| found.2.clone());
+    let held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(known, way, times, _)| known == name && *way == up && *times == smooth).map(|found| found.3.clone());
     if let Some(mesh) = held {
         return Ok(mesh);
     }
@@ -203,8 +287,8 @@ fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> 
     if !path.is_file() {
         return Err(MeshError::Missing { name: name.to_string() });
     }
-    let mesh = Arc::new(mesh_of(&bytes_of(&path)?, Kind::of(name)?, up)?);
-    keep(name, up, mesh.clone());
+    let mesh = Arc::new(mesh_of(&bytes_of(&path)?, Kind::of(name)?, up, smooth)?);
+    keep(name, up, smooth, mesh.clone());
     Ok(mesh)
 }
 
@@ -217,7 +301,7 @@ fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> 
 /// the mesh it has.
 pub fn attach(spec: &mut Spec) {
     if spec.form == Form::Imported && spec.import.mesh.is_none() && !spec.import.name.is_empty() {
-        spec.import.mesh = open(&spec.import.name, spec.import.up).ok();
+        spec.import.mesh = open(&spec.import.name, spec.import.up, spec.import.smooth).ok();
     }
 }
 

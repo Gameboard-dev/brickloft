@@ -2473,8 +2473,10 @@ pub struct Lay {
     pub water: Option<f64>,
     /// grass: how thickly reeds stand round the water, 0 to 1
     pub reeds: f64,
-    /// grass: how many levels its water stands at, 1 or 2 (see [`Waters`]); anything under 2 is one
+    /// grass: 2 if a hollow on raised ground holds water of its own, with streams and falls down from it (see [`Waters`]); anything under 2 and all its water stands at one level
     pub levels: u8,
+    /// grass: how readily steep ground is a cliff, 0 for never to 3 (see `grass::Ground`)
+    pub cliffs: u8,
     /// grass: what has been done to its ground, in order (see [`Sculpt`])
     pub mounds: Vec<Sculpt>,
 }
@@ -2493,6 +2495,8 @@ pub struct Sculpt {
     pub amount: f64,
     /// bring the ground to a level, where otherwise it is pushed up or down
     pub flatten: bool,
+    /// do all of it out to near the edge of its range and fall away over a narrow band there (see [`ground`]), where otherwise it eases off from its middle
+    pub sharp: bool,
 }
 
 /// The least a brush reaches: under this a push is a spike.
@@ -2519,6 +2523,15 @@ pub const LEAST_RANGE: f64 = 4.0;
 /// that is how a pond is dug (see [`grass`]). The patch then reaches as
 /// far below its own level as it was dug, and wants ground that deep
 /// under it, or to be raised by as much.
+///
+/// A touch with a sharp edge does all it does out to a band at the edge
+/// of its range, a fifth of the range wide and two cells at least, and
+/// falls away over that band on the same curve: a table with steep
+/// sides, or a pit with steep walls. It is there because the easing
+/// curve cannot make a cliff under a wide level top: its steepest slope
+/// is `pi * amount / (2 * range)`, 40 degrees only where the hill is
+/// more than half as high as its range, and 60 where it is higher than
+/// its range. Over the band the same height falls five times as steeply.
 pub fn ground(touches: &[Sculpt], p: DVec3) -> f64 {
     ground_on(0.0, touches, p)
 }
@@ -2537,7 +2550,11 @@ pub fn ground_on(height: f64, touches: &[Sculpt], p: DVec3) -> f64 {
         if d >= range {
             continue;
         }
-        if touch.flatten {
+        if touch.sharp {
+            let band = (range * 0.2).max(2.0).min(range);
+            let share = if d < range - band { 1.0 } else { 0.5 * (1.0 + (PI * (d - (range - band)) / band).cos()) };
+            height += if touch.flatten { (touch.amount - height) * share } else { touch.amount * share };
+        } else if touch.flatten {
             let share = if d < range * 0.5 { 1.0 } else { 0.5 * (1.0 + (PI * (d - range * 0.5) / (range * 0.5)).cos()) };
             height += (touch.amount - height) * share;
         } else {
@@ -2550,7 +2567,7 @@ pub fn ground_on(height: f64, touches: &[Sculpt], p: DVec3) -> f64 {
 impl Lay {
     /// Straight along x, `long` to each side of the foot.
     pub fn straight(long: f64) -> Lay {
-        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, mounds: Vec::new() }
+        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, cliffs: 0, mounds: Vec::new() }
     }
 }
 
@@ -4012,7 +4029,7 @@ mod tests {
         assert!(west(&ring) == 40 && west(&open) < 10, "{} of 40 closed, {} open", west(&ring), west(&open));
 
         // reeds stand along a line the same way
-        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, mounds: vec![] });
+        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, cliffs: 0, mounds: vec![] });
         let feet: Vec<DVec3> = bank.limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0]).collect();
         assert!(feet.iter().any(|f| f.y > 40.0 && f.x > 50.0) && feet.iter().any(|f| f.x < 20.0 && f.y.abs() < 9.0) && !feet.iter().any(|f| f.x < 40.0 && f.y > 20.0), "the reeds do not follow the bank");
     }
@@ -4146,7 +4163,7 @@ mod tests {
         assert!((top_at(&sharp, 40.5, -30.5).unwrap() - top_at(&sharp, 0.5, -30.5).unwrap()).abs() <= 4);
 
         let pond = [(-30.0, -20.0), (30.0, -25.0), (35.0, 20.0), (-20.0, 25.0)];
-        let lay = |closed: bool| Lay { run: pond.iter().map(|(x, y)| DVec3::new(*x, *y, 0.0)).collect::<Vec<_>>(), closed, sharp: true, water: None, reeds: 0.0, levels: 1, mounds: vec![] };
+        let lay = |closed: bool| Lay { run: pond.iter().map(|(x, y)| DVec3::new(*x, *y, 0.0)).collect::<Vec<_>>(), closed, sharp: true, water: None, reeds: 0.0, levels: 1, cliffs: 0, mounds: vec![] };
         let feet = |closed: bool| -> Vec<DVec3> { Model::laid(&Tree { count: 80, ..Tree::of(Kind::Reeds) }, DVec3::splat(0.5), 70.0, 8.0, &lay(closed)).limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0] - DVec3::new(0.5, 0.5, 0.0)).collect() };
         let (filled, along_it) = (feet(true), feet(false));
         let inner = |feet: &[DVec3]| feet.iter().filter(|f| f.x.abs() < 12.0 && f.y.abs() < 8.0).count();

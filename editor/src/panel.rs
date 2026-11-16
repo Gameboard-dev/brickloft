@@ -1,9 +1,11 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, IMPORTED, MAZE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, IMPORTED, MAZE, PROGRAM, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
+
+mod program;
 
 /// What a control is for, by the name it has in `help.json`.
 ///
@@ -125,6 +127,8 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut state.save_name).hint_text("name").desired_width(110.0));
         if helped(ui, help("saved_save"), |ui| ui.button("Save")).clicked() {
+            // (every brick, those of plants still waiting to be built among them)
+            state.build_owed_now();
             state.store_note = crate::store::save(&state.folder, &state.save_name, &state.painted(), &state.forms()).unwrap_or_else(|e| format!("Not saved: {e}"));
             state.list_saved();
         }
@@ -275,7 +279,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             // a tree's colours are for a tree's parts: they go when it does (and a maze's with the maze)
             // (and a bookcase's for its wood and its books)
             // (and a mesh's for the mesh)
-            if matches!(before, TREE | FURNITURE | MAZE | IMPORTED) && state.paint.mode == Mode::Pattern {
+            // (and a rule program's for its program's letters)
+            if matches!(before, TREE | FURNITURE | MAZE | IMPORTED | PROGRAM) && state.paint.mode == Mode::Pattern {
                 state.paint = crate::paint::Paint::default();
             }
             state.preset();
@@ -290,6 +295,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if let Some(problem) = &state.problem {
             ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
         }
+        // (and a rule program stopped early, whose bricks are built and stand: see `state::grow`)
+        program::caution(ui, state);
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
             ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=brickloft_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(help("sliders_go_up_to"));
@@ -305,7 +312,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // limit met. The sliders are logarithmic, since a slider that reaches
         // 1000 in even steps cannot be set to 3.
         let largest = state.max_size;
-        texture(ui, state, largest);
+        // (not for a rule program, which has no face of its own to lay a pattern on: its cells are the program's)
+        if state.form != PROGRAM {
+            texture(ui, state, largest);
+        }
         ui.separator();
         workspace(ui, state);
         ui.separator();
@@ -324,6 +334,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         if state.form == IMPORTED {
             crate::import::panel::show(ui, state, largest);
+        }
+        if state.form == PROGRAM {
+            program::show(ui, state);
         }
         let unblended = state.unblended();
         let s = &mut state.spec;
@@ -472,7 +485,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             // a tree is neither filled nor hollow, and has no wall; a maze is all wall; nor is furniture, whose boards have a thickness of their own
             // (a mesh's filling and its wall are with its other settings: see `import::panel`)
-            TREE | FURNITURE | MAZE | IMPORTED => {}
+            // (nor is a rule program, which is its grid's cells)
+            TREE | FURNITURE | MAZE | IMPORTED | PROGRAM => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -491,7 +505,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
-        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE | IMPORTED) {
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE | IMPORTED | PROGRAM) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve || state.form == CUBE {
@@ -558,7 +572,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // (not a tree, which is no one's mirror image, nor a maze, which would then have two ways through; they can still be flipped)
         // (nor furniture: a bookcase's carcass is its own mirror image already, and its books are not meant to be)
         // (nor a mesh: it is fitted from its triangles, and half of it mirrored would be another mesh)
-        if !matches!(state.form, TREE | FURNITURE | MAZE | IMPORTED) {
+        // (nor a rule program, whose bricks are its grid's and are neither mirrored nor flipped: it can still be turned)
+        if !matches!(state.form, TREE | FURNITURE | MAZE | IMPORTED | PROGRAM) {
             ui.horizontal(|ui| {
                 ui.label("Mirror").on_hover_text(help("mirror"));
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
@@ -571,6 +586,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // was already symmetric mirror images of each other. It did nothing
         // that could be seen on most forms and was not understood, and a
         // mirrored form has its bricks made mirror images in any case.)
+        if state.form != PROGRAM {
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -578,6 +594,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             hint(ui, help("flip"));
         });
+        }
 
         // (There were Add point and Remove point buttons here, for the dots a
         // form is drawn through. Alt + click and Alt + right-click on the
@@ -609,6 +626,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         ui.separator();
         let s = &mut state.spec;
+        // (a rule program's bricks are its cells at the size asked: there is no fit to make finer or coarser)
+        if state.form != PROGRAM {
         ui.label("Detail");
         let size_name = |g: i32| if g == 0 { "Automatic".to_string() } else { format!("{g} microbrick{}", if g == 1 { "" } else { "s" }) };
         helped(ui, help("brick_size"), |ui| {
@@ -627,6 +646,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             helped(ui, help("simplify"), |ui| ui.add(Slider::new(&mut s.simplify, 0.0..=1.5).text("Simplify")));
         }
         helped(ui, help("ramps_and_corners"), |ui| ui.checkbox(&mut s.wedges, "Use ramps and corner pieces"));
+        }
 
         ui.separator();
         let built = &state.built;
@@ -649,6 +669,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if let Some(problem) = &state.problem {
             ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
         }
+        program::caution(ui, state);
         // (a form slow to build is built behind the window: what is on screen is a moment old)
         if state.fitting() {
             ui.label("Fitting the change...");
@@ -1113,10 +1134,12 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         if helped(ui, help("grass_reeds"), |ui| ui.add(Slider::new(&mut reeds, 0..=10).text("Reeds round the water"))).changed() {
             s.depth = reeds + 1;
         }
-        // (two levels are kept in `tube`, which grass has no other use for: see `brickloft_core::tree::Waters`)
-        let mut levels = if s.tube { 2 } else { 1 };
-        if helped(ui, help("grass_levels"), |ui| ui.add(Slider::new(&mut levels, 1..=2).text("Pond levels"))).changed() {
-            s.tube = levels == 2;
+        // (kept in `tube`, which grass has no other use for: see `brickloft_core::grass`, `Waters`)
+        helped(ui, help("grass_levels"), |ui| ui.checkbox(&mut s.tube, "Raised ponds, with streams and waterfalls"));
+        // (and how readily steep ground is a cliff, in the number a pine keeps its baubles in)
+        let mut cliffs = s.tree.baubles.clamp(0, brickloft_core::grass::MOST_CLIFFS);
+        if helped(ui, help("grass_cliffs"), |ui| ui.add(Slider::new(&mut cliffs, 0..=brickloft_core::grass::MOST_CLIFFS).text("Cliffs"))).changed() {
+            s.tree.baubles = cliffs;
         }
         brush(ui, &mut state.brush, &mut state.touched, s, largest);
         // (see `brz::walked_through`)
@@ -1241,6 +1264,32 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         }
         hint(ui, help("tree_seed"));
     });
+    // A landscape from one press, for grass: beside the seed's Another,
+    // which goes on meaning other blades on the same ground. Each press
+    // is the next landscape, so pressing again is how to see another.
+    if kind == Kind::Grass {
+        helped(ui, help("grass_foliage"), |ui| ui.add(Slider::new(&mut state.foliage, 0..=100).suffix("%").text("Foliage density")));
+        let mut pressed = false;
+        ui.horizontal(|ui| {
+            pressed = helped(ui, help("grass_randomize"), |ui| ui.button("Randomize")).clicked();
+            if state.landscape > 0 {
+                ui.label(format!("Landscape {}", state.landscape));
+            }
+            let waiting = state.owed();
+            if waiting > 0 {
+                ui.label(format!("({waiting} plants still to build)"));
+            }
+        });
+        if pressed {
+            match state.randomize_lawn(state.landscape + 1, state.foliage) {
+                Ok(made) => {
+                    let fall = made.fall.map_or("no room for a waterfall".to_string(), |tall| format!("a waterfall {tall} high"));
+                    state.toast = Some((format!("Landscape {}: {} ponds, {fall}, {} plants", made.seed, made.ponds, made.plants.len()), None));
+                }
+                Err(why) => state.toast = Some((why, None)),
+            }
+        }
+    }
 }
 
 /// The controls of a piece of furniture: its kind, its style, its
@@ -1408,8 +1457,7 @@ fn furniture(ui: &mut Ui, state: &mut State, largest: f64) {
 /// can read and change, and a stroke would be hundreds of them. Touches
 /// with a wide range do what strokes do, one at a time.
 fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usize>, s: &mut brickloft_core::spec::Spec, largest: f64) {
-    use crate::state::{Action, FLATTENS};
-    use brickloft_core::DVec3;
+    use crate::state::{Action, Brush, SHARP};
     ui.label("Shape the ground: Alt + click on the grass touches it with this brush. Keep the button down and hold Ctrl to paint a stroke of touches as you move. The settings here are for touches still to be made. Drag a touch's orange dot up or down to change it, and Alt + right-click takes it off.");
     let named = |action: Action| match action {
         Action::Up => "Push up",
@@ -1420,8 +1468,8 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     let touch = touched.filter(|i| *i < s.pulls.len());
     if let Some(i) = touch {
         let by = s.pulls[i].1;
-        (brush.range, brush.action) = (if by.x > 0.0 { by.x } else { brush.range }, if by.y != 0.0 { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up });
-        if by.y == 0.0 {
+        (brush.range, brush.action, brush.sharp) = (if by.x > 0.0 { by.x } else { brush.range }, if Brush::flattens(by) { Action::Flatten } else if by.z < 0.0 { Action::Down } else { Action::Up }, by.y >= SHARP);
+        if !Brush::flattens(by) {
             brush.amount = by.z.abs();
         }
     }
@@ -1441,15 +1489,15 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     } else if brush.action != Action::Flatten {
         helped(ui, help("grass_intensity"), |ui| ui.add(Slider::new(&mut brush.amount, 0.5..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Intensity")));
     }
+    // (A sharp edge is what makes a cliff under a level top: the easing
+    // brush is steepest half way out, `pi * intensity / (2 * range)`, which
+    // passes 45 degrees only where the intensity is two thirds of the range.)
+    helped(ui, help("grass_sharp"), |ui| ui.checkbox(&mut brush.sharp, "Sharp edge (a table or a pit with steep sides)"));
     if let Some(i) = touch {
         let was_level = s.pulls[i].1.z;
         if *brush != was || level != was_level {
             // (made a flattening touch, it flattens to the height it had pushed to)
-            s.pulls[i].1 = match brush.action {
-                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
-                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
-                Action::Flatten => DVec3::new(brush.range, FLATTENS, level.max(0.0)),
-            };
+            s.pulls[i].1 = brush.touch(level.max(0.0));
         }
         ui.horizontal(|ui| {
             ui.label(format!("Changing touch {} of {}.", i + 1, s.pulls.len()));
@@ -1678,14 +1726,52 @@ mod tests {
         }
     }
 
+    #[test]
+    #[allow(deprecated)]
+    fn the_panel_draws_every_rule_program_at_rest_and_running_without_panicking() {
+        // as above, for each program on the list: shown finished, then at its first turn with a run asked for, then for a program that is not there
+        for entry in &brickloft_core::rewrite::form::BUNDLED {
+            let mut state = State::new();
+            state.grow.watch = false;
+            state.form = PROGRAM;
+            state.preset();
+            state.usual_program(entry.name, false);
+            let context = egui::Context::default();
+            for frame in 0..6 {
+                if frame == 3 {
+                    state.grow_restart();
+                }
+                if frame == 5 {
+                    state.spec.program = brickloft_core::rewrite::form::Program::of("Not here", true);
+                }
+                state.grow_frame(frame as f64 * 16.0);
+                state.refresh(|| 0.0);
+                let _ = context.run(egui::RawInput::default(), |context| {
+                    egui::SidePanel::left("panel").show(context, |ui| {
+                        show(ui, &mut state);
+                    });
+                });
+                let _ = state.painted();
+                if frame == 2 {
+                    // every colour number its bricks have is one of its colours: a colour to a letter
+                    assert!(state.problem.is_none() && !state.built.bricks.is_empty(), "{}: {:?}", entry.name, state.problem);
+                    assert!(state.built.shades.iter().all(|shade| (*shade as usize) < state.paint.colours.len()), "{}", entry.name);
+                }
+            }
+            assert!(state.problem.as_deref().is_some_and(|why| why.contains("\"Not here\"")), "{}: {:?}", entry.name, state.problem);
+        }
+        // a form has as many colours as a program may have letters with a colour of their own
+        assert_eq!(crate::paint::MOST_COLOURS, brickloft_core::rewrite::form::MOST_COLOURS);
+    }
+
     use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn every_explanation_asked_for_is_written_and_every_one_written_is_used() {
         let written: BTreeMap<String, String> = serde_json::from_str(include_str!("help.json")).expect("help.json is not a list of names and sentences");
         // the names this file asks for: whatever follows `help("`, up to the next quote
-        // (in this file and in the one that lays out a mesh's settings, which uses the same explanations)
-        let asked: BTreeSet<&str> = concat!(include_str!("panel.rs"), include_str!("import/panel.rs")).split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
+        // (in this file and in the ones that lay out a mesh's settings and a rule program's, which use the same explanations)
+        let asked: BTreeSet<&str> = concat!(include_str!("panel.rs"), include_str!("import/panel.rs"), include_str!("panel/program.rs")).split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
         assert!(asked.len() > 50, "only {} names were found: the search for them is broken", asked.len());
         for name in &asked {
             assert!(written.get(*name).is_some_and(|text| !text.trim().is_empty()), "help.json has no explanation named {name}");

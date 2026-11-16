@@ -84,10 +84,11 @@ pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
             .collect();
         // (as many as a paint may have: four was the most until a pattern could have eight, and a form in a pattern's eight colours could then be copied and not pasted)
         let colours = colours.filter(|c| c.len() <= crate::paint::MOST_COLOURS).ok_or("a form's colours cannot be read")?;
-        let paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
+        let mut paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
         let mut spec = parse_spec(spec)?;
         // (a form of a mesh says only the mesh's name: the mesh is found in the imports folder, if it is there)
         crate::import::attach(&mut spec);
+        crate::paint::with_cliffs(&spec, &mut paint);
         forms.push((spec, paint, place));
     }
     Ok(forms)
@@ -388,6 +389,28 @@ mod tests {
         assert_eq!(unpack(&bytes, cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
         // and as the text a browser keeps
         assert_eq!(unpack(describe(&forms).as_bytes(), false).unwrap(), forms);
+    }
+
+    #[test]
+    fn a_lawn_saved_before_it_had_cliffs_opens_with_colours_for_them() {
+        let mut state = crate::state::State::new();
+        state.form = crate::state::TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        let sets = crate::paint::palettes("grass");
+        assert!(sets.iter().all(|set| set.len() == 14) && state.paint.colours == sets[0]);
+        // as it was saved: the eight colours of the Winter set, and of the user's own
+        let own: Vec<[u8; 3]> = (0..8).map(|n| [n * 30, 10, 200]).collect();
+        for (eight, wanted) in [(sets[4][..8].to_vec(), sets[4].to_vec()), (own.clone(), [&own[..], &sets[0][8..]].concat())] {
+            state.paint.colours = eight;
+            let opened = unpack(describe(&state.forms()).as_bytes(), false).unwrap();
+            assert_eq!(opened[0].1.colours, wanted);
+        }
+        // a lawn in fourteen opens as it is, and no other form is given colours it did not have
+        state.paint.colours = sets[2].to_vec();
+        assert_eq!(unpack(describe(&state.forms()).as_bytes(), false).unwrap()[0].1.colours, sets[2]);
+        state.usual_tree(brickloft_core::tree::Kind::Tulip);
+        assert_eq!(unpack(describe(&state.forms()).as_bytes(), false).unwrap()[0].1.colours.len(), 8);
     }
 
     #[test]

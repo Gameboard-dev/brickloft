@@ -652,7 +652,32 @@ fn workspace(state: &State) -> Value {
         .enumerate()
         .map(|(index, ((spec, paint, place), built))| {
             let settings: Map<String, Value> = spec_text(spec).lines().filter_map(|line| line.split_once(" = ").or_else(|| line.split_once(" ="))).map(|(k, v)| (k.to_string(), Value::String(v.trim().to_string()))).collect();
-            let problem = if index == 0 { state.problem.clone() } else if built.bricks.is_empty() { crate::import::built(spec).err() } else { None };
+            // (a rule program not yet run is being run behind the window, and is not run here to learn whether it can be: see `state::grow`)
+            let program = (spec.form == brickloft_core::spec::Form::Program).then(|| brickloft_core::rewrite::form::known(&spec.program));
+            let problem = if index == 0 {
+                state.problem.clone()
+            } else if matches!(program, Some(None)) && cfg!(not(target_arch = "wasm32")) {
+                Some("its program is still being run: ask again in a moment".to_string())
+            } else if built.bricks.is_empty() {
+                crate::import::built(spec).err()
+            } else {
+                None
+            };
+            // how far a rule program has run, and what there is to say of the run
+            let run = program.map(|known| match known {
+                Some(Ok(outcome)) => json!({
+                    "turn": outcome.turns,
+                    "more_turns_to_take": outcome.running,
+                    "playing": index == 0 && state.growing(),
+                    "next_node": outcome.doing.map(|(node, line)| format!("{node}, line {line}")),
+                    "grid_cells": outcome.size,
+                    "seed_shown": outcome.seed,
+                    // (a run that passed over seeds itself says which; one that was watched had them written into its form as it went, and the editor kept the note)
+                    "seeds_passed_over": if !outcome.passed.is_empty() { Some(crate::state::grow::passed_over(&outcome.passed, outcome.seed)) } else if index == 0 { state.grow_note().map(str::to_string) } else { None },
+                    "stopped_early": outcome.early.as_ref().map(|early| early.to_string()),
+                }),
+                _ => json!({ "playing": index == 0 && state.growing(), "turn": Value::Null }),
+            });
             json!({
                 "index": index,
                 "being_edited": index == 0,
@@ -672,6 +697,7 @@ fn workspace(state: &State) -> Value {
                 "bricks": built.bricks.len(),
                 "discrepancy_percent": if built.solid > 0.0 { Value::from((10000.0 * built.error / built.solid).round() / 100.0) } else { Value::Null },
                 "not_built_because": problem,
+                "program_run": run,
             })
         })
         .collect();
@@ -770,6 +796,14 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.scene += 1;
             return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap }).to_string());
         }
+        // The rule programs a `program` form may name: those that come
+        // with the editor, and those the player has brought in. Names
+        // and nothing else of the folder: a program is run by its name.
+        "list_programs" => {
+            let bundled: Vec<Value> = brickloft_core::rewrite::form::BUNDLED.iter().map(|entry| json!({ "name": entry.name, "makes": entry.about, "usual_grid": entry.size })).collect();
+            let imported: Vec<Value> = crate::programs::imported().into_iter().map(|name| json!({ "name": format!("imported:{name}"), "usual_grid": crate::programs::usual_size(&name) })).collect();
+            return Ok(json!({ "come_with_the_editor": bundled, "imported": imported }).to_string());
+        }
         "list_meshes" => {
             let meshes: Vec<Value> = crate::import::listed().into_iter().map(|(name, bytes)| json!({ "name": name, "bytes": bytes })).collect();
             return Ok(json!({ "meshes": meshes }).to_string());
@@ -854,6 +888,11 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.fill = true;
                 }
             }
+            let program = spec.form == brickloft_core::spec::Form::Program;
+            if program && spec.program.imported && settings.get("program").and_then(Value::as_str).is_some_and(|given| !given.contains(',')) {
+                // (and a program brought in from outside, named and no more, is the size it was brought in at)
+                spec.program.size = crate::programs::usual_size(&spec.program.name).unwrap_or(spec.program.size);
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
                 let form = crate::state::form_index(spec.form);
@@ -881,6 +920,9 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 state.paint = Paint { mode: Mode::Pattern, colours, ..Paint::default() };
             } else if let Some(style) = own {
                 state.paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(style).to_vec(), ..Paint::default() };
+            } else if program {
+                // (a rule program comes in its program's own colours, a colour to a letter)
+                state.program_colours();
             }
             if let Some(place) = place {
                 state.place = place;
@@ -893,6 +935,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let was_hedge = spec.hedged();
             let walls_were = crate::paint::maze_texture(spec);
             let mesh_was = (spec.import.name.clone(), spec.import.colours);
+            let program_was = (spec.program.name.clone(), spec.program.imported);
             *spec = changed(spec, settings)?;
             crate::import::built(spec)?;
             let maze = spec.form == brickloft_core::spec::Form::Maze;
@@ -913,6 +956,11 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             } else if spec.form == brickloft_core::spec::Form::Furniture && was != spec.form {
                 // (and one made into furniture in the furniture's: its wood, and its books')
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(spec.furniture.colours()).to_vec(), ..Paint::default() };
+            } else if spec.form == brickloft_core::spec::Form::Program && (was != spec.form || program_was != (spec.program.name.clone(), spec.program.imported)) {
+                // (and one made into a rule program, or given another program, in that program's own)
+                if let Ok(colours) = brickloft_core::rewrite::form::colours(&spec.program) {
+                    *paint = Paint { mode: Mode::Pattern, colours: colours.into_iter().map(|(_, colour)| colour).collect(), ..Paint::default() };
+                }
             }
             if let Some(to) = arguments.get("place") {
                 *place = placed(to)?;
@@ -979,6 +1027,28 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 return Err("an arch that has been given quarter turns cannot be lined up; set `turned` back to 16 first".into());
             }
         }
+        // The run of the rule program being edited, as the panel's Play,
+        // Pause, Step, Restart and To the end set it going. The turns are
+        // taken by the frames that follow (see `state::grow`), so the
+        // answer says where the run stands now and `get_workspace` says
+        // where it has got to since.
+        "run_program" => {
+            if state.form != crate::state::PROGRAM {
+                return Err("the form being edited is not a rule program: add one, or select one, first".into());
+            }
+            if let Some(speed) = arguments.get("turns_a_second") {
+                let speed = speed.as_f64().filter(|speed| speed.is_finite()).ok_or("turns_a_second is a number")?;
+                state.grow.speed = speed.clamp(crate::state::grow::SPEEDS.0, crate::state::grow::SPEEDS.1);
+            }
+            match arguments.get("action").and_then(Value::as_str) {
+                Some("play") => state.grow_play(),
+                Some("pause") => state.grow_pause(),
+                Some("step") => state.grow_step(),
+                Some("restart") => state.grow_restart(),
+                Some("finish") => state.grow_finish(),
+                _ => return Err("action is play, pause, step, restart or finish".into()),
+            }
+        }
         "remove_form" => {
             let at = index(&forms)?;
             if forms.len() == 1 {
@@ -993,10 +1063,39 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 state.activate(at - 1);
             }
         }
+        "randomize_lawn" => {
+            let at = index(&forms)?;
+            if !(forms[at].0.form == brickloft_core::spec::Form::Tree && forms[at].0.tree.kind == brickloft_core::tree::Kind::Grass) {
+                return Err("that form is not a patch of grass: Randomize makes a landscape of a lawn".into());
+            }
+            let seed = match arguments.get("seed") {
+                None | Some(Value::Null) => state.landscape + 1,
+                Some(given) => given.as_u64().ok_or("seed is a whole number, not negative")?,
+            };
+            let density = match arguments.get("foliage") {
+                None | Some(Value::Null) => state.foliage as i64,
+                Some(given) => given.as_i64().filter(|d| (0..=100).contains(d)).ok_or("foliage is a whole number from 0, for no plants, to 100")?,
+            };
+            if at > 0 {
+                state.activate(at - 1);
+            }
+            let made = state.randomize_lawn(seed, density as i32)?;
+            // (every plant is built before the workspace is told: Claude is given brick counts and boxes, which a plant still waiting has none of)
+            state.build_owed_now();
+            state.scene += 1;
+            state.refresh(now_ms);
+            let names = brickloft_core::tree::KINDS;
+            let plants: Vec<Value> = made.plants.iter().map(|(kind, place, height, spread)| json!({ "kind": names[*kind as usize].1, "place": place.map(|u| u as f64 / 2.0), "height": height, "spread": spread })).collect();
+            let mut told = workspace(state);
+            told["landscape"] = json!({ "seed": made.seed, "touches": made.touches, "ponds": made.ponds, "waterfall_height": made.fall, "tries": made.tries, "plants": plants, "plants_replaced": made.replaced });
+            return Ok(told.to_string());
+        }
         other => return Err(format!("Unknown tool: {other}")),
     }
     state.scene += 1;
     state.refresh(now_ms);
+    // (a landscape opened or put back has plants waiting to be built: all of them now, since Claude is told the bricks)
+    state.build_owed_now();
     // A form just added, or just chosen to be edited, is brought to the
     // middle of the view: the camera flies to face it from where it now
     // looks, far enough off to take it all in. A form is set down beside
@@ -1045,7 +1144,30 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 18);
+        assert_eq!(tool_names().len(), 21);
+    }
+
+    #[test]
+    fn a_lawn_is_made_a_landscape_and_what_was_made_is_told() {
+        let mut state = State::new();
+        let corners = json!([[-89.5, -59.5, 0.5], [90.5, -59.5, 0.5], [90.5, 60.5, 0.5], [-89.5, 60.5, 0.5]]);
+        apply(&mut state, "add_form", &json!({ "settings": { "form": "tree", "tree": "grass", "points": corners, "closed": true, "protrude": true, "radius": 4 } }), || 0.0).unwrap();
+        let said: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0, "seed": 7, "foliage": 40 }), || 0.0).unwrap()).unwrap();
+        let made = &said["landscape"];
+        let plants = made["plants"].as_array().unwrap();
+        assert!(made["seed"] == 7 && made["waterfall_height"].as_i64().is_some_and(|tall| tall >= 6) && made["ponds"].as_u64().is_some_and(|ponds| ponds >= 2) && plants.len() >= 4, "{made}");
+        assert!(plants.iter().all(|plant| plant["kind"].is_string() && plant["place"].as_array().is_some_and(|at| at.len() == 3) && plant["height"].as_f64().is_some_and(|tall| tall >= 9.0)));
+        // every plant is in the workspace told, built: the lawn first, then a form for each
+        let forms = said["forms"].as_array().unwrap();
+        let built = forms.iter().filter(|form| form["settings"]["tree"].as_str().is_some_and(|tree| !tree.starts_with("grass")) && form["bricks"].as_u64().is_some_and(|bricks| bricks > 50)).count();
+        assert!(forms[0]["settings"]["tube"] == "true" && built == plants.len(), "{built} forms with bricks for {} plants", plants.len());
+        // the same seed again: the same landscape, its plants in place of the last ones and no more forms than before
+        let again: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0, "seed": 7, "foliage": 40 }), || 0.0).unwrap()).unwrap();
+        assert!(again["landscape"]["plants"] == made["plants"] && again["landscape"]["plants_replaced"] == plants.len() && again["forms"].as_array().unwrap().len() == forms.len());
+        // with no seed, the next one; and not for a form that is no lawn
+        let next: Value = serde_json::from_str(&apply(&mut state, "randomize_lawn", &json!({ "index": 0 }), || 0.0).unwrap()).unwrap();
+        assert!(next["landscape"]["seed"] == 8);
+        assert!(apply(&mut state, "randomize_lawn", &json!({ "index": 1 }), || 0.0).is_err() && apply(&mut state, "randomize_lawn", &json!({ "index": 0, "foliage": 500 }), || 0.0).is_err());
     }
 
     #[test]
@@ -1667,5 +1789,69 @@ mod tests {
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "sofa,3,2,0,11,34,3,1,1,85,modern,999,-4,77" } }), || 0.0).unwrap();
         let f = state.forms()[0].0.furniture;
         assert_eq!((f.count, f.choice, f.second), (12, 0, 12));
+    }
+
+    #[test]
+    fn a_rule_program_is_added_played_and_paused_and_a_path_is_never_a_program() {
+        use brickloft_core::rewrite::form;
+        let said = |answer: String| -> Value { serde_json::from_str(&answer).unwrap() };
+        // the frames the window would take, until the run has no more to give
+        let frames = |state: &mut State, until: &dyn Fn(&State) -> bool| {
+            let mut clock = 0.0;
+            for _ in 0..60_000 {
+                clock += 16.0;
+                state.grow_frame(clock);
+                state.refresh(|| 0.0);
+                if until(state) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            panic!("the run did not get there: {:?}", state.spec.program);
+        };
+        let mut state = State::new();
+        // added at turn 0: at once, nothing built yet, in the program's own colours
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "program", "program": "Escher,5,5,5,3,7,plain,50000,0" } }), || 0.0).unwrap());
+        let form = &added["forms"][0];
+        assert_eq!((form["settings"]["form"].as_str(), form["settings"]["program"].as_str(), form["bricks"].as_u64()), (Some("program"), Some("Escher,5,5,5,3,7,plain,50000,0"), Some(0)));
+        assert_eq!((form["program_run"]["turn"].as_u64(), form["program_run"]["more_turns_to_take"].as_bool(), form["program_run"]["playing"].as_bool()), (Some(0), Some(true), Some(false)));
+        assert_eq!((state.paint.mode, state.paint.colours.len()), (Mode::Pattern, form::colours(&state.spec.program).unwrap().len()));
+        // a step is a turn; played, it ends, and the form then says so in its own settings
+        let stepping = said(apply(&mut state, "run_program", &json!({ "action": "step" }), || 0.0).unwrap());
+        assert_eq!(stepping["forms"][0]["program_run"]["playing"], true);
+        frames(&mut state, &|state| !state.growing());
+        assert_eq!(state.spec.program.stop, Some(1));
+        apply(&mut state, "run_program", &json!({ "action": "play", "turns_a_second": 1e9 }), || 0.0).unwrap();
+        assert_eq!(state.grow.speed, crate::state::grow::SPEEDS.1);
+        frames(&mut state, &|state| !state.growing() && state.spec.program.stop.is_none());
+        let ended = said(apply(&mut state, "get_workspace", &json!({}), || 0.0).unwrap());
+        let form = &ended["forms"][0];
+        assert_eq!((form["settings"]["program"].as_str(), form["program_run"]["more_turns_to_take"].as_bool(), form["program_run"]["playing"].as_bool()), (Some("Escher,5,5,5,3,7,plain,50000,end"), Some(false), Some(false)));
+        assert!(form["bricks"].as_u64().unwrap() > 20 && form["program_run"]["turn"].as_u64().unwrap() > 5 && form["not_built_because"].is_null());
+        // another seed asked for through its settings is run to its end before the call answers; and another program comes in its own colours
+        let other = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "program": "Escher,5,5,5,3,8" } }), || 0.0).unwrap());
+        assert!(other["forms"][0]["bricks"].as_u64().unwrap() > 20 && other["forms"][0]["program_run"]["more_turns_to_take"] == false);
+        let escher = state.paint.colours.clone();
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "program": "Apartemazements,4,4,4" } }), || 0.0).unwrap();
+        assert!(state.paint.colours != escher && state.paint.colours.len() == form::colours(&state.spec.program).unwrap().len());
+        // a run stopped at its limit is built, and says so
+        let limited = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "program": "Apartemazements,6,6,6,4,1,wedges,12" } }), || 0.0).unwrap());
+        assert!(limited["forms"][0]["bricks"].as_u64().unwrap() > 0 && limited["forms"][0]["program_run"]["stopped_early"].as_str().unwrap().contains("12 steps"));
+        // what is no program's name is refused, a path most of all, and the workspace is as it was
+        let before = state.forms();
+        for bad in ["C:/Users/someone/evil.xml", "C:\\Users\\someone\\evil.xml", "../../secrets", "imported:../x", "imported:/etc/passwd", "Nonesuch", "imported:Never brought in", "Hills", "Escher,5,5,5,3,1,gilded", "Escher,5,5,5,3,1,plain,5,end,more"] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "program": bad } }), || 0.0).is_err(), "{bad} was taken");
+            assert!(apply(&mut state, "add_form", &json!({ "settings": { "form": "program", "program": bad } }), || 0.0).is_err(), "{bad} was added");
+            assert_eq!(state.forms(), before, "{bad} changed the workspace");
+        }
+        // there is no tool that takes a file to bring in; the one that lists programs gives names, the seven that come with the editor among them
+        assert!(tool_names().iter().all(|name| !name.contains("import")));
+        let listed = said(apply(&mut state, "list_programs", &json!({}), || 0.0).unwrap());
+        assert_eq!(listed["come_with_the_editor"].as_array().unwrap().iter().map(|entry| entry["name"].as_str().unwrap()).collect::<Vec<_>>(), form::BUNDLED.map(|entry| entry.name));
+        assert!(listed["imported"].as_array().unwrap().iter().all(|entry| entry["name"].as_str().unwrap().starts_with("imported:")));
+        // and a run is of a rule program, by a name the tool knows
+        assert!(apply(&mut state, "run_program", &json!({ "action": "rewind" }), || 0.0).unwrap_err().contains("play, pause, step, restart or finish"));
+        apply(&mut state, "add_form", &json!({ "settings": { "form": "cube" } }), || 0.0).unwrap();
+        assert!(apply(&mut state, "run_program", &json!({ "action": "play" }), || 0.0).unwrap_err().contains("not a rule program"));
     }
 }

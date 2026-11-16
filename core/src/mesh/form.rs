@@ -75,6 +75,16 @@ pub const FITTERS: [(Fitter, &str); 2] = [(Fitter::Smoothed, "smoothed"), (Fitte
 /// (the editor's `paint::MOST_COLOURS`).
 pub const MOST_LOOSE: i32 = 200;
 pub const MOST_COLOURS: i32 = 32;
+/// The most times over a mesh's surface may be smoothed, and how many a
+/// mesh that looks made by a network starts with (the editor's
+/// `import::looks_reconstructed`). None: on a cottage such a network made,
+/// 60 long, 20 times over took 8,095 bricks to 7,879 and the steps from
+/// 0.160 to 0.151 a cell, for a discrepancy of 2.39% in place of 2.31%,
+/// and 400 times over did no better (docs/algorithm.md, section 7.13).
+/// The roughness of such a mesh's bricks is not its bumps. The setting is
+/// there for a mesh whose bumps are worse.
+pub const MOST_SMOOTH: i32 = 60;
+pub const USUAL_SMOOTH: i32 = 0;
 /// How many colours a mesh starts with. Chosen by looking at the figure
 /// of `made::figure` built at 4, 8, 12, 16 and 32 (the pictures are in
 /// docs/images/mesh). At 4 its skin and the grass under it are one colour
@@ -109,11 +119,15 @@ pub struct Import {
     /// How many colours the mesh's own are reduced to. 0 for none: the
     /// form is then coloured as any other is.
     pub colours: i32,
+    /// How many times over the mesh's surface is smoothed before it is
+    /// fitted (see `mesh::smooth`). 0 fits it as the file has it. Like
+    /// `up`, it is done by whoever makes the mesh from its file.
+    pub smooth: i32,
 }
 
 impl PartialEq for Import {
     fn eq(&self, other: &Import) -> bool {
-        (&self.name, self.up, self.fitter, self.loose, self.colours) == (&other.name, other.up, other.fitter, other.loose, other.colours)
+        (&self.name, self.up, self.fitter, self.loose, self.colours, self.smooth) == (&other.name, other.up, other.fitter, other.loose, other.colours, other.smooth)
     }
 }
 
@@ -133,16 +147,17 @@ impl Import {
 
     /// The same, with every number brought within what it may be.
     pub fn clamped(self) -> Import {
-        Import { loose: self.loose.clamp(0, MOST_LOOSE), colours: self.colours.clamp(0, MOST_COLOURS), ..self }
+        Import { loose: self.loose.clamp(0, MOST_LOOSE), colours: self.colours.clamp(0, MOST_COLOURS), smooth: self.smooth.clamp(0, MOST_SMOOTH), ..self }
     }
 
     /// As a save has it: the name (or `none`), which way is up, the
     /// fitter, the size under which loose pieces are dropped, and how many
-    /// colours.
+    /// colours, and how many times over it is smoothed (a save from before
+    /// that could be set has no sixth value, and is not smoothed).
     pub fn text(&self) -> String {
         let word = |words: &[(u8, &'static str)], which: u8| words.iter().find(|w| w.0 == which).map_or("", |w| w.1);
         let (ups, fitters) = (UPS.map(|(up, name)| (up as u8, name)), FITTERS.map(|(fitter, name)| (fitter as u8, name)));
-        format!("{},{},{},{},{}", if self.name.is_empty() { "none" } else { &self.name }, word(&ups, self.up as u8), word(&fitters, self.fitter as u8), self.loose, self.colours)
+        format!("{},{},{},{},{},{}", if self.name.is_empty() { "none" } else { &self.name }, word(&ups, self.up as u8), word(&fitters, self.fitter as u8), self.loose, self.colours, self.smooth)
     }
 
     /// The reverse of [`Import::text`]: the name, and then as many of the
@@ -150,8 +165,8 @@ impl Import {
     pub fn read(text: &str) -> Result<Import, MeshError> {
         let bad = |why: &str| MeshError::Malformed { kind: "import setting", why: why.to_string() };
         let parts: Vec<&str> = text.split(',').map(str::trim).collect();
-        if parts.len() > 5 {
-            return Err(bad("expected `name,up,fitter,loose,colours`, or the first few of them"));
+        if parts.len() > 6 {
+            return Err(bad("expected `name,up,fitter,loose,colours,smooth`, or the first few of them"));
         }
         let mut import = Import { colours: USUAL_COLOURS, ..Import::default() };
         if parts[0] != "none" {
@@ -172,6 +187,9 @@ impl Import {
         }
         if let Some(colours) = parts.get(4) {
             import.colours = whole(colours)?;
+        }
+        if let Some(smooth) = parts.get(5) {
+            import.smooth = whole(smooth)?;
         }
         Ok(import.clamped())
     }
@@ -258,6 +276,51 @@ impl Stood {
         super::trial::measure(&|p| self.distance(p + low), self.stand().cells().map(|v| v as usize), &local, threads)
     }
 
+    /// The share of the mesh's surface that a build of it leaves bare:
+    /// with no brick in the cell a point of the surface is in, nor in any
+    /// of the 26 round that cell. Four points to a triangle, each standing
+    /// for a quarter of its area.
+    ///
+    /// The volume where bricks and mesh disagree says little about a thin
+    /// part: a sheet half a cell thick is a small volume whether it is
+    /// built or missing. This says whether it is there.
+    pub fn bare(&self, laid: &Laid) -> f64 {
+        let stand = self.stand();
+        let n = stand.cells().map(|v| v as usize);
+        let mut held = vec![0u64; (n[0] * n[1] * n[2]).div_ceil(64)];
+        for b in &laid.bricks {
+            for i in 0..(b.ext[0] * b.ext[1] * b.ext[2]) as usize {
+                let (ex, ey) = (b.ext[0] as usize, b.ext[1] as usize);
+                let at = [(b.min[0] - self.low[0]) as usize + i % ex, (b.min[1] - self.low[1]) as usize + i / ex % ey, (b.min[2] - self.low[2]) as usize + i / (ex * ey)];
+                let cell = at[0] + n[0] * (at[1] + n[1] * at[2]);
+                held[cell / 64] |= 1 << (cell % 64);
+            }
+        }
+        let near = |p: DVec3| {
+            let at = p.floor().to_array().map(|v| v as i64);
+            (0..27).any(|round| {
+                let to = [at[0] + round % 3 - 1, at[1] + round / 3 % 3 - 1, at[2] + round / 9 - 1];
+                (0..3).all(|k| to[k] >= 0 && to[k] < n[k] as i64) && {
+                    let cell = to[0] as usize + n[0] * (to[1] as usize + n[1] * to[2] as usize);
+                    held[cell / 64] >> (cell % 64) & 1 == 1
+                }
+            })
+        };
+        let (mut all, mut bare) = (0.0, 0.0);
+        for tri in 0..self.mesh.triangles() {
+            let ([a, b, c], _) = self.mesh.triangle(tri);
+            let area = (b - a).cross(c - a).length();
+            for share in [[1.0, 1.0, 1.0], [4.0, 1.0, 1.0], [1.0, 4.0, 1.0], [1.0, 1.0, 4.0]] {
+                let p = (a * share[0] + b * share[1] + c * share[2]) / (share[0] + share[1] + share[2]);
+                all += area;
+                if !near(stand.from_mesh(p)) {
+                    bare += area;
+                }
+            }
+        }
+        bare / all.max(1e-300)
+    }
+
     /// The colours its bricks are numbered by (see [`Laid::shades`]).
     pub fn palette(&self) -> Vec<[u8; 3]> {
         self.mesh.palette(self.colours)
@@ -272,7 +335,7 @@ impl Stood {
         let max_ext = max_ext.max(1) as usize;
         let smooth = wedges && self.fitter == Fitter::Smoothed;
         let found = scan(&stand, n, smooth, threads);
-        let (mut shape, mut sampled, mut facing, mut nearest, mut stages) = (found.shape, found.sampled, found.facing, found.nearest, found.stages);
+        let (mut shape, mut sampled, mut facing, mut nearest, kept, mut stages) = (found.shape, found.sampled, found.facing, found.nearest, found.kept, found.stages);
         let (mut solid, mut error) = (found.solid as i64, found.error as i64);
         let mut lap = super::trial::clock();
         if smooth {
@@ -289,7 +352,19 @@ impl Stood {
             crossed[cell / 64] |= 1 << (cell % 64);
         }
         if self.loose > 0 {
-            let gone = loose(&shape, &crossed, n, self.loose as usize);
+            let part = |i: usize| shape[i] != 0 || crossed[i / 64] >> (i % 64) & 1 == 1;
+            let mut gone = loose(&part, n, self.loose as usize, None);
+            // And the pieces that hang on the rest by a neck (see `necked`): what is left once the loose pieces are out,
+            // less its outermost layer of cells, falls into the body and whatever the necks held.
+            let mut left = vec![0u64; shape.len().div_ceil(64)];
+            for i in (0..shape.len()).filter(|i| part(*i)) {
+                left[i / 64] |= 1 << (i % 64);
+            }
+            for &(first, last) in &gone {
+                (first..last).for_each(|i| left[i / 64] &= !(1 << (i % 64)));
+            }
+            gone.extend(necked(&left, n, self.loose as usize));
+            gone.sort_unstable();
             if !gone.is_empty() {
                 // what was dropped is no part of the form any more: neither its volume nor what was wrong with it
                 let mut keep = vec![true; sampled.len()];
@@ -321,7 +396,7 @@ impl Stood {
         let mut bricks = Vec::new();
         if smooth {
             let surface = |k: usize, _: DVec3| facing[k];
-            let (stretched, saved, sought, laid) = guided(&surface, &mut shape, &sampled, n, max_ext, (price.max(0.0) * per_cell as f64).round().min(1e6) as u32, threads);
+            let (stretched, saved, sought, laid) = guided(&surface, &mut shape, &sampled, n, max_ext, (price.max(0.0) * per_cell as f64).round().min(1e6) as u32, &kept, threads);
             error -= saved;
             bricks = stretched;
             stages.push(("stretched pieces found", sought));
@@ -377,8 +452,13 @@ const ANY: u8 = 255;
 /// are often several shells each, and a scrap that touches the body by one
 /// triangle is one mesh with it; what the eye sees as a floating piece is
 /// bricks that touch no others.
-fn loose(shape: &[u8], crossed: &[u64], n: [usize; 3], under: usize) -> Vec<(usize, usize)> {
-    let part = |i: usize| shape[i] != 0 || crossed[i / 64] >> (i % 64) & 1 == 1;
+///
+/// `part` says which cells are occupied. With `cores` given, the pieces are
+/// what is left of pieces with a layer taken off them (see [`necked`]):
+/// the piece of the most cells is then never among those returned, nor is
+/// one of fewer cells than the first number, and each is judged as longer
+/// than it is by the second, which is the layer put back.
+fn loose(part: &dyn Fn(usize) -> bool, n: [usize; 3], under: usize, cores: Option<(u64, u32)>) -> Vec<(usize, usize)> {
     // every run: its row, and where it begins and ends along x
     let mut runs: Vec<(u32, u32, u32)> = Vec::new();
     let mut first_of_row = Vec::with_capacity(n[1] * n[2] + 1);
@@ -428,13 +508,75 @@ fn loose(shape: &[u8], crossed: &[u64], n: [usize; 3], under: usize) -> Vec<(usi
         let (lo, hi) = ([from, row % n[1] as u32, row / n[1] as u32], [to, row % n[1] as u32 + 1, row / n[1] as u32 + 1]);
         boxes[r] = ([0, 1, 2].map(|k| boxes[r].0[k].min(lo[k])), [0, 1, 2].map(|k| boxes[r].1[k].max(hi[k])));
     }
+    // (how many cells each piece is, for the one that is spared)
+    let mut cells = vec![0u64; runs.len()];
+    for i in 0..runs.len() {
+        cells[parent[i] as usize] += (runs[i].2 - runs[i].1) as u64;
+    }
+    let largest = (0..runs.len()).max_by_key(|i| (cells[*i], std::cmp::Reverse(*i))).filter(|_| cores.is_some());
+    let (least, more) = cores.unwrap_or((0, 0));
     (0..runs.len())
         .filter(|i| {
-            let (lo, hi) = boxes[parent[*i] as usize];
-            (0..3).map(|k| hi[k] - lo[k]).max().unwrap_or(0) < under as u32
+            let piece = parent[*i] as usize;
+            let (lo, hi) = boxes[piece];
+            let sides = [0, 1, 2].map(|k| hi[k] - lo[k]);
+            // (a piece with its layer off is a lump only if it is still two cells through every way: see `necked`)
+            Some(piece) != largest && cells[piece] >= least && (cores.is_none() || sides.iter().all(|side| *side >= 2)) && sides.iter().max().unwrap_or(&0) + more < under as u32
         })
         .map(|i| (runs[i].0 as usize * n[0] + runs[i].1 as usize, runs[i].0 as usize * n[0] + runs[i].2 as usize))
         .collect()
+}
+
+/// The cells, as runs along x, of the pieces smaller than `under` that are
+/// joined to the rest of the build only by a neck two cells through or
+/// less. `left` has a bit for each occupied cell.
+///
+/// A model made from one picture has scraps of ground and stray lumps
+/// that are not loose: each hangs on the model by a thread. With the
+/// outermost layer of cells taken off everything, a neck of two cells or
+/// fewer is gone, and what it joined falls apart into the body, which is
+/// the piece of the most cells, and the rest. Each of the rest that is
+/// smaller than `under` is dropped, with the layer that was taken off it
+/// (the cells within two steps of it that are in no piece themselves).
+/// A part that is thin all along, a chair's leg or a sheet, is no piece
+/// by this rule: with its outer layer off there is nothing left of it to
+/// be one, and it stays with whatever it is joined to.
+///
+/// This is opening, in the words of mathematical morphology (Serra, Image
+/// Analysis and Mathematical Morphology, 1982), done one layer deep. A
+/// deeper cut would part thicker necks, and a snowman's head from its
+/// body.
+fn necked(left: &[u64], n: [usize; 3], under: usize) -> Vec<(usize, usize)> {
+    let strides = [1, n[0], n[0] * n[1]];
+    let has = |i: usize| left[i / 64] >> (i % 64) & 1 == 1;
+    let at = |i: usize| [i % n[0], i / n[0] % n[1], i / (n[0] * n[1])];
+    let beside = move |i: usize| {
+        let p = at(i);
+        (0..6).filter_map(move |face| {
+            let k = face / 2;
+            if face % 2 == 0 { (p[k] > 0).then(|| i - strides[k]) } else { (p[k] + 1 < n[k]).then(|| i + strides[k]) }
+        })
+    };
+    let core = |i: usize| has(i) && beside(i).filter(|b| has(*b)).count() == 6;
+    // (A piece is at least 27 cells with its layer off and two through every way: a lump, and not the cells left of a
+    // sheet where it happens to lie three thick, which dropped with two steps round each made a sieve of a bowl. And it is as long as it was
+    // with its layer on, so that a scrap that is loose and too large to drop is not dropped here as a small one.)
+    let pieces = loose(&core, n, under, Some((27, 2)));
+    // the layer taken off each: two steps out through cells that are in no piece's core
+    let mut gone: std::collections::BTreeSet<usize> = pieces.iter().flat_map(|(first, last)| *first..*last).collect();
+    let mut edge: Vec<usize> = gone.iter().copied().collect();
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for cell in edge {
+            for other in beside(cell).filter(|b| has(*b) && !core(*b)) {
+                if gone.insert(other) {
+                    next.push(other);
+                }
+            }
+        }
+        edge = next;
+    }
+    gone.into_iter().map(|cell| (cell, cell + 1)).collect()
 }
 
 /// Empty the cells further inside than a wall `thick` cells through, and
@@ -537,6 +679,36 @@ fn tones(shape: &[u8], sampled: &[(usize, u64)], facing: &[(DVec3, DVec3)], near
         found
     });
     for (cell, tone) in seen.into_iter().flatten() {
+        tones[cell] = tone;
+    }
+    // Specks are taken out: a cell whose colour fewer than three of the coloured cells round it share takes the
+    // commonest colour among them. A picture painted on a model, or a network's guess at one, changes colour from
+    // point to point within what the eye sees as one colour, and a brick takes its colour at one point: on a cottage
+    // such a network made, a third of the boxes were cut where one speck met another (8,095 bricks in twelve colours
+    // against 4,964 in none). A feature three cells across or more keeps its colour, since each of its cells has
+    // neighbours of its own kind. Every cell is judged by the colours as they were, so the order does not matter.
+    let coloured: Vec<usize> = (0..tones.len()).filter(|i| tones[*i] != ANY).collect();
+    let settled = threads.map(coloured.len(), 2000, |k| {
+        let cell = coloured[k];
+        let at = [cell % n[0], cell / n[0] % n[1], cell / (n[0] * n[1])].map(|v| v as i64);
+        let mut counts = [0u8; 32];
+        for round in (0..27).filter(|r| *r != 13) {
+            let to = [at[0] + round % 3 - 1, at[1] + round / 3 % 3 - 1, at[2] + round / 9 - 1];
+            if (0..3).all(|k| to[k] >= 0 && to[k] < n[k] as i64) {
+                let tone = tones[to[0] as usize + n[0] * (to[1] as usize + n[1] * to[2] as usize)];
+                if (tone as usize) < counts.len() {
+                    counts[tone as usize] += 1;
+                }
+            }
+        }
+        let own = tones[cell];
+        if counts.get(own as usize).is_some_and(|same| *same >= 3) || counts.iter().all(|c| *c == 0) {
+            return own;
+        }
+        // (the first of the commonest, which is the one that covers more of the mesh)
+        (0..counts.len()).max_by_key(|tone| (counts[*tone], std::cmp::Reverse(*tone))).unwrap_or(own as usize) as u8
+    });
+    for (cell, tone) in coloured.into_iter().zip(settled) {
         tones[cell] = tone;
     }
     tones
@@ -649,14 +821,15 @@ mod tests {
             assert_eq!(Import::named(bad), Err(MeshError::NotAnImport { name: bad.to_string() }), "{bad:?}");
         }
         // and what a save says of a mesh is read back as it was written, with its numbers brought within bounds
-        let import = Import { name: "0123456789abcdef.ply".into(), mesh: None, up: Up::X, fitter: Fitter::Blocks, loose: 7, colours: 5 };
+        let import = Import { name: "0123456789abcdef.ply".into(), mesh: None, up: Up::X, fitter: Fitter::Blocks, loose: 7, colours: 5, smooth: 9 };
+        assert_eq!(Import::read("0123456789abcdef.ply,x,blocks,7,5").unwrap(), Import { smooth: 0, ..import.clone() });
         assert_eq!(Import::read(&import.text()).unwrap(), import);
         assert_eq!(Import::read("none").unwrap(), Import { colours: USUAL_COLOURS, ..Import::default() });
         // a name alone is the mesh as the editor opens it: a PLY file with z up, the others with y
         assert_eq!((Import::read("0123456789abcdef.ply").unwrap().up, Import::read("0123456789abcdef.obj").unwrap().up, Import::read("0123456789abcdef.ply,y").unwrap().up), (Up::Z, Up::Y, Up::Y));
         assert_eq!(Import::read("none,z,smoothed,99999,99999").unwrap(), Import { up: Up::Z, loose: MOST_LOOSE, colours: MOST_COLOURS, ..Import::default() });
         assert!(matches!(Import::read("../../secret.glb"), Err(MeshError::NotAnImport { .. })));
-        for bad in ["none,w", "none,y,round", "none,y,blocks,many", "none,y,blocks,1,2,3"] {
+        for bad in ["none,w", "none,y,round", "none,y,blocks,many", "none,y,blocks,1,2,3,4"] {
             assert!(matches!(Import::read(bad), Err(MeshError::Malformed { .. })), "{bad}");
         }
     }
@@ -811,6 +984,57 @@ mod tests {
     }
 
     #[test]
+    fn a_hole_is_closed_by_a_skin_as_close_as_the_rest_of_the_surface() {
+        // a ball with a cap and a patch gone, the holes 28 and 12 cells wide at this size
+        let ball = stood(made::holed_ball(24), 24.0, Import::default(), None);
+        let (one, many) = (ball.built(true, 80, 0.0, Threads::ONE), ball.built(true, 80, 0.0, Threads::forced(5)));
+        assert_eq!(one.bricks, many.bricks);
+        no_two_share_a_cell(&many.bricks);
+        // against the mesh asked at every sample, which is the slow way and has no shortcuts to go wrong at a hole
+        let measured = ball.measured(&many, Threads::forced(4));
+        assert!(measured.wrong < 0.03 * measured.solid, "{} of {} wrong", measured.wrong, measured.solid);
+        // and what it says of its own fit is what it measures as, skin and all
+        // (to within the skin's own cells, whose samples are read off their corners and not each asked for)
+        assert!((many.error - measured.wrong).abs() < 0.015 * measured.solid && (many.solid - measured.solid).abs() < 0.015 * measured.solid, "said {} of {}, measured {} of {}", many.error, many.solid, measured.wrong, measured.solid);
+        // the skin is laid in sloped pieces like any surface: over the top hole there is more than cubes
+        let top = many.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        assert!(many.bricks.iter().any(|b| b.mask != CUBE && b.min[2] + b.ext[2] >= top - 1));
+    }
+
+    #[test]
+    fn a_sheet_thinner_than_a_cell_is_built_a_cell_thick_and_whole() {
+        // a bowl and a leaning plate, each a third of a cell through at this size
+        for fitter in [Fitter::Smoothed, Fitter::Blocks] {
+            let sheets = stood(made::thin(0.3), 58.5, Import { fitter, ..Import::default() }, None);
+            let laid = sheets.built(true, 80, 0.0, Threads::forced(4));
+            assert_eq!(laid.bricks, sheets.built(true, 80, 0.0, Threads::ONE).bricks);
+            no_two_share_a_cell(&laid.bricks);
+            assert!(sheets.bare(&laid) < 0.01, "{:.1}% of the sheets has no brick near it", 100.0 * sheets.bare(&laid));
+        }
+        // the sharp edge of something thick is no sheet: a roof's eaves stay ramps, and the house is still exact
+        let house = stood(made::house(), 28.0, Import::default(), None).built(true, 80, 0.0, Threads::ONE);
+        assert!(house.error.abs() < 1e-9 && house.bricks.len() <= 12);
+    }
+
+    #[test]
+    fn a_lump_hanging_by_a_thread_is_dropped_with_the_loose_pieces_and_one_on_a_thick_neck_is_not() {
+        let built = |neck: f64, loose| stood(made::tethered(neck), 30.0, Import { loose, ..Import::default() }, None).built(true, 80, 0.0, Threads::forced(3));
+        let reach = |laid: &Laid| laid.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap() - laid.bricks.iter().map(|b| b.min[0]).min().unwrap();
+        // kept whole when nothing is asked to be dropped; the lump goes when pieces under 20 are, and the ball (40) stays
+        let (whole, cut) = (built(1.6, 0), built(1.6, 20));
+        assert!(reach(&whole) >= 58 && reach(&cut) <= 50 && reach(&cut) >= 40, "{} long whole and {} cut", reach(&whole), reach(&cut));
+        no_two_share_a_cell(&cut.bricks);
+        assert_eq!(cut.bricks, built(1.6, 20).bricks);
+        // a neck five cells thick is no thread: the lump is part of the thing
+        assert!(reach(&built(5.0, 20)) >= 58);
+        // and a thing thin all along is not cut off from itself: the bowl and the plate, each one cell thick as built, both stay
+        let sheets = |loose| stood(made::thin(0.3), 58.5, Import { loose, ..Import::default() }, None).built(true, 80, 0.0, Threads::forced(3));
+        // (but for crumbs at their edges, which are loose and small)
+        let (all, kept) = (sheets(0), sheets(20));
+        assert!(reach(&kept) == reach(&all) && kept.bricks.len() * 20 > all.bricks.len() * 19, "{} bricks {} long, and {} bricks {} long with pieces dropped", all.bricks.len(), reach(&all), kept.bricks.len(), reach(&kept));
+    }
+
+    #[test]
     fn a_brick_takes_the_colour_of_the_surface_nearest_it() {
         // red above, white round the middle, blue below
         // (three colours asked for: the band of triangles between two colours shades from one to the other, and more would be spent on those shades)
@@ -861,6 +1085,21 @@ mod tests {
         assert!(plain.shades.is_empty() && (volume(&plain) - volume(&laid)).abs() < 1e-9 && laid.bricks.len() >= plain.bricks.len());
         // and not many more: the inside is not cut up by the colours of the skin
         assert!(laid.bricks.len() < plain.bricks.len() * 2, "{} coloured and {} plain", laid.bricks.len(), plain.bricks.len());
+    }
+
+    #[test]
+    fn specks_of_colour_are_taken_out_and_a_patch_of_colour_is_kept() {
+        // a white ball with one point in twenty-three red, and a red cap on top a fifth of its height deep
+        let (points, triangles) = made::sphere_parts(32);
+        let colours: Vec<[u8; 3]> = points.iter().enumerate().map(|(i, p)| if i % 23 == 0 || p[2] > 0.3 { [200, 30, 30] } else { [240, 240, 240] }).collect();
+        let ball = stood(Mesh::new(&points, &triangles, &colours).unwrap(), 20.0, Import { colours: 2, ..Import::default() }, None);
+        let (palette, laid) = (ball.palette(), ball.built(true, 80, 0.0, Threads::forced(4)));
+        assert_eq!(laid.shades, ball.built(true, 80, 0.0, Threads::ONE).shades);
+        let red = (0..2u8).find(|shade| palette[*shade as usize][1] < 100).unwrap();
+        // red bricks are the cap's and next to none are below it (the cap begins 32 up, and stretched pieces take their colour at their own middle)
+        let reds: Vec<&CellBrick> = laid.bricks.iter().zip(&laid.shades).filter(|(_, shade)| **shade == red).map(|(b, _)| b).collect();
+        let below = reds.iter().filter(|b| b.min[2] + b.ext[2] <= 30).count();
+        assert!(reds.len() > 20 && below * 10 <= reds.len(), "{} red bricks, {below} of them below the cap", reds.len());
     }
 
     #[test]
