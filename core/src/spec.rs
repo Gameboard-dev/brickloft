@@ -2975,6 +2975,30 @@ mod tests {
     }
 
     #[test]
+    fn no_brick_is_longer_than_the_longest_allowed() {
+        // large forms of every kind, with the longest brick set well below
+        // what each would otherwise use
+        let longest = 12;
+        let base = Spec { max_ext: longest, ..Spec::default() };
+        let forms = [
+            ("sphere", Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, fill: true, ..base.clone() }),
+            ("shell", Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 40.0, thick: 4.0, fill: false, ..base.clone() }),
+            ("pyramid", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, fill: true, ..base.clone() }),
+            ("tent", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, thick: 4.0, fill: false, ..base.clone() }),
+            ("arch", Spec { form: Form::Arch(ArchType::Round), points: vec![at(-60.0, 0.0, 0.0), at(60.0, 0.0, 0.0)], thick: 6.0, depth: 40, ..base.clone() }),
+            ("disc", Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, thick: 4.0, depth: 30, fill: true, ..base.clone() }),
+            ("torus", Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, thick: 10.0, tube: true, ..base.clone() }),
+            ("lifted torus", Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 60.0, thick: 10.0, tube: true, pulls: vec![(at(-60.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 30.0))], pull_reach: 30.0, ..base.clone() }),
+            ("bell", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 60.0), at(30.0, 0.0, 40.0), at(50.0, 0.0, 0.0)], thick: 4.0, ..base.clone() }),
+        ];
+        for (name, spec) in forms {
+            let built = build(&spec).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let worst = built.bricks.iter().flat_map(|b| b.ext).max().unwrap();
+            assert!(worst <= longest, "{name}: a brick {worst} long at brick size {}, with {longest} allowed", built.grain);
+        }
+    }
+
+    #[test]
     fn a_point_added_to_a_laid_out_form_changes_it_only_there() {
         let key = |b: &CellBrick| (b.mask, b.min, b.ext);
         let kept = |plain: &Built, pulled: &Built| {

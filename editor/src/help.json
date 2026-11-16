@@ -1,5 +1,4 @@
 {
-  "add_remove_point": "Adds or removes one of the dots this form is drawn through. To pull a form out of shape at one place, Shift + click on it: that adds an orange point, and Shift + right-click takes it off.",
   "add_to_this_grid": "Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.",
   "arch_askew": "This arch runs at an angle to the brick grid: its feet differ along both X and Y. No flat outline can be fitted to it, so it is fitted cell by cell and comes out stepped. For a smooth arch, keep its feet in line along X or Y (Dots move: Keep Y), and turn its grid with a ring to aim it.",
   "arch_kind": "The shape of the arch between its two feet.",

@@ -442,21 +442,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             hint(ui, help("flip"));
         });
 
-        // A spline, a Bezier curve and a profile are drawn through their
-        // own dots, so those forms need a way to have more of them. An arch
-        // had these buttons too, from before a point could be added to any
-        // form with Shift + click, which does the same job for it.
-        if state.can_add_points() && state.form != ARCH {
-            ui.horizontal(|ui| {
-                if ui.button("Add point").clicked() {
-                    state.add_point();
-                }
-                if ui.button("Remove point").clicked() {
-                    state.remove_point();
-                }
-                hint(ui, help("add_remove_point"));
-            });
-        }
+        // (There were Add point and Remove point buttons here, for the dots a
+        // form is drawn through. Shift + click and Shift + right-click on the
+        // form add and remove a point on any form, and are the one way now.)
 
         ui.separator();
         let lock_name = |l: Lock| match l {
