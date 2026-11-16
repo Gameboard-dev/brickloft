@@ -129,7 +129,7 @@ The settings Claude can give:
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
-| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
+| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` and then `0, depth` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `blend` | Joins the form to the forms it stands in: `0` for a sharp crease, up to `6` for a fillet that many microbricks wide, `none` for a form that stands apart (see below) |
 | `carve` | `true` takes a joined form away from the forms it joins and builds none of its own bricks; `false`, the usual, adds it (see below) |
@@ -204,6 +204,7 @@ are laid.
 | `size` | how large the boards, bricks or cobbles are: 2 is usual, the panel's slider goes from 1 to 8, and up to 16 is accepted |
 | `bevel` | bricks only: 1 slopes the top microbrick of every brick down to its edge, and 0 leaves the tops flat. The form must be 2 or more deep. For every other style it is read as 0. |
 | `border` | how many microbricks of plain ground are left round the edge, 0 to 8 |
+| `depth` | the twelfth value, after a 0 that holds the eleventh place: 1 grooves planks of size 3 or more, or lays cobblestone's mortar one microbrick below its stones, and 0 leaves them flat. The form must be 2 or more deep. For every other style it is read as 0. |
 | `seed` | any whole number, each a different pattern |
 | `mortar` | bricks and cobblestone: 1 for a microbrick of mortar between pieces, 0 for none |
 | `stagger` | bricks: how far each course is moved along from the one before, in hundredths of a brick's length. 50 is the usual bond, 0 stacks the bricks, and -1 moves each course by an amount of its own. |

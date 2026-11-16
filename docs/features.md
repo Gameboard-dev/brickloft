@@ -324,8 +324,10 @@ sections 7.8 and 7.9.
 Stepping stones need a flat form: a floor or wall made from a cube, a
 flat band or a filled outline. They follow the curve, so a spline drawn across the ground
 becomes a winding stone path as wide as the band's **Thickness**. Stones
-fitted together with the gap at 0 still show narrow seams, because each
-stone is fitted with bricks by itself.
+fitted together with the gap at 0 share their edges: the two stones either
+side of an edge are laid to the same straight line, with sharp corners
+where three meet. Slivers can remain at the rim of the floor and along an
+edge that is nearly level.
 
 The other five patterns are made of tiles one microbrick across. A tile is
 one colour, or it is cut along a diagonal into two triangles of two
@@ -356,9 +358,14 @@ blot. Make the form larger for more detail, or set a **Brick size** by
 name for less.
 
 A rug wants a large floor. Its parts are drawn afresh for the size it is
-given, and a small rug has little room to show them: a medallion of one or
-two layers and plain lines for its guards. Lay it 100 microbricks or more
-across. The picture above is 240 by 160.
+given, and it shows all of them from about 100 microbricks across. The
+picture above is 240 by 160. Under 48 microbricks on its shorter side it is
+set out as a small rug: single lines for guards, a border of whole
+lozenges with a star in each corner, the corners of the field cut off on
+the diagonal, and a medallion of one or two layers. Nothing on it is cut
+short.
+
+<img src="images/pattern-rug-small.png" width="340" alt="A rug 48 microbricks by 36 seen from above, with a border of whole lozenges, a star in each corner, and a small medallion">
 
 ### The settings of a pattern
 
@@ -374,6 +381,8 @@ Each pattern shows the settings it has a use for.
 | **Uneven across** | bricks, cobblestone | the same across the courses. For bricks it moves the lines between courses, so the courses differ in depth. For cobblestone it moves each stone up and down. |
 | **Mortar between** | bricks, cobblestone | a microbrick of mortar between one piece and the next. Without it the pieces touch and are told apart by their shades alone, so give the pattern several colours. |
 | **Bevelled** | bricks | slopes the top microbrick of every brick down to its edge, all round it |
+| **Grooved** | planks of **Size** 3 or more | slopes the last microbrick of every row of boards down to the next row, so each row stands one microbrick proud of the one beside it |
+| **Mortar sunk** | cobblestone with mortar | lays the mortar one microbrick below the stones |
 | **Uneven stagger** | bricks | moves each course along by an amount of its own, so the upright joints fall anywhere. Untick it to set one **Stagger** for every course. |
 | **Stagger** | bricks | how far each course is moved along from the one before, 0 to 50% of a brick's length. 50% is the usual half-brick bond and 0% stacks the bricks in columns. |
 | **Courses upright** | bricks | runs the courses up the floor instead of across it, so the bricks stand on end |
@@ -395,6 +404,16 @@ four corners and a block between them. The bevel needs a form 2 microbricks or m
 shallower one. It is cut into one face only, the top of a floor, and the
 sides of a box are laid flat. Cobblestone has no bevel, because a
 cobble's sides run at any angle and no brick slopes along them cleanly.
+
+**Grooved** and **Mortar sunk** are the depth planks and cobblestone have.
+Both are off to begin with, one microbrick deep, and cut into the top of a
+form 2 microbricks or more deep. Grooved planks are whole microbricks and
+one long ramp to each board. The setting is offered from **Size** 3,
+because a narrower board would be half ramp and the floor would look
+ribbed. Sunk mortar is whole microbricks only: the stones keep their top
+microbrick and the mortar does not.
+
+<img src="images/pattern-planks-grooved.png" width="300" alt="A floor of grooved planks, each row of boards one microbrick proud of the next"> <img src="images/pattern-cobblestone-sunk.png" width="300" alt="A floor of cobblestones standing one microbrick proud of sunk mortar">
 
 ### The colours of a pattern
 

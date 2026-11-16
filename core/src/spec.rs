@@ -619,11 +619,16 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
 /// bricks of a rounded rim, and whatever is under or over them) is left
 /// as it was fitted, in the pattern's ground colour.
 ///
-/// A pattern wrapped onto a curved surface was not attempted. A sloped
-/// brick is one colour and often many cells long, so a pattern there
-/// would need the surface cut into bricks a cell across, which is many
-/// times the bricks and gives up the smooth fit the sloped bricks are
-/// there for.
+/// A pattern wrapped onto a curved surface was built and taken out. The
+/// form's bricks were kept as fitted and each given the pattern's colour
+/// at its place on a sheet laid over the form. A sloped brick is one
+/// colour, and a curved form's are large and stretched (a sphere's are
+/// corner pieces 2 cells by 3 by 10, which cannot be cut smaller without
+/// changing the surface), so a pattern's lines fell on brick edges that
+/// do not follow them: saw teeth for courses of bricks on a dome,
+/// fragments for a rug. Carrying the lines would need the surface cut
+/// into bricks a cell across, which is many times the bricks and gives
+/// up the smooth fit the sloped bricks are there for.
 fn pattern_flat_faces(spec: &Spec, built: &mut Built, threads: Threads) {
     let Some(mosaic) = &spec.mosaic else { return };
     if !built.shades.is_empty() || built.bricks.is_empty() {
@@ -864,6 +869,15 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g, threads),
     };
+    // The form's bricks before a pattern that only colours them, to be
+    // measured in place of the patterned ones. A pattern's tiles cut in
+    // two were measured a few percent further from a rounded form than
+    // the same form plain, by the places that fall on the face two half
+    // bricks share (see `report::scan`): a difference in the figure for
+    // no difference in what the bricks fill. A pattern with depth (a
+    // bevel, grooves, sunk mortar) does change what they fill, and is
+    // measured as it is.
+    let unpatterned = (grain == 1 && measured && built.unmeasured && coarse.mosaic.is_some_and(|mosaic| !mosaic.bevel)).then(|| built.bricks.clone());
     // (not a maze, which wraps its pattern along its own walls: left to
     // these, the outside of a grid maze was taken for the side of a box and
     // patterned over, in colour numbers the maze keeps for other things)
@@ -871,9 +885,10 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         pattern_flat_faces(&coarse, &mut built, threads);
         pattern_side_faces(&coarse, &mut built, threads);
     }
+    let form = Probe::of(solid);
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
-    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
+    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| form.solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
     }
@@ -882,11 +897,12 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         // with no figure for how well they fit it. Measure them against the
         // form itself. A build too large to measure that way is fitted cell
         // by cell after all, which does have its own figures.
-        let (field, min, max) = match &solid {
+        let (field, min, max) = match &form.solid {
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::measure(&Probe::of(solid), &built, threads) {
+        let plain = unpatterned.filter(|_| !built.shades.is_empty()).map(|bricks| Built { bricks, ..Built::default() });
+        match crate::report::measure(&form, plain.as_ref().unwrap_or(&built), threads) {
             Ok((volume, wrong)) => {
                 built.solid = volume;
                 built.error = wrong;
@@ -3440,7 +3456,8 @@ mod tests {
         let plain = build(&disc(None)).unwrap();
         let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         assert!(built.bricks.iter().any(|b| b.mask != CUBE && b.ext == [1, 1, built.bricks.iter().map(|b| b.ext[2]).max().unwrap()]), "no tile is cut in two");
-        assert!((built.error - plain.error).abs() < 0.1 * plain.error, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
+        // (the very same figure: it is the form's bricks as they were before the pattern that are measured)
+        assert!(built.error == plain.error && built.solid == plain.solid, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
     }
 
     #[test]

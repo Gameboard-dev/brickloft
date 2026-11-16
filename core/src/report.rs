@@ -94,8 +94,11 @@ pub fn spec_text(spec: &Spec) -> String {
     // whether a joined form is taken away from the forms it joins
     line("carve", spec.carve.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
-    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The last was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused.)
-    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},0", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1])));
+    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The eleventh was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused. The twelfth is whether planks are grooved or cobblestone's mortar is sunk, 1 or 0. It is apart from the third because the third was once a bevel that cobblestone had too and was taken from it: a file from then says 1 there, and must not come back with its mortar sunk.)
+    line("mosaic", spec.mosaic.map_or("none".into(), |m| {
+        let name = crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name;
+        format!("{},{},{},{},{},{},{},{},{},{},0,{}", name, m.size, (m.bevel && name == "bricks") as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1], (m.bevel && name != "bricks") as u8)
+    }));
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
     line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
     // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
@@ -268,9 +271,14 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 } else {
                     let parts: Vec<&str> = value.split(',').map(str::trim).collect();
                     // (five values, or eight, nine, ten or eleven: the later ones came later, and a file from before them means mortar, every course moved by its own amount, level courses, and pieces all alike)
-                    let wrong = || bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` and then `,uneven_along,uneven_across,uneven_in_depth` after it or not, or `none`");
+                    let wrong = || bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` and then `,uneven_along,uneven_across,uneven_in_depth` and then `,depth` after it or not, or `none`");
                     let ([style, size, bevel, border, seed], more) = (match parts.get(..5) { Some([a, b, c, d, e]) => [*a, *b, *c, *d, *e], _ => return Err(wrong()) }, &parts[5.min(parts.len())..]);
                     let share = |text: &str| -> Result<i32, String> { Ok((whole(text)?.clamp(0, 100)) as i32) };
+                    // (the twelfth value, where there is one: see `spec_text`)
+                    let (more, depth) = match more {
+                        [first @ .., depth] if more.len() == 7 => (first, whole(depth)? != 0),
+                        _ => (more, false),
+                    };
                     let (mortar, stagger, upright, uneven) = match more {
                         [] => (true, -1, false, None),
                         [mortar, stagger, upright] => (whole(mortar)? != 0, (whole(stagger)?.clamp(-1, 100)) as i32, whole(upright)? != 0, None),
@@ -292,7 +300,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                         (style, uneven) => (style, uneven.unwrap_or([0; 2])),
                     };
                     // (slabs' bevel was a corner cut off flat, which nothing has now)
-                    let bevel = whole(bevel)? > 0 && style == "bricks" && parts[0] != "slabs";
+                    let bevel = (whole(bevel)? > 0 && style == "bricks" && parts[0] != "slabs") || (depth && matches!(style, "planks" | "cobblestone"));
                     if style == "snowflake" {
                         spec.mosaic = None;
                         continue;
@@ -1114,6 +1122,13 @@ mosaic = {values}
         assert_eq!(read("cobblestone,2,0,0,7,1,-1,0,60,50,70").unwrap().unwrap().uneven, [60, 50]);
         // only bricks are bevelled, whatever a file says; a bevel once had a depth, and any depth is a bevel
         assert!(!read("cobblestone,2,1,0,7").unwrap().unwrap().bevel && read("bricks,2,3,0,7").unwrap().unwrap().bevel);
+        // planks' grooves and cobblestone's sunk mortar are the twelfth value, and are written and read back as it
+        assert!(read("cobblestone,2,0,0,7,1,-1,0,60,60,0,1").unwrap().unwrap().bevel && read("planks,2,0,0,7,1,-1,0,0,0,0,1").unwrap().unwrap().bevel);
+        assert!(!read("cobblestone,2,1,0,7,1,-1,0,60,60,0,0").unwrap().unwrap().bevel && !read("rug,2,0,0,7,1,-1,0,0,0,0,1").unwrap().unwrap().bevel);
+        for style in ["planks", "cobblestone", "bricks"] {
+            let depth = crate::pattern::Mosaic { style: crate::pattern::STYLES.iter().position(|s| s.name == style).unwrap(), bevel: true, ..ten };
+            assert_eq!(parse_spec(&spec_text(&Spec { mosaic: Some(depth), ..Spec::default() })).unwrap().mosaic, Some(depth), "{style}");
+        }
         // the styles that are gone: masonry by how uneven it was, slabs as uneven bricks with no bevel, a snowflake as no pattern
         assert_eq!(named(&read("masonry,2,1,0,7,1,-1,0,20").unwrap().unwrap()), "bricks");
         assert_eq!(named(&read("masonry,2,1,0,7,1,-1,0,80").unwrap().unwrap()), "cobblestone");
@@ -1125,7 +1140,7 @@ mosaic = {values}
         let text = spec_text(&Spec { mosaic: Some(ten), ..Spec::default() });
         assert_eq!(parse_spec(&text).unwrap().mosaic, Some(ten));
         // and what is no mosaic is refused
-        for wrong in ["bricks,2,0,0", "bricks,2,0,0,7,1", "bricks,2,0,0,7,1,50,0,1,2,3,4", "tartan,2,0,0,7", "bricks,2,x,0,7"] {
+        for wrong in ["bricks,2,0,0", "bricks,2,0,0,7,1", "bricks,2,0,0,7,1,50,0,1,2,3,1,4", "tartan,2,0,0,7", "bricks,2,x,0,7"] {
             assert!(read(wrong).is_err(), "{wrong} was read");
         }
     }

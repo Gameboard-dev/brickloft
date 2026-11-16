@@ -1322,7 +1322,7 @@ floor.
 
 <img src="images/stepping-stones.png" width="640" alt="A curved path laid as stepping stones">
 
-<img src="images/pattern-stones-fitted.png" width="420" alt="A square floor of stones of many shapes fitted together with the gap at 0, each stone one colour, with narrow seams between them">
+<img src="images/pattern-stones-fitted.png" width="420" alt="A square floor of stones of many shapes fitted together with the gap at 0, each stone one colour, meeting its neighbours along straight shared edges with sharp corners, and a few slivers left bare along the floor's rim">
 
 #### Scattering the stones
 
@@ -1440,12 +1440,60 @@ stones themselves do not. A stone whose bricks would meet a stone already
 laid is fitted again drawn in by half a cell, and then by a whole cell if
 they still meet. A brick that meets one even then is left out.
 
-With the gap at 0, neighbouring stones share their edges, so a stone is
-drawn in wherever its bricks would overlap a stone laid before it. Fitted
-stones therefore keep seams between them. Most are hairline and some are
-up to about a cell wide, as the second picture above shows. They are the
-cost of fitting each stone by itself (see
-[future-work.md](future-work.md)).
+#### Stones with no gap
+
+With the gap at 0 every stone meets its neighbours, and stones fitted to
+the lines between them do not meet exactly. Each fit strays up to half a
+cell from its line, one stone's to this side and its neighbour's to that.
+They overlapped in places, the later stone was drawn in, and seams up to a
+cell wide were left round every stone: 5% to 38% of a floor was bare,
+most where the stones were small.
+
+Two stones meet exactly only if they are given the same edge, and an edge
+that bricks can lay exactly from both sides. A straight line from one
+corner of the grid to another is such an edge. It is the sloped side of a
+right triangle, or of a few alike end to end, and the triangle on its other
+side fills the rest of the same box, as the two halves of a cut tile do.
+
+So with no gap each stone's outline is drawn with its corners moved to the
+nearest corners of the grid (`Stone::outline` in `pattern.rs`). The
+outline is the stone's ground cut out of a box by the line half way to
+each neighbour in turn
+([Sutherland and Hodgman's clipping](https://en.wikipedia.org/wiki/Sutherland%E2%80%93Hodgman_algorithm)).
+A corner is where three stones meet. Each of the three works it out from
+the same three points and moves it to the same corner of the grid, so the
+two stones either side of an edge have the same two ends for it. Each
+stone is then fitted to its outline by itself, on its own thread as
+before, and the outline fitter lays an outline of grid corners exactly.
+
+<img src="images/pattern-stones-fitted-close.png" width="420" alt="A close view of stones fitted with no gap: each edge between two stones is one straight line of sloped bricks, shared by both">
+
+A stone's corners are sharp this way, where with a gap they are rounded,
+because a rounded corner would be a hole where three stones meet. A corner
+moves by up to seven tenths of a cell, which changes a stone's shape a
+little and not its size.
+
+What is left is slivers, of two kinds.
+
+- At the rim of the region an edge ends on the rim and not on a corner of
+  the grid, and the two stones may be fitted differently there. A piece
+  that would overlap a stone already laid is cut down to the whole cells
+  of it that are free, so the hole is the sliver that was amiss and not a
+  whole brick.
+- An edge that is nearly level (13 cells along for 1 across) is now and
+  then fitted as a slope from one side and as a step from the other.
+
+Measured over four floors, four places to a cell, 0.1% to 0.6% of the
+ground more than a stone and a half in from the rim is bare, and 0.4% to
+4% of the whole floor. Nothing is filled twice away from the rim.
+
+Two other ways were tried. Fitting each stone to the bricks of those laid
+before it asked the fitter to follow another fit's staircase. It smooths
+across a staircase by design, since a corner costs it something, so its
+pieces overlapped the laid bricks and whole pieces had to be left out,
+which left a floor with holes in it. Filling the seams afterwards cannot
+work, because a seam between two sloped edges that do not match is a
+sliver no brick fills.
 
 #### A number for each stone
 
@@ -1772,20 +1820,49 @@ that is the reason the flowers are not small pictures stamped over the
 field. A picture is one size, and a flower drawn in tiles for a rug forty
 tiles across is a blot on one two hundred across.
 
-The rule also decides how much there is room to show, and a small rug
-shows little. A layer under five or six tiles broad is all outline, so the
-medallion has one layer where its points reach under 10 tiles from the
-middle, two from 10, three from 22 and four from 34. It may have twelve
-lobes only from a reach of 24, and has eight below it. The guards are
-single lines, with no lozenges, on a floor under 48 tiles on its shorter
-side.
+The rule also decides how much there is room to show. A layer under five
+or six tiles broad is all outline, so the medallion has one layer where its
+points reach under 10 tiles from the middle, two from 10, three from 22
+and four from 34. It may have twelve lobes only from a reach of 24, and
+has eight below it.
+
+##### A small rug
+
+A floor under 48 tiles on its shorter side has no room for a rug's parts at
+their own sizes. Drawn by the rules above they came out cut short: a
+corner piece was three tiles of one lobe, the pendants were blots, and the
+border's knots fell at uneven steps because its swing did not divide the
+side. A small rug is therefore set out by rules of its own, with the same
+parts made simpler and each of them whole.
+
+<img src="images/pattern-rug-small.png" width="420" alt="A rug 48 tiles by 36 seen from above: single guard lines, a border of whole lozenges with a star in each corner square, the corners of the field cut off on the diagonal, and a medallion of two layers with small flowers round it">
+
+| Part | On a small rug |
+|---|---|
+| Guards | single lines |
+| Border | lozenges four tiles across, one at the middle of each side and one every four tiles from it, with a square holding a star at each corner. Under 24 tiles the border is a chain of lozenges two tiles across, which divides a side of any length. |
+| Medallion | one layer or two, as its reach allows, and no pendants |
+| Corners of the field | cut off on the diagonal behind a line, with one lozenge in the corner where there is room |
+| Field | scrolls where they fit and small flowers elsewhere, as on a large rug |
+
+The border is counted from the middle of each side and not from the
+corner. A side of any length is then its own mirror image with a whole
+lozenge at its middle, and what does not divide by four is taken up beside
+the corner squares. A lozenge that would run into a corner square is left
+out and not cut short. The diagonal that cuts a corner of the field off is
+whole tiles and tiles cut in two, so it is exact on the grid.
+
+A rug of 48 tiles or more is untouched by these rules. Every sum is the
+same sum, and the numbers drawn from the seed are drawn in the same order,
+so a large rug is tile for tile what it was. A test holds six such rugs to
+the tiles they had.
 
 Worked through for a rug half as long again as it is broad, the medallion
 has three layers on a floor of about 90 tiles on its shorter side and four
 from about 130. A square rug needs more, because the medallion is kept to
 0.55 of the field's longer way. A rug is therefore best laid 100 tiles or
-more across. The picture above is 240 tiles by 160 and shows all four
-layers.
+more across to show all it can. The picture at the head of this section is
+240 tiles by 160 and shows all four layers.
 
 The rug is its own mirror image tile for tile. A place and its mirror
 image reach the rule by different sums that can differ by a hair, so both
@@ -1978,6 +2055,33 @@ Deeper bevels and uneven heights read as clutter at one cell to a tile.
 What is left is the one case that comes out exactly: a brick, whose sides
 are on the grid, with one cell of slope.
 
+##### Grooved planks and sunk mortar
+
+Planks and cobblestone each have one depth of their own. Like the bevel it
+is on or off, off to begin with, one cell deep, and cut into the top face
+of a form 2 cells or more deep. Both are built only of whole cells and of
+ramps as long as a row, which is what the bevel had to be cut down to
+before it looked clean.
+
+<img src="images/pattern-planks-grooved.png" width="330" alt="A floor of boards four tiles broad, each row standing one cell proud of the next along a straight line, with one long ramp down to it"> <img src="images/pattern-cobblestone-sunk.png" width="330" alt="A floor of cobblestones standing one cell proud of the mortar between them, with upright sides">
+
+**Grooved** planks: the last row of tiles of every row of boards is one
+long ramp down to the next row. Each row of boards then stands a cell
+proud of the one beside it along a straight line, as lapped boards do. The
+ramps of one board join into a single brick the length of the board. It
+needs boards three tiles broad or more, which is a **Size** of 3. At the
+usual size a board is two tiles broad, half of it would be ramp, and a
+floor of such boards looked ribbed like corrugated iron in its picture, so
+it is left flat. A groove of two ramps facing each other was tried first
+and takes a narrow board down to a ridge with no level top.
+
+**Mortar sunk**, for cobblestone: the mortar's tiles have no top cell, so
+the stones stand a cell proud of the mortar with upright sides. Where a
+stone's slanting edge cuts a tile in two, the stone's half keeps its top
+cell and the mortar's half does not. It needs mortar to sink. Cobbles
+domed, or bevelled as bricks are, were not brought back, because a slope
+along a side at any angle is a spray of single wedges.
+
 #### Colours by feature
 
 <img src="images/pattern-medallions-two-colours.png" width="320" alt="A floor of medallions with two colours chosen: the whole pattern is in the second colour on a ground of the first"> <img src="images/pattern-medallions-five-colours.png" width="320" alt="The same floor with five colours chosen: each of the four figures of the repeat has a colour of its own">
@@ -2065,10 +2169,28 @@ cut down to the columns that are not flat. Everything else, which is the
 sloped bricks of the rim and whatever lies over or under them, stays as
 it was fitted, in the ground colour.
 
-The pattern is not wrapped onto the curved part. A sloped brick is one
-colour and often many cells long, so a pattern there would need the
-surface cut into bricks one cell across. That is many times the bricks,
-and it gives up the smooth fit the sloped bricks are there for.
+The pattern is not wrapped onto the curved part. That was built and taken
+out again. Each form was given a sheet to lay the pattern on (a dome seen
+from its pole, a turned profile and a tube as rings), its bricks were kept
+exactly as fitted, and each took the pattern's colour at its place. A
+sloped brick is one colour, and a curved form's bricks are large and
+stretched: a sphere's are corner pieces 2 cells by 3 by 10, whose sides
+share no divisor and so cannot be cut into smaller bricks of the same
+slope. The pattern's lines then fell on brick edges that do not follow
+them. Courses of bricks on a dome came out as rows of saw teeth, a rug as
+fragments, and a torus could not be read at all. Making the pattern's
+tile as large as the bricks (4 cells on a dome 60 in radius) left room for
+six courses and no rug. Cutting the surface into bricks one cell across
+would carry the lines, at many times the bricks and at the cost of the
+smooth fit the sloped bricks are there for.
+
+A patterned form's figure for how closely it is fitted is that of its
+bricks before the pattern, wherever the pattern only colours them. The
+two halves of a tile cut in two fill the cell between them, but places
+that fall on the face the halves share were counted as amiss, and a
+patterned disc read a few percent further from its form than the same
+disc plain. A bevel, grooves and sunk mortar do change what the bricks
+fill, and those forms are measured as they are built.
 
 The second pass is for the sides of a box. Tiles pushed through a form
 show on its sides only as their ends, which are stripes. On a floor a
@@ -3949,11 +4071,13 @@ needles are the shoots that carry them. A tree is not its own mirror
 image and takes no added points.
 
 Stepping stones need a flat band, a filled outline or a cube. Laid with
-the gap at 0 they keep seams between them, because each stone is fitted by
-itself (7.8). A tile pattern is laid only where a form is flat: it is not
-wrapped onto a curved surface, and the curved part of a patterned form
-stays plain (7.9). Only bricks are bevelled, by one cell, and cobblestone
-is flat. A rug shows its full detail only on a large floor (7.9).
+the gap at 0 they share their edges, but slivers remain at the rim of the
+region and along some nearly level edges (7.8). A tile pattern is laid only
+where a form is flat: it is not wrapped onto a curved surface, and the
+curved part of a patterned form stays plain (7.9). Depth is one cell and
+one kind to a style: bricks are bevelled, planks three tiles broad or more
+are grooved, and cobblestone's mortar is sunk. A rug shows its full detail
+only on a large floor (7.9).
 
 ### Why no machine learning
 
