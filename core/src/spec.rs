@@ -9,7 +9,7 @@ use crate::curves::{arch, catmull_rom, circle3, rational_bezier, ArchType, Circl
 use crate::fit_lathe::{fit_lathe, Lathe};
 use crate::fit_planar::{self, fit_planar, fit_planar_towards};
 use crate::fit_pyramid::{fit_pyramid, Pyramid};
-use crate::fit_round::{fit_round, Round};
+use crate::fit_round::{fit_round_on, Round};
 use crate::fit_volume::{self, fit_volume};
 use crate::par::Threads;
 use crate::sdf::{Field, Fill, Region, Stroke};
@@ -2428,7 +2428,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -
             field,
             min,
             max,
-        } => match fit_round(round).filter(|_| spec.wedges) {
+        } => match fit_round_on(round, threads).filter(|_| spec.wedges) {
             Some(bricks) => Built {
                 bricks,
                 solid: 0.0,
