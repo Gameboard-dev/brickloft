@@ -3880,6 +3880,59 @@ mod tests {
         }
     }
 
+    /// Not a test: what a touch of the brush costs from the build to the
+    /// tiles the graphics card is given, on lawns of three sizes, with the
+    /// last build kept (`brickloft_core::grass`) and with nothing kept, as
+    /// every touch was before. Run by name, with `--release -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn timing_a_touch_on_lawns_of_three_sizes() {
+        use std::time::{Duration, Instant};
+        for (name, long, wide) in [("180 by 120", 180.0, 120.0), ("300 by 240", 300.0, 240.0), ("600 by 480", 600.0, 480.0)] {
+            let mut state = State::new();
+            state.form = TREE;
+            state.preset();
+            state.usual_tree(brickloft_core::tree::Kind::Grass);
+            let (spread, half): (f64, f64) = (wide / 2.0, long / 2.0 - wide / 2.0);
+            state.spec.radius = spread;
+            state.spec.points = vec![DVec3::new(0.5 - half, 0.5, 0.5), DVec3::new(0.5, 0.5, 0.5), DVec3::new(0.5 + half, 0.5, 0.5)];
+            let mut seed = 7u64;
+            let mut next = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); ((seed >> 33) % 1000) as f64 / 1000.0 };
+            state.spec.pulls = (0..24).map(|_| (DVec3::new((next() - 0.5) * (long - 20.0), (next() - 0.5) * (wide - 20.0), 2.0), DVec3::new(10.0 + next() * 15.0, 0.0, next() * 12.0 - 4.0))).collect();
+            state.refresh(|| 0.0);
+            let mut tiles = crate::tiles::Tiles::default();
+            let mut take = |state: &State| {
+                let at = Instant::now();
+                let bricks = state.painted();
+                let painted = at.elapsed();
+                let at = Instant::now();
+                let changed = tiles.take(bricks.iter().filter(|b| b.2 == 0).map(|(b, colour, ..)| (*b, colour.unwrap_or([0; 3]))));
+                let given: usize = changed.now.iter().map(|key| tiles.of(key).len()).sum();
+                (painted, at.elapsed(), given, bricks.len())
+            };
+            take(&state);
+            for kept in [true, false] {
+                let mut least = [Duration::MAX; 3];
+                let (mut given, mut all) = (0, 0);
+                for n in 0..8 {
+                    // a touch 20 in range made and taken back, turn about; with nothing kept, on a lawn of another seed each time, which is a lawn never built
+                    if n % 2 == 0 { state.spec.pulls.push((DVec3::new(long / 4.0, wide / 5.0, 2.0), DVec3::new(20.0, 0.0, 7.0))); } else { state.spec.pulls.pop(); }
+                    if !kept { state.spec.tree.seed += 1; }
+                    state.busy = true;
+                    let at = Instant::now();
+                    state.refresh(|| 0.0);
+                    let built = at.elapsed();
+                    state.busy = false;
+                    let (painted, taken, gave, of) = take(&state);
+                    least = [least[0].min(built), least[1].min(painted), least[2].min(taken)];
+                    // (with another seed every tile is other bricks: what is given then says nothing of a touch)
+                    (given, all) = (gave, of);
+                }
+                println!("{name}, {}: build {:?}, bricks with their colours {:?}, finding the tiles that changed {:?}; {given} of {all} bricks to give the card", if kept { "the last build kept" } else { "nothing kept" }, least[0], least[1], least[2]);
+            }
+        }
+    }
+
     /// Not a test: what moving and reshaping a form beside a large lawn
     /// costs, part by part. Run by name, with `--release -- --ignored --nocapture`.
     #[test]
