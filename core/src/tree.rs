@@ -47,6 +47,9 @@ use crate::shapes::{CellBrick, CUBE};
 use glam::DVec3;
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
+mod bloom;
+pub use bloom::{Bloom, Flower, FLOWERS, MOST_TILT};
+
 /// The golden angle, in radians: the turn between one leaf and the next
 /// that never lines two leaves up, so each has the most light (Vogel 1979).
 /// A coconut palm's fronds are set about 137.5 degrees apart.
@@ -94,10 +97,12 @@ pub enum Kind {
     Bed,
     /// a Japanese flowering cherry in blossom
     Cherry,
+    /// a single flower head with no plant under it (see [`bloom`])
+    Flower,
 }
 
 /// The kinds on offer, with the names they are written and read by.
-pub const KINDS: [(Kind, &str); 23] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed"), (Kind::Cherry, "cherry")];
+pub const KINDS: [(Kind, &str); 24] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed"), (Kind::Cherry, "cherry"), (Kind::Flower, "flower")];
 
 /// How a tree is grown: the settings a form carries for it. Its height is
 /// the form's `rise` and its spread the form's `radius`.
@@ -125,10 +130,16 @@ pub struct Tree {
     pub baubles: i32,
     /// A pine: whether a garland of tinsel is wound round it.
     pub tinsel: bool,
+    /// A pine: how far out its tinsel hangs, as a percentage of the way
+    /// from the stem to the ends of the boughs at each height:
+    /// [`HANG`]'s least to its most.
+    pub hang: i32,
     /// A pine: 0 for no lights, 1 for a string of them, 2 for candles on its boughs.
     pub lights: u8,
     /// A pine: whether its lights are written with a light on each in the game, or as glowing bricks alone.
     pub shine: bool,
+    /// A single flower head: which flower, which way it faces and what lies with it.
+    pub bloom: Bloom,
 }
 
 /// The most lights a pine carries, strung or as candles. Each is a light
@@ -167,8 +178,10 @@ impl Tree {
             Kind::Daffodil => (50, 5, 30),
             Kind::Bed => (50, 14, 40),
             Kind::Cherry => (60, 7, 40),
+            // (its count is unused; its bend is how open it is)
+            Kind::Flower => (60, 1, 60),
         };
-        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, lights: 0, shine: true }
+        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, hang: HANG.2, lights: 0, shine: true, bloom: Bloom::default() }
     }
 
     /// The fewest and most of whatever `count` counts, for a kind.
@@ -186,7 +199,7 @@ impl Tree {
             Kind::Petunia => (3, 80),
             Kind::Reeds => (1, 120),
             // (grass has nothing to count)
-            Kind::Cypress => (1, 1),
+            Kind::Cypress | Kind::Flower => (1, 1),
             Kind::Grass => (0, 40),
             Kind::Birch | Kind::Willow | Kind::ScotsPine | Kind::Cherry => (3, 9),
             Kind::DatePalm => (8, 60),
@@ -200,7 +213,7 @@ impl Tree {
     /// file or sent by another program may say anything.
     pub fn clamped(self) -> Tree {
         let (least, most) = Tree::count_range(self.kind);
-        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), lights: self.lights.min(2), ..self }
+        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), hang: self.hang.clamp(HANG.0, HANG.1), lights: self.lights.min(2), bloom: self.bloom.clamped(), ..self }
     }
 
     /// Whether a kind has a trunk whose thickness [`Tree::girth`] sets: the
@@ -267,6 +280,8 @@ impl Tree {
             Kind::Bed => (56.0, 36.0),
             // (wider than it is tall)
             Kind::Cherry => (84.0, 56.0),
+            // a single flower's spread is half the width of the bloom full blown, and its height the bloom's own depth
+            Kind::Flower => (28.0, 24.0),
         }
     }
 }
@@ -316,6 +331,12 @@ pub const BAUBLE_GOLD: u8 = 14;
 pub const BAUBLE_PALE: u8 = 12;
 /// a pine's tinsel
 pub const TINSEL: u8 = 21;
+
+/// How far out a pine's tinsel may hang, as a percentage of the way from
+/// its stem to its outline: the least, the most, and where it starts. At
+/// the least it is wound close round the stem inside the boughs, and at
+/// the most a little beyond their ends, hanging free between the tiers.
+pub const HANG: (i32, i32, i32) = (40, 110, 80);
 /// a pine's lights and its candles' flames
 pub const FLAME: u8 = 28;
 /// a pine's candles
@@ -668,6 +689,7 @@ impl Model {
             Kind::Daffodil => 21,
             Kind::Bed => 22,
             Kind::Cherry => 23,
+            Kind::Flower => 24,
         };
         let mut grown = Grown { parts: Vec::new(), limbs: Vec::new(), forks: Vec::new(), numbers: Numbers(tree.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt) };
         match tree.kind {
@@ -733,6 +755,7 @@ impl Model {
             Kind::Boxwood => boxwood(&mut grown, &tree, height, spread),
             Kind::Sunflower => sunflower(&mut grown, &tree, height, spread),
             Kind::Tulip => tulip(&mut grown, &tree, height, spread),
+            Kind::Flower => bloom::flower(&mut grown, &tree, height, spread),
         }
         // grown standing on the origin; moved to where it stands, on the
         // floor of the cell its point is in
@@ -1167,7 +1190,13 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             let t = n as f64 / steps as f64;
             let (angle, z) = (lean_way + t * turns * TAU, high + 2.0 - (high + 2.0 - low) * t);
             let sag = 2.5 * (angle * 3.0).sin().powi(2);
-            stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * 0.94 + 1.0) - DVec3::Z * sag
+            // (As far out as `Tree::hang` says, which starts at four fifths
+            // of the way to the tree's outline, among the ends of the
+            // boughs. Hung always at the outline itself and a cell beyond,
+            // it stood off the tree like a hoop wherever it crossed the gap
+            // between two tiers, the outline being the reach of the longest
+            // bough at each height and most boughs shorter.)
+            stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * tree.hang as f64 / 100.0) - DVec3::Z * sag
         };
         for n in 0..steps {
             let (a, b) = (at(n), at(n + 1));
@@ -3284,7 +3313,7 @@ mod tests {
             let count = |wanted: fn(u8) -> bool| built.shades.iter().filter(|s| wanted(**s)).count();
             let (bark, leaves) = (count(|s| s == TRUNK), count(is_leaf));
             // (a flower's stem and leaves are few bricks beside a tree's)
-            assert!((bark > 20 || matches!(kind, Kind::Cypress | Kind::Yucca)) && leaves > 150, "{name}: {bark} bricks of bark or stem and {leaves} of leaves");
+            assert!((bark > 20 || matches!(kind, Kind::Cypress | Kind::Yucca | Kind::Flower)) && leaves > 150, "{name}: {bark} bricks of bark or stem and {leaves} of leaves");
             // nothing below the ground it stands on, and it stands on it
             assert_eq!(built.bricks.iter().map(|b| b.min[2]).min(), Some(0), "{name}");
             // its extras are there when asked for
@@ -4234,6 +4263,15 @@ mod tests {
         assert!(bulbs.len() <= grown_bulbs + 4 && bulbs.len() * 10 >= grown_bulbs * 8 && bulbs.iter().filter(|b| b.ext == [2, 2, 2]).count() * 10 >= bulbs.len() * 8, "{} bricks for {grown_bulbs} bulbs: {:?}", bulbs.len(), bulbs.iter().map(|b| b.ext).collect::<Vec<_>>());
         // a pine with nothing on it has none of any of it
         assert!(grown(Tree::of(Kind::Pine)).parts.iter().all(|p| !matches!(p.shade, STAR | EXTRA | BAUBLE_GOLD | BAUBLE_PALE | TINSEL | FLAME | WAX)));
+
+        // the garland hangs as far out as it is told to: close round the stem, or out at the ends of the boughs
+        let reach = |hang: i32| {
+            let tree = grown(Tree { hang, ..dressed(0, true, 0) });
+            let out: Vec<f64> = tree.parts.iter().filter(|p| p.shade == TINSEL).filter_map(|p| match p.shape { Shape::Cone { a, .. } => Some(a.truncate().length()), _ => None }).collect();
+            out.iter().sum::<f64>() / out.len() as f64
+        };
+        let (tight, usual, loose) = (reach(HANG.0), reach(HANG.2), reach(HANG.1));
+        assert!(tight < usual * 0.6 && usual < loose * 0.8, "{tight}, {usual}, {loose}");
     }
 
     /// Going up a stem from the ground to past where its limbs leave, the

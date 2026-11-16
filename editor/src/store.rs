@@ -393,13 +393,13 @@ mod tests {
         let mut state = crate::state::State::new();
         for mode in [crate::paint::Mode::Blend, crate::paint::Mode::Pattern] {
             state.paint = Paint { mode, colours: crate::paint::palette("rug").to_vec(), axis: 2, width: 2 };
-            assert_eq!(state.paint.colours.len(), crate::paint::MOST_COLOURS);
+            assert_eq!(state.paint.colours.len(), crate::paint::USUAL_COLOURS);
             state.refresh(|| 0.0);
             let forms = state.forms();
             assert_eq!(unpack(&pack(&state.painted(), &forms).unwrap(), cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
         }
         // one colour more than a paint may have is still refused
-        let nine = describe(&state.forms()).replacen("paint ", "paint ", 1).lines().map(|line| if line.starts_with("paint ") { format!("{line} 1,2,3") } else { line.to_string() }).collect::<Vec<_>>().join("
+        let nine = describe(&state.forms()).replacen("paint ", "paint ", 1).lines().map(|line| if line.starts_with("paint ") { format!("{line}{}", " 1,2,3".repeat(crate::paint::MOST_COLOURS - crate::paint::USUAL_COLOURS + 1)) } else { line.to_string() }).collect::<Vec<_>>().join("
 ");
         assert!(unpack(nine.as_bytes(), false).is_err());
     }

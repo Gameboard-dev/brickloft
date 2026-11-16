@@ -25,6 +25,20 @@ fn help(name: &str) -> &'static str {
     texts.get(name).map_or("No explanation has been written for this control.", String::as_str)
 }
 
+/// What an explanation written for every kind of plant says of one kind.
+///
+/// Such an explanation is a line for each kind, or for several named
+/// together: the kinds' names as `brickloft_core::tree::KINDS` has them,
+/// a colon, and the sentence. A setting means something different for
+/// each plant (a pine's count is its tiers, a palm's its fronds), and the
+/// whole list was shown whatever the plant: twenty kinds to read through
+/// for the one in hand. An explanation with no line for the kind is given
+/// whole, so that a kind added later is not left with nothing.
+fn for_kind(text: &'static str, kind: brickloft_core::tree::Kind) -> &'static str {
+    let name = brickloft_core::tree::KINDS[kind as usize].1;
+    text.lines().find_map(|line| line.split_once(": ").filter(|(kinds, _)| kinds.split(", ").any(|k| k == name)).map(|(_, said)| said)).unwrap_or(text)
+}
+
 /// A small "?" that explains the control beside it when the pointer rests
 /// on it.
 ///
@@ -800,9 +814,9 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     let mut another = None;
     if walls && s.maze.hedge {
         // the hedge's own settings, as the Plant form has them for a hedge (see `tree`)
-        helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text("Density")));
-        helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text("Looseness")));
-        helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
+        helped(ui, for_kind(help("tree_fullness"), brickloft_core::tree::Kind::Hedge), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text("Density")));
+        helped(ui, for_kind(help("tree_bend"), brickloft_core::tree::Kind::Hedge), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text("Looseness")));
+        helped(ui, for_kind(help("tree_extras"), brickloft_core::tree::Kind::Hedge), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
             ui.label("Seed");
@@ -961,7 +975,7 @@ fn maze(ui: &mut Ui, state: &mut State, largest: f64) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers", "Cherry blossom tree"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass", "Birch tree", "Willow tree", "Date palm", "Scots pine", "Cypress", "Yucca", "Daisies", "Daffodils", "Bed of mixed flowers", "Cherry blossom tree", "Single flower"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -976,6 +990,29 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         state.usual_tree(kind);
     }
     let named = KINDS[kind as usize].1;
+    if kind == Kind::Flower {
+        // which flower, before its colours: a flower still in the colours the last one starts in takes those this one starts in
+        use brickloft_core::tree::FLOWERS;
+        let titled = |flower: brickloft_core::tree::Flower| ["Rose", "Water lily", "Gerbera"][flower as usize];
+        let was = state.spec.tree.bloom.flower;
+        let mut flower = was;
+        helped(ui, help("bloom_flower"), |ui| {
+            ComboBox::from_label("Flower").selected_text(titled(flower)).show_ui(ui, |ui| {
+                for (f, _) in FLOWERS {
+                    ui.selectable_value(&mut flower, f, titled(f));
+                }
+            })
+            .response
+        });
+        if flower != was {
+            state.spec.tree.bloom.flower = flower;
+            let sets = crate::paint::palettes(named);
+            if state.paint.mode == Mode::Pattern && state.paint.colours == sets[crate::paint::flower_set(was)] {
+                state.paint.colours = sets[crate::paint::flower_set(flower)].to_vec();
+                state.scene += 1;
+            }
+        }
+    }
     // which of the kind's sets of colours, if it is in one of them
     let (sets, names) = (crate::paint::palettes(named), crate::paint::tree_palette_names(named));
     let now = sets.iter().position(|set| state.paint.mode == Mode::Pattern && state.paint.colours == *set);
@@ -1008,7 +1045,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     let spread = match kind {
         Kind::Palm => "Frond length",
         Kind::Sunflower => "Half the head's width",
-        Kind::Peony => "Half the bloom's width",
+        Kind::Peony | Kind::Flower => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
         Kind::Grass => "Reach to each side",
         Kind::DatePalm => "Frond length",
@@ -1017,7 +1054,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
-    helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
+    helped(ui, for_kind(help("tree_spread"), kind), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
     if kind == Kind::Grass {
         // (a pond is a hollow pushed down deeper than the water stands: see `brickloft_core::tree::grass`)
         let mut reeds = (s.depth - 1).clamp(0, 10);
@@ -1073,14 +1110,15 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Bed => ("Leaves", "Flowers", "Unevenness"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
+        Kind::Flower => ("Petals", "", "How open it is"),
     };
     let (least, most) = Tree::count_range(kind);
     // (grass has nothing to count)
     if least < most {
-        helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+        helped(ui, for_kind(help("tree_count"), kind), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
     }
-    helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
-    helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
+    helped(ui, for_kind(help("tree_fullness"), kind), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
+    helped(ui, for_kind(help("tree_bend"), kind), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
     // (the trees alone: see `Tree::has_trunk`)
     if Tree::has_trunk(kind) {
         let (least, most) = brickloft_core::tree::GIRTH;
@@ -1088,13 +1126,16 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     match kind {
         Kind::Palm => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
         }
         Kind::Pine => {
             // a Christmas tree's decorations
             helped(ui, help("pine_star"), |ui| ui.checkbox(&mut s.tree.extras, "Star"));
             helped(ui, help("pine_baubles"), |ui| ui.add(Slider::new(&mut s.tree.baubles, 0..=100).suffix("%").text("Baubles")));
             helped(ui, help("pine_tinsel"), |ui| ui.checkbox(&mut s.tree.tinsel, "Tinsel"));
+            if s.tree.tinsel {
+                helped(ui, help("pine_hang"), |ui| ui.add(Slider::new(&mut s.tree.hang, brickloft_core::tree::HANG.0..=brickloft_core::tree::HANG.1).suffix("%").text("How far out the tinsel hangs")));
+            }
             ui.horizontal(|ui| {
                 ui.label("Lights").on_hover_text(help("pine_lights"));
                 for (n, name) in ["None", "Lights", "Candles"].into_iter().enumerate() {
@@ -1106,23 +1147,37 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
             }
         }
         Kind::Cherry => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no blossom)"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no blossom)"));
             helped(ui, help("cherry_petals"), |ui| ui.checkbox(&mut s.closed, "Fallen petals on the ground"));
         }
         Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::ScotsPine => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no leaves)"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no leaves)"));
         }
         Kind::Boxwood | Kind::Hedge => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
         }
         Kind::Reeds => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
         }
         Kind::DatePalm => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Dates"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "Dates"));
         }
         Kind::Yucca => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+        }
+        Kind::Flower => {
+            use brickloft_core::tree::Flower;
+            let bloom = &mut s.tree.bloom;
+            // (grown into the bloom itself: the form's quarter turns cannot lay it at a slant, and turning its grid turns the grid's other forms)
+            helped(ui, help("bloom_tilt"), |ui| ui.add(Slider::new(&mut bloom.tilt, 0..=brickloft_core::tree::MOST_TILT).suffix("°").text("Tilt")));
+            helped(ui, help("bloom_turn"), |ui| ui.add(Slider::new(&mut bloom.turn, 0..=359).suffix("°").text("Turn")));
+            let cup = match bloom.flower {
+                Flower::Rose | Flower::WaterLily => "Sepals under it",
+                Flower::Gerbera => "Green bracts under it",
+            };
+            helped(ui, for_kind(help("tree_extras"), kind), |ui| ui.checkbox(&mut s.tree.extras, cup));
+            helped(ui, help("bloom_stem"), |ui| ui.checkbox(&mut bloom.stem, "A short length of stem"));
+            helped(ui, help("bloom_fallen"), |ui| ui.checkbox(&mut bloom.fallen, "Fallen petals beside it"));
         }
         Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass | Kind::Cypress | Kind::Daisy | Kind::Daffodil | Kind::Bed => {}
     }
@@ -1415,6 +1470,30 @@ fn dropped_form(ui: &mut Ui, state: &mut State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_plants_settings_are_explained_for_the_kind_it_is() {
+        use brickloft_core::tree::{Kind, KINDS};
+        // each kind has a line of its own for what every plant has, and is told nothing of another kind
+        for (kind, name) in KINDS {
+            for about in [help("tree_count"), help("tree_fullness"), help("tree_bend"), help("tree_spread")] {
+                let said = for_kind(about, kind);
+                assert!(said != about && !said.contains('\n') && !said.contains(": "), "{name}: {said:?}");
+            }
+        }
+        assert_eq!(for_kind(help("tree_count"), Kind::Pine), "How many tiers of boughs the tree has.");
+        assert_eq!(for_kind(help("tree_count"), Kind::ScotsPine), "How many main limbs leave its stem.");
+        assert_eq!(for_kind(help("tree_bend"), Kind::DatePalm), "How far its trunk leans.");
+        // an extra only for the kinds that have one, each its own
+        assert!(for_kind(help("tree_extras"), Kind::Palm).contains("coconuts") && for_kind(help("tree_extras"), Kind::Cherry).contains("blossom"));
+        // every name in the lists is a kind, so that none is written for a plant that is not there
+        for about in [help("tree_count"), help("tree_fullness"), help("tree_bend"), help("tree_spread"), help("tree_extras")] {
+            for line in about.lines() {
+                let (kinds, _) = line.split_once(": ").expect("a line without its kinds");
+                assert!(kinds.split(", ").all(|k| KINDS.iter().any(|(_, name)| *name == k)), "{kinds}");
+            }
+        }
+    }
+
     #[test]
     // (the windowless way of running egui that this test uses has newer names in egui; the old ones are what the version three_d carries still has in common with them)
     #[allow(deprecated)]

@@ -167,14 +167,28 @@ walls ([algorithm.md](algorithm.md), section 7.11). What remains:
 
 ## More plants
 
-Twenty-two kinds of plant are built: eight trees, five bushes, seven
-flowers and a bed of them, reeds and grass, each grown by its
-own method ([algorithm.md](algorithm.md), section 7.10). What remains:
+Twenty-three kinds of plant are built: eight trees, five bushes, seven
+flowers and a bed of them, a single flower head, reeds and grass, each
+grown by its own method ([algorithm.md](algorithm.md), section 7.10).
+What remains:
 
-- **More plants still.** A rose was left out again: at this size its head
-  is a ball. A lily, a fern, a cactus and a bamboo have rules of their
-  own that are not written. A hedge still cannot fork or meet another at
-  a tee.
+- **More plants still.** A lily, a fern, a cactus and a bamboo have rules
+  of their own that are not written. A hedge still cannot fork or meet
+  another at a tee.
+- **More single flowers.** A rose, a water lily and a gerbera are built
+  from one kind of petal. A dahlia was built from it and taken out: sixty
+  petals four cells wide were confetti from above at 48 cells across. It
+  would read at twice the size, so it could be offered above some spread.
+  A camellia, a lily and an orchid are not written.
+- **A rose from straight above.** From the side and at three quarters
+  the rose shows separate cupped petals. From straight above it shows
+  arcs of petal with dark gaps between them and no clear spiral in its
+  heart, because the heart's petals are two cells thick round a hole one
+  cell wide. A larger rose shows more.
+- **A rose bush again.** The rose is a single head because it needs 40
+  cells. A bush of such heads would be 300 cells tall.
+- **A bloom facing down.** Tilt stops at 90 degrees. Past that the
+  form's quarter turns flip it, in steps of 90.
 - **Smoother limbs.** Trunks are eight-sided on the lattice and built of
   tall bricks. Limbs are still fitted cell by cell, and a slanting limb
   is steps. Building them as lifted tubes (section 7.7) would need them

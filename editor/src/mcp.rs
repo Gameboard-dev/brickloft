@@ -547,7 +547,7 @@ fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
         match key.as_str() {
             "mode" => paint.mode = MODES.iter().find(|m| Some(m.1) == value.as_str()).ok_or("mode is one, blend, stripes or pattern")?.0,
             "colours" => {
-                let colours = value.as_array().filter(|c| (1..=crate::paint::MOST_COLOURS).contains(&c.len())).ok_or("colours is a list of one to eight colours")?;
+                let colours = value.as_array().filter(|c| (1..=crate::paint::MOST_COLOURS).contains(&c.len())).ok_or("colours is a list of one to 32 colours")?;
                 paint.colours = colours
                     .iter()
                     .map(|c| {
@@ -1214,6 +1214,44 @@ mod tests {
     }
 
     #[test]
+    fn a_single_flower_keeps_which_flower_it_is_and_how_it_lies_through_undo_copy_and_save() {
+        use brickloft_core::tree::{Bloom, Flower, Kind, Tree};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        // by its kind alone it is a red rose facing up, at its usual size
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "tree", "tree": "flower" } }), || 0.0).unwrap());
+        assert_eq!((state.spec.tree, state.spec.radius, state.spec.rise), (Tree::of(Kind::Flower), Tree::usual_size(Kind::Flower).1, Some(Tree::usual_size(Kind::Flower).0)));
+        assert_eq!((added["forms"][0]["settings"]["bloom"].as_str(), state.paint.colours.as_slice()), (Some("rose,0,0,0,0"), crate::paint::palette("flower")));
+        let upright = state.built.bricks.clone();
+        // which flower and how it lies, given beside the kind in either order of the two, and alone afterwards
+        let lying = Bloom { flower: Flower::WaterLily, tilt: 60, turn: 45, stem: true, fallen: true };
+        let changed = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": "waterlily,60,45,1,1", "tree": "flower,3,80,1,90,1" } }), || 0.0).unwrap());
+        let wanted = Tree { seed: 3, fullness: 80, bend: 90, extras: true, bloom: lying, ..Tree::of(Kind::Flower) };
+        assert_eq!(state.forms()[0].0.tree, wanted);
+        assert_eq!(changed["forms"][0]["settings"]["bloom"], "waterlily,60,45,1,1");
+        assert_ne!(state.built.bricks, upright);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": ["rose", 20] } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.tree, Tree { bloom: Bloom { tilt: 20, ..Bloom::default() }, ..wanted });
+        // one step back is the lily lying down, and forward again the rose
+        assert!(state.undo());
+        assert_eq!(state.forms()[0].0.tree, wanted);
+        // copied and pasted, and saved and opened, it is the same flower lying the same way
+        let (_, copied) = state.copied();
+        state.paste(copied);
+        assert_eq!(state.forms().iter().filter(|form| form.0.tree == wanted).count(), 2);
+        let opened = crate::store::forms_in(&crate::store::describe(&state.forms())).unwrap();
+        assert_eq!(opened.iter().map(|form| form.0.tree).collect::<Vec<_>>(), state.forms().iter().map(|form| form.0.tree).collect::<Vec<_>>());
+        // what is no flower is refused, and what is out of range is brought within it
+        let before = state.forms();
+        for bad in [json!("orchid"), json!("rose,steep"), json!("rose,1,2,3,4,5"), json!(""), json!("rose\nradius = 900")] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": bad } }), || 0.0).is_err(), "{bad} was accepted");
+        }
+        assert_eq!(state.forms(), before);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": "gerbera,900,-90,5,5" } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.tree.bloom, Bloom { flower: Flower::Gerbera, tilt: 90, turn: 270, stem: true, fallen: true });
+    }
+
+    #[test]
     fn a_tree_is_added_by_its_kind_alone_at_its_usual_size_and_in_its_own_colours() {
         use brickloft_core::tree::{Kind, Tree};
         let mut state = State::new();
@@ -1228,18 +1266,18 @@ mod tests {
         // in the palm's colours, as the pattern has them, and told so
         assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("palm")));
         assert_eq!(added["forms"][0]["colour"]["mode"], "pattern");
-        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0,100,0,0,0,1");
+        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0,100,0,0,0,1,80");
         // every brick is painted the colour of its part: trunk and leaves both
         let painted = state.painted();
         let of = |n: usize| painted.iter().filter(|b| b.2 == 0 && b.1 == Some(crate::paint::palette("palm")[n])).count();
         assert!(of(0) > 100 && of(1) > 1000, "{} of trunk, {} of leaves", of(0), of(1));
         // a size and a list of settings are taken as given, and a form changed into a tree comes in the tree's colours
         let small = said(apply(&mut state, "update_form", &json!({ "index": 1, "settings": { "form": "tree", "tree": ["oak", 7, 80, 3, 20, 0], "radius": 20, "rise": 36, "points": [[0.5, 0.5, 0.5]] } }), || 0.0).unwrap());
-        assert_eq!(small["forms"][1]["settings"]["tree"], "oak,7,80,3,20,0,100,0,0,0,1");
+        assert_eq!(small["forms"][1]["settings"]["tree"], "oak,7,80,3,20,0,100,0,0,0,1,80");
         assert_eq!(small["forms"][1]["colour"]["mode"], "pattern");
         assert_eq!(small["forms"][1]["box_in_grid"]["size"][2].as_f64().map(|v| v <= 37.0 && v > 28.0), Some(true), "{}", small["forms"][1]["box_in_grid"]);
         // what is not a tree is refused, and what is out of range is brought within it
-        for bad in [json!("bamboo"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6,7,8,9,10,11"), json!(""), json!("pine\nradius = 900")] {
+        for bad in [json!("bamboo"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6,7,8,9,10,11,12"), json!(""), json!("pine\nradius = 900")] {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": bad } }), || 0.0).is_err(), "{bad} was accepted");
         }
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": "pine,1,5000,-3,999,7", "radius": 12, "rise": 30 } }), || 0.0).unwrap();

@@ -264,6 +264,21 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[92, 124, 60], [62, 116, 60], [42, 88, 48], [100, 146, 72], [84, 110, 56], [250, 128, 100], [236, 96, 84], [248, 214, 100]],
             &[[92, 124, 60], [62, 116, 60], [42, 88, 48], [100, 146, 72], [84, 110, 56], [250, 220, 222], [244, 190, 202], [246, 214, 110]],
         ],
+        // A single flower head's colours are for its parts, in the order
+        // of `brickloft_core::tree::bloom`'s numbers: stem, sepals, the
+        // throat of a petal, its lip, the swelling under the bloom, the
+        // outer petals, the inner petals, and the stamens or disc. The
+        // four tones of petal run from dark in the throat to light on the
+        // lip in every set but the last, so that each petal's edge shows
+        // against the one behind it.
+        // red; pink; white; yellow; cream edged with red
+        "flower" => &[
+            &[[74, 110, 54], [70, 124, 60], [92, 6, 22], [228, 56, 70], [84, 118, 56], [178, 18, 38], [140, 10, 30], [244, 200, 80]],
+            &[[74, 110, 54], [70, 124, 60], [196, 84, 124], [250, 200, 214], [84, 118, 56], [240, 150, 178], [222, 112, 150], [246, 210, 90]],
+            &[[74, 110, 54], [70, 124, 60], [226, 214, 190], [255, 253, 248], [84, 118, 56], [246, 242, 232], [238, 228, 206], [244, 200, 70]],
+            &[[74, 110, 54], [70, 124, 60], [214, 150, 30], [252, 232, 130], [84, 118, 56], [246, 208, 60], [236, 180, 40], [176, 104, 30]],
+            &[[74, 110, 54], [70, 124, 60], [240, 214, 150], [206, 36, 60], [84, 118, 56], [250, 236, 200], [246, 226, 170], [244, 200, 80]],
+        ],
         // a yellow sunflower; a red-bronze one; a pale lemon one
         "sunflower" => &[
             &[[92, 132, 56], [70, 124, 52], [48, 96, 44], [112, 156, 66], [84, 118, 50], [246, 196, 30], [150, 100, 40], [70, 46, 28]],
@@ -335,8 +350,8 @@ pub fn maze_palettes(texture: &str) -> Vec<Vec<[u8; 3]>> {
     palettes(texture)
         .iter()
         .map(|set| {
-            let mut colours: Vec<[u8; 3]> = (0..MOST_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
-            colours[MOST_COLOURS - 1] = WAY;
+            let mut colours: Vec<[u8; 3]> = (0..USUAL_COLOURS as u8).map(|shade| set[brickloft_core::pattern::colour_of(shade, set.len())]).collect();
+            colours[USUAL_COLOURS - 1] = WAY;
             colours
         })
         .collect()
@@ -378,8 +393,20 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "petunia" => &["Purple", "Pink", "White", "Red", "Blue and white"],
         "reeds" => &["Summer", "Autumn straw", "Purple plumes"],
         "sunflower" => &["Yellow", "Red-bronze", "Lemon"],
+        "flower" => &["Red", "Pink", "White", "Yellow", "Cream edged with red"],
         "tulip" => &["Red", "Yellow", "Pink", "Purple", "White", "Orange flamed"],
         _ => &["Summer", "Early autumn", "Late autumn", "Spring"],
+    }
+}
+
+/// Which of the single flower's sets of colours a flower starts in: a red
+/// rose, a white water lily and a yellow gerbera.
+pub fn flower_set(flower: brickloft_core::tree::Flower) -> usize {
+    use brickloft_core::tree::Flower;
+    match flower {
+        Flower::Rose => 0,
+        Flower::WaterLily => 2,
+        Flower::Gerbera => 3,
     }
 }
 
@@ -396,9 +423,22 @@ pub fn palette(style: &str) -> &'static [[u8; 3]] {
     palettes(style)[0]
 }
 
-/// The most colours a paint may have: one for each number a pattern may
-/// give a brick.
-pub const MOST_COLOURS: usize = 8;
+/// The most colours a paint may have: one for each number a form may
+/// give a brick (`brickloft_core::spec::Built::shades`).
+///
+/// It was eight, which is as many as a rug has features, and every form
+/// since was made to fit: a dressed pine's tinsel, star and flames share
+/// one gold, and a model with a palette of its own (a mesh, a program of
+/// rules) had its colours merged down to eight. Nothing but this number
+/// held it there: a brick's colour number is a byte, and a paint with
+/// more colours than a form has numbers leaves the rest unused (see
+/// `brickloft_core::pattern::colour_of`). Thirty-two is as many as fit in
+/// the panel in a few rows and are still told apart by eye.
+pub const MOST_COLOURS: usize = 32;
+
+/// How many colour numbers the forms made before that limit was raised
+/// use: the sets of colours written for them have one colour for each.
+pub const USUAL_COLOURS: usize = 8;
 
 impl Paint {
     /// The colour of a brick whose pattern gives it colour number `shade`

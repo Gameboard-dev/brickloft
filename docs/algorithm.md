@@ -2249,7 +2249,8 @@ of several thousand simple parts: tapered round branches, the eight-sided
 lengths of a palm's trunk, and balls of leaves. There are four trees (a
 pine, a palm, an oak and a beech), three bushes (a boxwood, a hedge of it
 and a hydrangea), four flowers (a peony, a sunflower, a tulip and
-petunias) and a stand of reeds. Each is grown by a method of its own,
+petunias) and a stand of reeds, with more of each added since, and a
+single flower head on its own. Each is grown by a method of its own,
 because they differ in how they grow and a single rule general enough for
 all of them describes none of them closely. The trees come first below,
 and the bushes and flowers after them reuse their parts.
@@ -3068,9 +3069,156 @@ other numbers, as the beech is, and each has something of its own.
   is alone and set down in its place. They share the bed's colours part
   for part, so a bed is a few colours that go together.
 
-A rose was considered again and left out. A rose head needs its petals
-in a tight spiral with each one curled, and at five to six cells across
-that is the ball with a heart that was taken out before.
+#### A single flower
+
+<img src="images/plant-rose.png" width="330" alt="A single red rose in bricks, most of the way open, seen from above and to one side: a furled heart, cupped petals round it in two tones of red with lighter edges, the outer ones with their lips rolled back, and green sepals under it"> <img src="images/plant-rose-lying.png" width="330" alt="The same rose tipped over on a short stem, with three loose petals lying on the floor beside it">
+
+A single flower is one bloom with no plant under it, 48 cells across when
+full blown, where a peony's bloom is 20. It exists because a rose cannot
+be built smaller. A rose is told from other flowers by separate petals
+furled round a heart, and at five or six cells across those petals are a
+ball with a heart, which is why the rose bush was taken out. The kind
+offers a rose, a water lily and a gerbera
+([core/src/tree/bloom.rs](../core/src/tree/bloom.rs)).
+
+All three are built from one part, the petal, a sheet 1.9 cells thick. A
+petal is ribs side by side, 1.25 cells apart, and each rib is a chain of
+round cones, so the sheet is a union of exact distances (section 5). A
+sheet with a distance function of its own was the alternative. A sheet
+bent three ways has no exact distance in closed form, and an approximate
+one must be scaled down to stay under the truth, which is what made
+noise on an oak's leaves cost four times as much as balls.
+
+A rib is followed out from the petal's root by its heading
+$`\theta`$, the angle between the rib and the bloom's axis. Let $`s`$ be
+the share of the way along the rib, and $`w`$ the rib's place across the
+petal, 0 for the middle rib and $`\pm 1`$ for the two edges. Then
+
+```math
+\theta(s, w) = \rho + (\lambda - \rho)\left(1 - \min\left(1,\ \frac{s}{0.4}\right)\right)^2 - \kappa\,s^2 + \ell\,(1 + e\,w^2)\,\max\left(0,\ \frac{s - 0.66}{0.34}\right)^2 + f\,w^2 s
+```
+
+Each number is one feature of the petal. It leaves the heart at the angle
+$`\lambda`$ and has turned to $`\rho`$ by two fifths of its length, which
+gives a cup its rounded bottom and its side. A petal that left at the
+angle it ends at, as the first version did, made the bloom a funnel.
+$`\kappa`$ turns the petal in over the top and is what closes a bud.
+$`\ell`$ rolls the last third out again as a lip, more at the edges than
+in the middle by $`e`$, and $`f`$ lifts the edges off the petal behind.
+
+Across its width a petal is an arc. A rose's petal is curved as a cone
+about the bloom's axis is curved where the petal stands: at the distance
+$`r`$ from the axis, to the radius $`r / \cos\theta`$. A narrow petal
+near the axis therefore goes most of the way round it, which is the
+furled heart, and a petal lying out level is flat. A water lily's petals
+and a gerbera's rays are curved to a radius of their own and are hollow
+like a boat.
+
+A rose is the high-centred double bloom of a hybrid tea. Four facts
+about it are built.
+
+- It has few, large petals for a double rose. The American Rose Society
+  calls 17 to 25 petals double and 26 to 40 full
+  ([rose forms and petal counts](https://www.marinrose.org/?p=487)), and
+  **Petals** gives 10 to 30. The inner petals of a double rose are
+  stamens made over into petals and are smaller
+  ([Dubois et al. 2010](https://doi.org/10.1371/journal.pone.0009288)).
+- Its innermost petals stay furled and stand as high as the open ones
+  round them
+  ([rose shapes](https://garden.org/ideas/view/Calif_Sue/1187/An-Explanation-of-Rose-Shapes-and-Types/)).
+- Its outer petals roll their lips back, and the roll draws each lip to
+  points. Zhang, Cohen, Moshe and Sharon
+  ([2025](https://doi.org/10.1126/science.adt0672)) show that a growing
+  rose petal relieves the strain in its margin by rolling it into cusps.
+  Here the edges of a lip roll 1.8 times as far as its middle.
+- Five sepals lie against the bud and turn back under the open bloom.
+
+The petal numbered $`k`$ of $`N`$ has the place $`t = (k + \tfrac12)/N`$,
+0 for the innermost and 1 for the outermost, and stands at the angle
+$`k \cdot 137.5^\circ`$ round the axis. The golden angle is a choice
+here and not a measurement of roses. It is the one turn that keeps every
+petal out from behind the last at any number of petals, as in the peony.
+With $`R`$ the spread, a petal is $`(0.83 + 0.18\,t)\,R`$ long and
+$`(0.30 + 0.70\,t)\,R`$ wide at its widest, so the outermost are as wide
+as they are long. A petal's size does not change as the bloom opens,
+because a real petal's does not. With $`o`$ for **How open it is**, the
+petal has opened by the share $`q = o\,(0.3 + 0.7\,t)`$, so the heart
+opens last and least, and
+
+```math
+\lambda = 0.3 + (1 + 0.1\,q)\,t, \qquad \rho = q\left(0.2\,u + 0.7\,q\,u^{1.6} - 0.05\right), \qquad \kappa = 0.08 + (1 - q)^{1.5}\,(0.5 + 0.6\,t), \qquad \ell = q^{0.8}\,\max\left(0,\ \frac{t - 0.45}{0.55}\right)^{1.2}
+```
+
+in radians, with $`u = \min(1,\ t / 0.8)`$, $`e = 0.8`$ and
+$`f = 0.45\,q\,t`$. At $`o = 0`$ every petal turns in. The outermost,
+held close to the axis, wrap half way round the rest and over the top,
+and the bud is a closed egg 16 cells across and 24 tall. At $`o = 1`$
+the outer petals lie out with their lips rolled under, the bloom is the
+spread to each side, and above 88% the heart shows its stamens. The
+outermost fifth of the petals open alike, because one petal further out
+than the rest made the bloom lopsided from above.
+
+<img src="images/plant-rose-bud.png" width="220" alt="The rose in bud: a closed egg of dark red petals, pointed at the top, with five green sepals lying against it"> <img src="images/plant-rose-full.png" width="330" alt="The rose full blown, seen from above and to one side: wide outer petals lying out with rolled lips round rings of cupped petals and a small open heart">
+
+Petals in turn have two tones. A petal overlaps the third and the fifth
+after it and never the next, so two petals that touch always differ, and
+the eye parts them as it does by their shadows on a real bloom. One tone
+for the inner half of the petals and another for the outer was tried
+first and parted nothing, because every petal lay against others of its
+own tone. The margin of every petal has a third, lighter colour, and the
+lowest quarter of the inner petals a fourth, darker one, seen only down
+inside the bloom.
+
+A water lily ([*Nymphaea*](https://en.wikipedia.org/wiki/Nymphaea)) is
+the same machinery with other numbers: 14 to 36 narrow petals, widest
+low down and tapering straight to a point, with no lip. The outermost
+lie out level and each round inside stands more upright, about a cushion
+of stamens set by Vogel's model. It has four sepals.
+
+A gerbera ([*Gerbera jamesonii*](https://en.wikipedia.org/wiki/Gerbera_jamesonii))
+is two rows of 13, 21 or 34 rays round a disc of seeds, the disc darker
+in its middle. The rays are spaced evenly and not by the golden angle,
+because a row has no round behind it to stay out from behind. Each ray is
+narrow enough to leave air between its end and the next. Wider, the rays
+were a dish.
+
+<img src="images/plant-waterlily.png" width="330" alt="A white water lily in bricks: pointed petals in a star, the outer ones lying out and the inner standing, round a yellow heart"> <img src="images/plant-gerbera.png" width="330" alt="A yellow gerbera in bricks seen from above: two rows of separate rays, the inner row orange, round a brown disc">
+
+A dahlia was built and taken out. Its petals are many and small, and at
+this size sixty of them four cells wide were told apart from the side
+and were confetti from above.
+
+**Tilt** and **Turn** are grown into the bloom. It is grown along +z
+and every part is then turned about the middle of the bloom: tipped over
+by the tilt towards +x, then turned about the upright. A round cone or a
+ball turned is the same solid elsewhere, so its distance stays exact,
+and the fitter lays the bricks on the grid as it does for any plant. The
+bloom is then moved straight up or down until its lowest point touches
+the floor, so it rests on its petals, its sepals or its stem and is
+never below the floor of its point. The form's 24 quarter turns (section
+8) cannot lay a rose down at a slant, and a grid at an angle turns every
+other form on that grid with it. A bloom tilts to 90 degrees, which is on
+its side. The quarter turns give the rest.
+
+Fallen petals are petals of the same shape laid on their backs on the
+floor, three to five of them, on the side the bloom faces.
+
+At the usual size, 48 cells across full blown:
+
+| Flower | Parts | Bricks | One thread | 16 threads |
+|---|---|---|---|---|
+| Rose, in bud | 4,289 | 1,757 | 0.52 s | 0.32 s |
+| Rose, 60% open | 4,570 | 3,886 | 0.66 s | 0.21 s |
+| Rose, full blown | 4,577 | 6,898 | 0.71 s | 0.14 s |
+| Water lily, 60% open | 2,101 | 4,332 | 0.36 s | 0.15 s |
+| Water lily, full blown | 2,073 | 4,140 | 0.34 s | 0.08 s |
+| Gerbera, 60% open | 2,055 | 3,430 | 0.27 s | 0.08 s |
+| Gerbera, full blown | 2,055 | 2,252 | 0.28 s | 0.09 s |
+
+A bud takes as long as an open bloom for a quarter of the bricks, and
+gains least from threads. Its 4,289 parts lie on one another in a
+sixth of the room, so each sample has more of them to be compared
+with. Where a bud's time goes was not measured further.
 
 #### One colour for each part
 

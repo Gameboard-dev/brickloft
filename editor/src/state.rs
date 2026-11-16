@@ -683,7 +683,9 @@ impl State {
     fn add_form_at(&mut self, spec: Spec, place: Option<[i32; 3]>) {
         // the far side of everything there, in units
         let taken = self.others.iter().filter_map(|i| i.bounds.map(|b| 2 * b.1[0] + i.place[0])).chain(self.bounds.map(|b| 2 * b.1[0] + self.place[0])).max();
-        let beside = match (taken, build(&spec).ok().as_ref().and_then(bounds_of)) {
+        // (built once, here: to find where it goes, and to be the bricks it has until its first build as the form being edited)
+        let fresh = build(&spec).unwrap_or_default();
+        let beside = match (taken, bounds_of(&fresh)) {
             // four microbricks of air between them
             (Some(right), Some((lo, _))) => [right + 8 - 2 * lo[0], 0, 0],
             _ => [0; 3],
@@ -695,6 +697,10 @@ impl State {
         self.paint = Paint::default();
         self.place = place.unwrap_or(beside);
         self.built_from = None;
+        // Its own bricks from the start: the bricks in hand were the last
+        // form's, and were drawn as the new one until it was built.
+        self.bounds = bounds_of(&fresh);
+        self.built = fresh;
         self.scene += 1;
     }
 
@@ -1100,6 +1106,13 @@ impl State {
     pub fn load_spec(&mut self, mut spec: Spec) {
         // (another form: a build begun for the last one is no answer for it)
         self.loaded += 1;
+        // And it is built here and now the first time, however slow the
+        // last form was. Built behind the window because a lawn had been
+        // slow, a cube just added was drawn for a moment as the lawn's
+        // bricks, which were still the bricks in hand: a second lawn
+        // appeared beside the first and was sent to the graphics card
+        // before the cube took its place.
+        self.build_ms = 0.0;
         // a torus saved by an earlier version: the same thing under its new name
         if spec.form == Form::Torus {
             (spec.form, spec.tube, spec.fill) = (Form::Circle, true, false);
@@ -3668,6 +3681,23 @@ mod tests {
     }
 
     #[test]
+    fn a_form_just_added_has_its_own_bricks_and_not_the_last_forms() {
+        let mut state = State::new();
+        state.load_spec(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 12.0)], radius: 12.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        let sphere = state.built.bricks.len();
+        assert!(sphere > 50);
+        // (as a form slow to build would leave it: the next build would be made behind the window)
+        state.build_ms = 1000.0;
+        state.add_cube();
+        // before anything is built again: one brick, the cube's, and the sphere set down whole beside it
+        assert_eq!((state.built.bricks.len(), state.others[0].built.bricks.len()), (1, sphere));
+        // and its first build is made at once, not behind the window
+        state.refresh_behind(|| 0.0);
+        assert!(!state.fitting() && state.built.bricks.len() == 1 && state.form == CUBE);
+    }
+
+    #[test]
     fn joined_forms_are_drawn_apart_while_one_is_dragged_and_together_when_it_is_let_go() {
         let mut state = State::new();
         state.form = CUBE;
@@ -4322,7 +4352,7 @@ mod tests {
         assert!(!state.can_pull() && state.add_pull(DVec3::new(0.5, -5.0, 30.0)).is_none() && state.tunable(None).is_empty());
         // every set of colours has a colour for each of its eight numbers, and a name
         let sets = crate::paint::palettes("bookcase");
-        assert!(sets.len() == crate::paint::furniture_palette_names("bookcase").len() && sets.iter().all(|set| set.len() == crate::paint::MOST_COLOURS));
+        assert!(sets.len() == crate::paint::furniture_palette_names("bookcase").len() && sets.iter().all(|set| set.len() == crate::paint::USUAL_COLOURS));
         // put back to how it starts, it keeps its seed and the floor it stands on
         state.spec.furniture = Furniture { seed: 9, board: 5, books: 10, ..state.spec.furniture };
         state.spec.points[0].z += 20.0;
