@@ -367,9 +367,6 @@ pub const STYLES: [Style; 5] = [
     Style { name: "cobblestone", drawn: Drawn::Cobbles },
 ];
 
-/// The longest a sloped brick at the edge of a mosaic may be, in cells.
-const EDGE_BRICK: i32 = 5;
-
 /// A tile of a mosaic, as the colour at each of its four corners: top
 /// left, top right, bottom left, bottom right, with the rows of tiles
 /// running the way y does. A tile of one colour has it at all four. A tile cut
@@ -1650,18 +1647,16 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
 /// colours the fit this makes.
 #[allow(clippy::too_many_arguments)]
 pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
-    // The floor is fitted with no brick longer than a few cells. A sloped
-    // brick is one colour, and along a slanting edge the fit otherwise
-    // lays sloped bricks twenty cells long, which stood in the pattern as
-    // bare triangles the size of a medallion. The whole cells are joined
-    // again into long bricks below, by colour, so only the sloped bricks
-    // of the edge are the more for it. The price is the edge: a slant
-    // drawn in bricks of five cells follows the form a little less
-    // closely than one drawn in bricks of twenty (on a band 20 wide
-    // curving through a third of a turn, 1.5% of its area amiss against
-    // 0.6%). At three cells the edge was plainly ragged, and at eight
-    // the triangles were still plain to see.
-    let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, &Opts { max_ext: opts.max_ext.min(EDGE_BRICK), ..*opts });
+    // The floor is fitted exactly as it is with no pattern: a pattern
+    // colours a form and does not reshape it. Along a slanting edge that
+    // fit lays sloped bricks many cells long, and each is one colour, the
+    // pattern's colour at its middle. For a while the floor was fitted
+    // with no brick longer than five cells, so that the edge's bricks
+    // were small enough to carry the pattern; but a slant drawn in short
+    // bricks follows the form less closely (1.5% of a curving band amiss
+    // against 0.6%), and a form that changed its outline when a pattern
+    // was chosen was the worse fault.
+    let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, opts);
     lay_tiles(fit, region, settings, axis, min, max, w0, depth, opts, bricks, shades)
 }
 
@@ -1797,7 +1792,7 @@ mod tests {
         // a disc of radius 30
         let disc = |p: DVec2| p.length() - 30.0;
         let (min, max) = ([-32, -32], [32, 32]);
-        let whole_floor = fit_planar(&|x, y| disc(DVec2::new(x, y)), min, max, &Opts { max_ext: EDGE_BRICK, ..Opts::default() });
+        let whole_floor = fit_planar(&|x, y| disc(DVec2::new(x, y)), min, max, &Opts::default());
         for (style, named) in STYLES.iter().enumerate() {
             let (mut bricks, mut shades) = (Vec::new(), Vec::new());
             let settings = Mosaic { style, size: 2, bevel: 2, border: 1, seed: 7, mortar: true, stagger: -1, upright: false, uneven: [0; 3] };

@@ -245,8 +245,8 @@ The other four patterns are made of tiles one microbrick across. A tile is
 one colour, or it is cut along a diagonal into two triangles of two
 colours. Medallions and the rug are their own mirror images and are set
 out from the middle of the floor. The floor's edge keeps the sloped bricks
-any flat form has, at most five microbricks long, and they take the
-pattern's colours.
+any flat form has, unchanged, and each takes the pattern's colour at
+its middle. A pattern never changes a form's outline.
 
 These four are laid at single microbricks whatever the **Brick budget**
 says, because a tile is one brick and a pattern's detail is its brick

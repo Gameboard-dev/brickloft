@@ -3004,6 +3004,27 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_colours_a_form_and_does_not_reshape_it() {
+        // a band 20 wide curving through a third of a turn, whose edges slant
+        let band = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-61.5, 0.5, -0.5), DVec3::new(-3.5, 0.5, 6.5), DVec3::new(4.5, 0.5, 2.5), DVec3::new(47.5, 0.5, -42.5)], thick: 20.0, depth: 1, plane: 2, mosaic, ..Spec::default() };
+        let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
+        let plain = build(&band(None)).unwrap();
+        let built = build(&band(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: 0, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }))).unwrap();
+        // as close to the form as it is plain, to the last figure
+        assert_eq!((built.solid, built.error), (plain.solid, plain.error));
+        // The sloped bricks of the edge are the plain form's own, each
+        // whole or taken apart into smaller ones of its slope: every one
+        // of the patterned form's lies inside one of the plain form's,
+        // with the same shape, and none is longer than the longest there.
+        let sloped = |built: &Built| built.bricks.iter().filter(|b| b.mask != CUBE).copied().collect::<Vec<CellBrick>>();
+        let longest = |bricks: &[CellBrick]| bricks.iter().map(|b| b.ext[0].max(b.ext[1])).max().unwrap();
+        assert!(longest(&sloped(&plain)) > 5, "the plain band has no long sloped brick to keep");
+        let edge: Vec<CellBrick> = sloped(&built).into_iter().filter(|b| !sloped(&plain).iter().any(|whole| whole.mask == b.mask && (0..3).all(|k| whole.min[k] <= b.min[k] && b.min[k] + b.ext[k] <= whole.min[k] + whole.ext[k]))).collect();
+        // (what is left are the pattern's own tiles cut in two, a cell each)
+        assert!(edge.iter().all(|b| b.ext == [1, 1, 1]), "a sloped brick of the patterned band is not one of the plain band's: {:?}", edge.iter().find(|b| b.ext != [1, 1, 1]));
+    }
+
+    #[test]
     fn a_pattern_is_laid_at_single_microbricks_whatever_the_budget() {
         // (`grain: 0` is the brick size chosen by the budget, as the editor has it)
         // a floor 240 by 160 and 4 deep, which as a plain floor is a handful of bricks (a floor one deep is at single microbricks anyway: there is no coarser brick it can be built of)
