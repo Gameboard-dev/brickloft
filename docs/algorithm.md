@@ -2586,6 +2586,77 @@ paint as two tones of blue, pink or white, or as blue running to pink.
 
 <img src="images/plant-hedge.png" width="330" alt="A clipped box hedge in bricks, five times as long as it is thick, with red berries over its top and sides"> <img src="images/plant-hydrangea.png" width="330" alt="A hydrangea in bricks: a rounded bush of leaves on a few stems, carrying domed flower heads of small blue and pink florets">
 
+#### An arch of hedge
+
+<img src="images/arch-hedge.png" width="330" alt="A round arch built as clipped hedge: lumpy tufts of leaves all over its band, light on top and dark underneath, standing on brown stems at its two feet"> <img src="images/arch-hedge-pointed.png" width="330" alt="A pointed arch of hedge with red berries among its leaves">
+
+With **Texture** set to hedge, an arch is built as clipped hedge
+([core/src/tree/over.rs](../core/src/tree/over.rs)). The hedge laid
+along a line, above, is grown straight and then bent, which suits a line
+on the ground. An arch's band climbs and comes down again, and a hedge
+bent along it would be a wall laid over: its top would face sideways at
+the crown and its stems would run along the soffit. The hedge is
+therefore grown from the arch's own distance function $`d`$ (section 5),
+which is negative inside the band.
+
+The tufts are the hedge's own, the same balls of leaves set back from a
+face by the same rule. What is new is where they go. Let
+$`e(p) = d(p) - 1`$, the band made one cell larger all round. Points are
+taken on a lattice $`s = 1.15\,m`$ apart, where $`m`$ is the size of a
+tuft, each layer half a step along from the last. A lattice point $`p`$
+with $`|e(p)| \le s/2`$ is moved onto the surface,
+
+```math
+q = p - e(p)\,n, \qquad n = \frac{\nabla e}{\lVert \nabla e \rVert}
+```
+
+with the slope $`\nabla e`$ taken by differences half a cell each way,
+and a tuft is set at $`q`$ looking along $`n`$. One layer of the lattice
+lies within half a step of any face, so every face has one layer of
+tufts a step apart whichever way it looks: both fronts, the outside and
+the soffit. A tuft of radius $`r`$ is then held $`r + 1`$ deep, or at
+the middle of a band thinner than that, so that the clusters of leaves
+that stand out of it stay inside. The inside is filled with balls on a
+coarser lattice, each of radius 0.4 less than its depth under the
+surface, so none of the filling shows.
+
+The finished hedge $`h`$ is cut off where the enlarged band ends:
+
+```math
+f(p) = \max\bigl(h(p),\ d(p) - 1\bigr)
+```
+
+Each of the two is no more than the distance to its own solid, so their
+maximum is no more than the distance to what the two share, and the
+fitter's skipping of far cells stays sound. The hedge therefore stands
+one cell outside the plain arch at the most, on any face, and the
+opening keeps its shape. Measured on arches 60 across, 10 thick and 12
+deep, the opening of a round arch is 46 wide and 25 high plain and 45 by
+25 as hedge, a pointed arch's 48 by 44 and 47 by 45, and a parabolic
+arch's 36 by 25 and 37 by 25.
+
+The band is enlarged by that cell because of what was measured without
+it. Held inside the band itself, as a hedge's tufts are held inside its
+box, the hedge filled three fifths of the plain arch's cells and looked a
+cell thin on every face. Grown over the enlarged band it fills seven
+tenths to three quarters of them, with the hollows between tufts at the
+arch's own surface and the tops of the tufts a cell proud of it, cut
+level there.
+
+Where the band stands on the ground its lowest tenth, 2 to 6 cells, is
+bare of leaves, and stems stand in it, as a hedge's do. Leaves are light
+where the sky is over them and dark where open air is under them, by the
+rule every plant's leaves have, which makes the soffit dark. A hedge is
+6 cells thick at the least, so a band thinner or less deep than that is
+grown 6 thick and 6 deep, as a maze's hedges are. More than a million
+cubic cells of band is built at the finest larger brick size that fits,
+as a hedge maze is.
+
+Nothing in this knows that the solid is an arch. A spline and a Bézier
+curve pass through the same function and would be grown the same way.
+They are not offered, because only arches have been looked at. The
+round arch above is 5,010 bricks.
+
 #### The flowers
 
 <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers in bricks, of different heights, facing the same way: dark hearts ringed with lighter seeds and yellow petals, on stout stems with broad drooping leaves"> <img src="images/plant-tulips.png" width="330" alt="A clump of tulips in bricks: orange cups flamed with red on bare stems, with strap-shaped leaves arching from the ground">
