@@ -211,18 +211,16 @@ What remains:
   twigs once more. Half-size bricks do not exist, and a wedge is a cell
   wide at its foot, so thinner twigs would be drawn with gaps.
 - **Grass.** Its blades are one cell thick, so a lawn is coarse tufts
-  close up. Water has two levels at most, every raised pond shares one
-  height, and a stream is five or six cells of water across. A stream
-  could now be narrower: the soil is laid cell by cell, and the 2.4 grid
-  that closed a narrow channel over is used only to find where water
-  stands. A corner where two bare slopes meet is a step, since the
+  close up. A corner where two bare slopes meet is a step, since the
   sloped piece for it is a different shape for each way it can face.
-- **Cliffs, waterfalls and a random landscape.** The ground can be asked
-  its height, its slope and its water cell by cell without the bricks
-  being built (`grass::Ground`, [algorithm.md](algorithm.md), section
-  7.10). A cliff would stand where the slope is steep and a waterfall
-  where a stream's level steps down, and a landscape made at random
-  would be touches chosen by rule. None of the three is written.
+- **Cliffs and waterfalls.** A cliff of soil is a smooth slope in two
+  tones, with no ledges as rock has. A waterfall is one sheet three
+  cells wide: it has no strands, no spray and no pool cut deeper where
+  it lands. Water that falls into a pond a stone lies across lands on
+  the stone. The ground has one height at each place, so a fall cannot
+  stand clear of the face with rock behind it, and no cliff overhangs.
+  Raised ponds are found on a grid of places 2.4 cells apart, so a
+  hollow narrower than about five cells may hold none.
 - **A touch on a very large lawn.** The ground and each tile's bricks
   are kept from one build to the next, so a touch builds what it changed
   ([algorithm.md](algorithm.md), section 7.10). Four costs still grow
@@ -234,7 +232,7 @@ What remains:
   means a build's result carrying more than its bricks. The build puts
   every tile's bricks end to end in one list and the caller copies it,
   about 3 ms for those bricks. Every kept tile's ground is compared,
-  1.3 to 2.8 ms for 320 tiles. With two pond levels the flood that finds
+  1.3 to 2.8 ms for 320 tiles. With raised ponds the flood that finds
   them is made again whole, 4 to 6 ms.
 - **One draw call for every shape.** The form being edited is drawn by
   one object with a call for each brick shape in it, a dozen for a lawn

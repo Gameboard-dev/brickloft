@@ -2804,6 +2804,23 @@ falls on the same curve from there to its edge, which leaves a level
 terrace with a bank that runs back into the hill. The touches are applied
 in the order they were made, as strokes are.
 
+A touch may have a sharp edge. It then does all it does out to a band at
+the edge of its range, a fifth of the range wide and two cells at least,
+and falls away over that band on the same curve. Pushing up makes a
+table with steep sides, pushing down a pit with steep walls, and
+flattening a terrace with a steep bank. The sharp edge exists because the
+easing touch cannot make a cliff under a wide level top. Its steepest
+slope, half way out, is
+
+```math
+\frac{\pi\,a}{2R}
+```
+
+which reaches 45 degrees only when the amount is two thirds of the range.
+Over the band the same height falls five times as steeply. A sharp touch
+is kept as 32 added to the middle number of its added point, where a
+flattening touch has 16, so a lawn saved before reads as it was.
+
 A touch may also be a stroke: with Ctrl held while the button is down,
 the same touch is made again wherever the cursor has moved 0.4 of the
 brush's range along the ground. A patch takes 240 touches. A touch is one
@@ -2837,9 +2854,68 @@ bank. A corner where two slopes meet is left a step.
 
 The table answers what the land is like without the bricks being built:
 `Ground::at` gives a cell's height, the top of its soil, the water
-standing there and whether that water is a stream's, and `Ground::slope`
-gives the rise each way from the heights of the cells beside it. Making
-the table takes about a third of a lawn's build from nothing.
+standing there, whether that water is a stream's, whether the cell is a
+cliff and the height water falls onto it from, and `Ground::slope` gives
+the rise each way from the heights of the cells beside it. Making the
+table takes about a third of a lawn's build from nothing.
+
+##### Cliffs
+
+<img src="images/plant-cliffs.png" width="640" alt="Three hills pushed up with the same brush to three heights: the lowest is grass thinning on its flanks, the middle one bare soil in two browns with a tuft or two, the tallest grey rock in level beds with ledges">
+
+Where the sculpted ground is steep, grass gives way to bare soil and
+then to rock. The three hills above were made with one brush, 20 in
+range, pushed 12, 22 and 36 high. The steepness of a cell is the rise
+each way over the cells to each side
+([finite differences](https://en.wikipedia.org/wiki/Finite_difference#Basic_types)):
+
+```math
+s = \tfrac{1}{2}\sqrt{(h_{x+1} - h_{x-1})^2 + (h_{y+1} - h_{y-1})^2}
+```
+
+The heights are the ground's as it was sculpted, before any stream is
+cut into it, so a stream's own banks are no cliff. The steepness is
+multiplied by a number between 0.85 and 1.15 that changes slowly over
+the ground
+([value noise](https://en.wikipedia.org/wiki/Value_noise) on squares of
+seven cells, from the seed), so the edge of a cliff wanders where
+steepness alone would draw it as a ring at one height round a hill. The
+**Cliffs** setting chooses two thresholds:
+
+| Cliffs | Bare soil from | Rock from |
+|---|---|---|
+| 0 | never | never |
+| 1 | 1.28 (52 degrees) | 2.48 (68 degrees) |
+| 2 | 1.0 (45 degrees) | 1.8 (61 degrees) |
+| 3 | 0.73 (36 degrees) | 1.33 (53 degrees) |
+
+Below three quarters of the first threshold the grass grows as anywhere.
+From there to the threshold a tuft is kept with a chance that falls to
+one in fourteen, and on a cliff of soil one tuft in fourteen stands. No
+blade stands on rock or leans over it, and no reed grows there. The
+middle setting was first tried at 40 and 60 degrees. At 40 a hill 16
+high pushed up with a brush 24 in range, which is 46 degrees at its
+steepest, was bare soil nearly all over, so the first threshold became
+45.
+
+A cliff is laid in beds: level layers two cells thick, each in one tone,
+that rise and dip slowly across the ground. Soil has the soil's own
+colour and a darker one. Rock has one grey for half its beds, a darker
+grey for three in ten and a paler for the rest. The top cell of a rock
+column is a ledge, a part with its own colour: weathered green-grey in
+the summer sets and snow in **Winter**. A rock column's top is brought
+down to the next of a set of levels four cells apart, so a face is
+risers a few cells tall with treads between them, and the beds show in
+the risers. A face left with one cell's step for each cell was a grey
+slope with no riser tall enough to show a bed. A rock column goes down
+to the foot of the bed its foot is in, so every piece of it is a whole
+bed and joins the same piece in the columns beside it. That took a face
+from 2.5 cells of rock a brick to 3.4.
+
+With **Cliffs** at 0 a lawn is the bricks it was before there were
+cliffs, which the test
+`the_lawns_are_the_bricks_they_were_with_cliffs_at_none_and_no_raised_ponds`
+holds five lawns to.
 
 ##### Ponds
 
@@ -2884,9 +2960,9 @@ against the depth of the solid bricks and leaving none of their own. The
 basin then shows through the water, and whatever stands in front of the
 water still hides it. Ice is drawn more solid than water.
 
-With **Pond levels** at 2, water stands at two heights (`Waters`). The
-ground is flooded from the edge of the patch inwards with a priority
-flood
+With **Raised ponds** ticked, a hollow on raised ground holds water of
+its own (`Waters`). The ground is flooded from the edge of the patch
+inwards with a priority flood
 ([Barnes, Lehman and Mulla 2014](https://arxiv.org/abs/1511.04463)),
 which gives each place its spill height: the height water would reach
 there before it ran off the patch. A hollow is a connected set of places
@@ -2898,16 +2974,22 @@ $`s`$ and the water $`w`$ below the lawn, the hollow's own level is
 ```
 
 and a hollow with $`s > 1.5`$ that is deeper than $`w + 1`$ is a raised
-pond. All raised ponds stand at the lowest $`\ell`$ among them, so there
-are two levels and none overflows. The lower level is $`-w`$ as before,
-and a patch with no raised hollow builds the same bricks at 2 as at 1.
-The flood is on a grid of places 2.4 cells apart, the grid the soil was
-laid on when it was fitted, so a lawn saved then has the levels and the
-streams it had.
+pond, standing at its own $`\ell`$. Each pond is as far below its own
+rim as the lawn's ponds are below the lawn, so none overflows. The
+lowest level is $`-w`$ as before, and a patch with no raised hollow
+builds the same bricks ticked as unticked. Every raised pond once stood
+at the lowest $`\ell`$ among them, which kept the levels to two and left
+a hollow on a much higher hill dry. The flood is on a grid of places 2.4
+cells apart, the grid the soil was laid on when it was fitted. A flood
+of every cell would be six times the work for levels that are whole
+numbers either way.
 
-A stream leaves each raised pond for the nearest water at the lower
-level. Its way is the cheapest over the grid of the ground by Dijkstra's
-search, where a step of length $`d`$ onto ground at height $`h`$ costs
+<img src="images/plant-stream.png" width="640" alt="A lawn with a pond in a hollow on a low hill and a larger pond below it, joined by a stream three cells wide that steps down the slope in a sandy channel">
+
+A stream leaves each raised pond for the nearest water that stands
+lower, the lawn's own or another raised pond's. Its way is the cheapest
+over the grid of the ground by Dijkstra's search, where a step of length
+$`d`$ onto ground at height $`h`$ costs
 
 ```math
 d\,\bigl(1 + 3\max(0,\; h - \ell)\bigr)
@@ -2916,24 +2998,54 @@ d\,\bigl(1 + 3\max(0,\; h - \ell)\bigr)
 so it goes round a rise sooner than through it. A way that climbs more
 than 1 over the pond's own rim is refused, and that pond has no stream.
 The way is smoothed, then swung to each side by up to 2.4 on a sine 28
-long whose phase comes from the seed, with no swing at either end. Along
-it, a cell at a time, the water's level is
+long whose phase comes from the seed, with no swing at either end.
+
+The water's level is worked out a cell at a time along the stream. It
+starts at the pond's level, never rises, and stops at the level $`r`$ of
+the water it reaches. With $`b_k`$ the lowest sculpted ground within 1.8
+to either side of place $`k`$, on gentle ground it is
 
 ```math
-z_k = \max\bigl(-w,\; \min(z_{k-1},\; \lfloor b_k - 0.5 \rfloor)\bigr)
+z_k = \max\bigl(r,\; \min(z_{k-1},\; \lfloor \min(b_k, b_{k+1}, b_{k+2}) - 0.5 \rfloor)\bigr)
 ```
 
-where $`b_k`$ is the lowest ground within 4.4 to either side over the
-next three cells, and $`z_0 = \ell`$ until the stream is out through the
-rim. The level never rises, it is a whole number, and it lies under both
-banks, so the water is flat reaches with a step down between them. The
-channel is cut 2.8 under the water over a width of 4.4, with banks that
-lie back further where the cut is deep, which leaves water one cell deep
-along its bed. Its bed is sand, it has a third as many reeds as a pond's
-margin, and a stone in it is a single cell, since a pond's stone would
-dam it. Its water is the pond's water in the game's file, ice with it
-when frozen. Eight streams are made at most, and a patch over 400,000
-places of ground keeps one level.
+which keeps it under both banks, in a channel. The two places ahead
+count only while the ground stays gentle. Where the ground drops by 0.8
+or more for each cell along the stream, the level is
+
+```math
+z_k = \max\bigl(r,\; \min(z_{k-1},\; \operatorname{round}(b_k + 1.6))\bigr)
+```
+
+which is the top of the soil beside it: the water lies on the face and
+is seen from the side. In a channel it would run down a trench several
+cells deep, out of sight. The channel is cut 2.8 under the water over a
+width of two cells, with banks that rise over the next cell and a half
+or more, and water lies within 1.7 of the stream's middle: three cells
+across. It was six, which the soil needed when it was balls on the 2.4
+grid and a narrower channel closed over.
+
+<img src="images/plant-waterfall.png" width="420" alt="A pond on a table of raised ground, a notch in the table's edge, a sheet of water down a grey rock face in level beds, and a pond at its foot"> <img src="images/plant-waterfall-side.png" width="420" alt="The same fall from the side: the water stands against the rock face from the lip to the foot">
+
+The water at each place reaches up to the level of the place before, so
+a stream is one piece of water from the pond it leaves to the water it
+reaches. On gentle ground that fills the corner of each step. Where the
+ground is a cliff the levels drop several cells from one place to the
+next, and the water between them is a sheet standing against the face:
+the waterfall. Nothing else makes one, so a stream that meets a cliff
+part way down falls there and is a stream again below. A drop of two
+cells or more is a fall. The ground within six and a half cells of one
+is rock, since sand does not lie on a face, and no grass or reed stands
+there. Where a run of drops that has a fall in it comes down three cells
+or more in all, the place it ends is the foot: the water within 3.6
+cells of it has white water for its top cell, with a chance that falls
+from 1 at the foot by a quarter for each cell away.
+
+A stream's bed is sand, it has a third as many reeds as a pond's margin,
+and a stone in it is a single cell, since a pond's stone would dam it.
+In the game's file the stream, the fall and the white water are the
+pond's water, and ice with it when frozen. Twelve streams are made at
+most, and a patch over 400,000 places of ground has no raised ponds.
 
 ##### Blades
 
@@ -3013,7 +3125,7 @@ since a reed gives way to the reeds before it, and that costs by the
 number of reeds. The water is joined into boxes again only when a cell
 of water has changed.
 
-With two pond levels the flood is made again at every touch, because a
+With raised ponds the flood is made again at every touch, because a
 hollow anywhere may change where water stands. Its samples of the ground
 are kept as the cells' heights are. If the water comes out where it
 was, the cells worked out are still only those the touch reaches. If it
@@ -3030,7 +3142,8 @@ second from nothing.
 ##### Which part a brick is
 
 Each brick comes with the number of its part: soil, sand, the bed, a
-stone, water, or one of the three greens. The colours go by that
+stone, water, one of the three greens, the darker soil of a cliff, one
+of three greys of rock, a ledge, or white water. The colours go by that
 number. The game's file gives each brick a flag for what it stops (the
 player, weapons, interaction and physics), and the bricks of the blades
 are written with the first, second and fourth off, so a player walks
@@ -3043,8 +3156,13 @@ A form joined into a lawn asks how far a place is from the lawn's bricks
 ##### A lawn saved before
 
 The form is kept as it was, in the same words, so a lawn saved when
-grass was fitted opens. Its ground is the same ground, its ponds stand at
-the same levels and its streams run the same ways. Its blades are the
+grass was fitted opens. Its ground is the same ground, and it has no
+cliffs, since the number that sets them was 0 in every lawn saved
+before. A lawn saved with two pond levels has its raised ponds each at
+its own height now, where they shared the lowest, and its streams are
+three cells wide where they were six. Its paint had eight colours, and
+is given the six for cliffs and white water from the set its eight
+belong to (`paint::with_cliffs`). Its blades are the
 same number of tufts on the same grid, and each is in another place with
 another height, since their numbers are worked out differently. Its
 reeds are thinner in the stem and stand in other places along the same

@@ -85,13 +85,37 @@ pub struct Brush {
     pub range: f64,
     pub amount: f64,
     pub action: Action,
+    /// whether a touch does all it does out to a narrow band at its edge (see `brickloft_core::tree::Sculpt`)
+    pub sharp: bool,
 }
 
 /// What an added point of grass says of a flattening touch in the place
 /// its range and amount are kept in: any number but 0 would do, and this
 /// one is still not 0 after a form is shrunk for the coarsest brick size
 /// and snapped to half cells (see `brickloft_core::spec::tree_lay`).
-pub const FLATTENS: f64 = 16.0;
+pub use brickloft_core::spec::FLATTENS;
+/// And what it says of a touch with a sharp edge, added to that.
+pub use brickloft_core::spec::SHARP;
+
+impl Brush {
+    /// What a touch made with this brush is kept as, in the place an
+    /// added point keeps how far it was pulled: its range, what it does
+    /// (see [`FLATTENS`]), and its amount, or for a flattening touch the
+    /// `level` it flattens to.
+    pub fn touch(&self, level: f64) -> DVec3 {
+        let edge = if self.sharp { SHARP } else { 0.0 };
+        match self.action {
+            Action::Up => DVec3::new(self.range, edge, self.amount),
+            Action::Down => DVec3::new(self.range, edge, -self.amount),
+            Action::Flatten => DVec3::new(self.range, edge + FLATTENS, level),
+        }
+    }
+
+    /// Whether an added point of grass is a touch that flattens.
+    pub fn flattens(by: DVec3) -> bool {
+        by.y % SHARP != 0.0
+    }
+}
 
 /// A best-fit search under way (see [`State::snap_best`]).
 struct Search {
@@ -589,7 +613,7 @@ impl State {
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
-            brush: Brush { range: 24.0, amount: 8.0, action: Action::Up },
+            brush: Brush { range: 24.0, amount: 8.0, action: Action::Up, sharp: false },
             touched: None,
             best_note: String::new(),
             search: None,
@@ -1551,6 +1575,12 @@ impl State {
         use brickloft_core::tree::{Tree, KINDS};
         let (height, spread) = Tree::usual_size(kind);
         self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
+        // (A new lawn has cliffs where its ground is made steep, at the
+        // middle setting; the number is one a pine keeps its baubles in.
+        // A lawn saved before there were cliffs has 0 there and none.)
+        if kind == brickloft_core::tree::Kind::Grass {
+            self.spec.tree.baubles = 2;
+        }
         (self.spec.radius, self.spec.rise) = (spread, Some(height));
         // (reeds round a pond in grass: a few, until asked for more)
         self.spec.depth = 3;
@@ -2427,7 +2457,7 @@ impl State {
             let Some(up) = along_line(from + self.standing(), DVec3::Z, origin, dir) else { return };
             let floor = from.z.floor() - from.z;
             let amount = snap(up).clamp(-HANDLE_LIMIT, HANDLE_LIMIT);
-            self.spec.pulls[i].1.z = if by.y != 0.0 { amount.max(floor.min(0.0)).max(0.0) } else { amount };
+            self.spec.pulls[i].1.z = if Brush::flattens(by) { amount.max(floor.min(0.0)).max(0.0) } else { amount };
             return;
         }
         let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
@@ -2615,13 +2645,8 @@ impl State {
             // in the games that have such a tool: touch a hilltop to make
             // a terrace at its height, or the flat beside a hill to level
             // the hill's foot.
-            let brush = self.brush;
-            let by = match brush.action {
-                Action::Up => DVec3::new(brush.range, 0.0, brush.amount),
-                Action::Down => DVec3::new(brush.range, 0.0, -brush.amount),
-                Action::Flatten => DVec3::new(brush.range, FLATTENS, snap(brickloft_core::spec::grass_ground(&self.spec.snapped(), on))),
-            };
-            self.spec.pulls.push((on, by));
+            let level = if self.brush.action == Action::Flatten { snap(brickloft_core::spec::grass_ground(&self.spec.snapped(), on)) } else { 0.0 };
+            self.spec.pulls.push((on, self.brush.touch(level)));
             // The brush stays the brush: the panel's sliders set what the
             // next touch will be, and change no touch already made. A
             // touch just made, or one dragged, used to become the one the
@@ -3161,7 +3186,8 @@ mod tests {
         assert_eq!(state.paint.colours, crate::paint::palette("oak"));
         // every set of colours has a colour for each of a tree's eight parts, and a name
         for kind in brickloft_core::tree::KINDS.map(|k| k.1) {
-            assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == 8), "{kind}");
+            // (grass has six more, for its cliffs and the white water under a fall)
+            assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == if kind == "grass" { 14 } else { 8 }), "{kind}");
             assert_eq!(crate::paint::palettes(kind).len(), crate::paint::tree_palette_names(kind).len(), "{kind}");
         }
     }
@@ -3216,9 +3242,31 @@ mod tests {
         assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
         let flat = state.bounds.unwrap().1[2];
         // a touch of the brush where it is clicked: as wide and as strong as the brush is, and the ground is a hill there
-        state.brush = Brush { range: 20.0, amount: 6.0, action: Action::Up };
+        // (a new lawn has cliffs at their middle setting, in the number a pine keeps its baubles in)
+        assert_eq!(state.spec.tree.baubles, 2);
+        state.brush = Brush { range: 20.0, amount: 6.0, action: Action::Up, sharp: false };
         let handle = state.add_pull(DVec3::new(10.5, 3.5, 2.0) + state.standing()).expect("grass could not be touched");
         assert_eq!((state.spec.pulls[0].1, state.touched), (DVec3::new(20.0, 0.0, 6.0), None));
+        // A sharp edge is the brush's, for touches still to be made: ticked, the touch already made is as it was, and the next has it (32 in its middle number, and 48 if it flattens).
+        {
+            let mut sharp = State::new();
+            sharp.form = TREE;
+            sharp.preset();
+            sharp.usual_tree(Kind::Grass);
+            sharp.refresh(|| 0.0);
+            sharp.brush = Brush { range: 12.0, amount: 9.0, action: Action::Up, sharp: false };
+            sharp.add_pull(DVec3::new(-10.5, 0.5, 2.0) + sharp.standing()).unwrap();
+            sharp.brush.sharp = true;
+            sharp.add_pull(DVec3::new(10.5, 0.5, 2.0) + sharp.standing()).unwrap();
+            sharp.brush.action = Action::Flatten;
+            sharp.add_pull(DVec3::new(10.5, 0.5, 2.0) + sharp.standing()).unwrap();
+            assert_eq!(sharp.spec.pulls.iter().map(|touch| (touch.1.x, touch.1.y)).collect::<Vec<_>>(), [(12.0, 0.0), (12.0, SHARP), (12.0, SHARP + FLATTENS)]);
+            assert_eq!(sharp.spec.pulls[2].1.z, 9.0, "flattened to the height of the table it was touched on");
+            // the sharp one is a table: as high three quarters of the way out as at its middle, where the eased one has fallen most of the way
+            sharp.spec.pulls.truncate(2);
+            let high = |x: f64| brickloft_core::spec::grass_ground(&sharp.spec, DVec3::new(x, 0.5, 0.5) + sharp.standing() * 0.0);
+            assert!(high(10.5 + 9.0) == 9.0 && high(-10.5 + 9.0) < 2.0, "{} and {}", high(19.5), high(-1.5));
+        }
         // its dot is on the hilltop, and dragged up it pushes harder: where it is and how wide stay as they were
         let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
         assert_eq!(at.z - state.spec.points[0].z, 6.0);
@@ -3228,7 +3276,7 @@ mod tests {
         assert!(state.refresh(|| 0.0) && state.problem.is_none());
         assert!(state.bounds.unwrap().1[2] >= flat + 10, "{} high raised, {flat} flat", state.bounds.unwrap().1[2]);
         // pushed down beside it, a hollow in the hill; and flattened on its flank, a terrace at the height the flank had there
-        state.brush = Brush { range: 10.0, amount: 4.0, action: Action::Down };
+        state.brush = Brush { range: 10.0, amount: 4.0, action: Action::Down, sharp: false };
         state.add_pull(DVec3::new(16.5, 3.5, 2.0) + state.standing()).unwrap();
         assert_eq!(state.spec.pulls[1].1, DVec3::new(10.0, 0.0, -4.0));
         state.brush.action = Action::Flatten;
@@ -3237,7 +3285,7 @@ mod tests {
         assert!(flank > 2.0 && state.spec.pulls[2].1.y != 0.0 && (state.spec.pulls[2].1.z - flank).abs() <= 0.25, "{:?}, flank {flank}", state.spec.pulls[2]);
         assert!(state.refresh(|| 0.0) && state.problem.is_none());
         // a stroke: with Ctrl held, the cursor moved 30 cells along the ground leaves a row of the same touch, 0.4 of its range apart
-        state.brush = Brush { range: 10.0, amount: 3.0, action: Action::Up };
+        state.brush = Brush { range: 10.0, amount: 3.0, action: Action::Up, sharp: false };
         let begun = state.add_pull(DVec3::new(-20.5, -5.5, 2.0) + state.standing()).unwrap();
         let had = state.spec.pulls.len();
         state.lift = true;

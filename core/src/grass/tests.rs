@@ -36,13 +36,15 @@ fn sculpted() -> Spec {
     Spec { pulls, ..along(&[(-30.0, 0.0), (0.0, 0.0), (30.0, 0.0)], 60.0, false) }
 }
 
-/// A lawn 180 by 120 with 24 touches, timed: run by name with `--release -- --ignored --nocapture`.
+/// A lawn 180 by 120 with 24 touches, a lawn with raised ponds and a stream, and one with a fall over a cliff, each built from nothing and timed: run by name with `--release -- --ignored --nocapture`.
 #[test]
 #[ignore = "a measurement, not a check"]
 fn how_long_a_lawn_takes() {
-    for (name, spec) in [("24 touches", sculpted()), ("two levels and a stream", Spec { tube: true, ..two_hollows() })] {
+    for (name, spec) in [("24 touches", sculpted()), ("raised ponds and a stream", Spec { tube: true, ..two_hollows() }), ("a fall over a cliff", fall())] {
+        let spec = spec.snapped();
         for threads in [Threads::ONE, Threads::available()] {
-            let least = (0..5).map(|_| { let at = std::time::Instant::now(); let built = build_with(&spec, true, threads).unwrap(); (at.elapsed(), built.bricks.len()) }).min().unwrap();
+            // (from nothing: built as any form is, a lawn built a second time is the lawn kept from the first)
+            let least = (0..7).map(|_| { let at = std::time::Instant::now(); let built = fresh_of(&spec, threads); (at.elapsed(), built.bricks.len()) }).min().unwrap();
             println!("{name}, on {} threads: {:?}, {} bricks", threads.count(), least.0, least.1);
         }
     }
@@ -97,7 +99,7 @@ fn grass_is_a_skin_of_soil_and_blades_that_added_points_raise() {
 
     // The ground as a brush shapes it. A wide push is a hill, not a
     // spike: half way out it is half as high, and at its edge it is gone.
-    let hill = Sculpt { at: DVec3::ZERO, range: 30.0, amount: 10.0, flatten: false };
+    let hill = Sculpt { at: DVec3::ZERO, range: 30.0, amount: 10.0, flatten: false, sharp: false };
     let at = |touches: &[Sculpt], x: f64| ground(touches, DVec3::new(x, 0.0, 0.0));
     assert!((at(&[hill], 0.0) - 10.0).abs() < 1e-9 && (at(&[hill], 15.0) - 5.0).abs() < 1e-9 && at(&[hill], 30.0) == 0.0 && at(&[hill], 29.0) < 0.1);
     // level at its top and at its edge: no crease where it meets the flat
@@ -105,10 +107,10 @@ fn grass_is_a_skin_of_soil_and_blades_that_added_points_raise() {
     // two pushes add, and a push down takes a hollow out of raised ground and no more
     let beside = Sculpt { at: DVec3::new(20.0, 0.0, 0.0), ..hill };
     assert!(at(&[hill, beside], 10.0) > at(&[hill], 10.0) + 4.0);
-    let hollow = Sculpt { at: DVec3::ZERO, range: 10.0, amount: -4.0, flatten: false };
+    let hollow = Sculpt { at: DVec3::ZERO, range: 10.0, amount: -4.0, flatten: false, sharp: false };
     assert!((at(&[hill, hollow], 0.0) - 6.0).abs() < 1e-9 && at(&[hollow], 0.0) == -4.0);
     // flattening brings the ground to its level within half its range, and leaves it alone beyond it
-    let terrace = Sculpt { at: DVec3::new(12.0, 0.0, 0.0), range: 12.0, amount: 3.0, flatten: true };
+    let terrace = Sculpt { at: DVec3::new(12.0, 0.0, 0.0), range: 12.0, amount: 3.0, flatten: true, sharp: false };
     for x in [7.0, 12.0, 17.0] {
         assert!((at(&[hill, terrace], x) - 3.0).abs() < 1e-9, "{} at {x}", at(&[hill, terrace], x));
     }
@@ -177,8 +179,13 @@ fn two_hollows() -> Spec {
     Spec { pulls: vec![touch(-25.0, 34.0, 16.0), touch(-25.0, 16.0, -14.0), touch(30.0, 20.0, -10.0)], ..lawn }
 }
 
+/// The heights water's surface stands at over the cell `x`, `y`.
+fn water_tops(_: &Spec, built: &crate::spec::Built, x: i32, y: i32) -> std::collections::BTreeSet<i32> {
+    built.bricks.iter().zip(&built.shades).filter(|(b, s)| **s == WATER && b.min[0] <= x && x < b.min[0] + b.ext[0] && b.min[1] <= y && y < b.min[1] + b.ext[1]).map(|(b, _)| b.min[2] + b.ext[2]).collect()
+}
+
 /// The heights water's surface stands at over the places from `from` to `to` along x.
-fn water_tops(built: &crate::spec::Built, from: f64, to: f64) -> std::collections::BTreeSet<i32> {
+fn water_tops_along(built: &crate::spec::Built, from: f64, to: f64) -> std::collections::BTreeSet<i32> {
     let mut tops = std::collections::BTreeMap::new();
     for (b, _) in built.bricks.iter().zip(&built.shades).filter(|(b, s)| **s == WATER && (b.min[0] as f64) < to && (b.min[0] + b.ext[0]) as f64 > from) {
         for x in (b.min[0]..b.min[0] + b.ext[0]).filter(|x| (*x as f64 + 1.0) > from && (*x as f64) < to) {
@@ -198,15 +205,15 @@ fn two_hollows_at_two_heights_hold_water_at_two_levels_and_a_stream_runs_down_be
     // one level: water only at the lawn's own, in the lower hollow
     // (a cell of water at a pond's very edge may be a cell lower, under the lip of its bank)
     let level = |tops: &std::collections::BTreeSet<i32>| { let (low, high) = (*tops.iter().next().unwrap(), *tops.iter().next_back().unwrap()); assert!(high - low <= 1, "a pond's water at {tops:?}"); high };
-    assert_eq!(level(&water_tops(&flat, -100.0, 100.0)), -3);
-    assert!(water_tops(&flat, -100.0, 5.0).is_empty());
+    assert_eq!(level(&water_tops_along(&flat, -100.0, 100.0)), -3);
+    assert!(water_tops_along(&flat, -100.0, 5.0).is_empty());
     // two: the hollow on the hill holds water too, higher, and each pond is level
-    let (upper, lower) = (water_tops(&stepped, -30.0, -20.0), water_tops(&stepped, 26.0, 34.0));
+    let (upper, lower) = (water_tops_along(&stepped, -30.0, -20.0), water_tops_along(&stepped, 26.0, 34.0));
     assert_eq!(level(&lower), -3);
     let high = level(&upper);
     assert!(high >= 0, "the upper pond stands at {high}");
     // the stream: water all the way from one to the other, never rising on the way down, never over its banks
-    let along: Vec<i32> = (-18..=22).map(|x| water_tops(&stepped, x as f64 + 0.25, x as f64 + 0.75).into_iter().max().unwrap_or_else(|| panic!("the stream is dry at {x}"))).collect();
+    let along: Vec<i32> = (-18..=22).map(|x| water_tops_along(&stepped, x as f64 + 0.25, x as f64 + 0.75).into_iter().max().unwrap_or_else(|| panic!("the stream is dry at {x}"))).collect();
     // (taken two cells apart: where it bends, the end of one reach lies beside the start of the next, and which is the higher at one x is by a cell either way)
     assert!(along.windows(3).all(|w| w[2] <= w[0]) && along[0] == high && *along.last().unwrap() == -3, "the stream's water, going down: {along:?}");
     assert!(along.iter().collect::<std::collections::BTreeSet<_>>().len() >= 4, "it falls in {along:?}: no steps");
@@ -233,7 +240,7 @@ fn two_hollows_at_two_heights_hold_water_at_two_levels_and_a_stream_runs_down_be
     assert_eq!((&a.bricks, &a.shades), (&b.bricks, &b.shades));
     // a hollow on a hill with no lower water to run to: a pond up there, and no stream
     let alone = build(&Spec { tube: true, pulls: two_hollows().pulls[..2].to_vec(), ..two_hollows() }).unwrap();
-    assert!(!water_tops(&alone, -30.0, -20.0).is_empty() && water_tops(&alone, -8.0, 100.0).is_empty(), "{:?}", water_tops(&alone, -8.0, 100.0));
+    assert!(!water_tops_along(&alone, -30.0, -20.0).is_empty() && water_tops_along(&alone, -8.0, 100.0).is_empty(), "{:?}", water_tops_along(&alone, -8.0, 100.0));
 }
 
 #[test]
@@ -286,7 +293,7 @@ fn no_two_bricks_of_a_lawn_share_a_cell_and_it_is_the_same_on_any_number_of_thre
         let one = build_with(&spec, true, Threads::ONE).unwrap();
         // every brick a shape there is, no longer than a brick may be, and a part of the lawn
         assert!(one.bricks.len() == one.shades.len() && one.bricks.iter().all(|b| crate::shapes::shape_info(b.mask).is_some() && b.ext.iter().all(|e| *e >= 1 && *e <= spec.max_ext)), "{name}");
-        assert!(one.shades.iter().all(|s| [TRUNK, SAND, BED, STONE, WATER, LEAF, LEAF_DARK, LEAF_LIGHT].contains(s)), "{name}");
+        assert!(one.shades.iter().all(|s| [TRUNK, SAND, BED, STONE, WATER, LEAF, LEAF_DARK, LEAF_LIGHT, CLIFF, ROCK, ROCK_DARK, ROCK_LIGHT, LEDGE, FOAM].contains(s)), "{name}");
         assert!(cells_of(&one).len() > 1000, "{name}");
         // exactly what it is: nothing to measure, and nothing amiss
         assert!(!one.unmeasured && one.error == 0.0 && (one.solid - one.bricks.iter().map(|b| b.volume()).sum::<f64>()).abs() < 1e-6, "{name}");
@@ -453,8 +460,232 @@ fn every_lawn() -> Vec<(String, Spec)> {
     all.push(("tall".into(), Spec { rise: Some(40.0), depth: 6, ..sized(120.0, 90.0, 12) }));
     all.push(("large, two levels".into(), Spec { tube: true, depth: 8, tree: Tree { seed: 5, count: 2, ..Tree::of(Kind::Grass) }, ..sized(300.0, 240.0, 40) }));
     all.push(("closed".into(), Spec { depth: 5, pulls: vec![(DVec3::new(0.5, 0.5, 0.5), DVec3::new(22.0, 0.0, -10.0))], ..along(&[(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)], 4.0, true) }));
+    // (and with cliffs: a fall, and hills steep enough for soil and for rock with ponds on and among them)
+    all.push(("a fall".into(), fall()));
+    all.push(("steep hills".into(), Spec { tube: true, depth: 6, tree: Tree { seed: 9, baubles: 3, ..Tree::of(Kind::Grass) }, pulls: vec![touch(-28.0, 0.0, 26.0, 30.0, 0.0), touch(-28.0, 0.0, 9.0, -9.0, 0.0), touch(25.0, 2.0, 24.0, 16.0, 0.0), touch(25.0, -20.0, 14.0, -12.0, SHARP), touch(-2.0, 22.0, 12.0, 6.0, SHARP + FLATTENS)], ..along(&[(-60.0, -40.0), (60.0, -40.0), (60.0, 40.0), (-60.0, 40.0)], 4.0, true) }));
     all
 }
+
+use crate::spec::{FLATTENS, SHARP};
+
+/// A touch of the brush at `x`, `y`, as a spec keeps it: `how` is 0 for a push, [`FLATTENS`] to flatten, and [`SHARP`] more for a sharp edge.
+fn touch(x: f64, y: f64, range: f64, amount: f64, how: f64) -> (DVec3, DVec3) {
+    (DVec3::new(x + 0.5, y + 0.5, 0.5), DVec3::new(range, how, amount))
+}
+
+/// A lawn 120 by 80 with a table 16 high in its west half, cut with a sharp edge so that its sides are cliffs; a hollow on the table near its east edge; and a hollow in the low ground to the east. Raised ponds are on and cliffs are at their middle setting, so the upper hollow's water goes over the cliff to the lower.
+fn fall() -> Spec {
+    Spec { tube: true, depth: 4, tree: Tree { seed: 3, baubles: 2, ..Tree::of(Kind::Grass) }, pulls: vec![touch(-31.0, 0.0, 30.0, 16.0, SHARP), touch(-18.0, 0.0, 9.0, -8.0, 0.0), touch(22.0, 2.0, 17.0, -9.0, 0.0)], ..along(&[(-60.0, -40.0), (60.0, -40.0), (60.0, 40.0), (-60.0, 40.0)], 4.0, true) }
+}
+
+/// The cells of a build that hold water, white water among them, and the stones that lie in it: a stone in the shallows where a stream comes into a pond may lie right across it, as one in a real stream does, and the water is no less one water for that.
+fn wet_cells(built: &crate::spec::Built) -> std::collections::HashSet<[i32; 3]> {
+    let mut cells = std::collections::HashSet::new();
+    for (b, _) in built.bricks.iter().zip(&built.shades).filter(|(_, s)| matches!(**s, WATER | FOAM | STONE)) {
+        for z in 0..b.ext[2] {
+            for y in 0..b.ext[1] {
+                for x in 0..b.ext[0] {
+                    cells.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z]);
+                }
+            }
+        }
+    }
+    cells
+}
+
+/// The cells of water that can be reached from `from` through water, going from a cell to one that shares a face with it.
+fn reached(wet: &std::collections::HashSet<[i32; 3]>, from: [i32; 3]) -> std::collections::HashSet<[i32; 3]> {
+    let (mut seen, mut stack) = (std::collections::HashSet::from([from]), vec![from]);
+    while let Some(c) = stack.pop() {
+        for (axis, step) in [(0, 1), (0, -1), (1, 1), (1, -1), (2, 1), (2, -1)] {
+            let mut n = c;
+            n[axis] += step;
+            if wet.contains(&n) && seen.insert(n) {
+                stack.push(n);
+            }
+        }
+    }
+    seen
+}
+
+#[test]
+fn no_grass_grows_on_a_cliff_and_past_the_second_threshold_it_is_rock() {
+    for (name, spec) in every_lawn().into_iter().filter(|(name, _)| name == "a fall" || name == "steep hills") {
+        // (with no reeds, which are green too and may hang a leaf over a rock by the water)
+        let spec = Spec { depth: 1, ..spec }.snapped();
+        let (lawn, built) = (crate::spec::lawn(&spec).unwrap(), build(&spec).unwrap());
+        let g = &lawn.ground;
+        let (soil, rock) = STEEP[spec.tree.baubles as usize - 1];
+        let (lo, hi) = g.cells();
+        // how steep the sculpted ground is at a cell, by the cells to each side, as the lawn has it before its edge is made to wander (by up to 15 parts in 100 either way)
+        let steep = |x: i32, y: i32| {
+            let at = |x: i32, y: i32| crate::spec::grass_ground(&spec, DVec3::new(x.clamp(lo[0], hi[0] - 1) as f64 + 0.5, y.clamp(lo[1], hi[1] - 1) as f64 + 0.5, 0.5));
+            DVec2::new(at(x + 1, y) - at(x - 1, y), at(x, y + 1) - at(x, y - 1)).length() / 2.0
+        };
+        // the blades standing on each cell: the bricks of the greens whose foot is on the top of its soil (and not those that lean over it from a cell beside it)
+        let mut blades: HashMap<[i32; 2], usize> = HashMap::new();
+        for (b, _) in built.bricks.iter().zip(&built.shades).filter(|(b, s)| matches!(**s, LEAF | LEAF_DARK | LEAF_LIGHT) && g.at(b.min[0], b.min[1]).is_some_and(|place| place.top == b.min[2])) {
+            *blades.entry([b.min[0], b.min[1]]).or_default() += 1;
+        }
+        // (and any green at all over a cell, for rock, which has none)
+        let over: std::collections::HashSet<[i32; 2]> = built.bricks.iter().zip(&built.shades).filter(|(_, s)| matches!(**s, LEAF | LEAF_DARK | LEAF_LIGHT)).map(|(b, _)| [b.min[0], b.min[1]]).collect();
+        // what the column of soil under each cell is made of, and what is on top of it
+        let mut columns: HashMap<[i32; 2], Vec<(i32, u8)>> = HashMap::new();
+        for (b, s) in built.bricks.iter().zip(&built.shades).filter(|(b, s)| b.mask == CUBE && matches!(**s, TRUNK | CLIFF | ROCK | ROCK_DARK | ROCK_LIGHT | LEDGE | SAND | BED)) {
+            for y in b.min[1]..b.min[1] + b.ext[1] {
+                for x in b.min[0]..b.min[0] + b.ext[0] {
+                    columns.entry([x, y]).or_default().push((b.min[2] + b.ext[2], *s));
+                }
+            }
+        }
+        let (mut grassy, mut bare, mut rocky, mut on_grass, mut on_bare) = (0, 0, 0, 0, 0);
+        for y in lo[1]..hi[1] {
+            for x in lo[0]..hi[0] {
+                let place = g.at(x, y).unwrap();
+                // (dry ground the lawn covers that is soil and not sand, and has no fall beside it: there the cliff is the ground's steepness and nothing else)
+                if !place.covered || place.skin != TRUNK || place.water.is_some() || place.stream {
+                    continue;
+                }
+                let s = steep(x, y);
+                // well past each threshold it is that, and well short of the first it is neither
+                if s * 0.85 >= rock {
+                    assert_eq!(place.cliff, 2, "{name}: the ground at {x}, {y} rises {s:.2} for each cell along, and is not rock");
+                } else if s * 0.85 >= soil {
+                    assert!(place.cliff >= 1, "{name}: the ground at {x}, {y} rises {s:.2} for each cell along, and is no cliff");
+                } else if s * 1.15 < soil {
+                    assert_eq!(place.cliff, 0, "{name}: the ground at {x}, {y} rises {s:.2} for each cell along, and is a cliff");
+                }
+                let here = blades.get(&[x, y]).copied().unwrap_or(0);
+                // (up to the top of the soil: a reed's head over the cell is no part of its ground)
+                let column: Vec<(i32, u8)> = columns.get(&[x, y]).unwrap_or_else(|| panic!("{name}: no soil at {x}, {y}")).iter().copied().filter(|c| c.0 <= place.top).collect();
+                let top = column.iter().max().unwrap();
+                match place.cliff {
+                    2 => {
+                        rocky += 1;
+                        // rock all through, a ledge on top, and no grass standing on it
+                        assert!(top.1 == LEDGE && column.iter().all(|c| matches!(c.1, ROCK | ROCK_DARK | ROCK_LIGHT | LEDGE)), "{name}: the rock at {x}, {y} is {column:?}");
+                        assert!(!over.contains(&[x, y]), "{name}: grass on the rock at {x}, {y}, or over it");
+                    }
+                    1 => {
+                        bare += 1;
+                        on_bare += here;
+                        assert!(column.iter().all(|c| matches!(c.1, TRUNK | CLIFF)), "{name}: the cliff of soil at {x}, {y} is {column:?}");
+                    }
+                    _ => {
+                        // (ground with all its grass: short of where it begins to thin)
+                        if s * 1.15 < 0.75 * soil {
+                            grassy += 1;
+                            on_grass += here;
+                        }
+                        assert!(column.iter().all(|c| c.1 == TRUNK), "{name}: the soil at {x}, {y} is {column:?}");
+                    }
+                }
+            }
+        }
+        // both kinds of cliff are there, in both tones and all the greys; and a cliff of soil has the odd tuft: a quarter of the blades level ground has, or fewer (one tuft in fourteen is kept, and the cells are a hundred or two, so the share is rough)
+        assert!(rocky > 60 && bare > 60 && grassy > 2000, "{name}: {rocky} cells of rock, {bare} of bare soil, {grassy} of grass");
+        assert!(on_bare * grassy * 4 <= on_grass * bare, "{name}: {on_bare} blades on {bare} cells of cliff, {on_grass} on {grassy} of grass");
+        let count = |shades: &[u8]| built.shades.iter().filter(|s| shades.contains(s)).count();
+        for shade in [CLIFF, ROCK, LEDGE] {
+            assert!(count(&[shade]) > 3, "{name}: no bricks of part {shade}");
+        }
+        // (the rock in more greys than one: which beds are darker and which paler goes by the seed, and a low face may have none of one)
+        assert!(count(&[ROCK_DARK, ROCK_LIGHT]) > 3, "{name}: the rock is all one grey");
+        // rock is in large bricks: beds joined along the face, some cells in each
+        let rock_bricks: Vec<&CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(_, s)| matches!(**s, ROCK | ROCK_DARK | ROCK_LIGHT)).map(|(b, _)| b).collect();
+        let cells: i32 = rock_bricks.iter().map(|b| b.ext[0] * b.ext[1] * b.ext[2]).sum();
+        assert!(cells >= rock_bricks.len() as i32 * 3, "{name}: {cells} cells of rock in {} bricks", rock_bricks.len());
+        // and with cliffs at none there is none of it, on the same ground
+        let plain = build(&Spec { tree: Tree { baubles: 0, ..spec.tree }, ..spec.clone() }).unwrap();
+        assert!(!plain.shades.iter().any(|s| matches!(*s, CLIFF | ROCK | ROCK_DARK | ROCK_LIGHT | LEDGE)) || name == "a fall", "{name}: cliffs at none, and there is rock");
+    }
+}
+
+#[test]
+fn a_brush_with_a_sharp_edge_makes_ground_steep_enough_for_rock_and_the_easing_brush_does_not_at_the_same_height() {
+    let at = |touches: &[Sculpt], x: f64| ground(touches, DVec3::new(x, 0.0, 0.0));
+    let steepest = |touch: Sculpt| (0..400).map(|n| (at(&[touch], n as f64 * 0.1) - at(&[touch], n as f64 * 0.1 + 0.1)).abs() / 0.1).fold(0.0, f64::max);
+    let (soil, rock) = STEEP[1];
+    let push = Sculpt { at: DVec3::ZERO, range: 30.0, amount: 12.0, flatten: false, sharp: false };
+    // a hill 12 high from a brush 30 in range is 32 degrees at its steepest: grass all over
+    assert!(steepest(push) < 0.75 * soil, "{}", steepest(push));
+    // the same push with a sharp edge: level on top out to four fifths of its range, and past the angle for rock in the band beyond
+    let table = Sculpt { sharp: true, ..push };
+    assert!((at(&[table], 0.0) - 12.0).abs() < 1e-9 && (at(&[table], 23.9) - 12.0).abs() < 1e-9 && at(&[table], 30.0) == 0.0 && steepest(table) > rock, "{}", steepest(table));
+    // a pit, and a terrace cut into a hill, likewise
+    assert!(steepest(Sculpt { amount: -12.0, ..table }) > rock && (at(&[Sculpt { amount: -12.0, ..table }], 5.0) + 12.0).abs() < 1e-9);
+    let hill = Sculpt { range: 60.0, amount: 30.0, ..push };
+    let terrace = Sculpt { at: DVec3::new(20.0, 0.0, 0.0), range: 15.0, amount: 4.0, flatten: true, sharp: true };
+    assert!((at(&[hill, terrace], 20.0) - 4.0).abs() < 1e-9 && (at(&[hill, terrace], 31.0) - 4.0).abs() < 1e-9 && at(&[hill, terrace], 36.0) == at(&[hill], 36.0));
+    // and as a form keeps a touch: 0 and 16 are what they were, 32 and 48 the same with a sharp edge
+    let spec = Spec { pulls: vec![touch(0.0, 0.0, 30.0, 12.0, 0.0), touch(0.0, 0.0, 30.0, 3.0, FLATTENS), touch(0.0, 0.0, 30.0, 12.0, SHARP), touch(0.0, 0.0, 30.0, 3.0, SHARP + FLATTENS)], ..along(&[(-40.0, 0.0), (40.0, 0.0)], 40.0, false) };
+    let (lay, _) = crate::spec::tree_lay(&spec, spec.points[0]).unwrap();
+    assert_eq!(lay.mounds.iter().map(|t| (t.flatten, t.sharp)).collect::<Vec<_>>(), [(false, false), (true, false), (false, true), (true, true)]);
+}
+
+#[test]
+fn a_pond_above_a_cliff_above_a_pond_is_joined_by_falling_water_and_on_a_gentle_slope_by_a_stream() {
+    let spec = fall().snapped();
+    let (lawn, built) = (crate::spec::lawn(&spec).unwrap(), build(&spec).unwrap());
+    let g = &lawn.ground;
+    let wet = wet_cells(&built);
+    // the upper pond on the table and the lower in the low ground, each level, the upper well above the lower
+    let (upper, lower) = (g.at(-18, 0).unwrap().water.expect("no water in the hollow on the table"), g.at(22, 2).unwrap().water.expect("no water in the low hollow"));
+    assert!(upper >= lower + 10 && upper - g.at(-18, 0).unwrap().top >= 3, "the upper pond stands at {upper} and the lower at {lower}");
+    // one piece of water from the one to the other, cell to cell through faces: the stream out through the lip, the fall down the face, the stream to the pool
+    let from_upper = reached(&wet, [-18, 0, upper - 1]);
+    // (most of the lower pond's top layer of water: a stone or a reed may stand in a cell of it)
+    let pool = |cells: &std::collections::HashSet<[i32; 3]>| cells.iter().filter(|c| c[2] == lower - 1 && c[0] > 12).count();
+    assert!(pool(&wet) > 100 && pool(&from_upper) == pool(&wet), "the water of the upper pond does not reach the lower: {} of its {} cells, and down to {:?}", pool(&from_upper), pool(&wet), from_upper.iter().map(|c| c[2]).min());
+    // the fall: somewhere on the way, water standing in one cell's column over most of the drop, where the ground says water comes down
+    let falls: Vec<(i32, i32, Place)> = (-8..=20).flat_map(|x| (-8..=8).map(move |y| (x, y))).filter_map(|(x, y)| g.at(x, y).filter(|p| p.falls_from.is_some()).map(|p| (x, y, p))).collect();
+    let tallest = falls.iter().map(|(_, _, p)| p.falls_from.unwrap() - p.water.unwrap()).max().unwrap_or(0);
+    assert!(tallest >= 3, "the water comes down {tallest} cells at the most in one place");
+    let (x, y, place) = falls.iter().max_by_key(|(_, _, p)| p.falls_from.unwrap() - p.water.unwrap()).unwrap();
+    assert!((place.top..place.falls_from.unwrap()).all(|z| wet.contains(&[*x, *y, z])), "the fall at {x}, {y} is not water from {} up to {}", place.top, place.falls_from.unwrap());
+    // a notch in the lip: the stream's water where the table's edge was, well below the table's top
+    assert!((-9..=-5).all(|x| (-4..=4).any(|y| g.at(x, y).is_some_and(|p| p.stream && p.water == Some(upper) && p.top < 16))), "no channel through the lip of the table");
+    // rock behind and beside it, and white water where it lands, lying in the water's top cell
+    assert!(falls.iter().filter(|(_, _, p)| p.falls_from.unwrap() - p.water.unwrap() >= 2).all(|(_, _, p)| p.cliff == 2), "a fall with no rock under it");
+    assert!(falls.iter().all(|(x, y, _)| [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().all(|(dx, dy)| g.at(x + dx, y + dy).is_some_and(|beside| beside.water.is_some() || beside.cliff == 2 || beside.skin == SAND))), "grass or soil beside the fall");
+    let white: Vec<DVec3> = bricks_of(&built, &[FOAM]);
+    assert!(white.len() >= 2 && white.iter().all(|p| p.z < (lower + 4) as f64 && p.x > -6.0), "white water at {white:?}");
+    // The same two ponds on a gentle hill (27 degrees at its steepest): a stream, with no fall in it and no white water. It is one piece of water too.
+    let gentle = Spec { pulls: vec![touch(-25.0, 0.0, 44.0, 14.0, 0.0), touch(-25.0, 0.0, 14.0, -10.0, 0.0), touch(32.0, 2.0, 17.0, -9.0, 0.0)], ..spec.clone() }.snapped();
+    let (lawn, built) = (crate::spec::lawn(&gentle).unwrap(), build(&gentle).unwrap());
+    let g = &lawn.ground;
+    let (lo, hi) = g.cells();
+    let (upper, lower) = (g.at(-25, 0).unwrap().water.expect("no water in the hollow on the hill"), g.at(32, 2).unwrap().water.expect("no water in the low hollow"));
+    assert!(upper > lower + 3);
+    let (wet, pool) = (wet_cells(&built), |cells: &std::collections::HashSet<[i32; 3]>| cells.iter().filter(|c| c[2] == lower - 1 && c[0] > 22).count());
+    assert!(pool(&wet) > 100 && pool(&reached(&wet, [-25, 0, upper - 1])) == pool(&wet), "the stream is broken");
+    let drops: Vec<i32> = (lo[0]..hi[0]).flat_map(|x| (lo[1]..hi[1]).map(move |y| (x, y))).filter_map(|(x, y)| g.at(x, y)).filter_map(|p| Some(p.falls_from? - p.water?)).collect();
+    assert!(!drops.is_empty() && drops.iter().all(|d| *d < 2), "on a gentle slope the water comes down {:?} cells at a step", drops.iter().max());
+    assert!(bricks_of(&built, &[FOAM]).is_empty() && (lo[0]..hi[0]).all(|x| (lo[1]..hi[1]).all(|y| g.at(x, y).unwrap().cliff == 0)));
+    // and with raised ponds off, on the ground with the cliff: no water up on the table, and none coming down
+    let off = build(&Spec { tube: false, ..spec.clone() }).unwrap();
+    assert!(wet_cells(&off).iter().all(|c| c[2] < 0) && bricks_of(&off, &[FOAM]).is_empty());
+}
+
+#[test]
+fn two_raised_ponds_at_different_heights_hold_water_at_different_heights() {
+    // two hills, one twice as high as the other, each with a hollow in its top, and a hollow in the low ground between them
+    let lawn = Spec { tube: true, depth: 1, tree: Tree { seed: 4, ..Tree::of(Kind::Grass) }, pulls: vec![touch(-38.0, 0.0, 30.0, 26.0, 0.0), touch(-38.0, 0.0, 12.0, -18.0, 0.0), touch(38.0, 0.0, 30.0, 13.0, 0.0), touch(38.0, 0.0, 12.0, -15.0, 0.0), touch(0.0, 22.0, 14.0, -8.0, 0.0)], ..along(&[(-75.0, -40.0), (75.0, -40.0), (75.0, 40.0), (-75.0, 40.0)], 4.0, true) };
+    let built = build(&lawn).unwrap();
+    let level = |tops: &std::collections::BTreeSet<i32>| *tops.iter().next_back().unwrap_or_else(|| panic!("a hollow is dry"));
+    // (the water over the middle of each hollow)
+    let top_at = |x: i32, y: i32| level(&water_tops(&Spec::snapped(&lawn), &built, x, y));
+    let (high, low, ground) = (top_at(-38, 0), top_at(38, 0), top_at(0, 22));
+    // each as far below its own rim as the lowest is below the lawn: the high one about 13 above the low one, as its hill is
+    assert!(ground == -3 && low >= 4 && high >= low + 8, "the ponds stand at {high}, {low} and {ground}");
+    // and each is deep: water for several cells down, where at the lowest raised pond's level the higher hollow held none
+    let g = crate::spec::lawn_ground(&lawn).unwrap();
+    for (x, at) in [(-38, high), (38, low)] {
+        let place = g.at(x, 0).unwrap();
+        assert!(place.water == Some(at) && at - place.top >= 3, "the pond at {x} is {} deep", at - place.top);
+    }
+}
+
 
 #[test]
 #[ignore = "prints, checks nothing"]
@@ -590,12 +821,23 @@ fn a_tile_kept_is_laid_again_when_the_reeds_over_it_are_others() {
     assert!(built.bricks == fresh_of(&touched, Threads::ONE).bricks);
 }
 
-/// Every lawn the tests have is the bricks it was before anything was kept between builds: the numbers are those of the lawns as `main` built them at 63b2fd6, when each build was from nothing and a tile was laid from the whole ground.
+/// Every lawn the tests have with cliffs at none and its water at one
+/// level is the bricks it was before there were cliffs, raised ponds at
+/// heights of their own or anything kept between builds: the numbers are
+/// those of the lawns as `main` built them at 63b2fd6. Two of them have
+/// ground steep enough for a cliff ("rough" rises 1.2 for each cell
+/// along, and "tall" 1.1), and one a hollow on a hill that would be a
+/// raised pond ("two hollows"). The lawns with raised ponds are not
+/// here: their streams are narrower than they were and each pond has its
+/// own level.
 #[test]
-fn the_lawns_are_the_bricks_they_were() {
-    let were = [("sculpted", 0xd5a905604c89faedu64), ("two levels", 0xc8a6b3131470261a), ("rough", 0xd7e6a86f7bd9ad03), ("two hollows", 0x3832e3a0a7b80296), ("tall", 0x50ed6b8d59974b81), ("large, two levels", 0x626a00a14131a756), ("closed", 0x4e4f45365858131e)];
-    for ((name, spec), (_, was)) in every_lawn().into_iter().zip(were) {
-        assert_eq!(print_of(&build(&spec).unwrap()), was, "{name}");
+fn the_lawns_are_the_bricks_they_were_with_cliffs_at_none_and_no_raised_ponds() {
+    let were = [("sculpted", 0xd5a905604c89faedu64), ("rough", 0xd7e6a86f7bd9ad03), ("two hollows", 0x3832e3a0a7b80296), ("tall", 0x50ed6b8d59974b81), ("closed", 0x4e4f45365858131e)];
+    let lawns = every_lawn();
+    for (name, was) in were {
+        let spec = &lawns.iter().find(|lawn| lawn.0 == name).unwrap().1;
+        assert!(spec.tree.baubles == 0 && !spec.tube, "{name}");
+        assert_eq!(print_of(&build(spec).unwrap()), was, "{name}");
     }
 }
 

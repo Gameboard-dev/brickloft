@@ -3149,13 +3149,23 @@ pub(crate) fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Ve
     let mounds = if grass { grass_touches(spec, foot) } else { Vec::new() };
     // (grass: water stands `count` below it, 0 for none; and `depth`, which a plant has no other use for, is how thickly reeds stand round it: one more than so many tenths, since a depth is 1 at least)
     let water = (grass && spec.tree.count > 0).then(|| -(spec.tree.count as f64));
-    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, levels: if grass && spec.tube { 2 } else { 1 }, mounds };
+    // (and its `baubles`, which only a pine has otherwise, is how readily its steep ground is a cliff)
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, levels: if grass && spec.tube { 2 } else { 1 }, cliffs: if grass { spec.tree.baubles.clamp(0, crate::grass::MOST_CLIFFS) as u8 } else { 0 }, mounds };
     Ok((lay, path))
 }
 
+/// What a touch of a brush on grass has in the middle number of its
+/// added point: this if it flattens, [`SHARP`] more if its edge is sharp
+/// (see [`crate::tree::Sculpt`]). A touch saved before there were sharp
+/// edges has this or 0, and is what it was.
+pub const FLATTENS: f64 = 16.0;
+/// See [`FLATTENS`].
+pub const SHARP: f64 = 32.0;
+
 /// The touches on a patch of grass's ground, as its added points have them.
 fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
-    spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y != 0.0, amount: by.z }).collect()
+    // (anything from 32 up is sharp, and of what is left anything but 0 flattens, as anything but 0 always did)
+    spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y % SHARP != 0.0, sharp: by.y >= SHARP, amount: by.z }).collect()
 }
 
 /// The plant a spec describes, as the solid its bricks were fitted to:
