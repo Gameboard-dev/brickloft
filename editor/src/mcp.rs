@@ -1317,6 +1317,27 @@ mod tests {
     }
 
     #[test]
+    fn a_form_is_cut_out_of_another_and_one_joined_half_a_microbrick_off_is_moved() {
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "cube", "points": [[0, 0, 8]], "radius": 8, "fill": true }, "place": [0, 0, 0] }), || 0.0).unwrap();
+        let ball = json!({ "form": "sphere", "points": [[0, 0, 0]], "radius": 9, "fill": true, "blend": 0 });
+        let room = |state: &State| state.painted().iter().map(|b| b.0.volume()).sum::<f64>();
+        let cube = room(&state);
+        // joined half a microbrick off along x and z, it is moved by that half, and the two are fitted as one
+        let joined = said(apply(&mut state, "add_form", &json!({ "settings": ball, "place": [9.5, 3, 14.5] }), || 0.0).unwrap());
+        assert_eq!((joined["forms"][0]["place"].clone(), joined["forms"][0]["settings"]["carve"].as_str()), (json!([10.0, 3.0, 15.0]), Some("false")));
+        assert!(room(&state) > cube + 200.0);
+        // cut out instead, none of it is built and the cube has lost a corner
+        let cut = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "carve": true, "blend": 2 } }), || 0.0).unwrap());
+        assert_eq!(cut["forms"][0]["settings"]["carve"], "true");
+        assert!(state.painted().iter().all(|b| b.2 == 1) && room(&state) < cube - 200.0, "{} microbricks left of a cube of {cube}", room(&state));
+        // and a setting that is no true or false is refused
+        assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "carve": "a little" } }), || 0.0).is_err());
+        assert!(state.spec.carve);
+    }
+
+    #[test]
     fn a_cube_is_added_resized_and_moved() {
         let mut state = State::new();
         let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
