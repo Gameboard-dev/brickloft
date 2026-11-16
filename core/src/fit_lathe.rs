@@ -45,7 +45,7 @@ use crate::fit_planar::{fit_planar, fit_planar_towards, Opts, Piece};
 use crate::fit_round::rest_of_box;
 use crate::fit_stack::{grow, Plan};
 use crate::fit_volume::merge;
-use crate::shapes::{corners, shape_info, CellBrick, CUBE};
+use crate::shapes::{corners, inside_shape, shape_info, CellBrick, CUBE};
 use glam::DVec2;
 use std::collections::HashMap;
 
@@ -415,7 +415,9 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
         (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])))
     };
     // 0 for nothing, 1 for a piece's box, 2 for a box holding the first of
-    // the two pieces that share it, CUBE for a whole cell
+    // the two pieces that share it, CLEAR for a cell to be left empty, CUBE
+    // for a whole cell
+    const CLEAR: u8 = 3;
     let mut grid = vec![0u8; size[0] * size[1] * size[2]];
     let mut bricks: Vec<CellBrick> = Vec::new();
     // Outer faces first, so that where an outer face and a hollow's wall
@@ -423,12 +425,31 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
     //
     // A piece that cannot be placed, because another has a cell of its box
     // or because its box reaches past the face next out from it, is where
-    // two faces of the form run into each other: the bottom of a groove,
-    // the root of a lip. An outer face's piece is what the air leaves of
-    // its box, so leaving it out would leave a hole; its box is built whole
-    // instead, wherever it is free, which rounds the groove off with a
-    // little too much. A hollow's piece is simply left out: its cells are
-    // then not hollow, so they too are built whole where they are free.
+    // two faces of the form run into each other and share no outline: a
+    // wall so thin that the boxes of its two faces cross, or a rim a cell
+    // wide.
+    //
+    // A wall's piece, which stands upright through all the wall's layers,
+    // is then built cell by cell, wherever its box is free: a cell is whole
+    // if the piece would have filled three eighths of it or more, and is
+    // left empty otherwise. That is a staircase along the piece's upright
+    // face, half a cell off it at most. (Its whole box was built solid
+    // before, which stood as far out as the box is deep: a lump four cells
+    // high inside the neck of a bowl whose wall is three thick.) Three
+    // eighths and not a half, so that a cell the face cuts corner to
+    // corner, which samples as just under half, is whole: a bump there is
+    // better than a hole.
+    //
+    // A ring's piece is one sloped face through its box, and so in effect
+    // is the piece of a wall one layer high. An outer face's is what the
+    // air leaves of its box, so leaving it out would leave a hole; its box
+    // is built whole instead, wherever it is free, which rounds the place
+    // off with a little too much. A hollow's is simply left out: its cells
+    // are then not hollow, so they too are built whole where they are free.
+    // Cell by cell these were measured rougher: such a piece is mostly in a
+    // shallow dish in a flat top or a recess one layer deep, where a
+    // staircase one cell high is a row of teeth and the place is better
+    // left flat.
     for hollow in [false, true] {
         for (number, band) in bands.iter().enumerate().filter(|(_, b)| b.hollow == hollow) {
             for (piece, half) in band.pieces.iter().zip(&band.halves) {
@@ -459,6 +480,21 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                     cells(piece).for_each(|[x, y, z]| grid[index(x, y, z).unwrap()] = if half.is_some() { 2 } else { 1 });
                     if *half != Some(0) {
                         bricks.push(CellBrick { mask: half.unwrap_or(piece.mask), ..*piece });
+                    }
+                } else if piece.mask & 15 == piece.mask >> 4 && band.high - band.low > 1 {
+                    let shape = shape_info(piece.mask)?;
+                    for [x, y, z] in cells(piece) {
+                        if let Some(i) = index(x, y, z).filter(|i| grid[*i] == 0) {
+                            // 16 points of the cell, in the piece's own box; it is the same all the way up
+                            let held = (0..16).filter(|k| {
+                                let t = [(x, k % 4, 0), (y, k / 4, 1)].map(|(cell, part, axis)| (cell as f64 + (part as f64 + 0.5) / 4.0 - piece.min[axis] as f64) / piece.ext[axis] as f64);
+                                inside_shape(shape, t[0], t[1], 0.5)
+                            });
+                            // A hollow's cell that is not to be hollow is
+                            // left for the faces further out to settle:
+                            // where the box reaches past them it is air.
+                            grid[i] = if held.count() < 6 { CLEAR } else if hollow { 0 } else { CUBE };
+                        }
                     }
                 } else if !hollow {
                     for [x, y, z] in cells(piece) {
