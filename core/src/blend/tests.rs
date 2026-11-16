@@ -437,6 +437,178 @@ fn three_forms_joined_in_a_chain_are_one_build() {
     assert!(placed(&scene, &pieces) == placed(&again, &again.pieces()));
 }
 
+/// How rough a join is where it was fitted afresh, for comparing one way of
+/// fitting it with another.
+#[derive(Debug, Clone, Copy)]
+struct Seam {
+    /// bricks in all, and those of them that are no form's own
+    bricks: usize,
+    fresh: usize,
+    /// bricks one cell each way that are sloped, among the fresh ones
+    unit_sloped: usize,
+    /// and those of them with no other sloped brick against any face: a tooth
+    alone: usize,
+    /// the room, in cells, where the bricks and the joined solid disagree near the seam
+    wrong: f64,
+    /// The area, in cell faces, of the steps the bricks make near the seam
+    /// that the solid does not have: where, across the face between two
+    /// cells, there is brick on one side and none on the other, and the
+    /// solid is the same on both. A surface that the bricks follow exactly
+    /// has none, however it slopes; a tooth has its three upright sides.
+    steps: f64,
+}
+
+/// [`Seam`] for a scene of two forms that stand whole cells apart. "Near
+/// the seam" is where the two forms' distances are within the blend's reach
+/// of one another and the solid's surface is within two cells.
+fn seam(scene: &Scene, pieces: &[Piece], blend: f64) -> Seam {
+    assert!(scene.places.iter().all(|p| p.iter().all(|u| u % 2 == 0)));
+    let distances = scene.distances();
+    let near = |p: DVec3| {
+        let d = distances(p);
+        let (a, b) = (d[0], if scene.specs[1].carve { -d[1] } else { d[1] });
+        ((a - b).abs() < blend + 2.0 && scene.solid(&d, blend).abs() < 2.0).then(|| scene.solid(&d, blend) < 0.0)
+    };
+    // the bricks in each cell of the world
+    let mut within: HashMap<[i32; 3], Vec<usize>> = HashMap::new();
+    for (n, piece) in pieces.iter().enumerate() {
+        let off = scene.places[piece.member].map(|u| u / 2);
+        for c in cells(&piece.brick) {
+            within.entry([0, 1, 2].map(|k| c[k] + off[k])).or_default().push(n);
+        }
+    }
+    let held = |p: DVec3| within.get(&p.floor().to_array().map(|v| v as i32)).is_some_and(|some| some.iter().any(|&n| holds(&pieces[n].brick, p - DVec3::from_array(scene.places[pieces[n].member].map(|u| u as f64 / 2.0)))));
+    let own: Vec<HashSet<(u8, [i32; 3], [i32; 3])>> = scene.built.iter().map(|b| b.bricks.iter().map(|b| (b.mask, b.min, b.ext)).collect()).collect();
+    let fresh: Vec<&Piece> = pieces.iter().filter(|p| !own[p.member].contains(&(p.brick.mask, p.brick.min, p.brick.ext))).collect();
+    let sloped: HashSet<[i32; 3]> = pieces.iter().filter(|p| p.brick.mask != CUBE).flat_map(|p| cells(&p.brick).map(|c| [0, 1, 2].map(|k| c[k] + scene.places[p.member][k] / 2))).collect();
+    let unit: Vec<[i32; 3]> = fresh.iter().filter(|p| p.brick.mask != CUBE && p.brick.ext == [1; 3]).map(|p| [0, 1, 2].map(|k| p.brick.min[k] + scene.places[p.member][k] / 2)).collect();
+    let alone = unit.iter().filter(|c| (0..6).all(|f| !sloped.contains(&[0, 1, 2].map(|k| c[k] + if k == f / 2 { [-1, 1][f % 2] } else { 0 })))).count();
+    let (low, high) = scene.extent();
+    let (low, high) = (low.floor() - 2.0, high.ceil() + 2.0);
+    let (mut wrong, mut steps) = (0usize, 0usize);
+    const FINE: usize = 4;
+    let part = |i: usize| (i as f64 + 0.5) / FINE as f64;
+    for z in low.z as i32..high.z as i32 {
+        for y in low.y as i32..high.y as i32 {
+            for x in low.x as i32..high.x as i32 {
+                let at = DVec3::new(x as f64, y as f64, z as f64);
+                if near(at + 0.5).is_none() && distances(at + 0.5).iter().all(|d| d.abs() > 4.0) {
+                    continue;
+                }
+                for s in 0..FINE * FINE * FINE {
+                    let p = at + DVec3::new(part(s % FINE), part(s / FINE % FINE), part(s / (FINE * FINE)));
+                    if let Some(inside) = near(p) {
+                        wrong += (inside != held(p)) as usize;
+                    }
+                }
+                // the three faces of the cell on its low sides, a little to either side of each
+                for axis in 0..3 {
+                    for s in 0..FINE * FINE {
+                        let mut on = [part(s % FINE), part(s / FINE), 0.0];
+                        on.swap(2, axis);
+                        let (before, after) = (at + DVec3::from_array(on) - DVec3::AXES[axis] * 0.01, at + DVec3::from_array(on) + DVec3::AXES[axis] * 0.01);
+                        if let (Some(a), Some(b)) = (near(before), near(after)) {
+                            steps += (a == b && held(before) != held(after)) as usize;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Seam { bricks: pieces.len(), fresh: fresh.len(), unit_sloped: unit.len(), alone, wrong: wrong as f64 / (FINE * FINE * FINE) as f64, steps: steps as f64 / (FINE * FINE) as f64 }
+}
+
+/// The joins the seam's roughness is measured on: the sphere on a cube that
+/// was complained of, a sphere in a sphere, and a sphere out of a cube.
+fn seams() -> Vec<(&'static str, Scene, f64)> {
+    let mut all = Vec::new();
+    for blend in [0.0, 2.0, 6.0] {
+        all.push(("a sphere on a cube", Scene::new(&[(cube(), [0.0; 3]), (ball(12.0), [4.0, 2.0, 22.0])], blend), blend));
+        all.push(("a sphere in a sphere", Scene::new(&[(ball(20.0), [0.0; 3]), (ball(14.0), [22.0, 6.0, 9.0])], blend), blend));
+        all.push(("a sphere out of a cube", Scene::carved(&[(cube(), [0.0; 3]), (ball(12.0), [12.0, 4.0, 18.0])], blend), blend));
+    }
+    all
+}
+
+#[test]
+fn a_seam_is_no_rougher_than_it_was_measured_to_be() {
+    // The nine joins together, as they were before the seam was evened out
+    // and laid with stretched bricks, and as they are with both:
+    //
+    //                         wrong   steps   unit sloped   standing alone
+    //   before                515.0  2172.9          1634               45
+    //   evened out only       513.7  1876.1          1738                6
+    //   stretched only        473.2  1968.8          1104               15
+    //   both                  466.2  1818.3          1136                1
+    let all: Vec<Seam> = seams().iter().map(|(_, scene, blend)| seam(scene, &scene.pieces(), *blend)).collect();
+    let (wrong, steps) = (all.iter().map(|s| s.wrong).sum::<f64>(), all.iter().map(|s| s.steps).sum::<f64>());
+    let (unit, alone) = (all.iter().map(|s| s.unit_sloped).sum::<usize>(), all.iter().map(|s| s.alone).sum::<usize>());
+    assert!(wrong < 485.0 && steps < 1900.0 && unit < 1300 && alone <= 3, "{wrong:.1} cells wrong, {steps:.1} faces of step, {unit} unit sloped bricks and {alone} of them standing alone");
+}
+
+/// The same two measures for a sphere alone, fitted by its own fitter and
+/// cell by cell: what a seam's figures are to be read against. (A sphere of
+/// radius 20 has 0.18 cells wrong and 0.08 faces of step for each cell of
+/// its surface from its own fitter, and 0.11 and 0.40 cell by cell: its own
+/// facets are smooth by being further from the sphere, not nearer.)
+#[test]
+#[ignore = "prints figures to compare by eye, and asserts nothing"]
+fn how_rough_a_sphere_alone_is() {
+    for r in [12.0, 20.0] {
+        let spec = ball(r);
+        let built = build(&spec).unwrap();
+        let probe = Probe::new(&spec, built.grain).unwrap();
+        let fit = crate::fit_volume::fit_volume(&|p| probe.distance(p), [-24; 3], [24; 3], &crate::fit_volume::Opts::default());
+        for (name, bricks) in [("round", &built.bricks), ("volume", &fit.bricks)] {
+            let mut within: HashMap<[i32; 3], Vec<usize>> = HashMap::new();
+            for (n, b) in bricks.iter().enumerate() {
+                for c in cells(b) {
+                    within.entry(c).or_default().push(n);
+                }
+            }
+            let held = |p: DVec3| within.get(&p.floor().to_array().map(|v| v as i32)).is_some_and(|some| some.iter().any(|&n| holds(&bricks[n], p)));
+            let (mut wrong, mut steps) = (0usize, 0usize);
+            let part = |i: usize| (i as f64 + 0.5) / 4.0;
+            for z in -24..24 {
+                for y in -24..24 {
+                    for x in -24..24 {
+                        let at = DVec3::new(x as f64, y as f64, z as f64);
+                        if probe.distance(at + 0.5).abs() > 4.0 {
+                            continue;
+                        }
+                        for s in 0..64 {
+                            let p = at + DVec3::new(part(s % 4), part(s / 4 % 4), part(s / 16));
+                            wrong += ((probe.distance(p) < 0.0) != held(p)) as usize;
+                        }
+                        for axis in 0..3 {
+                            for s in 0..16 {
+                                let mut on = [part(s % 4), part(s / 4), 0.0];
+                                on.swap(2, axis);
+                                let (before, after) = (at + DVec3::from_array(on) - DVec3::AXES[axis] * 0.01, at + DVec3::from_array(on) + DVec3::AXES[axis] * 0.01);
+                                steps += ((probe.distance(before) < 0.0) == (probe.distance(after) < 0.0) && held(before) != held(after)) as usize;
+                            }
+                        }
+                    }
+                }
+            }
+            let area = 4.0 * std::f64::consts::PI * r * r;
+            println!("sphere {r} {name}: {} bricks, wrong {:.3} a cell of surface, steps {:.3} a cell of surface", bricks.len(), wrong as f64 / 64.0 / area, steps as f64 / 16.0 / area);
+        }
+    }
+}
+
+/// Prints [`Seam`] for each of [`seams`]: run with `--ignored --nocapture`
+/// before and after a change to how a join is fitted.
+#[test]
+#[ignore = "prints figures to compare by eye, and asserts nothing"]
+fn how_rough_each_seam_is() {
+    println!("{:<24} {:>5} {:>7} {:>6} {:>6} {:>6} {:>8} {:>8}", "join", "blend", "bricks", "fresh", "unit", "alone", "wrong", "steps");
+    for (name, scene, blend) in seams() {
+        let s = seam(&scene, &scene.pieces(), blend);
+        println!("{name:<24} {blend:>5} {:>7} {:>6} {:>6} {:>6} {:>8.1} {:>8.1}", s.bricks, s.fresh, s.unit_sloped, s.alone, s.wrong, s.steps);
+    }
+}
+
 #[test]
 fn an_ordinary_join_is_put_together_in_a_few_milliseconds() {
     // the least of several runs, since a test shares the machine with the others

@@ -728,7 +728,7 @@ fn between_at_samples(v: &[f64; 8]) -> [f64; K * K * K] {
 /// gives every form's distance at one of its corners. A corner is shared
 /// by eight cells, so the caller that fits many cells works each corner
 /// out once (see [`refit`]).
-fn fit_cell(solid: &Joined, at: DVec3, wedges: bool, middle: &[f64; MOST], at_corner: impl Fn(usize) -> [f64; MOST]) -> (u8, Option<u64>) {
+fn fit_cell(solid: &Joined, at: DVec3, wedges: bool, middle: &[f64; MOST], at_corner: impl Fn(usize) -> [f64; MOST]) -> (u8, Option<Crossed>) {
     let n = solid.parts.len();
     if let Some(sure) = surely(solid, middle) {
         return (sure, None);
@@ -759,18 +759,31 @@ fn fit_cell(solid: &Joined, at: DVec3, wedges: bool, middle: &[f64; MOST], at_co
         // strictly inside, as the volume fitter has it
         bits |= ((solid.together(&d) < 0.0) as u64) << s;
     }
-    let corners = (0..8).fold(0u8, |m, c| {
+    let whole: [f64; 8] = std::array::from_fn(|c| {
         for i in 0..n {
             d[i] = corner[i][c];
         }
-        m | ((solid.together(&d) <= 0.0) as u8) << c
+        solid.together(&d)
     });
+    let corners = (0..8).fold(0u8, |m, c| m | ((whole[c] <= 0.0) as u8) << c);
+    // how the solid's distance changes across the cell along each axis: the mean over the four edges that run that way
+    let slope = [0, 1, 2].map(|k| (0..8).filter(|c| c >> k & 1 == 0).map(|c| whole[c | 1 << k] - whole[c]).sum::<f64>() / 4.0);
     let patterns = if wedges { patterns() } else { &patterns()[..2] };
     let mut scores = [(0u32, 0u32); 30];
     for (score, (mask, pattern)) in scores.iter_mut().zip(patterns) {
         *score = ((bits ^ pattern).count_ones(), (corners ^ mask).count_ones());
     }
-    (patterns[least_unshared(&scores[..patterns.len()], 2)].0, Some(bits))
+    (patterns[least_unshared(&scores[..patterns.len()], 2)].0, Some(Crossed { bits, corners, slope }))
+}
+
+/// What is kept of the joined solid in a cell its surface crosses: which of
+/// the cell's samples and corners it holds, and how its distance changes
+/// across the cell along each axis (see `stretch`).
+#[derive(Clone, Copy)]
+struct Crossed {
+    bits: u64,
+    corners: u8,
+    slope: [f64; 3],
 }
 
 /// Fit one join afresh where its forms meet, and cut their own bricks back
@@ -892,7 +905,7 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threa
         let c = corners[at];
         solid.each(DVec3::new((origin[0] + (c % (n[0] + 1)) as i32) as f64, (origin[1] + (c / (n[0] + 1) % (n[1] + 1)) as i32) as f64, (origin[2] + (c / ((n[0] + 1) * (n[1] + 1))) as i32) as f64))
     });
-    let fitted: Vec<(u8, Option<u64>)> = threads.map(wanted.len(), CELLS_A_THREAD, |at| {
+    let fitted: Vec<(u8, Option<Crossed>)> = threads.map(wanted.len(), CELLS_A_THREAD, |at| {
         let i = wanted[at];
         // (found by halving: the corners are in order, and every one asked for here is among them)
         fit_cell(&solid, place(i), wedges, &middles[at], |c| at_corners[corners.binary_search(&corner_number(i, c)).expect("a corner of a cell to be sampled")])
@@ -900,10 +913,10 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threa
     // (the few cells fitted one at a time below ask at their own corners)
     let fit_at = |i: usize| fit_cell(&solid, place(i), wedges, &solid.each(place(i) + 0.5), |c| solid.each(corner_of(place(i), c)));
     let mut shape = vec![0u8; mark.len()];
-    let mut sampled: Vec<(usize, u64)> = Vec::new();
-    for (&i, &(mask, bits)) in wanted.iter().zip(&fitted) {
+    let mut crossed: Vec<(usize, Crossed)> = Vec::new();
+    for (&i, &(mask, found)) in wanted.iter().zip(&fitted) {
         shape[i] = mask;
-        sampled.extend(bits.map(|bits| (i, bits)));
+        crossed.extend(found.map(|found| (i, found)));
     }
     // The cells beside a tetrahedron at the zone's edge are fitted too,
     // and then left out. A tetrahedron is kept only where two of its faces
@@ -918,23 +931,71 @@ fn refit(members: &[Member], cluster: &[usize], pieces: &mut [Vec<Piece>], threa
     beside.dedup();
     for &i in &beside {
         mark[i] = BESIDE;
-        let (mask, bits) = fit_at(i);
+        let (mask, found) = fit_at(i);
         shape[i] = mask;
-        sampled.extend(bits.map(|bits| (i, bits)));
+        crossed.extend(found.map(|found| (i, found)));
     }
     wanted.extend(&beside);
-    sampled.sort_unstable_by_key(|s| s.0);
+    crossed.sort_unstable_by_key(|c| c.0);
     let mut sloped: Vec<CellBrick> = Vec::new();
     if wedges {
+        let sampled: Vec<(usize, u64, u8)> = crossed.iter().map(|(i, c)| (*i, c.bits, c.corners)).collect();
+        even::even_out(&mut shape, &sampled, n, |i| mark[i] == IN, |i| mark[i] != 0);
+        let sampled: Vec<(usize, u64)> = crossed.iter().map(|(i, c)| (*i, c.bits)).collect();
         drop_spikes(&mut shape, &sampled, n);
     }
     for i in wanted.iter().filter(|i| mark[**i] == BESIDE) {
         shape[*i] = 0;
     }
-    sampled.retain(|s| mark[s.0] == IN);
+    crossed.retain(|c| mark[c.0] == IN);
     if wedges {
+        let mut sampled: Vec<(usize, u64)> = crossed.iter().map(|(i, c)| (*i, c.bits)).collect();
+        let slopes: Vec<[f64; 3]> = crossed.iter().map(|c| c.1.slope).collect();
+        // A stretched brick may take the cells of the zone, and cells
+        // beside it that no brick of any of the forms has in its box.
+        // Most of a stretched corner piece's box is empty, and reaches
+        // further from the surface than the zone does: held to the zone
+        // alone, one in seven of those that fit was refused. Its box in a cell
+        // outside the zone is empty air and must stay so (`stretch`
+        // lets no brick into a cell the solid is not known to reach),
+        // and the game minds only that no other brick's box is there.
+        let mut free = vec![true; mark.len()];
+        let block = (origin, [0, 1, 2].map(|k| origin[k] + n[k] as i32));
+        for part in parts {
+            for b in &members[part.member].built.bricks {
+                let (min, max) = own_box(part, b);
+                if !meet(&(min, max), &block) {
+                    continue;
+                }
+                let (from, to) = ([0, 1, 2].map(|k| min[k].max(block.0[k])), [0, 1, 2].map(|k| max[k].min(block.1[k])));
+                for z in from[2]..to[2] {
+                    for y in from[1]..to[1] {
+                        let row = index([from[0], y, z]);
+                        free[row..row + (to[0] - from[0]) as usize].fill(false);
+                    }
+                }
+            }
+        }
+        for (free, mark) in free.iter_mut().zip(&mark) {
+            *free |= *mark == IN;
+        }
+        sloped = stretch::stretch(&mut shape, &sampled, &slopes, n, max_ext, &|i| free[i], threads);
+        // (the cells those took are no longer the solid's to fit: a ramp may not enter a cell the solid does not reach)
+        for b in &sloped {
+            for c in cells(b) {
+                free[c[0] as usize + n[0] * (c[1] as usize + n[1] * c[2] as usize)] = false;
+            }
+        }
+        sampled.retain(|s| free[s.0]);
+        // Then the volume fitter's ramps stretched one way, over what is
+        // left. They are tried at every length in every place, where the
+        // bricks above are tried only where the slope at one cell puts
+        // them, and so find the runs those miss: on the joins measured
+        // (`tests::seams`) the two together disagreed with the solid by 6
+        // to 13% less than these ramps alone, and by more than that less
+        // than the bricks above alone.
         // (a stretched ramp never enters a cell the solid does not reach, and so never leaves the zone)
-        sloped = stretch_ramps(&mut shape, &sampled, n, max_ext, threads).0;
+        sloped.extend(stretch_ramps(&mut shape, &sampled, n, max_ext, threads).0);
     }
     // Which brick of each form covers each cell of the zone.
     let mut cover: Vec<HashMap<usize, usize>> = vec![HashMap::new(); parts.len()];
@@ -1192,5 +1253,7 @@ pub fn holds(brick: &CellBrick, p: DVec3) -> bool {
     shape_info(brick.mask).is_some_and(|info| crate::shapes::inside_shape(info, t[0], t[1], t[2]))
 }
 
+mod even;
+mod stretch;
 #[cfg(test)]
 mod tests;
