@@ -665,8 +665,13 @@ fn pattern_side_faces(spec: &Spec, built: &mut Built) {
     if size.iter().product::<i64>() > MOST_CELLS {
         return;
     }
-    // the way the pattern runs through the form: the way most of its bricks run from one face to the other
-    let through = (0..3).max_by_key(|k| built.bricks.iter().filter(|b| b.min[*k] == lo[*k] && b.ext[*k] == hi[*k] - lo[*k]).count()).unwrap_or(2);
+    // The way the pattern runs through the form: the way most of its
+    // bricks run from one face to the other, or to a cell short of the
+    // other, as the bricks under a bevelled top do. (Counting only those
+    // that ran the whole way, a wall of bevelled bricks had none, some
+    // other way was taken, and the wall's own face was patterned over as
+    // if it were a side.)
+    let through = (0..3).max_by_key(|k| built.bricks.iter().filter(|b| b.min[*k] == lo[*k] && b.ext[*k] >= (hi[*k] - lo[*k] - 1).max(1)).count()).unwrap_or(2);
     if hi[through] - lo[through] < LEAST_SIDE + 2 {
         return;
     }
@@ -3135,7 +3140,7 @@ mod tests {
         let disc = |mosaic| Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 30.0, thick: 8.0, depth: 8, fill: true, tube: true, plane: 2, mosaic, ..Spec::default() };
         let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
         let plain = build(&disc(None)).unwrap();
-        let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         assert!(plain.shades.is_empty() && plain.bricks.iter().any(|b| b.mask != CUBE), "the plain disc has no rounded rim to speak of");
         assert_eq!(built.shades.len(), built.bricks.len());
         // the pattern is there: several colours, on bricks that run the form's whole depth
@@ -3161,7 +3166,7 @@ mod tests {
         // a block 40 by 30 and 12 high, as a filled closed outline, laid as planks
         let block = |depth: i32, mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-19.5, 0.5, 0.5), DVec3::new(20.5, 0.5, 0.5)], thick: 30.0, depth, plane: 2, mosaic, ..Spec::default() };
         let planks = crate::pattern::STYLES.iter().position(|style| style.name == "planks").unwrap();
-        let laid = |depth: i32| build(&block(depth, Some(crate::pattern::Mosaic { style: planks, size: 2, border: 0, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        let laid = |depth: i32| build(&block(depth, Some(crate::pattern::Mosaic { style: planks, size: 2, bevel: false, border: 0, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         let (plain, built) = (build(&block(12, None)).unwrap(), laid(12));
         assert_eq!(built.shades.len(), built.bricks.len());
         let (lo, hi) = ([0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
@@ -3185,6 +3190,13 @@ mod tests {
         for (n, a) in built.bricks.iter().enumerate() {
             assert!(built.bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
         }
+        // A wall of bevelled bricks six deep: its face is the bevelled
+        // bricks' own tops, sloped, and not a layer of tiles laid over them.
+        let bricks = crate::pattern::STYLES.iter().position(|style| style.name == "bricks").unwrap();
+        let wall = build(&block(6, Some(crate::pattern::Mosaic { style: bricks, size: 2, bevel: true, border: 0, seed: 3, mortar: true, stagger: 50, upright: false, uneven: [0; 2] }))).unwrap();
+        let face = wall.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        let tops: Vec<&CellBrick> = wall.bricks.iter().filter(|b| b.min[2] + b.ext[2] == face).collect();
+        assert!(tops.iter().filter(|b| b.mask != CUBE).count() > 100 && wall.bricks.iter().zip(&wall.shades).filter(|(b, _)| b.min[2] + b.ext[2] == face).all(|(_, shade)| *shade != 0), "the wall's face was laid over");
         // a floor two deep has no sides to speak of: every brick runs through it
         let floor = laid(2);
         assert!(floor.bricks.iter().all(|b| b.min[2] == floor.bricks[0].min[2] && b.ext[2] == 2));
@@ -3196,7 +3208,7 @@ mod tests {
         let band = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-61.5, 0.5, -0.5), DVec3::new(-3.5, 0.5, 6.5), DVec3::new(4.5, 0.5, 2.5), DVec3::new(47.5, 0.5, -42.5)], thick: 20.0, depth: 1, plane: 2, mosaic, ..Spec::default() };
         let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
         let plain = build(&band(None)).unwrap();
-        let built = build(&band(Some(crate::pattern::Mosaic { style: medallions, size: 2, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        let built = build(&band(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         // as close to the form as it is plain, to the last figure
         assert_eq!((built.solid, built.error), (plain.solid, plain.error));
         // The sloped bricks of the edge are the plain form's own, each
@@ -3217,7 +3229,7 @@ mod tests {
         // a floor 240 by 160 and 4 deep, which as a plain floor is a handful of bricks (a floor one deep is at single microbricks anyway: there is no coarser brick it can be built of)
         let floor = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-119.5, 0.5, 0.5), DVec3::new(120.5, 0.5, 0.5)], thick: 160.0, depth: 4, plane: 2, grain: 0, budget: 2500, mosaic, ..Spec::default() };
         let rug = crate::pattern::STYLES.iter().position(|style| style.name == "rug").unwrap();
-        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: false, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         // Far over the budget, at the finest size: some 25,000 bricks. (Held
         // to the budget it is built of bricks 2 or more across and is under
         // 8,000. A flat form's `grain` says 1 either way, its bricks being

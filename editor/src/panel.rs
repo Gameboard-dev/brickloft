@@ -469,7 +469,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
                 // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
                 // (cobbles start uneven: all alike, they are a grid of squares)
-                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
+                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
                 // A pattern is its colours, and each has colours of its
                 // own to start in (a rug's reds and golds, a floor of
                 // planks' browns). They are brought in with the pattern
@@ -511,6 +511,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
                 }
                 if style == "bricks" {
+                    helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
                     // below nothing, every course is moved along by an amount of its own
                     let mut uneven = laid.stagger < 0;
                     if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
@@ -858,7 +859,7 @@ mod tests {
                 state.preset();
                 state.refresh(|| 0.0);
                 state.spec.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
+                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
                 if choice != 0 {
                     state.paint.mode = Mode::Pattern;
                     state.paint.colours = crate::paint::palette(if choice == 1 { "stepping stones" } else { brickloft_core::pattern::STYLES[choice - 2].name }).to_vec();
