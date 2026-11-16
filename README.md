@@ -13,14 +13,15 @@ any length. Anything square is easy to build from them. A curve is hard,
 because a grid has no curves. The usual result is a staircase, a row of
 little steps where a smooth slope should be.
 
-Take a dome for the top of a tower, 100 microbricks across. Built well, it
+Take a stone ball to sit on top of a gatepost, 100 microbricks across. Built well, it
 is 2,215 bricks. Each one has to be the right shape, the right size and
 turned the right way, and each has to meet its neighbours exactly, because
 one misplaced wedge shows as a notch in the surface. By hand that is an
-evening of careful work, and the next dome, a little larger, starts again
+evening of careful work, and the next ball, a little larger, starts again
 from nothing. In Brickloft you pick Sphere, drag one dot until the size is
-right, and press Ctrl+C. The dome that pastes into the game has no steps
-anywhere on it, and its volume is within 1.2% of a true sphere's.
+right, and press Ctrl+C. The ball that pastes into the game has no steps
+anywhere on it, and it differs from a true sphere over only 1.2% of its
+volume.
 
 Brickloft can do this because every brick shape is a box with some of its
 corners kept. For each box it asks which corners lie inside the shape you
