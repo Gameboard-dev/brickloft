@@ -19,19 +19,11 @@ pub struct BrickMaterial {
     /// line width in pixels
     pub line_width: f32,
     pub roughness: f32,
-    /// Drawn see-through, each brick as clear as the fourth part of its
-    /// colour says: the water of a pond, and its ice. Such bricks are
-    /// drawn after the solid ones, tested against their depth but leaving
-    /// none of their own, so that what lies under water shows through it
-    /// and what stands in front still hides it. Writing their depth would
-    /// hide the bed behind the first face drawn.
-    /// https://www.khronos.org/opengl/wiki/Transparency_Sorting
-    pub clear: bool,
 }
 
 impl Default for BrickMaterial {
     fn default() -> Self {
-        BrickMaterial { line_shade: 0.28, line_width: 1.3, roughness: 0.7, clear: false }
+        BrickMaterial { line_shade: 0.28, line_width: 1.3, roughness: 0.7 }
     }
 }
 
@@ -67,15 +59,10 @@ impl Material for BrickMaterial {
     }
 
     fn render_states(&self) -> RenderStates {
-        if self.clear {
-            // (the picture's own fourth part is left as it was: on a web page a canvas less than solid would show the page through it)
-            RenderStates { write_mask: WriteMask::COLOR, blend: Blend::TRANSPARENCY, ..Default::default() }
-        } else {
-            RenderStates::default()
-        }
+        RenderStates::default()
     }
 
     fn material_type(&self) -> MaterialType {
-        if self.clear { MaterialType::Transparent } else { MaterialType::Opaque }
+        MaterialType::Opaque
     }
 }

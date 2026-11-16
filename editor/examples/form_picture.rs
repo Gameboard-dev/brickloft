@@ -9,7 +9,8 @@
 //! `palette:rug` paints a pattern in the colours the editor starts that
 //! style in, and `palette:rug:2` in the third of its sets (see
 //! `brickloft_editor::paint::palettes`), to judge a pattern as a player
-//! first sees it and not in this example's own colours. Extra `key=value`
+//! first sees it and not in this example's own colours. `palette:maze`
+//! paints a maze in the colours its walls' texture starts in. Extra `key=value`
 //! arguments override the file's settings, as with the `inspect` example.
 
 use brickloft_core::report::parse_spec;
@@ -54,8 +55,10 @@ fn main() {
     // a style's own colours instead, all of them: `palette:STYLE` or `palette:STYLE:N`
     let own: Option<Vec<[f64; 3]>> = args.iter().find_map(|a| {
         let mut parts = a.strip_prefix("palette:")?.split(':');
-        let sets = brickloft_editor::paint::palettes(parts.next()?);
-        let set = sets[parts.next().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0).min(sets.len() - 1)];
+        let style = parts.next()?;
+        // (a maze's sets go by what its walls are, and have the floor and the way through among them)
+        let sets: Vec<Vec<[u8; 3]>> = if style == "maze" { brickloft_editor::paint::maze_palettes(brickloft_editor::paint::maze_texture(&spec)) } else { brickloft_editor::paint::palettes(style).iter().map(|set| set.to_vec()).collect() };
+        let set = &sets[parts.next().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0).min(sets.len() - 1)];
         Some(set.iter().map(|c| c.map(f64::from)).collect())
     });
     // a pond's water last and seen through, as the editor draws it (ice more solid)

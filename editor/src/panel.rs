@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, MAZE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -250,8 +250,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             .response
         });
         if state.form != before {
-            // a tree's colours are for a tree's parts: they go when it does
-            if before == TREE && state.paint.mode == Mode::Pattern {
+            // a tree's colours are for a tree's parts: they go when it does (and a maze's with the maze)
+            if matches!(before, TREE | MAZE) && state.paint.mode == Mode::Pattern {
                 state.paint = crate::paint::Paint::default();
             }
             state.preset();
@@ -284,6 +284,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         let arch_feet = state.has_rise();
         if state.form == TREE {
             tree(ui, state, largest);
+        }
+        if state.form == MAZE {
+            maze(ui, state, largest);
         }
         let unblended = state.unblended();
         let s = &mut state.spec;
@@ -430,8 +433,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             CUBE => {
                 helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
             }
-            // a tree is neither filled nor hollow, and has no wall
-            TREE => {}
+            // a tree is neither filled nor hollow, and has no wall; a maze is all wall
+            TREE | MAZE => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -446,7 +449,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            SPHERE | REVOLVE | PYRAMID | CUBE => "Wall thickness",
+            SPHERE | REVOLVE | PYRAMID | CUBE | MAZE => "Wall thickness",
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
@@ -487,6 +490,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // one more control that does nothing.
         if let Some(blend) = &mut s.blend {
             helped(ui, help("blend"), |ui| ui.add(Slider::new(blend, 0.0..=brickloft_core::blend::MAX_BLEND).step_by(0.5).text("Blend")));
+            helped(ui, help("carve"), |ui| ui.checkbox(&mut s.carve, "Cut out of what it joins"));
             if let Some(why) = unblended {
                 ui.label(why);
             }
@@ -513,8 +517,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 }
             });
         }
-        // (not a tree, which is no one's mirror image; it can still be flipped)
-        if state.form != TREE {
+        // (not a tree, which is no one's mirror image, nor a maze, which would then have two ways through; they can still be flipped)
+        if !matches!(state.form, TREE | MAZE) {
             ui.horizontal(|ui| {
                 ui.label("Mirror").on_hover_text(help("mirror"));
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
@@ -691,7 +695,12 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 /// tube too: see `brickloft_core::spec::pattern_flat_faces`; a cube is its
 /// largest face pushed through its shortest length).
 fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
-    if !(state.form <= BEZIER || state.form == CUBE) {
+    // A maze has the same list for what its walls are made of: the
+    // patterns that can be wrapped along a wall (see
+    // `brickloft_core::maze::walls`), and one more, hedge, which is not a
+    // pattern at all but is chosen in the same breath.
+    let walls = state.form == MAZE;
+    if !(state.form <= BEZIER || state.form == CUBE || walls) {
         return;
     }
     // A warm tint laid over whichever theme the panel is in, and the
@@ -707,22 +716,46 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     // each, since a form has one pattern at most. 0 is none, 1
     // the stepping stones, and 2 onwards the styles of mosaic.
     let styles = &brickloft_core::pattern::STYLES;
+    // (the last on the list, past the styles, and for a maze alone)
+    let hedge = styles.len() + 2;
     let named = |choice: usize| match choice {
         0 => "none",
         1 => "stepping stones",
+        n if n == hedge => "hedge",
         _ => styles[(choice - 2).min(styles.len() - 1)].name,
     };
-    let before = if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
+    // what of the list a form may have: a maze no stepping stones and no rug, and nothing else a hedge
+    let offered = |choice: usize| if walls { choice != 1 && named(choice) != "rug" } else { choice != hedge };
+    // the sets of colours a choice comes in, which for a maze have the floor and the way through among them
+    let sets = |choice: usize| if walls { crate::paint::maze_palettes(named(choice)) } else { crate::paint::palettes(named(choice)).iter().map(|set| set.to_vec()).collect() };
+    let before = if walls && s.maze.hedge { hedge } else if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
+    // (a maze given a rug or stones from outside has plain walls: see `brickloft_core::maze::walls::wrapped`)
+    let before = if offered(before) { before } else { 0 };
     let mut choice = before;
-    helped(ui, help("pattern"), |ui| {
+    let about = if walls { help("maze_texture") } else { help("pattern") };
+    helped(ui, about, |ui| {
         ComboBox::from_label(egui::RichText::new("Texture").strong().color(ink)).selected_text(named(choice)).show_ui(ui, |ui| {
-            for n in 0..styles.len() + 2 {
+            for n in (0..styles.len() + 3).filter(|n| offered(*n)) {
                 ui.selectable_value(&mut choice, n, named(n));
             }
         })
         .response
     });
-    if choice != before {
+    if walls && choice != before {
+        // a maze's walls: hedge or not, and a pattern or none; and their colours with them, as a tree's kind brings its own
+        s.maze.hedge = choice == hedge;
+        s.stones = None;
+        s.mosaic = (choice >= 2 && choice != hedge).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: 50, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
+        // (a hedge is thicker than a wall need be, and no thinner than a hedge can be; and it is grown as the Plant form's hedge starts out, not as whatever plant the form last was)
+        if s.maze.hedge {
+            s.thick = s.thick.max(brickloft_core::maze::LEAST_HEDGE);
+            s.tree = brickloft_core::tree::Tree { seed: s.tree.seed, ..brickloft_core::tree::Tree::of(brickloft_core::tree::Kind::Hedge) };
+        }
+        let own = state.paint.mode == Mode::Pattern && !sets(before).iter().any(|set| state.paint.colours == *set);
+        if !own {
+            (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets(choice)[0].clone());
+        }
+    } else if choice != before {
         s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
         // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
         // (cobbles start uneven: all alike, they are a grid of squares)
@@ -740,7 +773,22 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     // another pattern, in the next of its sets of colours
     let mut another = None;
-    if let Some(laid) = &mut s.stones {
+    if walls && s.maze.hedge {
+        // the hedge's own settings, as the Plant form has them for a hedge (see `tree`)
+        helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text("Density")));
+        helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text("Looseness")));
+        helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));
+            ui.label("Seed");
+            if ui.button("Another").clicked() {
+                s.tree.seed = s.tree.seed.wrapping_add(1);
+                another = Some(s.tree.seed);
+            }
+            hint(ui, help("tree_seed"));
+        });
+    }
+    if let Some(laid) = s.stones.as_mut().filter(|_| !walls) {
         helped(ui, help("stone_size"), |ui| ui.add(Slider::new(&mut laid.size, brickloft_core::pattern::LEAST_STONE..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Stone size")));
         helped(ui, help("stone_gap"), |ui| ui.add(Slider::new(&mut laid.gap, brickloft_core::pattern::LEAST_GAP..=8.0).step_by(0.5).text("Gap")));
         helped(ui, help("stone_uneven"), |ui| ui.add(Slider::new(&mut laid.uneven, 0.0..=1.0).step_by(0.05).text("Uneven")));
@@ -754,7 +802,7 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
             hint(ui, help("pattern_seed"));
         });
     }
-    if let Some(laid) = &mut s.mosaic {
+    if let Some(laid) = s.mosaic.as_mut().filter(|_| choice >= 2 && choice != hedge) {
         // (each style shows the settings it has a use for)
         let style = named(choice);
         let masonry = matches!(style, "bricks" | "cobblestone");
@@ -767,8 +815,21 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
             helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
             helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
         }
+        // The one depth each of these two styles has, off unless asked
+        // for (see `brickloft_core::pattern::Mosaic::bevel`). Each is
+        // offered only where it would do something: sunk mortar needs
+        // mortar, and grooves boards three microbricks broad or more.
+        if style == "cobblestone" && laid.mortar {
+            helped(ui, help("pattern_sunk"), |ui| ui.checkbox(&mut laid.bevel, "Mortar sunk"));
+        }
+        if style == "planks" && laid.size >= 3 {
+            helped(ui, help("pattern_grooved"), |ui| ui.checkbox(&mut laid.bevel, "Grooved"));
+        }
         if style == "bricks" {
-            helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
+            // (not on a maze's walls, where a bevel would take a cell off the wall's face)
+            if !walls {
+                helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
+            }
             // below nothing, every course is moved along by an amount of its own
             let mut uneven = laid.stagger < 0;
             if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
@@ -779,7 +840,7 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
             }
             helped(ui, help("pattern_upright"), |ui| ui.checkbox(&mut laid.upright, "Courses upright"));
         }
-        if matches!(style, "medallions" | "rug") {
+        if matches!(style, "medallions" | "rug") && !walls {
             helped(ui, help("pattern_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
         }
         ui.horizontal(|ui| {
@@ -793,9 +854,74 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
         });
     }
     if let Some(seed) = another {
-        let sets = crate::paint::palettes(named(choice));
-        state.paint.colours = sets[seed as usize % sets.len()].to_vec();
+        let sets = sets(choice);
+        state.paint.colours = sets[seed as usize % sets.len()].clone();
     }
+    });
+}
+
+/// The controls of a maze: its kind, its rings and how they are divided,
+/// its walls' height, its way in, its floor, and which maze it is. What
+/// its walls are made of is the Texture list, further up.
+fn maze(ui: &mut Ui, state: &mut State, largest: f64) {
+    use brickloft_core::maze::{Kind, KINDS, LEAST_PASSAGE, MOST_DIVISIONS, MOST_FLOOR, MOST_GROW, RINGS};
+    let s = &mut state.spec;
+    s.maze = s.maze.clamped();
+    let titled = |kind: Kind| ["Theta (rings)", "Grid (squares)"][kind as usize];
+    helped(ui, help("maze_kind"), |ui| {
+        ComboBox::from_label("Kind").selected_text(titled(s.maze.kind)).show_ui(ui, |ui| {
+            for (kind, _) in KINDS {
+                ui.selectable_value(&mut s.maze.kind, kind, titled(kind));
+            }
+        })
+        .response
+    });
+    // The form keeps its radius and how many rings it has, and a corridor
+    // is the one divided by the other (a grid's room is half a corridor to
+    // each side of the middle, so it has half a ring less). The sliders
+    // are the two a builder thinks in, the number of rings and how wide a
+    // corridor is: changing either keeps the other and moves the radius.
+    // The dot on the rim drags the radius, which widens every corridor.
+    let across = |rings: i32| if s.maze.kind == Kind::Grid { rings as f64 - 0.5 } else { rings as f64 };
+    let mut gap = (s.radius / across(s.maze.rings) * 2.0).round() / 2.0;
+    let mut rings = s.maze.rings;
+    let ringed = helped(ui, help("maze_rings"), |ui| ui.add(Slider::new(&mut rings, RINGS.0..=RINGS.1).text("Rings"))).changed();
+    let least = s.thick.round().max(1.0) + LEAST_PASSAGE;
+    let gapped = helped(ui, help("maze_gap"), |ui| ui.add(Slider::new(&mut gap, least..=largest.max(least)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text("Ring gap (corridor and wall)"))).changed();
+    if ringed || gapped {
+        s.maze.rings = rings;
+        s.radius = (gap.max(least) * across(rings)).min(brickloft_core::spec::MAX_SPAN);
+    }
+    if s.maze.kind == Kind::Theta {
+        helped(ui, help("maze_divisions"), |ui| ui.add(Slider::new(&mut s.maze.divisions, 1..=MOST_DIVISIONS).logarithmic(true).text("Cells in the first ring")));
+        let grown = |grow: i32| match grow {
+            0 => "to keep cells square".to_string(),
+            1 => "every ring".to_string(),
+            n => format!("every {n} rings"),
+        };
+        helped(ui, help("maze_grow"), |ui| {
+            ComboBox::from_label("Cells double").selected_text(grown(s.maze.grow)).show_ui(ui, |ui| {
+                for grow in 0..=MOST_GROW {
+                    ui.selectable_value(&mut s.maze.grow, grow, grown(grow));
+                }
+            })
+            .response
+        });
+    }
+    let mut height = brickloft_core::maze::walls::height_of(&s.maze, s.rise);
+    if helped(ui, help("maze_height"), |ui| ui.add(Slider::new(&mut height, 1.0..=largest.max(1.0)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Wall height"))).changed() {
+        s.rise = Some(height);
+    }
+    helped(ui, help("maze_entrance"), |ui| ui.add(Slider::new(&mut s.maze.entrance, 0..=359).suffix("°").text("Way in, round the rim")));
+    helped(ui, help("maze_floor"), |ui| ui.add(Slider::new(&mut s.maze.floor, 0..=MOST_FLOOR).text("Floor thickness (0 for none)")));
+    helped(ui, help("maze_solution"), |ui| ui.checkbox(&mut s.maze.solution, "Mark the way through"));
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut s.maze.seed).speed(1.0));
+        ui.label("Seed");
+        if ui.button("Another").clicked() {
+            s.maze.seed = s.maze.seed.wrapping_add(1);
+        }
+        hint(ui, help("maze_seed"));
     });
 }
 
@@ -1169,6 +1295,39 @@ mod tests {
                     });
                     let _ = state.painted();
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_panel_draws_a_maze_of_every_texture_without_panicking() {
+        // as above, for a maze of each kind with each thing its walls may be made of: none, each pattern, and hedge
+        let styles = brickloft_core::pattern::STYLES.len();
+        for kind in brickloft_core::maze::KINDS {
+            for choice in (0..styles + 3).filter(|choice| *choice != 1) {
+                let mut state = State::new();
+                state.form = MAZE;
+                state.preset();
+                // (small, so that the hedge is quick)
+                (state.spec.radius, state.spec.thick, state.spec.rise) = (60.0, 6.0, Some(14.0));
+                state.spec.maze = brickloft_core::maze::Maze { kind: kind.0, rings: 3, hedge: choice == styles + 2, floor: 1, solution: true, ..state.spec.maze };
+                state.spec.mosaic = (2..styles + 2).contains(&choice).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: 50, upright: false, uneven: [0; 2] });
+                state.paint.colours = crate::paint::maze_palettes(crate::paint::maze_texture(&state.spec))[0].clone();
+                let context = egui::Context::default();
+                for _ in 0..3 {
+                    state.refresh(|| 0.0);
+                    assert_eq!(state.problem, None, "{} with texture {choice}", kind.1);
+                    let _ = context.run(egui::RawInput::default(), |context| {
+                        egui::SidePanel::left("panel").show(context, |ui| {
+                            show(ui, &mut state);
+                        });
+                    });
+                    let _ = state.painted();
+                }
+                // every colour number the maze's bricks have is one of its colours, and the way through has the last
+                let most = *state.built.shades.iter().max().unwrap() as usize;
+                assert_eq!(most, state.paint.colours.len() - 1, "{} with texture {choice}: the way through is colour {most} of {}", kind.1, state.paint.colours.len());
             }
         }
     }

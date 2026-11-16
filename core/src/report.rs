@@ -32,6 +32,7 @@ fn form_name(form: Form) -> String {
         Form::Pyramid => "pyramid".into(),
         Form::Cube => "cube".into(),
         Form::Tree => "tree".into(),
+        Form::Maze => "maze".into(),
     }
 }
 
@@ -90,11 +91,19 @@ pub fn spec_text(spec: &Spec) -> String {
     line("max_ext", spec.max_ext.to_string());
     // whether it is joined to the forms it stands in, and how far the fillet between them reaches
     line("blend", spec.blend.map_or("none".into(), number));
+    // whether a joined form is taken away from the forms it joins
+    line("carve", spec.carve.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
-    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The last was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused.)
-    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},0", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1])));
+    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The eleventh was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused. The twelfth is whether planks are grooved or cobblestone's mortar is sunk, 1 or 0. It is apart from the third because the third was once a bevel that cobblestone had too and was taken from it: a file from then says 1 there, and must not come back with its mortar sunk.)
+    line("mosaic", spec.mosaic.map_or("none".into(), |m| {
+        let name = crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name;
+        format!("{},{},{},{},{},{},{},{},{},{},0,{}", name, m.size, (m.bevel && name == "bricks") as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1], (m.bevel && name != "bricks") as u8)
+    }));
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
     line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
+    // a maze: which kind, how many rings, the cells of its first ring, how they grow outwards, which maze, where its way in is (degrees), how thick its floor is, and whether its way through is marked and its walls are hedge (each 1 or 0)
+    let m = &spec.maze;
+    line("maze", format!("{},{},{},{},{},{},{},{},{}", crate::maze::KINDS[m.kind as usize].1, m.rings, m.divisions, m.grow, m.seed, m.entrance, m.floor, m.solution as u8, m.hedge as u8));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -160,6 +169,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("cube", _) => Form::Cube,
                     // (a bush or a flower is a tree of another kind)
                     ("tree" | "plant", _) => Form::Tree,
+                    ("maze", _) => Form::Maze,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -253,15 +263,22 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     Some(num(value).ok().filter(|k| (0.0..=crate::blend::MAX_BLEND).contains(k)).ok_or_else(|| bad("expected `none`, or a blend from 0 to 6"))?)
                 }
             }
+            // (a file from before a form could be taken away has no such line, and its form adds)
+            "carve" => spec.carve = flag(value)?,
             "mosaic" => {
                 spec.mosaic = if value == "none" {
                     None
                 } else {
                     let parts: Vec<&str> = value.split(',').map(str::trim).collect();
                     // (five values, or eight, nine, ten or eleven: the later ones came later, and a file from before them means mortar, every course moved by its own amount, level courses, and pieces all alike)
-                    let wrong = || bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` and then `,uneven_along,uneven_across,uneven_in_depth` after it or not, or `none`");
+                    let wrong = || bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` and then `,uneven_along,uneven_across,uneven_in_depth` and then `,depth` after it or not, or `none`");
                     let ([style, size, bevel, border, seed], more) = (match parts.get(..5) { Some([a, b, c, d, e]) => [*a, *b, *c, *d, *e], _ => return Err(wrong()) }, &parts[5.min(parts.len())..]);
                     let share = |text: &str| -> Result<i32, String> { Ok((whole(text)?.clamp(0, 100)) as i32) };
+                    // (the twelfth value, where there is one: see `spec_text`)
+                    let (more, depth) = match more {
+                        [first @ .., depth] if more.len() == 7 => (first, whole(depth)? != 0),
+                        _ => (more, false),
+                    };
                     let (mortar, stagger, upright, uneven) = match more {
                         [] => (true, -1, false, None),
                         [mortar, stagger, upright] => (whole(mortar)? != 0, (whole(stagger)?.clamp(-1, 100)) as i32, whole(upright)? != 0, None),
@@ -283,7 +300,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                         (style, uneven) => (style, uneven.unwrap_or([0; 2])),
                     };
                     // (slabs' bevel was a corner cut off flat, which nothing has now)
-                    let bevel = whole(bevel)? > 0 && style == "bricks" && parts[0] != "slabs";
+                    let bevel = (whole(bevel)? > 0 && style == "bricks" && parts[0] != "slabs") || (depth && matches!(style, "planks" | "cobblestone"));
                     if style == "snowflake" {
                         spec.mosaic = None;
                         continue;
@@ -325,6 +342,30 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     tree.extras = whole(extras)? != 0;
                 }
                 spec.tree = tree.clamped();
+            }
+            "maze" => {
+                let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                // The kind, and then as many of the rest as are given, in order, as a tree's are.
+                if parts.len() > 9 {
+                    return Err(bad("expected `kind,rings,divisions,grow,seed,entrance,floor,solution,hedge`, or the first few of them"));
+                }
+                let kind = crate::maze::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of maze: theta or grid"))?.0;
+                let mut maze = crate::maze::Maze { kind, ..crate::maze::Maze::default() };
+                // (numbers from a file, which may be anyone's: brought within what a maze may be by `clamped`)
+                let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(-100_000, 100_000) as i32) };
+                for (n, part) in parts.iter().enumerate().skip(1) {
+                    match n {
+                        1 => maze.rings = within(part)?,
+                        2 => maze.divisions = within(part)?,
+                        3 => maze.grow = within(part)?,
+                        4 => maze.seed = part.parse().map_err(|_| bad("the seed is a whole number, not negative"))?,
+                        5 => maze.entrance = within(part)?,
+                        6 => maze.floor = within(part)?,
+                        7 => maze.solution = whole(part)? != 0,
+                        _ => maze.hedge = whole(part)? != 0,
+                    }
+                }
+                spec.maze = maze.clamped();
             }
             "stones" => {
                 spec.stones = if value == "none" {
@@ -1081,6 +1122,13 @@ mosaic = {values}
         assert_eq!(read("cobblestone,2,0,0,7,1,-1,0,60,50,70").unwrap().unwrap().uneven, [60, 50]);
         // only bricks are bevelled, whatever a file says; a bevel once had a depth, and any depth is a bevel
         assert!(!read("cobblestone,2,1,0,7").unwrap().unwrap().bevel && read("bricks,2,3,0,7").unwrap().unwrap().bevel);
+        // planks' grooves and cobblestone's sunk mortar are the twelfth value, and are written and read back as it
+        assert!(read("cobblestone,2,0,0,7,1,-1,0,60,60,0,1").unwrap().unwrap().bevel && read("planks,2,0,0,7,1,-1,0,0,0,0,1").unwrap().unwrap().bevel);
+        assert!(!read("cobblestone,2,1,0,7,1,-1,0,60,60,0,0").unwrap().unwrap().bevel && !read("rug,2,0,0,7,1,-1,0,0,0,0,1").unwrap().unwrap().bevel);
+        for style in ["planks", "cobblestone", "bricks"] {
+            let depth = crate::pattern::Mosaic { style: crate::pattern::STYLES.iter().position(|s| s.name == style).unwrap(), bevel: true, ..ten };
+            assert_eq!(parse_spec(&spec_text(&Spec { mosaic: Some(depth), ..Spec::default() })).unwrap().mosaic, Some(depth), "{style}");
+        }
         // the styles that are gone: masonry by how uneven it was, slabs as uneven bricks with no bevel, a snowflake as no pattern
         assert_eq!(named(&read("masonry,2,1,0,7,1,-1,0,20").unwrap().unwrap()), "bricks");
         assert_eq!(named(&read("masonry,2,1,0,7,1,-1,0,80").unwrap().unwrap()), "cobblestone");
@@ -1092,7 +1140,7 @@ mosaic = {values}
         let text = spec_text(&Spec { mosaic: Some(ten), ..Spec::default() });
         assert_eq!(parse_spec(&text).unwrap().mosaic, Some(ten));
         // and what is no mosaic is refused
-        for wrong in ["bricks,2,0,0", "bricks,2,0,0,7,1", "bricks,2,0,0,7,1,50,0,1,2,3,4", "tartan,2,0,0,7", "bricks,2,x,0,7"] {
+        for wrong in ["bricks,2,0,0", "bricks,2,0,0,7,1", "bricks,2,0,0,7,1,50,0,1,2,3,1,4", "tartan,2,0,0,7", "bricks,2,x,0,7"] {
             assert!(read(wrong).is_err(), "{wrong} was read");
         }
     }
@@ -1133,7 +1181,9 @@ mosaic = {values}
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
+                carve: true,
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true },
+                maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
         ];
@@ -1141,6 +1191,8 @@ mosaic = {values}
         assert_eq!(parse_spec("form = sphere").unwrap().blend, None);
         assert_eq!(parse_spec("blend = 0").unwrap().blend, Some(0.0));
         assert!(["blend = 7", "blend = -1", "blend = inf", "blend = nan", "blend = round"].iter().all(|line| parse_spec(line).is_err()));
+        // nor has one from before a form could be taken away
+        assert!(!parse_spec("blend = 2").unwrap().carve && parse_spec("carve = true").unwrap().carve && parse_spec("carve = 1").is_err());
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

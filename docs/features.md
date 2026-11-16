@@ -47,6 +47,7 @@ until you tick it.
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
 
 ### The cube
 
@@ -165,18 +166,49 @@ A joined form has a **Blend** slider, from 0 to 6 microbricks.
 | 0 | a sharp crease, as if the forms were carved from one piece |
 | above 0 | a rounded fillet that reaches that many microbricks along each form from where they meet |
 
-The join is fitted with single wedges and ramps, so it is rougher than a
-sphere's own facets, and a small blend on a curved seam is a ring of
-single wedges. Three kinds of form are joined by cutting alone, with a
-notch a microbrick or two deep where a sloped brick had to be left out, and
-the blend does nothing to them: a form that stands half a microbrick off
-the other (move either by half a microbrick), a form laid as a pattern, and
-a plant. The panel says so under the slider.
+The join is fitted a microbrick at a time and then laid with stretched
+ramps and corner pieces wherever one lies closer to the joined surface, so
+most single wedges standing alone are gone. It is still rougher than a
+sphere's own facets, because its bricks are chosen one at a time and do not
+meet edge to edge as a sphere's do
+([algorithm.md](algorithm.md), "Where it falls short").
+
+A joined form stands a whole number of microbricks from the form it joins,
+because the two can be fitted as one only if their bricks line up. A drag
+with Ctrl therefore moves a whole microbrick at a time, and a form joined
+half a microbrick off in any other way is moved by that half, with a note
+over the view. Forms built at one **Brick size** above 1 are lined up to
+whole bricks of that size, and are then joined in bricks of that size.
+
+Two kinds of form are joined by cutting alone, with a notch a microbrick
+or two deep where a sloped brick had to be left out, and the blend does
+nothing to them: a form laid as a pattern, and a plant. The panel says so
+under the slider.
+
+#### Cutting a form out of another
+
+A joined form has a tick box, **Cut out of what it joins**. Ticked, the
+form is taken away from the forms it is joined to and none of its own
+bricks are built: a cube through a wall is a window, and a bar through a
+sphere is a hole. The form is drawn as red glass, fainter when it is not
+the form being edited, so that it can still be seen, clicked and dragged.
+**Blend** then rounds the rim of the hole. A form that is cut out cuts
+every form on its grid that it reaches, joined or not, patterns and plants
+included.
+
+| Blend | The hole |
+|---|---|
+| 0 | sharp edges, as if cut with a knife |
+| above 0 | a rim rounded for that many microbricks along the hole and along the form it is in |
+
+The walls of a hole are fitted a microbrick at a time, so a round hole is
+rougher inside than the same form is outside. A square one through a wall
+is blocks and nothing else.
 
 A joined form stays where it is when a form it sits in is reshaped, where
 an unjoined one would be pushed clear. Dragging it again without Ctrl sets
-it clear of the others. The join and its blend are part of the form, so
-undo, a save and a copy all keep them.
+it clear of the others. The join, its blend and whether it is cut out are
+part of the form, so undo, a save and a copy all keep them.
 
 Ctrl can also be pressed after the drag has begun.
 
@@ -292,8 +324,10 @@ sections 7.8 and 7.9.
 Stepping stones need a flat form: a floor or wall made from a cube, a
 flat band or a filled outline. They follow the curve, so a spline drawn across the ground
 becomes a winding stone path as wide as the band's **Thickness**. Stones
-fitted together with the gap at 0 still show narrow seams, because each
-stone is fitted with bricks by itself.
+fitted together with the gap at 0 share their edges: the two stones either
+side of an edge are laid to the same straight line, with sharp corners
+where three meet. Slivers can remain at the rim of the floor and along an
+edge that is nearly level.
 
 The other five patterns are made of tiles one microbrick across. A tile is
 one colour, or it is cut along a diagonal into two triangles of two
@@ -324,9 +358,14 @@ blot. Make the form larger for more detail, or set a **Brick size** by
 name for less.
 
 A rug wants a large floor. Its parts are drawn afresh for the size it is
-given, and a small rug has little room to show them: a medallion of one or
-two layers and plain lines for its guards. Lay it 100 microbricks or more
-across. The picture above is 240 by 160.
+given, and it shows all of them from about 100 microbricks across. The
+picture above is 240 by 160. Under 48 microbricks on its shorter side it is
+set out as a small rug: single lines for guards, a border of whole
+lozenges with a star in each corner, the corners of the field cut off on
+the diagonal, and a medallion of one or two layers. Nothing on it is cut
+short.
+
+<img src="images/pattern-rug-small.png" width="340" alt="A rug 48 microbricks by 36 seen from above, with a border of whole lozenges, a star in each corner, and a small medallion">
 
 ### The settings of a pattern
 
@@ -342,6 +381,8 @@ Each pattern shows the settings it has a use for.
 | **Uneven across** | bricks, cobblestone | the same across the courses. For bricks it moves the lines between courses, so the courses differ in depth. For cobblestone it moves each stone up and down. |
 | **Mortar between** | bricks, cobblestone | a microbrick of mortar between one piece and the next. Without it the pieces touch and are told apart by their shades alone, so give the pattern several colours. |
 | **Bevelled** | bricks | slopes the top microbrick of every brick down to its edge, all round it |
+| **Grooved** | planks of **Size** 3 or more | slopes the last microbrick of every row of boards down to the next row, so each row stands one microbrick proud of the one beside it |
+| **Mortar sunk** | cobblestone with mortar | lays the mortar one microbrick below the stones |
 | **Uneven stagger** | bricks | moves each course along by an amount of its own, so the upright joints fall anywhere. Untick it to set one **Stagger** for every course. |
 | **Stagger** | bricks | how far each course is moved along from the one before, 0 to 50% of a brick's length. 50% is the usual half-brick bond and 0% stacks the bricks in columns. |
 | **Courses upright** | bricks | runs the courses up the floor instead of across it, so the bricks stand on end |
@@ -363,6 +404,16 @@ four corners and a block between them. The bevel needs a form 2 microbricks or m
 shallower one. It is cut into one face only, the top of a floor, and the
 sides of a box are laid flat. Cobblestone has no bevel, because a
 cobble's sides run at any angle and no brick slopes along them cleanly.
+
+**Grooved** and **Mortar sunk** are the depth planks and cobblestone have.
+Both are off to begin with, one microbrick deep, and cut into the top of a
+form 2 microbricks or more deep. Grooved planks are whole microbricks and
+one long ramp to each board. The setting is offered from **Size** 3,
+because a narrower board would be half ramp and the floor would look
+ribbed. Sunk mortar is whole microbricks only: the stones keep their top
+microbrick and the mortar does not.
+
+<img src="images/pattern-planks-grooved.png" width="300" alt="A floor of grooved planks, each row of boards one microbrick proud of the next"> <img src="images/pattern-cobblestone-sunk.png" width="300" alt="A floor of cobblestones standing one microbrick proud of sunk mortar">
 
 ### The colours of a pattern
 
@@ -541,6 +592,62 @@ finest brick size that fits, so the **Height** slider never stops
 short. A tree can be turned, flipped, moved, joined to other forms and
 put on a grid of its own like any form. It cannot be mirrored and takes no
 added points.
+
+## Mazes
+
+<img src="images/maze-theta.png" width="340" alt="A theta maze of six rings seen from above, with its way through marked by a yellow strip"> <img src="images/maze-hedge.png" width="340" alt="A theta maze with walls of clipped hedge on a brown floor">
+
+**Maze** builds a maze to walk through. It has one way in, on its rim,
+and a room in the middle. Every part of it can be reached, there are no
+loops, and there is exactly one way from the way in to the room. How it
+is made is in [algorithm.md](algorithm.md), section 7.11.
+
+| Setting | What it does |
+|---|---|
+| **Kind** | **Theta** is rings of corridors about a round room, with walls that are arcs and spokes. **Grid** is square cells about a square room. |
+| **Rings** | How many rings, the room counted as the first, from 2 to 40. Changing it keeps the corridors' width, so the maze grows. |
+| **Ring gap** | A corridor and one wall, in microbricks. Changing it keeps the rings and resizes the maze. A corridor is at least 3 between its walls. |
+| **Cells in the first ring** | How many cells spokes cut the first ring into (theta only). |
+| **Cells double** | How the number of cells grows outwards (theta only): **to keep cells square**, or every 1 to 8 rings. Every 2 is what the older brickmaze tool did. |
+| **Wall thickness** | Whole microbricks. |
+| **Wall height** | How tall the walls stand above the floor. |
+| **Way in, round the rim** | Where the gap in the rim is, in degrees round from the X axis. |
+| **Floor thickness** | A floor under the whole maze, or 0 for none. |
+| **Mark the way through** | Lays a strip one microbrick high along the ground from the way in to the room, in its own colour. |
+| **Seed**, **Another** | Which maze. The same seed and settings are always the same maze. |
+
+Two dots size it in the view. The dot on the rim drags the radius, which
+widens or narrows every corridor and keeps the rings. The dot over the
+middle drags the walls' height. Ctrl + scroll resizes it too.
+
+**Texture** sets what the walls are made of:
+
+| Texture | The walls |
+|---|---|
+| **none** | plain fitted walls: long sloped bricks round every ring, a few hundred to a few thousand bricks |
+| **hedge** | the Plant form's hedge grown along every wall, with its **Density**, **Looseness**, **Berries** and seed. At least 6 thick and 12 tall. |
+| **bricks** | courses of bricks that run level along each wall and bend round the rings with it |
+| **cobblestone**, **planks**, **medallions** | the same patterns as on a floor, wrapped along each wall |
+
+<img src="images/maze-bricks.png" width="340" alt="A theta maze with brick walls: level courses of red brick round every ring wall"> <img src="images/maze-grid.png" width="340" alt="A grid maze seen from above with its way through marked">
+
+A texture colours the walls and never moves them. On the curved face of
+a ring wall each long sloped brick is one colour to a course, so upright
+joints show there only where one sloped brick ends. The straight walls
+along the axes, the wall tops and a grid maze carry the pattern exactly.
+Rug and stepping stones are not offered for a maze.
+
+Choosing a texture brings its colours unless you have set your own. With
+plain walls there are three colours: the floor, the walls, and the strip
+that marks the way through. With a texture or hedge there are eight: the
+first is the floor and the mortar or stems, and the last is the strip.
+
+A hedge maze and a textured maze are tens of thousands of bricks. A maze
+is refused, with what to change, if its corridors would be under 3
+microbricks wide, its walls over 40,000 microbricks long in all, or its
+hedge more than can be built in a few seconds. It can be turned,
+flipped, moved and put on a grid of its own. It cannot be mirrored and
+takes no added points.
 
 ## Colour
 

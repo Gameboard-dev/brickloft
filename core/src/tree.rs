@@ -573,6 +573,22 @@ impl Model {
     /// stand of reeds or a patch of grass (see [`Lay`]). Other kinds take
     /// no notice of the line.
     pub fn laid(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay) -> Model {
+        Model::laid_all(tree, base, height, spread, std::slice::from_ref(lay))
+    }
+
+    /// [`Model::laid`], for a hedge or reeds along several lines at once,
+    /// as one plant: the walls of a maze (see [`crate::maze`]). The parts
+    /// grown along every line are one solid, so where two lines meet the
+    /// hedges run into each other, and no brick is laid twice. The plants
+    /// the kind counts are shared among the lines by their length, one to
+    /// a line at the least. Other kinds grow along the first line only.
+    ///
+    /// This is the one way a maze reaches into this file. A hedge for
+    /// each wall, each built on its own, would have been bricks laid
+    /// twice over wherever two walls meet.
+    pub fn laid_all(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay]) -> Model {
+        let none = Lay::default();
+        let lay = lays.first().unwrap_or(&none);
         let tree = tree.clamped();
         let (height, spread) = (height.max(Tree::least_height(tree.kind)), spread.max(LEAST_SPREAD));
         // each kind has numbers of its own from one seed
@@ -620,37 +636,43 @@ impl Model {
             Kind::Cherry => broadleaf(&mut grown, &tree, height, spread, &CHERRY, lay.closed),
             Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH, false),
             Kind::Hedge | Kind::Reeds => {
-                // grown straight, then laid along its line (see [`Grown::lay_along`])
-                let run = Run::new(lay);
-                let half = run.long() / 2.0;
-                let closed = lay.closed && lay.run.len() > 2;
-                if tree.kind == Kind::Hedge {
-                    hedge(&mut grown, &tree, height, spread, half, closed);
-                    grown.lay_along(0, 0, &run, half);
-                    // At a sharp corner the straight hedge laid round it
-                    // opens on the outside like a hinge. A round post of
-                    // the same leaves stands in each corner and closes it.
-                    if lay.sharp {
-                        let corners = if closed { 0..run.points.len() - 1 } else { 1..run.points.len() - 1 };
-                        let mass = (spread * 0.3).clamp(2.6, height * 0.3);
-                        for at in corners.map(|i| run.points[i]) {
-                            grown.blob(at + DVec3::Z * height * 0.5, DVec3::new(spread - mass, spread - mass, height * 0.5 - mass * 0.5), LEAF_DARK, true);
-                            let rows = ((height * 0.9) / (mass * 1.15)).ceil() as usize;
-                            for row in 0..=rows {
-                                for k in 0..10 {
-                                    let way = TAU * (k as f64 + 0.5 * (row % 2) as f64) / 10.0;
-                                    let r = mass * grown.between(0.8, 1.1);
-                                    let out = if row == rows { (spread - r - 1.7) * (k as f64 / 10.0) } else { spread - r - 1.7 };
-                                    grown.leaves(at + DVec3::new(way.cos(), way.sin(), 0.0) * out.max(0.0) + DVec3::Z * (height * 0.1 + r * 0.4 + (height * 0.9 - r * 1.2) * row as f64 / rows as f64), DVec3::new(r, r, r * 0.8));
+                // grown straight, then laid along its line (see [`Grown::lay_along`]); of several lines, each line's after the last's
+                let runs: Vec<Run> = lays.iter().map(Run::new).collect();
+                let all: f64 = runs.iter().map(|run| run.long()).sum();
+                for (lay, run) in lays.iter().zip(&runs) {
+                    let (parts, limbs) = (grown.parts.len(), grown.limbs.len());
+                    let half = run.long() / 2.0;
+                    let closed = lay.closed && lay.run.len() > 2;
+                    // (of several lines, each has its share of the plants, by its length)
+                    let tree = if lays.len() > 1 { Tree { count: ((tree.count as f64 * run.long() / all.max(1e-9)).round() as i32).max(1), ..tree } } else { tree };
+                    if tree.kind == Kind::Hedge {
+                        hedge(&mut grown, &tree, height, spread, half, closed);
+                        grown.lay_along(parts, limbs, run, half);
+                        // At a sharp corner the straight hedge laid round it
+                        // opens on the outside like a hinge. A round post of
+                        // the same leaves stands in each corner and closes it.
+                        if lay.sharp {
+                            let corners = if closed { 0..run.points.len() - 1 } else { 1..run.points.len() - 1 };
+                            let mass = (spread * 0.3).clamp(2.6, height * 0.3);
+                            for at in corners.map(|i| run.points[i]) {
+                                grown.blob(at + DVec3::Z * height * 0.5, DVec3::new(spread - mass, spread - mass, height * 0.5 - mass * 0.5), LEAF_DARK, true);
+                                let rows = ((height * 0.9) / (mass * 1.15)).ceil() as usize;
+                                for row in 0..=rows {
+                                    for k in 0..10 {
+                                        let way = TAU * (k as f64 + 0.5 * (row % 2) as f64) / 10.0;
+                                        let r = mass * grown.between(0.8, 1.1);
+                                        let out = if row == rows { (spread - r - 1.7) * (k as f64 / 10.0) } else { spread - r - 1.7 };
+                                        grown.leaves(at + DVec3::new(way.cos(), way.sin(), 0.0) * out.max(0.0) + DVec3::Z * (height * 0.1 + r * 0.4 + (height * 0.9 - r * 1.2) * row as f64 / rows as f64), DVec3::new(r, r, r * 0.8));
+                                    }
                                 }
                             }
                         }
+                    } else if closed {
+                        reeds(&mut grown, &tree, height, spread, half, Some(run));
+                    } else {
+                        reeds(&mut grown, &tree, height, spread, half, None);
+                        grown.lay_along(parts, limbs, run, half);
                     }
-                } else if closed {
-                    reeds(&mut grown, &tree, height, spread, half, Some(&run));
-                } else {
-                    reeds(&mut grown, &tree, height, spread, half, None);
-                    grown.lay_along(0, 0, &run, half);
                 }
             }
             Kind::Grass => grass(&mut grown, &tree, height, spread, lay),

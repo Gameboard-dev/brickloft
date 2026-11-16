@@ -69,6 +69,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Pyramid | a base and a height: solid, or a hollow tent |
 | Cube | a box with a length along each axis: a block, a floor, a wall, or a hollow room |
 | Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a birch, a willow, a cherry in blossom, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds and streams |
+| Maze | a maze to walk through, in rings or in squares, grown from a seed: one way in, a room in the middle, walls plain, of brick, stone or planks, or of hedge |
 
 Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and
@@ -83,6 +84,15 @@ up to eight colours (see
 [docs/features.md](docs/features.md#patterns)).
 
 <img src="docs/images/pattern-rug.png" width="700" alt="A floor laid as a Persian rug: borders with flowers on a swinging stem, a lobed medallion at the middle, corner pieces, and coiling stems with flowers over the field">
+
+A maze has one way in and one way to the room in its middle, with every
+part of it reachable. Its ring walls are fitted as a circle is, in long
+sloped bricks, and can be laid as brick courses that bend round the
+rings, or grown as hedge (see
+[docs/features.md](docs/features.md#mazes)). It replaces the author's
+earlier brickmaze generator.
+
+<img src="docs/images/maze-bricks.png" width="345" alt="A maze of rings with brick walls, the courses running level round every ring"> <img src="docs/images/maze-hedge.png" width="345" alt="A maze of rings with walls of clipped hedge">
 
 <img src="docs/images/stepping-stones.png" width="345" alt="A curved path laid as stepping stones"> <img src="docs/images/pattern-box-sides.png" width="345" alt="A box laid as bricks: the top of each brick on its upper face is bevelled down to the mortar, and the four sides carry the same pattern flat">
 

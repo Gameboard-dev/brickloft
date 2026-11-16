@@ -129,19 +129,34 @@ The settings Claude can give:
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
-| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
+| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` and then `0, depth` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `blend` | Joins the form to the forms it stands in: `0` for a sharp crease, up to `6` for a fillet that many microbricks wide, `none` for a form that stands apart (see below) |
+| `carve` | `true` takes a joined form away from the forms it joins and builds none of its own bricks; `false`, the usual, adds it (see below) |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
 Forms are fitted one at a time, so two forms set in the same place
 overlap, and the game refuses a brick that overlaps another. To build one
 thing out of two forms, give the second a `place` partly inside the first
 and a `blend`. The two are then fitted as one solid where they meet (see
-[features.md](features.md), "Joining forms"). Both must stand a whole
-number of microbricks apart along every axis, so a `place` ending in a half
-on one form needs the same on the other. A pattern or a plant is joined by
-cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is refused.
+[features.md](features.md), "Joining forms"). A joined form must stand a
+whole number of microbricks from the form it joins along every axis, so one
+given a `place` half a microbrick off is moved by that half, and the
+workspace that comes back says where it stands. A pattern or a plant is
+joined by cutting alone, whatever its `blend`. A `blend` outside 0 to 6 is
+refused.
+
+To cut a window or a hole, give the cutting form a `place` inside what it
+is to cut, a `blend` and `carve: true`. It is taken away from every form on
+its grid that it reaches, and `blend` is then how far the rim of the hole
+is rounded. The form stays in the workspace, listed with the bricks it
+would have had, and can be moved or reshaped like any other.
+
+```json
+{ "name": "add_form", "arguments": {
+    "settings": { "form": "cube", "points": [[0, 0, 0]], "radius": 5, "fill": true, "blend": 0, "carve": true },
+    "place": [2, 0, 18] } }
+```
 
 A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 `colours` written `#rrggbb`, the axis it `runs_along`, and a
@@ -190,6 +205,7 @@ are laid.
 | `size` | how large the boards, bricks or cobbles are: 2 is usual, the panel's slider goes from 1 to 8, and up to 16 is accepted |
 | `bevel` | bricks only: 1 slopes the top microbrick of every brick down to its edge, and 0 leaves the tops flat. The form must be 2 or more deep. For every other style it is read as 0. |
 | `border` | how many microbricks of plain ground are left round the edge, 0 to 8 |
+| `depth` | the twelfth value, after a 0 that holds the eleventh place: 1 grooves planks of size 3 or more, or lays cobblestone's mortar one microbrick below its stones, and 0 leaves them flat. The form must be 2 or more deep. For every other style it is read as 0. |
 | `seed` | any whole number, each a different pattern |
 | `mortar` | bricks and cobblestone: 1 for a microbrick of mortar between pieces, 0 for none |
 | `stagger` | bricks: how far each course is moved along from the one before, in hundredths of a brick's length. 50 is the usual bond, 0 stacks the bricks, and -1 moves each course by an amount of its own. |
@@ -227,6 +243,34 @@ A rug wants a rectangle 100 microbricks or more across to show its detail.
 A pattern shows its colours only in the mode `pattern`. A form added with
 a pattern and no `colour` comes in that pattern's own colours, as it does
 from the panel. A pattern takes up to eight colours.
+
+A maze is the form `maze`, and its own settings are one line of text,
+`maze`, as a plant's are `tree`: `kind,rings,divisions,grow,seed,entrance,floor,solution,hedge`,
+of which only the kind (`theta` or `grid`) is needed. The form's `radius`
+is from its middle to the middle of its outside wall, `thick` is the
+walls' thickness and `rise` their height; left out they are 120, 4 and
+30. A corridor with one wall is `radius` divided by `rings`. For example,
+this call adds a maze of eight rings with a floor 2 thick, its way
+through marked, and walls of brick in level courses:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "maze", "maze": "theta,8,4,0,3,270,2,1,0", "radius": 160, "mosaic": ["bricks", 2, 0, 0, 1, 1, 50, 0, 0, 0] }
+  }
+}
+```
+
+The last number of `maze` set to 1 makes the walls hedge, grown with the
+`tree` setting's fullness, bend and berries. A `mosaic` of `bricks`,
+`cobblestone`, `planks` or `medallions` is wrapped along every wall; a
+`rug` and `stones` are not laid on a maze. A maze added with no `colour`
+comes in its walls' own colours: three for plain walls (floor, walls,
+way through) and eight otherwise, the first being the floor and the last
+the way through. A maze whose corridors would be under 3 microbricks
+wide, or whose walls or hedge are more than may be built, is refused
+with the reason and what to change.
 
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to

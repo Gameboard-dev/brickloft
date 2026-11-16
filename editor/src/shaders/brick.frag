@@ -33,6 +33,5 @@ void main()
     float face = smoothstep(width * (lineWidth - 0.5), width * (lineWidth + 0.5), uvs.x);
     lit *= mix(lineShade, 1.0, face);
 
-    // (how solid: 1 but for water and ice, which are drawn blended over what is behind them)
-    outColor = vec4(color_mapping(tone_mapping(lit)), col.a);
+    outColor = vec4(color_mapping(tone_mapping(lit)), 1.0);
 }

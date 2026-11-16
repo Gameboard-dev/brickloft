@@ -1322,7 +1322,7 @@ floor.
 
 <img src="images/stepping-stones.png" width="640" alt="A curved path laid as stepping stones">
 
-<img src="images/pattern-stones-fitted.png" width="420" alt="A square floor of stones of many shapes fitted together with the gap at 0, each stone one colour, with narrow seams between them">
+<img src="images/pattern-stones-fitted.png" width="420" alt="A square floor of stones of many shapes fitted together with the gap at 0, each stone one colour, meeting its neighbours along straight shared edges with sharp corners, and a few slivers left bare along the floor's rim">
 
 #### Scattering the stones
 
@@ -1440,12 +1440,60 @@ stones themselves do not. A stone whose bricks would meet a stone already
 laid is fitted again drawn in by half a cell, and then by a whole cell if
 they still meet. A brick that meets one even then is left out.
 
-With the gap at 0, neighbouring stones share their edges, so a stone is
-drawn in wherever its bricks would overlap a stone laid before it. Fitted
-stones therefore keep seams between them. Most are hairline and some are
-up to about a cell wide, as the second picture above shows. They are the
-cost of fitting each stone by itself (see
-[future-work.md](future-work.md)).
+#### Stones with no gap
+
+With the gap at 0 every stone meets its neighbours, and stones fitted to
+the lines between them do not meet exactly. Each fit strays up to half a
+cell from its line, one stone's to this side and its neighbour's to that.
+They overlapped in places, the later stone was drawn in, and seams up to a
+cell wide were left round every stone: 5% to 38% of a floor was bare,
+most where the stones were small.
+
+Two stones meet exactly only if they are given the same edge, and an edge
+that bricks can lay exactly from both sides. A straight line from one
+corner of the grid to another is such an edge. It is the sloped side of a
+right triangle, or of a few alike end to end, and the triangle on its other
+side fills the rest of the same box, as the two halves of a cut tile do.
+
+So with no gap each stone's outline is drawn with its corners moved to the
+nearest corners of the grid (`Stone::outline` in `pattern.rs`). The
+outline is the stone's ground cut out of a box by the line half way to
+each neighbour in turn
+([Sutherland and Hodgman's clipping](https://en.wikipedia.org/wiki/Sutherland%E2%80%93Hodgman_algorithm)).
+A corner is where three stones meet. Each of the three works it out from
+the same three points and moves it to the same corner of the grid, so the
+two stones either side of an edge have the same two ends for it. Each
+stone is then fitted to its outline by itself, on its own thread as
+before, and the outline fitter lays an outline of grid corners exactly.
+
+<img src="images/pattern-stones-fitted-close.png" width="420" alt="A close view of stones fitted with no gap: each edge between two stones is one straight line of sloped bricks, shared by both">
+
+A stone's corners are sharp this way, where with a gap they are rounded,
+because a rounded corner would be a hole where three stones meet. A corner
+moves by up to seven tenths of a cell, which changes a stone's shape a
+little and not its size.
+
+What is left is slivers, of two kinds.
+
+- At the rim of the region an edge ends on the rim and not on a corner of
+  the grid, and the two stones may be fitted differently there. A piece
+  that would overlap a stone already laid is cut down to the whole cells
+  of it that are free, so the hole is the sliver that was amiss and not a
+  whole brick.
+- An edge that is nearly level (13 cells along for 1 across) is now and
+  then fitted as a slope from one side and as a step from the other.
+
+Measured over four floors, four places to a cell, 0.1% to 0.6% of the
+ground more than a stone and a half in from the rim is bare, and 0.4% to
+4% of the whole floor. Nothing is filled twice away from the rim.
+
+Two other ways were tried. Fitting each stone to the bricks of those laid
+before it asked the fitter to follow another fit's staircase. It smooths
+across a staircase by design, since a corner costs it something, so its
+pieces overlapped the laid bricks and whole pieces had to be left out,
+which left a floor with holes in it. Filling the seams afterwards cannot
+work, because a seam between two sloped edges that do not match is a
+sliver no brick fills.
 
 #### A number for each stone
 
@@ -1772,20 +1820,49 @@ that is the reason the flowers are not small pictures stamped over the
 field. A picture is one size, and a flower drawn in tiles for a rug forty
 tiles across is a blot on one two hundred across.
 
-The rule also decides how much there is room to show, and a small rug
-shows little. A layer under five or six tiles broad is all outline, so the
-medallion has one layer where its points reach under 10 tiles from the
-middle, two from 10, three from 22 and four from 34. It may have twelve
-lobes only from a reach of 24, and has eight below it. The guards are
-single lines, with no lozenges, on a floor under 48 tiles on its shorter
-side.
+The rule also decides how much there is room to show. A layer under five
+or six tiles broad is all outline, so the medallion has one layer where its
+points reach under 10 tiles from the middle, two from 10, three from 22
+and four from 34. It may have twelve lobes only from a reach of 24, and
+has eight below it.
+
+##### A small rug
+
+A floor under 48 tiles on its shorter side has no room for a rug's parts at
+their own sizes. Drawn by the rules above they came out cut short: a
+corner piece was three tiles of one lobe, the pendants were blots, and the
+border's knots fell at uneven steps because its swing did not divide the
+side. A small rug is therefore set out by rules of its own, with the same
+parts made simpler and each of them whole.
+
+<img src="images/pattern-rug-small.png" width="420" alt="A rug 48 tiles by 36 seen from above: single guard lines, a border of whole lozenges with a star in each corner square, the corners of the field cut off on the diagonal, and a medallion of two layers with small flowers round it">
+
+| Part | On a small rug |
+|---|---|
+| Guards | single lines |
+| Border | lozenges four tiles across, one at the middle of each side and one every four tiles from it, with a square holding a star at each corner. Under 24 tiles the border is a chain of lozenges two tiles across, which divides a side of any length. |
+| Medallion | one layer or two, as its reach allows, and no pendants |
+| Corners of the field | cut off on the diagonal behind a line, with one lozenge in the corner where there is room |
+| Field | scrolls where they fit and small flowers elsewhere, as on a large rug |
+
+The border is counted from the middle of each side and not from the
+corner. A side of any length is then its own mirror image with a whole
+lozenge at its middle, and what does not divide by four is taken up beside
+the corner squares. A lozenge that would run into a corner square is left
+out and not cut short. The diagonal that cuts a corner of the field off is
+whole tiles and tiles cut in two, so it is exact on the grid.
+
+A rug of 48 tiles or more is untouched by these rules. Every sum is the
+same sum, and the numbers drawn from the seed are drawn in the same order,
+so a large rug is tile for tile what it was. A test holds six such rugs to
+the tiles they had.
 
 Worked through for a rug half as long again as it is broad, the medallion
 has three layers on a floor of about 90 tiles on its shorter side and four
 from about 130. A square rug needs more, because the medallion is kept to
 0.55 of the field's longer way. A rug is therefore best laid 100 tiles or
-more across. The picture above is 240 tiles by 160 and shows all four
-layers.
+more across to show all it can. The picture at the head of this section is
+240 tiles by 160 and shows all four layers.
 
 The rug is its own mirror image tile for tile. A place and its mirror
 image reach the rule by different sums that can differ by a hair, so both
@@ -1978,6 +2055,33 @@ Deeper bevels and uneven heights read as clutter at one cell to a tile.
 What is left is the one case that comes out exactly: a brick, whose sides
 are on the grid, with one cell of slope.
 
+##### Grooved planks and sunk mortar
+
+Planks and cobblestone each have one depth of their own. Like the bevel it
+is on or off, off to begin with, one cell deep, and cut into the top face
+of a form 2 cells or more deep. Both are built only of whole cells and of
+ramps as long as a row, which is what the bevel had to be cut down to
+before it looked clean.
+
+<img src="images/pattern-planks-grooved.png" width="330" alt="A floor of boards four tiles broad, each row standing one cell proud of the next along a straight line, with one long ramp down to it"> <img src="images/pattern-cobblestone-sunk.png" width="330" alt="A floor of cobblestones standing one cell proud of the mortar between them, with upright sides">
+
+**Grooved** planks: the last row of tiles of every row of boards is one
+long ramp down to the next row. Each row of boards then stands a cell
+proud of the one beside it along a straight line, as lapped boards do. The
+ramps of one board join into a single brick the length of the board. It
+needs boards three tiles broad or more, which is a **Size** of 3. At the
+usual size a board is two tiles broad, half of it would be ramp, and a
+floor of such boards looked ribbed like corrugated iron in its picture, so
+it is left flat. A groove of two ramps facing each other was tried first
+and takes a narrow board down to a ridge with no level top.
+
+**Mortar sunk**, for cobblestone: the mortar's tiles have no top cell, so
+the stones stand a cell proud of the mortar with upright sides. Where a
+stone's slanting edge cuts a tile in two, the stone's half keeps its top
+cell and the mortar's half does not. It needs mortar to sink. Cobbles
+domed, or bevelled as bricks are, were not brought back, because a slope
+along a side at any angle is a spray of single wedges.
+
 #### Colours by feature
 
 <img src="images/pattern-medallions-two-colours.png" width="320" alt="A floor of medallions with two colours chosen: the whole pattern is in the second colour on a ground of the first"> <img src="images/pattern-medallions-five-colours.png" width="320" alt="The same floor with five colours chosen: each of the four figures of the repeat has a colour of its own">
@@ -2065,10 +2169,28 @@ cut down to the columns that are not flat. Everything else, which is the
 sloped bricks of the rim and whatever lies over or under them, stays as
 it was fitted, in the ground colour.
 
-The pattern is not wrapped onto the curved part. A sloped brick is one
-colour and often many cells long, so a pattern there would need the
-surface cut into bricks one cell across. That is many times the bricks,
-and it gives up the smooth fit the sloped bricks are there for.
+The pattern is not wrapped onto the curved part. That was built and taken
+out again. Each form was given a sheet to lay the pattern on (a dome seen
+from its pole, a turned profile and a tube as rings), its bricks were kept
+exactly as fitted, and each took the pattern's colour at its place. A
+sloped brick is one colour, and a curved form's bricks are large and
+stretched: a sphere's are corner pieces 2 cells by 3 by 10, whose sides
+share no divisor and so cannot be cut into smaller bricks of the same
+slope. The pattern's lines then fell on brick edges that do not follow
+them. Courses of bricks on a dome came out as rows of saw teeth, a rug as
+fragments, and a torus could not be read at all. Making the pattern's
+tile as large as the bricks (4 cells on a dome 60 in radius) left room for
+six courses and no rug. Cutting the surface into bricks one cell across
+would carry the lines, at many times the bricks and at the cost of the
+smooth fit the sloped bricks are there for.
+
+A patterned form's figure for how closely it is fitted is that of its
+bricks before the pattern, wherever the pattern only colours them. The
+two halves of a tile cut in two fill the cell between them, but places
+that fall on the face the halves share were counted as amiss, and a
+patterned disc read a few percent further from its form than the same
+disc plain. A bevel, grooves and sunk mortar do change what the bricks
+fill, and those forms are measured as they are built.
 
 The second pass is for the sides of a box. Tiles pushed through a form
 show on its sides only as their ends, which are stripes. On a floor a
@@ -2947,6 +3069,332 @@ instead, the plant stopped growing: past some height the slider moved
 and the last plant that could be built stood there unchanged. A plant
 that large has parts thick enough to come through at the coarser size.
 
+### 7.11 Mazes
+
+<img src="images/maze-theta.png" width="340" alt="A theta maze of six rings seen from above: ring walls and spokes round a middle room, a gap in the rim, and a yellow strip from the gap along the corridors to the room"> <img src="images/maze-grid.png" width="340" alt="A grid maze seen from above: square cells about a middle room, with a yellow strip from a gap in its edge to the room">
+
+**Maze** builds a maze to be walked through: one way in on the rim, a
+room in the middle, and one way between them
+([core/src/maze.rs](../core/src/maze.rs) lays it out and
+[core/src/maze/walls.rs](../core/src/maze/walls.rs) builds it). There are
+two kinds. A theta maze is rings of corridors about a round room, and its
+walls are arcs of circles and straight spokes. A grid maze is square
+cells about a square room. Both are cells with wall slots between them,
+so one routine takes the walls out of both, and the two kinds differ
+only in where a wall stands.
+
+The form replaces an earlier maze generator of the author's, brickmaze.
+That tool drew the walls into a picture, one pixel to a stud, walked the
+picture's black pixels, and cut what it found into rectangles and
+triangles. Here the walls are never a picture. A ring wall is the band
+between two circles and a spoke is a rectangle, each as a formula, and
+the outline fitter of 7.2 lays them, so a ring wall is long sloped bricks
+all the way round with an exact outline.
+
+#### Rings and cells
+
+Write $`R`$ for the form's radius, to the middle of the outside wall,
+$`N`$ for the number of rings and $`t`$ for the walls' thickness. The
+gap from one ring wall to the next, corridor and wall together, is
+
+```math
+g = \frac{R}{N}
+```
+
+Ring wall $`j`$ is the circle of radius $`j\,g`$, for $`j`$ from 1 to
+$`N`$, and the last of them is the rim. Ring 0 is the room inside the
+first wall. Ring $`k`$ lies between walls $`k`$ and $`k + 1`$ and is cut
+by spokes into $`n_k`$ cells of equal angle. A corridor is $`g - t`$ wide
+between its walls, and the maze is refused if that is under 3 cells.
+
+One number of cells for every ring would give slivers by the room and
+halls at the rim, because a cell of ring $`k`$ is $`2\pi k g / n_k`$ long
+at its inner wall. So the number grows outwards, and it grows only by
+doubling. Every spoke of a ring then lines up with a spoke of the ring
+outside it, and a cell has one cell inside it and one or two outside.
+The first ring has the number asked for, **Cells in the first ring**, or
+as many as leave 3 cells between spokes if that is fewer. From there
+**Cells double** sets the rule:
+
+```math
+n_k = \begin{cases} 2\,n_{k-1} & \text{if the rule asks for it and } \dfrac{2\pi k g}{2\,n_{k-1}} - t \ge 3 \\ n_{k-1} & \text{otherwise} \end{cases}
+```
+
+Left **to keep cells square**, the rule asks for a doubling wherever
+the doubled cells are still at least as long as the corridor is wide:
+
+```math
+\frac{2\pi k g}{2\,n_{k-1}} \ge g
+```
+
+Every cell from the second ring out is then between one and two
+corridor widths long at its inner wall. For example, with 6 cells in the
+first ring, twelve rings have 1, 6, 12, 12, 24, 24, 24, 24, 48, 48, 48
+and 48 cells. This is the adaptive rule for a polar grid in Buck,
+*Mazes for Programmers* (2015), chapter 7, kept to doublings. The other
+setting doubles **every so many rings**, at each ring whose number is a
+multiple of the setting. At 2 it is brickmaze's own rule: 4, 4, 8, 8, 16,
+16. The second condition of the first formula applies to either setting,
+so a ring is never divided so finely that a player could not pass
+between its spokes.
+
+A grid maze of $`N`$ rings is $`2N - 1`$ cells each way, the room being
+the cell in the middle. Its cells are $`\text{round}(R / (N - \tfrac{1}{2}))`$
+apart, a whole number, so that every wall lies on the lattice.
+
+#### Taking the walls out
+
+Every wall starts standing. A walk begins in the cell inside the way in.
+At each step it moves into a cell it has not visited, chosen at random
+among those beside it, and takes out the wall it passes through. When no
+such cell is beside it, it goes back one step along the way it came. It
+ends when it is back at the start with nothing left to visit
+(`carve` in `maze.rs`). This is the randomised depth-first search, often
+called the recursive backtracker, kept on a list and not on the call
+stack so that a large maze cannot overrun the stack.
+
+Every cell is entered once, through one wall, so the gaps are a spanning
+tree of the cells. A tree gives the two properties a maze needs: every
+cell can be reached, and between any two cells there is exactly one way,
+so the maze has one solution and no loops. Any spanning tree gives those.
+The walk was chosen for the shape of its tree. It goes on as far as it
+can before it turns back, so corridors are long and winding and few
+branches leave them.
+
+The alternative weighed was a tree grown from anywhere on its edge, which
+is Prim's method with random weights, and is close to what Kruskal's
+method and Wilson's uniform tree give. Those have many short dead ends
+(Buck, "Maze Generation: Algorithm Recap", 2011). The test
+`corridors_are_long_and_dead_ends_few` measures both on the same cells,
+over twelve mazes of nine rings of each kind:
+
+| | Dead ends, the walk | Dead ends, grown from anywhere | Way through, the walk | Way through, grown from anywhere |
+|---|---|---|---|---|
+| Theta, 157 cells | 11.4% of cells | 33.2% | 84 cells | 12 |
+| Grid, 289 cells | 11.0% | 32.1% | 120 cells | 13 |
+
+The way through the walk's maze visits about half its cells, so it
+cannot be found by heading for the middle.
+
+The room is left out of the walk and given one door afterwards. Walked
+into like any other cell, the room of a theta maze has every cell of the
+first ring beside it, and the walk would leave it by several of them, so
+corridors would run through the goal. Its door is put in the cell beside
+it that is furthest from the way in along the corridors, which makes the
+way through as long as that maze allows.
+
+The numbers come from the seed by the generator the patterns use
+(SplitMix64), so one seed and one set of settings is always one maze.
+
+#### The walls as one outline
+
+The outline fitter asks one thing of a form: how far a place is from its
+surface, negative inside. For a maze that is the distance to the nearest
+wall (`Layout::wall`), and each wall near a place is found by
+arithmetic. With $`r`$ the place's distance from the middle and
+$`\theta`$ its angle, the nearest ring wall is wall
+$`j = \text{round}(r / g)`$, and its arc there is the one numbered
+$`\lfloor \theta\, n / 2\pi \rfloor`$ of that wall's $`n`$. Inside a
+standing arc the distance is
+
+```math
+d = \left| r - j g \right| - \tfrac{t}{2}
+```
+
+and an arc whose neighbour has been taken out also ends there, on the
+line from the middle through the spoke's place. The nearest spoke is at
+the angle $`\text{round}(\theta\, n_k / 2\pi) \cdot 2\pi / n_k`$, and is a
+rectangle $`t`$ wide from $`k g - t/2`$ to $`(k + 1) g + t/2`$ out from
+the middle. It runs half a thickness past each ring wall so that it
+closes against the wall's far face. The distance to the maze is the least
+of these, so a spoke and the ring wall it meets are one solid and are
+fitted with no seam.
+
+The alternative was each wall as a polyline in a search grid, as a
+spline's band is. That would have made every circle a chain of chords
+and every wall a solid of its own, rounded where it met the next.
+
+The middle of a wall is put on a lattice line if the wall is an even
+number of cells thick and down the middle of a row of cells if it is
+odd, as a band's is (7.2). The spokes that lie along the axes, and every
+wall of a grid maze, are then whole cells. A grid maze has no
+discrepancy at all.
+
+#### Fitting a square at a time
+
+The walls are fitted in squares of ground 96 cells each way, every square
+as an outline of its own, and the pieces are put together in the squares'
+order (`Walls::fitted`).
+
+Fitted as one outline they took too long. The fitter searches each
+stretch of an outline for its corners, and a maze's walls are one outline
+or a few, a hundred times as long as a ring's and joined at every spoke.
+Its time rose faster than the length: a maze of 12 rings took 1.3
+seconds and one of 13 took 10.8. In squares no outline is longer than a
+square holds, so the time goes by the area. A maze of 16 rings took 17.7
+seconds as one outline and takes 1.4 in squares, on one thread.
+
+The squares are also the work shared out over threads (see
+[Threads](performance.md#threads) in performance.md). A square does not depend on
+any other, each is given to whichever thread is free, and the results are
+taken in the squares' order, so a maze is the same bricks in the same
+order on one thread or sixteen. The test
+`a_maze_is_the_same_bricks_on_any_number_of_threads` holds it to that.
+
+A cut between two squares is along lattice lines, so it is exact: the
+pieces either side are whole cells there, with no gap and no overlap. It
+costs bricks, because a sloped brick cannot cross a cut. Measured on the
+maze of 16 rings, the squares lay 4% more pieces than one outline and
+leave 3.5% of the walls' area amiss against 3.4%. Squares of 64 and 192
+cells were slower (2.1 and 2.5 seconds).
+
+The squares are set out from the middle of the maze, half a square to
+each side of it, so no cut runs along the spokes on the axes. For a grid
+maze a square is an even number of the maze's cells across, which puts
+every cut down the middle of a row of cells and never along a wall.
+
+#### Textures on the walls
+
+<img src="images/maze-bricks.png" width="340" alt="A theta maze with brick walls seen from a low angle: courses of red brick with pale mortar run level round every ring wall, with upright joints on the straight spokes and the wall tops"> <img src="images/maze-hedge.png" width="340" alt="A theta maze whose walls are clipped green hedge, on a brown floor, with a yellow strip along the corridors">
+
+**Texture** sets what the walls are made of. Plain walls are the fit as
+it stands. Planks, bricks, cobblestone and medallions are the tile
+patterns of 7.9, and on a maze they are wrapped along each wall and not
+pushed down through the whole maze from above, which would show a
+brick's face on the wall tops and stripes on every wall
+(`Walls::patterned`).
+
+The pattern is drawn once, flat, by the code that draws it on a floor
+(`lay_mosaic_on`), on a sheet as long as all the walls unrolled end to
+end and as tall as they stand. Each ring wall is unrolled from the x axis
+round, one cell of the sheet to one cell of the wall's middle circle. A
+place in a wall at angle $`\theta`$ in ring wall $`j`$ is at
+$`\lfloor \theta\, j g \rfloor`$ along that wall's part of the sheet, so
+every place on one line through the wall towards the middle has the same
+column of the sheet behind it. A spoke is unrolled outwards from its
+inner end. Each wall has a part of the sheet to itself, so no two walls
+show the same bricks.
+
+Every piece of the fit is then a column from the ground up, and each
+cell of its height takes the sheet's colour at that height. A block is
+taken one cell of ground at a time, so a joint between two bricks is one
+cell wide and goes through the wall. Cells of one colour are joined into
+bricks again. Because every piece is cut at the same heights, the line
+between two courses of bricks is level and unbroken round a whole ring.
+
+A texture colours the walls and never moves them, as on any form (see
+[The edge](#the-edge-the-forms-own)). The fit is not changed: each piece
+keeps its outline and is only cut across its height. The curved face of
+a ring wall is long sloped bricks, and a sloped brick is one colour to a
+course, the colour where the middle of its solid half lies. So on a
+curved face the upright joints fall where one sloped brick ends and the
+next begins, and cobblestones there are blocks as long as the sloped
+bricks. A sloped brick whose middle lies on a joint takes the colour of
+the brick beside the joint; without that, one in nine was a slab of
+mortar a dozen cells long. The straight spokes along the axes, the wall
+tops and all of a grid maze are whole cells and carry the pattern
+exactly. Shortening the sloped bricks to a brick's length would carry it
+everywhere and would fit the curve less closely, which is the choice
+7.9 made the same way for a floor's edge.
+
+A rug is not wrapped. It is one figure with a middle and a border, and
+cut into the strips of a hundred walls it is none, so a maze given a rug
+has plain walls. Bevel and border do nothing on a wall. The pass that
+patterns the sides of a box (7.9) is not run on a maze: it takes a form's
+outermost layer of whole cells, and it patterned over the outside of a
+grid maze before it was kept off.
+
+**Hedge** is not a pattern. The walls are not fitted at all. The hedge
+of the Plant form (7.10) is grown along the line of every wall: each run
+of arcs standing side by side is one line, and each spoke is one. All of
+them are one plant (`Model::laid_all` in
+[core/src/tree.rs](../core/src/tree.rs)), so where two walls meet the
+hedges run into each other and no brick is laid twice. That function is
+the only thing the maze asks of the plants' code. A hedge wall is at
+least 6 cells thick and 12 tall, the least a hedge can be.
+
+#### The floor, the way through and the colours
+
+A floor, if asked for, is the disc or the square out to the outside face
+of the rim, fitted as an outline and laid under the walls, which then
+stand on it. The way through is a strip one cell high on the ground, a
+quarter as wide as the narrowest gap it passes. It runs along the middle
+of each corridor and crosses from one ring to the next along a line
+towards the middle of the maze, through the middle of the outer of the
+two cells, which is inside the gap the two share.
+
+A maze's bricks carry colour numbers, as a pattern's do. With plain
+walls there are three: the floor, the walls and the strip. With a
+texture or hedge there are eight: the first is the floor and also the
+mortar or the hedge's stems, the last is the strip, and the texture's
+own numbers are between. A pattern's seventh feature shares the first
+feature's colour, which leaves the last number free for the strip.
+
+#### What is refused
+
+Every setting is brought within its range before anything is laid out:
+2 to 40 rings, 1 to 64 cells in the first ring. Three sizes are then
+refused with a message that says what to change, each before the work it
+would cost:
+
+| Limit | Why |
+|---|---|
+| walls 40,000 cells long in all | four or five seconds of fitting on one thread |
+| a textured maze whose walls unroll to 1,500,000 tiles | each tile is drawn by the pattern's rule, up to 4 microseconds for cobblestone |
+| hedge of 1,000,000 cells cubed (length by thickness by height) | a hedge is 0.1 to 0.25 bricks to each cell of that volume, so this is 100,000 to 250,000 bricks and about eight seconds on one thread |
+
+#### What is measured
+
+Walls 30 tall and 4 thick (hedge 6), on a desktop with 16 logical cores,
+the least of three builds
+(`cargo run --release -p brickloft-core --example timing -- maze`):
+
+| Maze | Walls | Bricks | One thread | 16 threads |
+|---|---|---|---|---|
+| Theta, 4 rings, radius 80 | plain | 514 | 81 ms | 26 ms |
+| Theta, 4 rings, radius 80 | bricks | 11,997 | 0.11 s | 42 ms |
+| Theta, 4 rings, radius 80 | cobblestone | 8,675 | 0.26 s | 62 ms |
+| Theta, 4 rings, radius 80 | hedge | 27,125 | 1.1 s | 0.23 s |
+| Theta, 6 rings, radius 120 | plain | 1,122 | 0.18 s | 40 ms |
+| Theta, 6 rings, radius 120 | bricks | 25,045 | 0.25 s | 75 ms |
+| Theta, 6 rings, radius 120 | cobblestone | 18,898 | 0.59 s | 0.13 s |
+| Theta, 6 rings, radius 120 | hedge | 54,903 | 2.5 s | 1.0 s |
+| Theta, 9 rings, radius 180 | plain | 2,415 | 0.73 s | 0.15 s |
+| Theta, 9 rings, radius 180 | bricks | 52,694 | 0.77 s | 0.19 s |
+| Theta, 9 rings, radius 180 | cobblestone | 37,155 | 2.2 s | 0.33 s |
+| Theta, 9 rings, radius 180 | hedge | 118,989 | 5.7 s | 1.9 s |
+| Theta, 16 rings, radius 320 | plain | 6,870 | 2.3 s | 0.34 s |
+| Theta, 16 rings, radius 320 | bricks | 149,553 | 2.6 s | 0.85 s |
+| Theta, 16 rings, radius 320 | cobblestone | 104,728 | 6.4 s | 1.6 s |
+| Theta, 16 rings, radius 320 | hedge | refused: too much hedge | | |
+| Grid, 6 rings, radius 120 | plain | 97 | 0.13 s | 74 ms |
+| Grid, 6 rings, radius 120 | bricks | 10,582 | 0.46 s | 0.56 s |
+| Grid, 6 rings, radius 120 | cobblestone | 16,827 | 0.84 s | 0.17 s |
+| Grid, 6 rings, radius 120 | hedge | 60,009 | 3.1 s | 0.71 s |
+
+The desktop was running other builds when these were taken, so the
+figures for sixteen threads are higher than an idle machine gives, by
+an amount that differs from row to row.
+
+A maze is built at brick size 1 whatever the brick budget, as a pattern
+and a plant are. Its walls are a few cells thick and its corridors are
+sized to be walked, so at a coarser size it would be a different maze.
+Fewer bricks come from fewer rings.
+
+#### Where it falls short
+
+- A texture on a curved face is as coarse as the sloped bricks there, as
+  described above. A grid maze has none of this.
+- A textured maze is tens of thousands of bricks, because every course
+  and every line of mortar is its own layer of bricks.
+- The hedge keeps the Plant form's foot: the lowest tenth of its height
+  is stems with air between, and a hedge has 40 plants at most, shared
+  among the walls by length, so a long wall has few stems under it.
+- A cut between two squares can fall along a ring wall where the wall is
+  tangent to it, which lays that stretch as two thinner runs of bricks.
+- The room is one ring across and cannot be made larger, and there is
+  one way in. A maze takes no added points and cannot be mirrored.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points
@@ -3150,6 +3598,45 @@ surface lies where the further form is at most $`1.25k`$ away, which is 7.5
 cells at a blend of 6. A larger blend would have its rim cut short wherever
 a curve's distance gave out.
 
+Raising that margin to 16 cells, which a blend of 12 needs, was measured
+and left out, because every curve pays for it whether it is joined or not.
+A curve's distance is found by looking through the pieces of its path
+filed near the place asked about, and a wider margin files each piece in
+more places, so there are more to look through at every one.
+
+| Form | Built, margin 8 | Built, margin 16 | One distance, margin 8 | One distance, margin 16 |
+|---|---|---|---|---|
+| a round tube along a spline of 14 points | 48 ms | 373 ms | 117 ns | 580 ns |
+| a ring of radius 40 | 19 ms | 35 ms | 53 ns | 118 ns |
+| an arch 60 wide | 4.6 ms | 6.8 ms | 62 ns | 116 ns |
+| an arch askew to the grid | 13 ms | 22 ms | 74 ns | 125 ns |
+
+#### Taking a form away
+
+A joined form marked to be cut out (`Spec::carve`) is subtracted from the
+forms it is joined to, where an unmarked one is added: a window through a
+wall, a hole through a sphere. The solid left of $`a`$ once $`b`$ is taken
+out of it is where $`a`$ is inside and $`b`$ is outside, which is the
+larger of $`a`$ and $`-b`$. Its smooth form is the smooth minimum turned
+over, and rounds the rim of the hole as a fillet rounds a crease:
+
+```math
+\mathrm{smax}(a, -b) = -\mathrm{smin}(-a, b) = \max(a, -b) + \frac{h^2}{4k}, \qquad h = \max\left(k - \lvert a + b\rvert,\ 0\right)
+```
+
+Three things differ from a form that adds.
+
+| What differs | Why |
+|---|---|
+| None of the form's own bricks are built. The editor draws them as red glass. | The form is a hole. With nothing drawn there would be nothing to see of it or take hold of. |
+| The zone follows the whole wall of the hole, however deep inside the other form it runs. | A joined form's surface inside another is buried, but a hole's wall shows. The wall is fitted cell by cell, because the hollow side of a sloped brick is not a brick: the game takes a brick's box whole. |
+| It is taken out of every form of the join, joined or not, and the rounding of the rim is its own blend alone. | The rim of a window is rounded as the window says, whatever the wall was joined with. |
+
+Clear of the zone, where whole blocks of the two forms overlap, the other
+forms give up the room they share with the cutting form's bricks exactly as
+a joined form gives way ("What is still cut" below). The cutting form's
+bricks are dropped only after that.
+
 #### The zone
 
 The joined solid differs from the two forms fitted separately only near
@@ -3175,10 +3662,21 @@ but the seam of a sphere sunk into a floor is a ring, and a box round a
 ring takes in the whole disc inside it and refits surface that has not
 changed.
 
+For a hole, with $`a`$ the form it is in and $`b`$ the form taken away, the
+bounds are one-sided, because the hole's wall runs as deep into $`a`$ as
+the hole does.
+
+| Condition | What it says |
+|---|---|
+| $`-b > a - \max(2,\ k - \sqrt{0.4k} + 1.74)`$ | the hole matters here: its inside is the nearer of the two surfaces, or near enough to it |
+| $`\max(a, -b) < 1`$ | what is left is no more than a cell away, by the plain measure and not the rounded one, so that a rim rounded by a large blend is all in the zone |
+| $`\mathrm{smax}(a, -b) > -1.5`$ | the cell is not deep inside what is left |
+
 The zone is fitted by the volume fitter's method (section 7): the best
 brick for each cell, tetrahedra with fewer than two backed faces removed,
 ramps stretched where that fits closer, and ramps joined along their
-ridges. One step is done differently, because it was most of a join's
+ridges. Two passes are added to it, which the next two sections describe.
+One step is done differently, because it was most of a join's
 time. The volume fitter asks the solid for its distance at each of a
 cell's 64 samples. Here each form's distance is asked at the cell's eight
 corners, once for all the cells that share a corner, and worked out at the
@@ -3189,6 +3687,109 @@ join stays sharp. A form whose own distance is not smooth across a cell (an
 edge of its own crosses it) is detected by comparing three true values in
 the cell with what the corners give, and is asked at every sample there as
 before.
+
+#### Evening out the seam
+
+The best brick for a cell is the one that disagrees least with the solid
+inside that cell, and takes no account of the cells beside it. On a
+surface that slopes gently, or runs askew to all three axes, the best brick
+changes from cell to cell: a ramp, nothing, a ramp, a tetrahedron. Each is
+right by volume and together they are a row of teeth. What shows is the
+upright sides of the teeth, which are faces of bricks standing where the
+solid has no face.
+
+So each cell is chosen a second time, by a cost with two parts
+(`even_out` in [core/src/blend/even.rs](../core/src/blend/even.rs)):
+
+```math
+\text{cost} = \text{disagreement in the cell} + \lambda \cdot \text{steps on the cell's six faces}
+```
+
+A step is counted on the face between two cells: the part of the face that
+one cell's brick comes up to and the other's does not. Bricks that follow a
+sloping surface exactly have none, because both come up to the same part
+of the face they share. A tooth has three. A step is not counted where the
+solid has one itself, which is where its surface lies flat in the face, so
+the top of a cube is not pulled away from the plane it lies in. With
+disagreement in sixty-fourths of a cell and steps in sixteenths of a face,
+$`\lambda`$ is 1.
+
+One cell's choice depends on its neighbours' bricks, so the choice is
+repeated until nothing changes
+([iterated conditional modes](https://en.wikipedia.org/wiki/Iterated_conditional_modes)).
+The cells are taken as the two colours of a chessboard in turn. A cell's
+six neighbours are all of the other colour, so the cells of one colour can
+be chosen in any order, or on any number of threads, with the same result,
+and each choice lowers the total cost, so the passes end. Choosing every
+cell at once was the alternative. Two neighbours can then each change to
+suit the other as it was, and change back on the next pass.
+
+#### Stretched bricks in the seam
+
+A unit ramp, tetrahedron or cut cube slopes at 45 degrees and at no other
+angle. The game stretches a brick along each axis separately, and a
+stretched brick slopes at whatever its three lengths make: a tetrahedron 4
+by 2 by 1 cells rises 1 in 4 one way and 1 in 2 the other. A sphere's own
+fitter lays its facets out from the sphere's centre with such bricks. A
+fillet has no centre, so its layout is taken from the solid, one cell at a
+time (`stretch` in
+[core/src/blend/stretch.rs](../core/src/blend/stretch.rs)).
+
+Where the surface crosses a cell, the change in the solid's distance across
+the cell is the surface's slope there, its gradient $`(g_x, g_y, g_z)`$. A
+stretched brick lies along a surface of that slope when its lengths are in
+the inverse proportions of the gradient's parts:
+
+```math
+l_x : l_y : l_z = \frac{1}{\lvert g_x\rvert} : \frac{1}{\lvert g_y\rvert} : \frac{1}{\lvert g_z\rvert}
+```
+
+A part of the gradient too small for any length up to 6 cells to match
+counts as none. With one such part the brick is a ramp, level along that
+axis. With none it is a tetrahedron or a cut cube, whichever fits. Each
+brick is tried at up to five sizes, in the one place where the cell is the
+first that its sloped face crosses. It is kept as a candidate only if it
+disagrees with the solid less than the unit bricks in its box do, so the
+join never gets further from the solid. Candidates are taken largest saving
+first, and no two overlap. The volume fitter's ramps stretched one way are
+then tried over what is left, since they are tried in every place and
+find runs the gradient at one cell does not.
+
+Trying every stretched brick in every position needs no gradient, and was
+set aside as a thousand times the work for the same bricks: a brick that
+does not lie along the gradient cannot fit.
+
+The two passes were measured on nine joins: a sphere on a cube, a sphere in
+a sphere and a sphere cut out of a cube, each at blends of 0, 2 and 6. The
+figures are sums over the nine, within the blend's reach of the seam
+(`seam` in [core/src/blend/tests.rs](../core/src/blend/tests.rs)).
+
+| | Disagreement with the solid, cells | Steps, cell faces | Unit sloped bricks | Of those, standing alone |
+|---|---|---|---|---|
+| before | 515 | 2,173 | 1,634 | 45 |
+| evened out only | 514 | 1,876 | 1,738 | 6 |
+| stretched only | 473 | 1,969 | 1,104 | 15 |
+| both | 466 | 1,818 | 1,136 | 1 |
+
+Together they take a tenth off the disagreement, a sixth off the steps and
+nearly a third off the unit sloped bricks, and leave one tooth standing
+alone where there were 45. The seam is still rougher than a sphere's own
+facets, and "Where it falls short" below says why.
+
+#### Brick size
+
+Forms built at one brick size larger than a microbrick, and standing a
+whole number of bricks of that size apart, are joined at that size: every
+brick the join fits is a multiple of it. The whole join is done on a
+lattice that many cells coarse (`common_size` in
+[core/src/blend.rs](../core/src/blend.rs)). A form's bricks and place are
+divided by the size on the way in, its distance is asked at a place
+multiplied by the size and then divided by it, the blend is divided by it,
+and the fitted bricks are multiplied by it on the way out. A solid measured
+in a larger unit is the same solid, so nothing in between changes. Forms of
+different sizes, or of one size out of step, share no lattice coarser than
+the cells', and are joined at single microbricks: sound, with a band of
+fine bricks round the seam.
 
 #### The seam
 
@@ -3215,7 +3816,8 @@ at the brick's middle, and is coloured as that form's bricks are.
 Deep inside, blocks of one form overlap blocks of another, and one of them
 gives way: a block is cut down to the cells that share no room, and a
 sloped brick that shares any is left out, which inside the other form is
-not seen. Forms that are not joined give way to nobody. Joined forms give
+not seen. Forms that are not joined give way to nobody but a form that is
+cut out, which every form on its grid gives way to. Joined forms give
 way to those that are not and to one another in an order fixed by where
 they stand, so the result is the same whichever form is being edited.
 
@@ -3224,28 +3826,45 @@ effect from the blend.
 
 | Form | Why it is not fitted as one with the others |
 |---|---|
-| a form standing an odd unit (half a microbrick) off the other along any axis | Its cells straddle the other's, and no brick is half a microbrick wide to fill the difference, so no set of bricks can meet both forms' own without a gap or an overlap. The panel says so under the blend. |
+| a form standing an odd unit (half a microbrick) off the other along any axis | Its cells straddle the other's, and no brick is half a microbrick wide to fill the difference, so no set of bricks can meet both forms' own without a gap or an overlap. |
 | a form laid as a pattern (a mosaic, stepping stones) | Its bricks are not its distance function: refitting it would fill the gaps between its stones and lose its colours. |
 | a plant | Its bricks are leaves and branches coloured one by one, for the same reason. |
 
+The first of these no longer arises from the editor. Whoever places a
+joined form moves it by half a microbrick along each axis it is off on
+(`settled` in [core/src/blend.rs](../core/src/blend.rs)): a drag with Ctrl
+goes a whole microbrick at a time, and a join made any other way (by
+Claude, by pasting, from an older save) is settled when the workspace is
+next built, with a note over the view. Half a microbrick is less than can
+be placed by eye, and the alternative, a lattice twice as fine, needs a
+brick half a microbrick across, which the game does not have. A form is
+lined up with the form it shares most room with, so one joined to two
+forms that are themselves half a microbrick apart still lines up with one
+only, and is cut where it meets the other. Two forms of one brick size are
+settled to whole bricks of that size in the same way.
+
 Forms on different grids are never joined: grids pass through one another.
-The zone is fitted at single microbricks whatever brick size the forms were
-built at.
 
 #### How long it takes, and why not on the graphics card
 
 A join is put together again whenever one of its forms, its place or its
 blend changes, which while a form is dragged is every frame. Measured on a
-desktop with 16 logical cores, otherwise idle, as the least of seven runs:
+desktop with 16 logical cores as the least of many runs, while other
+programs were building on it, so the figures are a little high:
 
 | Join | Blend 0 | Blend 2 | Blend 6 |
 |---|---|---|---|
-| a sphere of radius 20 in a cube 17 a side, one thread | 3.9 ms | 5.7 ms | 11.5 ms |
-| the same, all cores | 4.4 ms | 4.3 ms | 7.9 ms |
-| two spheres of radius 20, one thread | 8.7 ms | 10.0 ms | 14.0 ms |
-| the same, all cores | 6.9 ms | 7.4 ms | 9.7 ms |
+| a sphere of radius 20 in a cube 17 a side, one thread | 5.1 ms | 6.5 ms | 13.0 ms |
+| the same, all cores | 5.5 ms | 5.5 ms | 10.8 ms |
+| two spheres of radius 20, one thread | 10.9 ms | 13.7 ms | 17.5 ms |
+| the same, all cores | 9.6 ms | 10.8 ms | 13.4 ms |
 
-Testing the blocks and sampling the zone's cells are shared among threads
+Evening out the seam and laying stretched bricks are 1 to 4 ms of each
+figure. With both switched off in the same run, the same joins took 3.9,
+5.1 and 10.1 ms, and 8.1, 9.4 and 15.9 ms, on one thread.
+
+Testing the blocks, sampling the zone's cells and measuring the stretched
+bricks are shared among threads
 (see [performance.md](performance.md), "Threads"), and the bricks are the
 same on any number of them. The editor keeps the last join and reuses it
 when only a colour or a pick has changed.
@@ -3264,13 +3883,49 @@ in any case.
 
 #### Where it falls short
 
-The zone is fitted cell by cell, so it is rougher than a sphere's or a
-turned form's own layout, and the band of refitted bricks round a seam
-shows against them. It is also wider than the seam itself wherever a form's
-own bricks are large, since a sloped brick the zone touches is swallowed
-whole. A small blend on a curved seam comes out as a ring of single wedges
-and tetrahedra, since a fillet half a microbrick deep is less than one
-brick can follow.
+The seam is still rougher than a sphere's or a turned form's own layout,
+and the band of refitted bricks shows against them. The measure that says
+why is the same two figures for a sphere alone, counted for each cell of
+its surface.
+
+| A sphere of radius 20 | Disagreement, cells | Steps, cell faces |
+|---|---|---|
+| its own fitter | 0.18 | 0.08 |
+| fitted cell by cell | 0.11 | 0.40 |
+
+A sphere's own facets are further from the sphere than a cell by cell fit
+is, and have a fifth of its steps. They are smooth because they meet edge
+to edge, and they are placed to do that at the cost of closeness. A join's
+bricks are each chosen for closeness, one at a time, and two of them of
+different slopes do not meet along an edge. Three ways of trading closeness
+for smoothness without a layout were tried on the nine joins above, and
+none lowered the steps.
+
+| Tried | What happened |
+|---|---|
+| a stretched brick allowed to disagree a little more than the unit bricks it replaces | more bricks were laid, and both the disagreement and the steps rose, by 3 to 40% as the allowance grew |
+| a larger weight on steps when evening out | at 2 and 4 the steps fell 2 to 5% more and the disagreement rose 1 to 4% |
+| each cell given the brick whose corners are the corners the solid holds, which meet face to face by construction | a gentle slope becomes terraces, whose flat treads are steps of another kind: no fewer in all |
+
+What a smooth seam needs is a layout: the bricks of a patch of surface
+chosen together so that neighbours share edges, as a sphere's are. For a
+surface that is a height above a plane over the patch, corner heights
+snapped to whole cells on a grid of rectangles would give one: a
+tetrahedron, a cut cube, a ramp, a hip or an inner corner covers a
+rectangle whose corners differ by at most one layer, unless two opposite
+corners are the high ones. It is not built, and that much of it is
+reasoning and not measurement
+([future-work.md](future-work.md), "Blending forms into one").
+
+Two smaller shortfalls remain. The band is wider than the seam wherever a
+form's own bricks are large, since a sloped brick the zone touches is
+swallowed whole. Cutting such a brick into the shorter bricks of the same
+slope was built and measured, and taken out again: only a brick whose
+lengths share a factor can be cut (none of a sphere of radius 12, 45% of
+one of radius 20), and on two spheres of radius 20 it left 4.6% fewer cells
+to refit, for more bricks and five teeth where there was one. And a hole's
+wall is fitted cell by cell all the way through, so a round hole is
+rougher inside than the form that made it is outside.
 
 A joined form is not pushed clear when a form it sits in is reshaped, and
 moving it without Ctrl sets it clear again.
@@ -3502,11 +4157,13 @@ needles are the shoots that carry them. A tree is not its own mirror
 image and takes no added points.
 
 Stepping stones need a flat band, a filled outline or a cube. Laid with
-the gap at 0 they keep seams between them, because each stone is fitted by
-itself (7.8). A tile pattern is laid only where a form is flat: it is not
-wrapped onto a curved surface, and the curved part of a patterned form
-stays plain (7.9). Only bricks are bevelled, by one cell, and cobblestone
-is flat. A rug shows its full detail only on a large floor (7.9).
+the gap at 0 they share their edges, but slivers remain at the rim of the
+region and along some nearly level edges (7.8). A tile pattern is laid only
+where a form is flat: it is not wrapped onto a curved surface, and the
+curved part of a patterned form stays plain (7.9). Depth is one cell and
+one kind to a style: bricks are bevelled, planks three tiles broad or more
+are grooved, and cobblestone's mortar is sunk. A rug shows its full detail
+only on a large floor (7.9).
 
 ### Why no machine learning
 
