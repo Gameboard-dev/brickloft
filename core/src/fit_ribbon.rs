@@ -102,74 +102,233 @@ pub(crate) fn parts_of(c: [i32; 4], middle: f64) -> Option<Vec<(u8, i32, i32, u8
     Some(parts)
 }
 
-/// Columns of a solid that has a top and an under side over the ground it
-/// covers, as a tube lifted along its length has: for each cell of ground
-/// in `cells`, the bricks between the two.
+/// The ground under a solid that has a top and an under side over it, as a
+/// tube lifted along its length has: whole cells and half cells of the plane
+/// across the axis, sharing their corners.
 ///
-/// `span` gives the under side and the top along `axis` over a point (u, v)
-/// of the plane across it; where the solid ends, the two are equal. Both
-/// are taken at the cell's four corners and rounded to whole cells, and
-/// each is then made as [`parts_of`] makes a square of a surface: the top
-/// from its corners' heights, the under side the same way upside down.
-/// Whatever is between them is whole.
+/// The solid is laid out from one under side and one top at each corner,
+/// in whole cells, and every cell is built from the heights at its own
+/// corners. Two cells that share an edge share its two corners, so their
+/// surfaces meet along it exactly. The heights were first rounded cell by
+/// cell, and a cell whose rounded corners no single brick could join was
+/// changed on its own: its surface then stood off its neighbours' by a lip
+/// along each edge it had changed. Kept in one place, a height that has to
+/// change changes for all the cells around its corner at once (see
+/// [`settle`]).
+pub struct Ground {
+    /// the lattice points that are corners of its cells
+    pub at: Vec<(i32, i32)>,
+    /// the under side and the top wanted over each of them
+    pub wanted: Vec<(f64, f64)>,
+    /// whole cells: their four corners as numbers into `at`, in the order a
+    /// brick's are (first along the plane's first axis, then its second),
+    /// and the under side and top wanted over their middles
+    pub squares: Vec<([usize; 4], (f64, f64))>,
+    /// half cells, cut corner to corner: the square corner first, then the
+    /// two ends of the long side
+    pub halves: Vec<[usize; 3]>,
+}
+
+/// What can stand on half a cell to join its three corners' heights (square
+/// corner first): which corners it rises to, the level it rises from and how
+/// far it rises. `None` where no single brick does it.
 ///
-/// So wherever one brick can make each slope the solid's surface is sloped
-/// bricks meeting edge to edge, with no steps: across the tube, where its
-/// top falls away to its sides, and along it, where it climbs. A cell whose
-/// corners no single bricks can join, or where the solid is thinner than
-/// it climbs across the cell, is a plain block from the middle of its
-/// under side to the middle of its top.
-///
-/// Returns the sloped and three-cornered bricks, and the cells that are
-/// whole, for the caller to join into cubes with its own.
-pub fn columns(cells: &[(i32, i32)], span: &dyn Fn(f64, f64) -> (f64, f64), axis: usize, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
-    let (ua, va) = plane_axes(axis);
-    let limit = max_ext.max(1);
-    let mut bricks: Vec<CellBrick> = Vec::new();
-    let mut whole: Vec<[i32; 3]> = Vec::new();
-    let level = |u: i32, v: i32| {
-        let (under, top) = span(u as f64, v as f64);
-        ((under.round() as i32).min(top.round() as i32), top.round() as i32)
-    };
-    for &(u, v) in cells {
-        let corners = [level(u, v), level(u + 1, v), level(u, v + 1), level(u + 1, v + 1)];
-        // Four corners at four heights, neither pair of opposite ones level,
-        // cannot be joined by single bricks: a tube running askew of the
-        // grid has many such cells, since its top falls one way across it
-        // and climbs another along it. The nearer pair is then made level,
-        // at the height between them, and the cell is two half squares
-        // rising to and from that pair. Its edge no longer quite meets its
-        // neighbours' at those two corners: a lip of half the difference
-        // between them, where a plain block would be a step of all of it.
-        let joinable = |h: [i32; 4]| {
-            if parts_of(h, 0.5).is_some() {
-                return h;
-            }
-            let (a, b) = if (h[0] - h[3]).abs() <= (h[1] - h[2]).abs() { (0, 3) } else { (1, 2) };
-            let mut made = h;
-            // (halved towards zero from the lower, so that a surface and its mirror image agree)
-            let between = h[a].min(h[b]) + (h[a] - h[b]).abs() / 2;
-            (made[a], made[b]) = (between, between);
-            made
-        };
-        let (under, top) = (joinable(corners.map(|c| c.0)), joinable(corners.map(|c| c.1)));
-        // (made level separately, the two sides can cross at a corner where the solid is thin)
-        let under = [0, 1, 2, 3].map(|k| under[k].min(top[k]));
-        if (0..4).all(|k| under[k] == top[k]) {
-            continue; // nothing over this cell
+/// One brick makes it when one corner is higher than the other two (a
+/// tetrahedron over the square corner, a half inner corner over an end of
+/// the long side) or both ends of the long side are (a half outer corner).
+/// The square corner with one end of the long side has none.
+fn cap_of(h: [i32; 3]) -> Option<(u8, i32, i32)> {
+    let (lo, hi) = (h[0].min(h[1]).min(h[2]), h[0].max(h[1]).max(h[2]));
+    if h.iter().any(|v| *v != lo && *v != hi) {
+        return None;
+    }
+    let high = (0..3).filter(|k| h[*k] == hi && hi != lo).fold(0u8, |m, k| m | 1 << k);
+    matches!(high, 0 | 0b001 | 0b010 | 0b100 | 0b110).then_some((high, lo, hi - lo))
+}
+
+/// The corners of a cell of the ground: a whole cell's four or a half cell's three.
+#[derive(Clone, Copy)]
+enum Face {
+    Square([usize; 4]),
+    Half([usize; 3]),
+}
+
+impl Face {
+    fn corners(&self) -> &[usize] {
+        match self {
+            Face::Square(c) => c,
+            Face::Half(c) => c,
         }
-        let (under_hi, top_lo) = (*under.iter().max().unwrap(), *top.iter().min().unwrap());
-        let (mid_under, mid_top) = span(u as f64 + 0.5, v as f64 + 0.5);
-        let share = |lo: i32, hi: i32, at: f64| (at - lo as f64) / (hi - lo).max(1) as f64;
-        let above = parts_of(top, share(top_lo, *top.iter().max().unwrap(), mid_top));
-        // the under side is a surface too, seen from below: its heights negated
-        let hung = under.map(|h| -h);
-        let below = parts_of(hung, share(-under_hi, -*under.iter().min().unwrap(), -mid_under));
-        let mut brick = |local: u8, from: i32, to: i32| {
+    }
+}
+
+/// How far from the height wanted a corner may be moved to make its cells
+/// buildable. Rounding alone is up to half a cell off; this allows a whole
+/// cell and a half on top of that.
+const SETTLE_REACH: f64 = 2.0;
+
+/// What a cell that single bricks cannot join costs, set against the squared
+/// distances of heights from the surface that everything else is counted in.
+/// Such a cell is built with a lip of about half a cell at two corners, and
+/// is charged a little more than moving two corners that far.
+const UNJOINED: f64 = 2.0;
+
+/// What a cell costs with its corners at the heights `h`: [`UNJOINED`] if
+/// single bricks cannot join them, and otherwise how far its surface is over
+/// its middle from the height `middle` wanted there, squared. Of the two
+/// bricks that fit some sets of corners (a hip or half a square, a valley or
+/// a cut cube) the nearer is counted, as [`Ground::lay`] chooses it.
+fn cell_cost(face: &Face, h: &[i32], middle: f64) -> f64 {
+    match face {
+        Face::Half(c) => {
+            if cap_of(c.map(|k| h[k])).is_some() { 0.0 } else { UNJOINED }
+        }
+        Face::Square(c) => {
+            let c = c.map(|k| h[k]);
+            let (lo, hi) = (c[0].min(c[1]).min(c[2]).min(c[3]), c[0].max(c[1]).max(c[2]).max(c[3]));
+            let two = c.iter().all(|v| *v == lo || *v == hi);
+            if !two && c[0] != c[3] && c[1] != c[2] {
+                return UNJOINED;
+            }
+            let (lo, hi) = (lo as f64, hi as f64);
+            let nearest = |of: &[f64]| of.iter().map(|v| (v - middle).powi(2)).fold(f64::INFINITY, f64::min);
+            if !two {
+                // folded along its level pair of corners
+                return nearest(&[if c[0] == c[3] { c[0] } else { c[1] } as f64]);
+            }
+            let high = c.iter().filter(|v| **v as f64 == hi).count();
+            match high {
+                4 => nearest(&[lo]),
+                2 if c[0] == c[3] => nearest(&[lo, hi]),
+                2 => nearest(&[(lo + hi) / 2.0]),
+                1 => nearest(&[lo, (lo + hi) / 2.0]),
+                _ => nearest(&[hi, (lo + hi) / 2.0]),
+            }
+        }
+    }
+}
+
+/// Whole heights for a surface over the corners of `faces`, near the heights
+/// `wanted` and such that single bricks can join the corners of as many
+/// cells as possible (see [`parts_of`] and [`cap_of`]). `middles` is the
+/// height wanted over the middle of each face.
+///
+/// Rounded each on its own, the corners of a surface that climbs more than
+/// one cell per cell, or that climbs along a half cell's long side, often
+/// cannot be joined. A surface that steep is buildable only where the lines
+/// along which it is level run along the grid or across its diagonals, cell
+/// after cell, so mending one cell on its own moves the trouble to the cell
+/// beside it. The heights are therefore settled together, by annealing: a
+/// corner near an unbuildable cell is moved one cell up or down, at random,
+/// and the move is kept if it lowers the cost of the surface (the squared
+/// distance of each corner from its wanted height, and [`cell_cost`] for
+/// each cell), or sometimes when it raises it, less often as the search
+/// goes on. Corners away from any trouble stay as rounded.
+///
+/// The choices are drawn from a fixed sequence, so the same surface always
+/// settles the same way.
+fn settle(wanted: &[f64], faces: &[Face], middles: &[f64]) -> Vec<i32> {
+    let mut h: Vec<i32> = wanted.iter().map(|w| w.round() as i32).collect();
+    let mut touching: Vec<Vec<usize>> = vec![Vec::new(); h.len()];
+    for (f, face) in faces.iter().enumerate() {
+        for &k in face.corners() {
+            touching[k].push(f);
+        }
+    }
+    // the corners within two cells of an unbuildable one
+    let mut near = vec![false; h.len()];
+    for face in faces.iter().enumerate().filter(|(f, face)| cell_cost(face, &h, middles[*f]) >= UNJOINED).map(|f| f.1) {
+        for &k in face.corners() {
+            near[k] = true;
+        }
+    }
+    for _ in 0..2 {
+        let grown: Vec<usize> = faces.iter().filter(|f| f.corners().iter().any(|k| near[*k])).flat_map(|f| f.corners().iter().copied()).collect();
+        for k in grown {
+            near[k] = true;
+        }
+    }
+    let loose: Vec<usize> = (0..h.len()).filter(|k| near[*k]).collect();
+    if loose.is_empty() {
+        return h;
+    }
+    let around = |h: &[i32], k: usize| -> f64 { (h[k] as f64 - wanted[k]).powi(2) + touching[k].iter().map(|f| cell_cost(&faces[*f], h, middles[*f])).sum::<f64>() };
+    // (a linear congruential generator: Knuth's MMIX constants)
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut draw = || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 33) as u32
+    };
+    const SWEEPS: usize = 120;
+    for sweep in 0..SWEEPS {
+        // warm at first, then cooling to nothing: the last sweeps only go downhill
+        let heat = if sweep + 24 >= SWEEPS { 0.0 } else { 0.5 * (0.02f64 / 0.5).powf(sweep as f64 / (SWEEPS - 24) as f64) };
+        for _ in 0..loose.len() {
+            let k = loose[draw() as usize % loose.len()];
+            let to = h[k] + if draw() & 1 == 0 { 1 } else { -1 };
+            if (to as f64 - wanted[k]).abs() > SETTLE_REACH {
+                continue;
+            }
+            let (was, before) = (h[k], around(&h, k));
+            h[k] = to;
+            let worse = around(&h, k) - before;
+            if worse > 0.0 && (heat == 0.0 || (draw() as f64 / u32::MAX as f64) >= (-worse / heat).exp()) {
+                h[k] = was;
+            }
+        }
+    }
+    h
+}
+
+impl Ground {
+    /// The under side and the top over each corner, in whole cells, settled
+    /// so that as many cells as can be are buildable (see [`settle`]). The
+    /// under side is a surface too, seen from below: its heights negated.
+    pub fn heights(&self) -> (Vec<i32>, Vec<i32>) {
+        let faces: Vec<Face> = self.squares.iter().map(|s| Face::Square(s.0)).chain(self.halves.iter().map(|h| Face::Half(*h))).collect();
+        let middles = |of: &dyn Fn((f64, f64)) -> f64| -> Vec<f64> { self.squares.iter().map(|s| of(s.1)).chain(self.halves.iter().map(|_| 0.0)).collect() };
+        let top = settle(&self.wanted.iter().map(|w| w.1).collect::<Vec<f64>>(), &faces, &middles(&|m| m.1));
+        let hung = settle(&self.wanted.iter().map(|w| -w.0.min(w.1)).collect::<Vec<f64>>(), &faces, &middles(&|m| -m.0.min(m.1)));
+        // (settled separately, the two sides can cross at a corner where the solid is thin)
+        let under = hung.iter().zip(&top).map(|(h, t)| (-h).min(*t)).collect();
+        (under, top)
+    }
+
+    /// The bricks between the under side and the top, over every cell of
+    /// the ground.
+    ///
+    /// Each side of a whole cell is made as [`parts_of`] makes a square of
+    /// a surface: the top from its corners' heights, the under side the
+    /// same way upside down. Whatever is between them is whole. A half cell
+    /// is an upright ramp between the two, with the brick of [`cap_of`] on
+    /// top and underneath. So wherever one brick can make each slope the
+    /// solid's surface is sloped bricks meeting edge to edge, with no
+    /// steps: across the tube, where its top falls away to its sides, and
+    /// along it, where it climbs.
+    ///
+    /// A whole cell that could not be settled has the nearer pair of its
+    /// opposite corners made level, at the height between them, and is two
+    /// half squares rising to and from that pair: a lip of half the
+    /// difference at those two corners, where a plain block would be a
+    /// step of all of it. A cell where the solid is thinner than it climbs
+    /// across the cell is a plain block from the middle of its under side
+    /// to the middle of its top.
+    ///
+    /// Returns the sloped and three-cornered bricks, and the cells that are
+    /// whole, for the caller to join into cubes with its own.
+    pub fn lay(&self, axis: usize, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+        let (ua, va) = plane_axes(axis);
+        let limit = max_ext.max(1);
+        let (under_at, top_at) = self.heights();
+        let mut bricks: Vec<CellBrick> = Vec::new();
+        let mut whole: Vec<[i32; 3]> = Vec::new();
+        // a brick over the cell at (u, v), its mask given with the plane's corners first and the axis last
+        let mut brick = |u: i32, v: i32, local: u8, from: i32, to: i32| {
             if to <= from || shape_info(local).is_none() {
                 return;
             }
             let mask = (0..8u8).filter(|c| local >> c & 1 == 1).fold(0u8, |m, c| m | 1 << ((c & 1) << ua | (c >> 1 & 1) << va | (c >> 2) << axis));
+            // one that is the same all the way along the axis may be cut to length
             let upright = local & 15 == local >> 4;
             let mut at = from;
             while at < to {
@@ -181,36 +340,140 @@ pub fn columns(cells: &[(i32, i32)], span: &dyn Fn(f64, f64) -> (f64, f64), axis
                 at += run;
             }
         };
-        let mut block = |from: i32, to: i32| {
-            for w in from..to {
-                let mut at = [0; 3];
-                (at[ua], at[va], at[axis]) = (u, v, w);
-                whole.push(at);
+        let joinable = |h: [i32; 4]| {
+            if parts_of(h, 0.5).is_some() {
+                return h;
             }
+            let (a, b) = if (h[0] - h[3]).abs() <= (h[1] - h[2]).abs() { (0, 3) } else { (1, 2) };
+            let mut made = h;
+            // (halved towards zero from the lower, so that a surface and its mirror image agree)
+            let between = h[a].min(h[b]) + (h[a] - h[b]).abs() / 2;
+            (made[a], made[b]) = (between, between);
+            made
         };
-        match (above, below) {
-            // the two sides clear of each other: whole between the highest of the under side and the lowest of the top
-            (Some(above), Some(below)) if top_lo >= under_hi => {
-                block(under_hi, top_lo);
-                for (foot, from, peak, up, in_valley) in above {
-                    brick(foot | foot << 4, top_lo, from);
-                    if up != 0 {
-                        brick(if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 }, from, peak);
-                    }
-                }
-                for (foot, from, peak, up, in_valley) in below {
-                    // upside down: what was `from..peak` going up is `-peak..-from`, with the piece's two ends exchanged
-                    brick(foot | foot << 4, -from, under_hi);
-                    if up != 0 {
-                        let piece = if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 };
-                        brick(piece >> 4 | (piece & 15) << 4, -peak, -from);
-                    }
-                }
+        for &(corners, (mid_under, mid_top)) in &self.squares {
+            let (u, v) = self.at[corners[0]];
+            let (under, top) = (joinable(corners.map(|k| under_at[k])), joinable(corners.map(|k| top_at[k])));
+            let under = [0, 1, 2, 3].map(|k| under[k].min(top[k]));
+            if (0..4).all(|k| under[k] == top[k]) {
+                continue; // nothing over this cell
             }
-            _ => block(mid_under.round() as i32, (mid_top.round() as i32).max(mid_under.round() as i32)),
+            let (under_hi, top_lo) = (*under.iter().max().unwrap(), *top.iter().min().unwrap());
+            let share = |lo: i32, hi: i32, at: f64| (at - lo as f64) / (hi - lo).max(1) as f64;
+            let above = parts_of(top, share(top_lo, *top.iter().max().unwrap(), mid_top));
+            // the under side is a surface too, seen from below: its heights negated
+            let hung = under.map(|h| -h);
+            let below = parts_of(hung, share(-under_hi, -*under.iter().min().unwrap(), -mid_under));
+            let mut block = |from: i32, to: i32| {
+                for w in from..to {
+                    let mut at = [0; 3];
+                    (at[ua], at[va], at[axis]) = (u, v, w);
+                    whole.push(at);
+                }
+            };
+            match (above, below) {
+                // the two sides clear of each other: whole between the highest of the under side and the lowest of the top
+                (Some(above), Some(below)) if top_lo >= under_hi => {
+                    block(under_hi, top_lo);
+                    for (foot, from, peak, up, in_valley) in above {
+                        brick(u, v, foot | foot << 4, top_lo, from);
+                        if up != 0 {
+                            brick(u, v, if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 }, from, peak);
+                        }
+                    }
+                    for (foot, from, peak, up, in_valley) in below {
+                        // upside down: what was `from..peak` going up is `-peak..-from`, with the piece's two ends exchanged
+                        brick(u, v, foot | foot << 4, -from, under_hi);
+                        if up != 0 {
+                            let piece = if in_valley { valley(foot | up << 4, 2) } else { foot | up << 4 };
+                            brick(u, v, piece >> 4 | (piece & 15) << 4, -peak, -from);
+                        }
+                    }
+                }
+                _ => block(mid_under.round() as i32, (mid_top.round() as i32).max(mid_under.round() as i32)),
+            }
         }
+        for corners in &self.halves {
+            let plan = corners.map(|k| self.at[k]);
+            let (u, v) = (plan.iter().map(|p| p.0).min().unwrap(), plan.iter().map(|p| p.1).min().unwrap());
+            // each corner as a corner of the cell's box, at its foot
+            let bit = |k: usize| 1u8 << ((plan[k].0 - u) | (plan[k].1 - v) << 1);
+            let foot = bit(0) | bit(1) | bit(2);
+            let raised = |which: u8| (0..3).filter(|k| which >> k & 1 == 1).fold(0u8, |m, k| m | bit(k));
+            let (tops, unders) = (corners.map(|k| top_at[k]), corners.map(|k| under_at[k]));
+            let (low_top, high_under) = (*tops.iter().min().unwrap(), *unders.iter().max().unwrap());
+            if low_top <= high_under {
+                continue;
+            }
+            brick(u, v, foot | foot << 4, high_under, low_top);
+            // where the three corners cannot be joined, the half cell ends level at the lowest of them
+            if let Some((which, from, tall)) = cap_of(tops) {
+                brick(u, v, foot | raised(which) << 4, from, from + tall);
+            }
+            if let Some((which, from, tall)) = cap_of(unders.map(|h| -h)) {
+                brick(u, v, raised(which) | foot << 4, -from - tall, -from);
+            }
+        }
+        (bricks, whole)
     }
-    (bricks, whole)
+}
+
+/// `bricks` with every row of like bricks made one brick: bricks of one
+/// shape and size, end to end along an axis their shape is the same all the
+/// way along (a ramp along its ridge, a cube along anything), up to
+/// `max_ext` cells long.
+///
+/// [`Ground::lay`] builds a cell at a time, so a slope that is level across
+/// a tube five cells wide comes out as five ramps side by side where one
+/// ramp five wide is the same solid. Joining them afterwards keeps the
+/// laying out simple; laying out long bricks in the first place would need
+/// every cell to know its neighbours' heights.
+pub fn in_rows(mut bricks: Vec<CellBrick>, max_ext: i32) -> Vec<CellBrick> {
+    for along in 0..3 {
+        let (a, b) = plane_axes(along);
+        // (an inner corner's mask is not its corners, and it is the same along no axis)
+        let same_along = |mask: u8| shape_info(mask).is_some_and(|i| i.kind != Kind::Inner) && (0..8u8).all(|c| mask >> c & 1 == mask >> (c ^ 1 << along) & 1);
+        bricks.sort_by_key(|k| (k.mask, k.min[a], k.min[b], k.ext[a], k.ext[b], k.min[along]));
+        let mut joined: Vec<CellBrick> = Vec::with_capacity(bricks.len());
+        for brick in bricks {
+            match joined.last_mut() {
+                Some(last)
+                    if last.mask == brick.mask
+                        && same_along(brick.mask)
+                        && [a, b].iter().all(|k| last.min[*k] == brick.min[*k] && last.ext[*k] == brick.ext[*k])
+                        && last.min[along] + last.ext[along] == brick.min[along]
+                        && last.ext[along] + brick.ext[along] <= max_ext.max(1) =>
+                {
+                    last.ext[along] += brick.ext[along];
+                }
+                _ => joined.push(brick),
+            }
+        }
+        bricks = joined;
+    }
+    bricks
+}
+
+/// Columns of a solid that has a top and an under side over the ground it
+/// covers: for each cell of ground in `cells`, the bricks between the two
+/// (see [`Ground`]).
+///
+/// `span` gives the under side and the top along `axis` over a point (u, v)
+/// of the plane across it; where the solid ends, the two are equal.
+pub fn columns(cells: &[(i32, i32)], span: &dyn Fn(f64, f64) -> (f64, f64), axis: usize, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+    let mut ground = Ground { at: Vec::new(), wanted: Vec::new(), squares: Vec::new(), halves: Vec::new() };
+    let mut numbered: std::collections::HashMap<(i32, i32), usize> = std::collections::HashMap::new();
+    for &(u, v) in cells {
+        let corners = [(u, v), (u + 1, v), (u, v + 1), (u + 1, v + 1)].map(|p| {
+            *numbered.entry(p).or_insert_with(|| {
+                ground.at.push(p);
+                ground.wanted.push(span(p.0 as f64, p.1 as f64));
+                ground.at.len() - 1
+            })
+        });
+        ground.squares.push((corners, span(u as f64 + 0.5, v as f64 + 0.5)));
+    }
+    ground.lay(axis, max_ext)
 }
 
 /// A band to raise. Everything is in cells.
@@ -411,8 +674,47 @@ mod tests {
         // where it climbs, its top and its under side are sloped bricks, and it is the same on both sides
         let sloped = |on_top: bool| pieces.iter().filter(|b| b.mask & 15 != b.mask >> 4 && b.min[0] >= 4 && b.min[0] < 12 && (b.min[2] as f64 > 10.0 + lift(b.min[0] as f64)) == on_top).count();
         assert!(sloped(true) >= 16 && sloped(false) >= 16, "{} on top, {} underneath", sloped(true), sloped(false));
-        let all: std::collections::HashSet<[i32; 3]> = bricks.iter().map(|b| b.min).collect();
-        assert!(all.iter().all(|c| all.contains(&[c[0], -1 - c[1], c[2]])), "not the same either side of its middle");
+        // (The two sides of its middle are no longer alike brick for brick:
+        // where corners have to be settled, the order they are tried in is
+        // drawn at random. A form asked to be symmetric is made so afterwards.)
+    }
+
+    #[test]
+    fn corners_are_settled_until_bricks_can_join_them() {
+        // a surface climbing 1.3 cells a cell one way and half a cell the other: steeper than rounding can follow
+        let n = 14;
+        let wanted: Vec<f64> = (0..n * n).map(|k| 1.3 * (k % n) as f64 + 0.5 * (k / n) as f64 + 0.2).collect();
+        let faces: Vec<Face> = (0..(n - 1) * (n - 1)).map(|k| (k % (n - 1), k / (n - 1))).map(|(i, j)| Face::Square([i + n * j, i + 1 + n * j, i + n * (j + 1), i + 1 + n * (j + 1)])).collect();
+        let middles: Vec<f64> = faces.iter().map(|f| f.corners().iter().map(|k| wanted[*k]).sum::<f64>() / 4.0).collect();
+        let unjoined = |h: &[i32]| faces.iter().filter(|f| matches!(f, Face::Square(c) if parts_of(c.map(|k| h[k]), 0.5).is_none())).count();
+        let rounded: Vec<i32> = wanted.iter().map(|w| w.round() as i32).collect();
+        let settled = settle(&wanted, &faces, &middles);
+        assert!(unjoined(&rounded) >= 20, "only {} cells to settle", unjoined(&rounded));
+        assert!(unjoined(&settled) * 5 <= unjoined(&rounded), "{} of {} cells still cannot be joined", unjoined(&settled), unjoined(&rounded));
+        // and no corner far from the surface
+        assert!(settled.iter().zip(&wanted).all(|(h, w)| (*h as f64 - w).abs() <= SETTLE_REACH));
+        // half a cell climbing along its long side: its square corner has to come down to the lower end
+        let (wanted, half) = ([1.0, 0.0, 1.0, 1.0], [Face::Square([0, 1, 2, 3]), Face::Half([0, 1, 2])]);
+        assert!(cap_of([1, 0, 1]).is_none());
+        let settled = settle(&wanted, &half, &[0.75, 0.0]);
+        assert!(cap_of([settled[0], settled[1], settled[2]]).is_some(), "{settled:?}");
+    }
+
+    #[test]
+    fn like_bricks_in_a_row_become_one() {
+        let ramp = |x: i32, y: i32, z: i32| CellBrick { mask: 0x3f, min: [x, y, z], ext: [1, 1, 1] };
+        assert!(shape_info(0x3f).is_some_and(|i| i.kind == Kind::Ramp));
+        // five ramps side by side along their ridge (x), and one further up the slope
+        let mut bricks: Vec<CellBrick> = (0..5).map(|x| ramp(x, 0, 0)).collect();
+        bricks.push(ramp(0, 1, 1));
+        let rows = in_rows(bricks.clone(), 80);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows.contains(&CellBrick { mask: 0x3f, min: [0, 0, 0], ext: [5, 1, 1] }));
+        // no longer than allowed
+        assert!(in_rows(bricks, 2).iter().all(|b| b.ext[0] <= 2));
+        // a tetrahedron is the same along no axis
+        let tets: Vec<CellBrick> = (0..3).map(|x| CellBrick { mask: 0x17, min: [x, 0, 0], ext: [1, 1, 1] }).collect();
+        assert_eq!(in_rows(tets, 80).len(), 3);
     }
 
     #[test]
