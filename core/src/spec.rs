@@ -3316,6 +3316,17 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_of_cut_tiles_measures_as_close_to_a_rounded_form_as_no_pattern() {
+        // a disc with a rounded rim: the pattern is on its flat top and does not change its shape
+        let disc = |mosaic| Spec { form: Form::Torus, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 40.0, thick: 10.0, fill: true, tube: true, mosaic, ..Spec::default() };
+        let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
+        let plain = build(&disc(None)).unwrap();
+        let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        assert!(built.bricks.iter().any(|b| b.mask != CUBE && b.ext == [1, 1, built.bricks.iter().map(|b| b.ext[2]).max().unwrap()]), "no tile is cut in two");
+        assert!((built.error - plain.error).abs() < 0.1 * plain.error, "plain {} of {}, patterned {} of {}", plain.error, plain.solid, built.error, built.solid);
+    }
+
+    #[test]
     fn a_pattern_is_laid_at_single_microbricks_whatever_the_budget() {
         // (`grain: 0` is the brick size chosen by the budget, as the editor has it)
         // a floor 240 by 160 and 4 deep, which as a plain floor is a handful of bricks (a floor one deep is at single microbricks anyway: there is no coarser brick it can be built of)
