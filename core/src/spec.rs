@@ -1318,9 +1318,11 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             // grown tree does take is checked when it is fitted. (At the
             // full reach each way, eight times the cells, an oak was
             // refused from about 150 tall, a size it builds at easily.)
+            // a hedge's length is its thickness stretched along x
+            let long = spread * spec.stretch.x.clamp(1.0, MAX_SPAN);
             let reach = (spread + height / 2.0) as i64 + 8;
-            check_size(&[reach, reach, height as i64 + 8])?;
-            let tree = std::sync::Arc::new(crate::tree::Model::new(&spec.tree, foot, height, spread));
+            check_size(&[reach.max(long as i64 + 8), reach, height as i64 + 8])?;
+            let tree = std::sync::Arc::new(crate::tree::Model::with_length(&spec.tree, foot, height, spread, long));
             let (lo, hi) = tree.bounds();
             volume(Field::Tree(tree), lo, hi, Vec::new())
         }

@@ -784,6 +784,10 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 if !settings.contains_key("rise") {
                     spec.rise = Some(height);
                 }
+                // (and a hedge given no length is three times as long as it is thick)
+                if kind == brickloft_core::tree::Kind::Hedge && !settings.contains_key("stretch") {
+                    spec.stretch.x = brickloft_core::tree::HEDGE_LENGTH;
+                }
             }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
