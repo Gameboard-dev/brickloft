@@ -398,6 +398,8 @@ other way. There is no dot for the length yet: the slider sets it.
 on from every branch end. It is the same tree as in leaf. **Berries** on
 a boxwood or hedge take the seventh colour of its set.
 
+<img src="images/tree-oak-bare.png" width="330" alt="A bare oak: a thick flared trunk and heavy crooked limbs ending in short forking twigs"> <img src="images/plant-hedge.png" width="330" alt="A clipped hedge with red berries, five times as long as it is thick">
+
 **Seed** is which plant of its kind: any whole number, each a different
 one, and the same number is always the same plant. **Another** takes the
 next number. The height, spread and other settings change the tree a seed
