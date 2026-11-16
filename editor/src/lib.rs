@@ -141,6 +141,20 @@ pub fn run_form(form: usize, claude: bool) {
             Gm::new(InstancedMesh::new(&context, &Instances::default(), &cpu), material::BrickMaterial::default())
         })
         .collect();
+    // The same shapes again for the bricks that are seen through, the
+    // water and ice of ponds: drawn after everything solid (see
+    // `BrickMaterial::clear`). They are few and large, so a second set of
+    // draw calls costs next to nothing, and the solid bricks keep theirs.
+    let mut clear_meshes: Vec<Gm<InstancedMesh, material::BrickMaterial>> = brick_meshes.iter().zip(&masks).map(|(_, &mask)| {
+        let shape = mesh::shape_mesh(mask);
+        let cpu = CpuMesh {
+            positions: Positions::F32(shape.positions.iter().map(|p| vec3(p[0], p[1], p[2])).collect()),
+            normals: Some(shape.normals.iter().map(|n| vec3(n[0], n[1], n[2])).collect()),
+            uvs: Some(shape.rim.iter().map(|r| vec2(*r, 0.0)).collect()),
+            ..Default::default()
+        };
+        Gm::new(InstancedMesh::new(&context, &Instances::default(), &cpu), material::BrickMaterial { clear: true, ..Default::default() })
+    }).collect();
     let mut handle_mesh = Gm::new(
         InstancedMesh::new(&context, &Instances::default(), &CpuMesh::sphere(16)),
         ColorMaterial::new_opaque(&context, &CpuMaterial { albedo: Srgba::WHITE, ..Default::default() }),
@@ -493,9 +507,12 @@ pub fn run_form(form: usize, claude: bool) {
                 .into_iter()
                 .map(|(at, q)| (q != state::LEVEL).then(|| Mat4::from_translation(vec3(at[0] as f32, at[1] as f32, at[2] as f32)) * Mat4::from(Quat::new(q[3] as f32, q[0] as f32, q[1] as f32, q[2] as f32))))
                 .collect();
-            for ((object, &mask), owner) in brick_meshes.iter_mut().zip(&masks).zip(owners.iter_mut()) {
+            // each form's water: its colour and how solid it is drawn (see `State::waters`)
+            let waters = state.waters();
+            for (((object, glass), &mask), owner) in brick_meshes.iter_mut().zip(clear_meshes.iter_mut()).zip(&masks).zip(owners.iter_mut()) {
                 let mut instances = Instances::default();
                 let mut colours = Vec::new();
+                let (mut clear, mut tints) = (Instances::default(), Vec::new());
                 owner.clear();
                 for (b, colour, form, place) in bricks.iter().filter(|b| b.0.mask == mask) {
                     // the mesh is a unit box at the origin: scale it to the
@@ -504,10 +521,18 @@ pub fn run_form(form: usize, claude: bool) {
                     let at = vec3(b.min[0] as f32 + place[0] as f32 / 2.0, b.min[1] as f32 + place[1] as f32 / 2.0, b.min[2] as f32 + place[2] as f32 / 2.0);
                     let on_lattice = Mat4::from_translation(at) * Mat4::from_nonuniform_scale(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32);
                     // then turned with its form's grid, if that is at an angle
-                    instances.transformations.push(match grids.get(*form).copied().flatten() {
+                    let set = match grids.get(*form).copied().flatten() {
                         Some(turn) => turn * on_lattice,
                         None => on_lattice,
-                    });
+                    };
+                    // (water and ice: seen through, never clicked on, and casting no shadow on their own bed)
+                    if let Some((_, solid)) = waters.get(*form).copied().flatten().filter(|w| Some(w.0) == *colour) {
+                        let [r, g, b] = colour.unwrap_or([214, 208, 196]);
+                        clear.transformations.push(set);
+                        tints.push(Srgba::new(r, g, b, solid));
+                        continue;
+                    }
+                    instances.transformations.push(set);
                     // a brick left to the player's colour in the game is
                     // shown in a neutral one; the forms not being edited
                     // are shown a little darker, to tell them apart
@@ -520,6 +545,8 @@ pub fn run_form(form: usize, claude: bool) {
                 }
                 instances.colors = Some(colours);
                 object.geometry.set_instances(&instances);
+                clear.colors = Some(tints);
+                glass.geometry.set_instances(&clear);
             }
             // The shadow map is redrawn only here, when the bricks change, not
             // every frame: turning the camera does not move a shadow.
@@ -596,6 +623,7 @@ pub fn run_form(form: usize, claude: bool) {
             screen.render(&camera, &arrows, &lights);
         }
         screen.render(&camera, &handle_mesh, &lights);
+        screen.render(&camera, clear_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
         // the button is in the panel, so its picture has the panel in it
         let shot = shot_keyed.or(asked.screenshot.then_some(true));
         // Read back from the frame as drawn so far, before the window shows

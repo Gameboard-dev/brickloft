@@ -161,6 +161,19 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[70, 56, 46], [36, 80, 50], [24, 58, 40], [60, 108, 62], [84, 68, 54], [60, 108, 62], [206, 44, 40], [240, 210, 90]],
             &[[100, 80, 56], [150, 164, 60], [108, 130, 50], [198, 196, 84], [112, 92, 66], [198, 196, 84], [232, 128, 36], [240, 210, 90]],
         ],
+        // A cherry: dark bark; blossom in a middle tone, a deep one and a
+        // pale one; dark limbs; a bronze young leaf; dark buds; and the
+        // pale bands on its trunk. Pale pink; deep pink; white; mixed
+        // pinks and white; and out of blossom, in summer leaf and in
+        // autumn, where the same parts are leaves.
+        "cherry" => &[
+            &[[62, 44, 42], [246, 196, 212], [232, 150, 178], [252, 236, 240], [52, 38, 38], [150, 110, 70], [176, 60, 100], [124, 96, 88]],
+            &[[62, 44, 42], [236, 130, 170], [208, 84, 136], [248, 190, 210], [52, 38, 38], [146, 100, 66], [150, 40, 86], [124, 96, 88]],
+            &[[62, 44, 42], [250, 244, 244], [238, 214, 222], [255, 252, 250], [52, 38, 38], [156, 126, 80], [214, 150, 170], [124, 96, 88]],
+            &[[62, 44, 42], [244, 170, 196], [214, 96, 146], [254, 246, 246], [52, 38, 38], [150, 110, 70], [168, 50, 94], [124, 96, 88]],
+            &[[66, 48, 44], [78, 130, 58], [54, 100, 48], [116, 162, 72], [56, 42, 40], [140, 170, 80], [60, 90, 44], [128, 100, 90]],
+            &[[66, 48, 44], [214, 120, 44], [176, 60, 36], [236, 176, 60], [56, 42, 40], [200, 150, 50], [140, 40, 30], [128, 100, 90]],
+        ],
         // a birch: white bark, its marks the seventh colour; autumn gold; spring
         "birch" => &[
             &[[232, 230, 222], [92, 142, 60], [66, 112, 50], [136, 176, 76], [70, 62, 56], [136, 176, 76], [44, 40, 38], [150, 120, 70]],
@@ -308,6 +321,7 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "daisy" => &["White", "Pink", "Yellow"],
         "daffodil" => &["Yellow", "White with a yellow trumpet", "White with an orange trumpet"],
         "bed" => &["Spring mix", "Pink and white", "Hot colours"],
+        "cherry" => &["Pale pink", "Deep pink", "White", "Mixed", "Summer leaf", "Autumn"],
         "petunia" => &["Purple", "Pink", "White", "Red", "Blue and white"],
         "reeds" => &["Summer", "Autumn straw", "Purple plumes"],
         "sunflower" => &["Yellow", "Red-bronze", "Lemon"],

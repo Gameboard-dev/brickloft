@@ -869,6 +869,21 @@ impl State {
     /// is, was cut from or stands in place of. One the form had no brick
     /// for (the fillet itself) is coloured as a brick of the form standing
     /// there would be.
+    /// For each form (the one being edited, then the others), the colour
+    /// of its bricks that are drawn seen through and how solid they are
+    /// drawn, of 255: the water of a patch of grass, and more solid its
+    /// ice. `None` for a form with no such bricks. Told by colour and not
+    /// by brick, since a brick of a join is not a brick of its form's
+    /// build; a patch whose water has been given the very colour of its
+    /// sand would have its sand seen through as well.
+    pub fn waters(&self) -> Vec<Option<([u8; 3], u8)>> {
+        let spec = self.full_spec();
+        std::iter::once((&self.paint, &spec)).chain(self.others.iter().map(|i| (&i.paint, &i.spec))).map(|(paint, spec)| {
+            let pond = spec.form == Form::Tree && spec.tree.kind == brickloft_core::tree::Kind::Grass && paint.mode == crate::paint::Mode::Pattern;
+            paint.shade(brickloft_core::tree::WATER).filter(|_| pond).map(|colour| (colour, if spec.fill { 190 } else { 105 }))
+        }).collect()
+    }
+
     pub fn painted(&self) -> Vec<Painted> {
         let mut all = Vec::new();
         let spec = self.full_spec();
@@ -1149,7 +1164,10 @@ impl State {
             self.lock = Lock::Axis(2);
         } else {
             self.spec.points.truncate(1);
-            self.spec.closed = false;
+            // (a cherry keeps it: it is whether its fallen petals lie under it)
+            if kind != Kind::Cherry {
+                self.spec.closed = false;
+            }
             self.spec.pulls.clear();
         }
         self.spec.stretch = DVec3::ONE;

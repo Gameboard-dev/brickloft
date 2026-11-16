@@ -92,10 +92,12 @@ pub enum Kind {
     Daffodil,
     /// a bed of mixed flowers
     Bed,
+    /// a Japanese flowering cherry in blossom
+    Cherry,
 }
 
 /// The kinds on offer, with the names they are written and read by.
-pub const KINDS: [(Kind, &str); 22] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed")];
+pub const KINDS: [(Kind, &str); 23] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed"), (Kind::Cherry, "cherry")];
 
 /// How a tree is grown: the settings a form carries for it. Its height is
 /// the form's `rise` and its spread the form's `radius`.
@@ -144,6 +146,7 @@ impl Tree {
             Kind::Daisy => (50, 7, 30),
             Kind::Daffodil => (50, 5, 30),
             Kind::Bed => (50, 14, 40),
+            Kind::Cherry => (60, 7, 40),
         };
         Tree { kind, seed: 1, fullness, count, bend, extras: false }
     }
@@ -165,7 +168,7 @@ impl Tree {
             // (grass has nothing to count)
             Kind::Cypress => (1, 1),
             Kind::Grass => (0, 40),
-            Kind::Birch | Kind::Willow | Kind::ScotsPine => (3, 9),
+            Kind::Birch | Kind::Willow | Kind::ScotsPine | Kind::Cherry => (3, 9),
             Kind::DatePalm => (8, 60),
             Kind::Yucca => (8, 80),
             Kind::Daisy | Kind::Daffodil => (1, 20),
@@ -229,6 +232,8 @@ impl Tree {
             Kind::Daffodil => (46.0, 6.0),
             // a bed's is how far the bed reaches
             Kind::Bed => (56.0, 36.0),
+            // (wider than it is tall)
+            Kind::Cherry => (84.0, 56.0),
         }
     }
 }
@@ -587,22 +592,24 @@ impl Model {
             Kind::Daisy => 20,
             Kind::Daffodil => 21,
             Kind::Bed => 22,
+            Kind::Cherry => 23,
         };
         let mut grown = Grown { parts: Vec::new(), limbs: Vec::new(), forks: Vec::new(), numbers: Numbers(tree.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt) };
         match tree.kind {
             Kind::Pine => pine(&mut grown, &tree, height, spread),
             Kind::Palm => palm(&mut grown, &tree, height, spread, false),
             Kind::DatePalm => palm(&mut grown, &tree, height, spread, true),
-            Kind::Birch => broadleaf(&mut grown, &tree, height, spread, &BIRCH),
-            Kind::Willow => broadleaf(&mut grown, &tree, height, spread, &WILLOW),
-            Kind::ScotsPine => broadleaf(&mut grown, &tree, height, spread, &SCOTS),
+            Kind::Birch => broadleaf(&mut grown, &tree, height, spread, &BIRCH, false),
+            Kind::Willow => broadleaf(&mut grown, &tree, height, spread, &WILLOW, false),
+            Kind::ScotsPine => broadleaf(&mut grown, &tree, height, spread, &SCOTS, false),
             Kind::Cypress => cypress(&mut grown, &tree, height, spread),
             Kind::Yucca => yucca(&mut grown, &tree, height, spread),
             Kind::Daisy => clump(&mut grown, &tree, height, spread, daisy_at),
             Kind::Daffodil => clump(&mut grown, &tree, height, spread, daffodil_at),
             Kind::Bed => bed(&mut grown, &tree, height, spread),
-            Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK),
-            Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH),
+            Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK, false),
+            Kind::Cherry => broadleaf(&mut grown, &tree, height, spread, &CHERRY, lay.closed),
+            Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH, false),
             Kind::Hedge | Kind::Reeds => {
                 // grown straight, then laid along its line (see [`Grown::lay_along`])
                 let run = Run::new(lay);
@@ -838,6 +845,8 @@ impl Model {
                 }
             }
             // a birch's white bark is marked with black: bands and patches, more of them low down
+            // a cherry's bark is banded across with pale lenticels: every third layer of its trunk, broken here and there
+            (Kind::Cherry, Shape::Column { .. }, TRUNK) if (p.z.floor() as i64).rem_euclid(3) == 1 && noise(&self.lattice, DVec3::new(p.x * 0.6, p.y * 0.6, p.z * 0.3)) > -0.35 => STAR,
             (Kind::Birch, _, TRUNK | LIMB) if noise(&self.lattice, DVec3::new(p.x * 0.35, p.y * 0.35, p.z * 1.1)) > 0.42 => EXTRA,
             (_, _, shade) => shade,
         }
@@ -1293,10 +1302,25 @@ struct Habit {
     weep: f64,
     /// how far the smaller tufts of a mass stand above and below its middle: little, for leaves in flat layers
     spray: f64,
+    /// in blossom: clouds of small clusters along its branches, where another tree has masses of leaves at their ends (see [`CHERRY`])
+    bloom: bool,
 }
 
 /// An oak: low fork, wide heavy limbs, leaves in separate masses.
-const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045), leader: false, polar: (0.78, 1.22), out: 0.36, sag: 0.1, up: 0.15, wander: 0.44, flat: 0.78, heart: 0.15, leafy: 1.5, roots: 1.0, fine: 0.0, weep: 0.0, spray: 0.5 };
+const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045), leader: false, polar: (0.78, 1.22), out: 0.36, sag: 0.1, up: 0.15, wander: 0.44, flat: 0.78, heart: 0.15, leafy: 1.5, roots: 1.0, fine: 0.0, weep: 0.0, spray: 0.5, bloom: false };
+
+/// A Japanese flowering cherry in blossom, *Prunus serrulata* or the
+/// Yoshino cherry: a short dark trunk banded across with pale lenticels,
+/// forking low into wide limbs that sweep a little upwards, and a broad
+/// airy crown wider than the tree is tall. It flowers before its leaves,
+/// so what is seen is blossom along the bare dark branches, in clouds.
+/// https://en.wikipedia.org/wiki/Prunus_serrulata
+/// https://en.wikipedia.org/wiki/Cherry_blossom
+/// The oak's rule of forking, with limbs that leave the trunk wide and
+/// turn up a little, and with blossom on every branch under five and a
+/// half cells thick and not only at the ends, which is what puts it along the
+/// branches.
+const CHERRY: Habit = Habit { girth: 0.042, bole: (0.15, 0.2), mass: (0.065, 0.04), leader: false, polar: (1.0, 1.4), out: 0.46, sag: 0.0, up: 0.1, wander: 0.3, flat: 0.6, heart: 0.18, leafy: 5.5, roots: 0.8, fine: 0.5, weep: 0.0, spray: 0.42, bloom: true };
 
 /// A beech, *Fagus sylvatica*: a smooth grey trunk that carries on up
 /// through a dense, oval crown about three quarters as wide as the tree
@@ -1307,19 +1331,19 @@ const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045
 /// It is the oak's rule with other numbers, which is the reason the rule
 /// has numbers: a leading stem, limbs that wander less, flatter tufts of
 /// leaves on more of the branches (so the crown closes), and small roots.
-const BEECH: Habit = Habit { girth: 0.04, bole: (0.22, 0.28), mass: (0.09, 0.055), leader: true, polar: (0.75, 1.1), out: 0.24, sag: 0.0, up: 0.1, wander: 0.24, flat: 0.42, heart: 0.34, leafy: 3.0, roots: 0.55, fine: 1.0, weep: 0.0, spray: 0.12 };
+const BEECH: Habit = Habit { girth: 0.04, bole: (0.22, 0.28), mass: (0.09, 0.055), leader: true, polar: (0.75, 1.1), out: 0.24, sag: 0.0, up: 0.1, wander: 0.24, flat: 0.42, heart: 0.34, leafy: 3.0, roots: 0.55, fine: 1.0, weep: 0.0, spray: 0.12, bloom: false };
 
 /// A silver birch, *Betula pendula*: a slender white trunk marked with
 /// black, carrying on to the top of a narrow, open crown of thin
 /// climbing limbs whose ends hang.
 /// https://en.wikipedia.org/wiki/Betula_pendula
-const BIRCH: Habit = Habit { girth: 0.024, bole: (0.26, 0.34), mass: (0.12, 0.06), leader: true, polar: (0.4, 0.75), out: 0.12, sag: 0.0, up: 0.18, wander: 0.22, flat: 0.8, heart: 0.4, leafy: 2.6, roots: 0.4, fine: 1.0, weep: 0.3, spray: 0.5 };
+const BIRCH: Habit = Habit { girth: 0.019, bole: (0.26, 0.34), mass: (0.12, 0.06), leader: true, polar: (0.4, 0.75), out: 0.12, sag: 0.0, up: 0.18, wander: 0.22, flat: 0.8, heart: 0.4, leafy: 2.6, roots: 0.4, fine: 1.0, weep: 0.3, spray: 0.5, bloom: false };
 
 /// A weeping willow, *Salix babylonica*: a short stout trunk, limbs that
 /// climb and spread into a wide dome, and from every branch end a
 /// curtain of long thin shoots hanging straight down, some to the ground.
 /// https://en.wikipedia.org/wiki/Salix_babylonica
-const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035), leader: false, polar: (0.5, 0.95), out: 0.3, sag: 0.0, up: 0.16, wander: 0.36, flat: 0.7, heart: 0.45, leafy: 1.8, roots: 0.9, fine: 1.0, weep: 1.0, spray: 0.4 };
+const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035), leader: false, polar: (0.5, 0.95), out: 0.3, sag: 0.0, up: 0.16, wander: 0.36, flat: 0.7, heart: 0.45, leafy: 1.8, roots: 0.9, fine: 1.0, weep: 1.0, spray: 0.4, bloom: false };
 
 /// A Scots pine, *Pinus sylvestris*, grown old: a tall bare trunk, its
 /// lower boughs long shed, and at the top a flat, broken crown of
@@ -1329,7 +1353,7 @@ const WILLOW: Habit = Habit { girth: 0.05, bole: (0.2, 0.26), mass: (0.06, 0.035
 /// It is grown by the forking rule and not the pine's tiers: an old
 /// Scots pine has lost the tiers a young one had, and what is left is a
 /// few limbs that fork.
-const SCOTS: Habit = Habit { girth: 0.034, bole: (0.52, 0.6), mass: (0.12, 0.06), leader: true, polar: (1.0, 1.45), out: 0.3, sag: 0.04, up: 0.02, wander: 0.5, flat: 0.34, heart: 0.5, leafy: 1.3, roots: 0.5, fine: 0.0, weep: 0.0, spray: 0.1 };
+const SCOTS: Habit = Habit { girth: 0.034, bole: (0.52, 0.6), mass: (0.12, 0.06), leader: true, polar: (1.0, 1.45), out: 0.3, sag: 0.04, up: 0.02, wander: 0.5, flat: 0.34, heart: 0.5, leafy: 1.3, roots: 0.5, fine: 0.0, weep: 0.0, spray: 0.1, bloom: false };
 
 /// The thinnest an oak's branch is followed to, in cells: thinner than
 /// this it would not survive the fit, and it ends in leaves.
@@ -1384,7 +1408,7 @@ struct Shoot {
 /// else, so the crown is clumps with sky between them and the limbs show
 /// from below, as on the tree. Each mass is a few flattened balls with a
 /// rough surface (see [`ROUGH`]).
-fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit) {
+fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit, fallen: bool) {
     let (dense, gnarl) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let limbs = tree.count.max(2) as usize;
     let girth = (height * habit.girth).max(2.4);
@@ -1400,16 +1424,33 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     // oak's crookedness is in its limbs.)
     let _ = g.between(0.0, TAU);
     let stem = |z: f64| DVec3::Z * z;
-    let trunk = g.trunk(DVec3::ZERO, bole, &|z: f64| girth * (1.0 + 0.45 * habit.roots * (-z / (girth * 1.3)).exp()), TRUNK);
+    // (widening to its foot by up to a third, over twice its own thickness of height)
+    // A tree that keeps its stem through its crown narrows all the way up
+    // it, and is at its fork a little over three quarters of what it is
+    // near the ground; one that divides there into limbs is a column to
+    // its fork. What it is at the fork is what its limbs share.
+    // (a slender one, a birch, by more)
+    let neck = if habit.leader { girth * if habit.girth < 0.03 { 0.7 } else { 0.78 } } else { girth };
+    let trunk = g.trunk(DVec3::ZERO, bole, &|z: f64| (girth + (neck - girth) * (z / bole).min(1.0)) * (1.0 + 0.36 * habit.roots * (-z / (girth * 2.2)).exp()), TRUNK);
+    // and narrowing under its fork to what its limbs are together, so that they do not leave a shoulder
+    g.cone(DVec3::Z * (bole - neck * 0.4), DVec3::Z * (bole + neck * 0.7), neck * 0.85, neck * 0.6, TRUNK);
     // the roots where they leave the trunk: buttresses running down into the ground
     let roots = 5 + (g.unit() * 3.0) as usize;
     let turn = g.between(0.0, TAU);
     for k in 0..roots {
         let way = turn + TAU * (k as f64 + g.between(-0.25, 0.25)) / roots as f64;
         let out = DVec3::new(way.cos(), way.sin(), 0.0);
-        let far = girth * g.between(1.9, 2.6) * habit.roots;
-        let high = girth * g.between(1.4, 2.2) * habit.roots;
-        g.cone(out * girth * 0.4 + DVec3::Z * high, out * far - DVec3::Z * girth * 0.2, girth * 0.62, girth * 0.3, TRUNK);
+        // A buttress is a thin ridge running down the flare of the
+        // trunk and out along the ground a little way. They were stout
+        // cones reaching two and a half trunks out, ending half way up
+        // a trunk that had hardly widened: a wide skirt with a post
+        // standing in it. A slender tree has none.
+        let far = girth * g.between(1.55, 1.95) * habit.roots;
+        // (and no higher than half way up to its fork)
+        let high = (girth * g.between(2.4, 3.4) * habit.roots).min(bole * 0.5);
+        if habit.roots >= 0.7 {
+            g.cone(out * girth * 0.72 + DVec3::Z * high, out * far - DVec3::Z * girth * 0.2, girth * 0.3, girth * 0.24, TRUNK);
+        }
     }
 
     // The crown's outline: a dome, widest a fifth of the way up it and
@@ -1444,15 +1485,15 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
         // the limbs the trunk divides into, sharing its cross-section
         let mut shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
         if habit.leader {
-            // (the stem carries on as the thickest of them)
-            shares[0] *= 2.4;
+            // (the stem carries on as the thickest of them: of a slender tree, a birch, as most of it, its limbs being thin things off a stem)
+            shares[0] *= if habit.girth < 0.03 { 5.0 } else { 2.4 };
         }
         let total: f64 = shares.iter().sum();
         let turn = g.between(0.0, TAU);
         let mut waiting = Vec::new();
         let mut radii = Vec::new();
         for (k, share) in shares.iter().enumerate() {
-            let radius = girth * (share / total).sqrt();
+            let radius = neck * (share / total).sqrt();
             radii.push(radius);
             let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / limbs as f64;
             // striking out at wide angles, 45 to 70 degrees off upright;
@@ -1461,7 +1502,7 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
             let polar = if k == 0 && habit.leader { g.between(0.02, 0.12) } else if k == 0 && limbs >= 4 { g.between(0.15, 0.4) } else { g.between(habit.polar.0, habit.polar.1) };
             waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
-        g.forks.push((girth, radii));
+        g.forks.push((neck, radii));
 
         while let Some(shoot) = waiting.pop() {
             let (mut at, mut way, mut radius, mut roll) = (shoot.from, shoot.way, shoot.radius, shoot.roll);
@@ -1551,7 +1592,7 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
         let level = g.limbs[n].level;
         for i in 1..path.len() {
             g.cone(path[i - 1], path[i], radius[i - 1], radius[i], // (a slender tree's limbs keep its trunk's bark while they are over a cell and a half thick: a birch is white well up into its crown)
-            if (level == 1 && radius[i] > girth * 0.42) || (habit.girth < 0.03 && radius[i] > 1.5) { TRUNK } else { LIMB });
+            if (level == 1 && radius[i] > girth * 0.42) || (habit.girth < 0.03 && radius[i] > 1.02) { TRUNK } else { LIMB });
         }
         g.limbs[n].path = path;
     }
@@ -1575,6 +1616,25 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
             // (a fork deeper on a tall tree, which has the room for it)
             let deep = if size >= 1.0 { 2 + habit.fine as u8 + (height > 150.0) as u8 } else { 1 };
             twigs(g, at, way, mass * (1.25 + 0.2 * habit.fine), deep, habit.fine, gnarl, &hold);
+            continue;
+        }
+        if habit.bloom {
+            // Blossom: a loose cloud of small clusters round this place
+            // on the branch, each its own ball two to three cells
+            // through and most a cell or two from the next, so that sky
+            // and the dark branch show between them. One ball of
+            // clusters, as an oak's tuft is, would be a pink oak. Of
+            // every twenty clusters nine are the middle pink, five
+            // white, four the deep pink, one a dark bud and one a young
+            // bronze leaf.
+            let clusters = ((9.0 + 16.0 * dense) * size) as usize;
+            for _ in 0..clusters {
+                let (off, far, throw) = (g.any_way(), g.unit().sqrt() * mass * 2.1, g.unit());
+                let r = if throw >= 0.9 { g.between(1.2, 1.6) } else { g.between(1.6, 2.7) };
+                let c = hold(at + DVec3::new(off.x, off.y, off.z * 0.45) * far + DVec3::Z * mass * 0.25);
+                let shade = if throw < 0.45 { LEAF } else if throw < 0.7 { LEAF_LIGHT } else if throw < 0.9 { LEAF_DARK } else if throw < 0.95 { EXTRA } else { TOP };
+                g.blob(DVec3::new(c.x, c.y, c.z.min(height - r)), DVec3::new(r, r, r * 0.8), shade, false);
+            }
             continue;
         }
         if habit.weep > 0.0 && size >= 1.0 {
@@ -1611,6 +1671,14 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
             way = (way + g.any_way() * 0.6 + DVec3::Z * 0.2).normalize();
             way.z = way.z.max(-0.1) * (habit.spray / 0.5).min(1.0);
             at += way * r * 1.15;
+        }
+    }
+    if fallen && habit.bloom && !tree.extras {
+        // fallen petals: small flat drifts on the ground under the crown, thickest under its middle
+        for _ in 0..(spread * spread * 0.035) as usize {
+            let (way, far) = (g.between(0.0, TAU), g.unit().powf(0.7) * (spread - 2.0));
+            let (r, pale) = (g.between(1.2, 2.0), g.unit() < 0.4);
+            g.blob(DVec3::new(fork.x + way.cos() * far, fork.y + way.sin() * far, 0.35), DVec3::new(r, r, 0.75), if pale { LEAF_LIGHT } else { LEAF }, false);
         }
     }
 }
@@ -2086,6 +2154,8 @@ pub struct Lay {
     pub water: Option<f64>,
     /// grass: how thickly reeds stand round the water, 0 to 1
     pub reeds: f64,
+    /// grass: how many levels its water stands at, 1 or 2 (see [`Waters`]); anything under 2 is one
+    pub levels: u8,
     /// grass: what has been done to its ground, in order (see [`Sculpt`])
     pub mounds: Vec<Sculpt>,
 }
@@ -2151,7 +2221,7 @@ pub fn ground(touches: &[Sculpt], p: DVec3) -> f64 {
 impl Lay {
     /// Straight along x, `long` to each side of the foot.
     pub fn straight(long: f64) -> Lay {
-        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, sharp: false, water: None, reeds: 0.0, mounds: Vec::new() }
+        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, mounds: Vec::new() }
     }
 }
 
@@ -2280,16 +2350,299 @@ impl Grown {
 /// four to a tuft, each of its own height and lean and of one of three
 /// greens; all lean a little one way, as grass does. A blade is two
 /// lengths of round rib a cell or so thick, the thinnest that is built.
+/// Where water stands in a patch of grass that has two levels of it, and
+/// the streams that run from the upper to the lower.
+///
+/// The rule. The ground is flooded from the edge of the patch inwards
+/// (priority flood: Barnes, Lehman and Mulla 2014,
+/// https://arxiv.org/abs/1511.04463), which gives every place the height
+/// water would have to reach there before it ran off the patch: its spill
+/// height. A hollow is the places lying under their spill height that
+/// touch one another. Water stands in a hollow as far below its rim as it
+/// stands below the lawn in a pond, so a hollow whose rim is on raised
+/// ground holds its water higher than the lawn's ponds do. All such raised
+/// hollows share one height, that of the lowest of them, so there are two
+/// levels and no more, and none of them can overflow. Asked which pond is
+/// at which level, the answer is read off the ground the user sculpted
+/// and never typed.
+///
+/// A stream leaves each raised pond for the nearest water at the lower
+/// level by the cheapest way over the ground (Dijkstra's), where a step
+/// costs its length and three times as much again for each cell the
+/// ground there stands above the upper water: it goes round a rise sooner
+/// than through it. Its water starts at the upper level and at each cell
+/// of its length is the lower of what it was and the ground there, in
+/// whole cells: flat reaches with a step down between them, never a rise.
+/// The alternative, water sloping with the ground, cannot be built of
+/// bricks with level tops. A way that would have to climb over ground
+/// higher than the pond's own rim is no way downhill, and that pond has no
+/// stream.
+struct Waters {
+    lo: DVec3,
+    step: f64,
+    nx: usize,
+    ny: usize,
+    /// whether a place is in or beside a raised hollow
+    high: Vec<bool>,
+    upper: f64,
+    lower: f64,
+    /// the stream's place nearest each cell of the grid, if one is near
+    near: Vec<u32>,
+    /// the streams, a cell apart along their lengths: where, and how high the water is there
+    stream: Vec<(DVec3, f64)>,
+}
+
+/// How far under a stream's water its bed is cut. The soil is balls that
+/// stand a cell and a half over the ground they are laid on (see
+/// [`grass`]), so a bed a cell and a half down, which was tried, was soil
+/// to the water's very surface with water showing in the gaps.
+const BED_UNDER: f64 = 2.8;
+
+/// What water a place is beside: its level, and when that water is a
+/// stream's, how far the place is from the middle of it.
+type Wet = (f64, Option<f64>);
+
+impl Waters {
+    fn cell(&self, p: DVec3) -> Option<usize> {
+        let (i, j) = (((p.x - self.lo.x) / self.step).round(), ((p.y - self.lo.y) / self.step).round());
+        (i >= 0.0 && j >= 0.0 && (i as usize) < self.nx && (j as usize) < self.ny).then(|| j as usize * self.nx + i as usize)
+    }
+
+    /// The stream beside a place: how far its middle, and its water's level there.
+    fn beside(&self, p: DVec3) -> Option<(f64, f64)> {
+        let k = *self.near.get(self.cell(p)?)? as usize;
+        if k >= self.stream.len() {
+            return None;
+        }
+        (k.saturating_sub(5)..(k + 6).min(self.stream.len())).map(|n| ((self.stream[n].0 - p).truncate().length(), self.stream[n].1)).min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// The ground at a place with the streams' channels cut into it: a
+    /// bed [`BED_UNDER`] the water, four and a half cells
+    /// wide, and banks that rise to the ground as it was over the next
+    /// two and a quarter, or over more where the cut is deep.
+    fn ground(&self, p: DVec3, was: f64) -> f64 {
+        match self.beside(p) {
+            Some((far, level)) if was > level - BED_UNDER => {
+                // (where it cuts deep, through the rim of the pond it leaves, the banks lie back further: upright, the soil of the two would close over the water)
+                let t = ((far - 2.2) / (1.5 * (was - level + BED_UNDER)).max(2.25)).clamp(0.0, 1.0);
+                level - BED_UNDER + (was - level + BED_UNDER) * t * t * (3.0 - 2.0 * t)
+            }
+            _ => was,
+        }
+    }
+
+    /// The water a place is beside, given the ground there as it was sculpted.
+    fn level(&self, p: DVec3, was: f64) -> Wet {
+        let pond = if self.cell(p).is_some_and(|c| self.high[c]) { self.upper } else { self.lower };
+        match self.beside(p) {
+            // (in a pond, the pond's water)
+            Some((far, level)) if far < 5.0 && was + 1.0 >= pond => (level, Some(far)),
+            _ => (pond, None),
+        }
+    }
+
+    fn found(lay: &Lay, lower: f64, covered: &dyn Fn(DVec3) -> bool, lifted: &dyn Fn(DVec3) -> f64, lo: DVec3, hi: DVec3, step: f64, seed: u32) -> Waters {
+        use std::{cmp::Reverse, collections::BinaryHeap};
+        let mut waters = Waters { lo, step, nx: 0, ny: 0, high: Vec::new(), upper: lower, lower, near: Vec::new(), stream: Vec::new() };
+        let (nx, ny) = (((hi.x - lo.x) / step).ceil() as usize + 1, ((hi.y - lo.y) / step).ceil() as usize + 1);
+        // (a patch past six hundred cells square keeps one level: the flood is a grid of the whole patch in memory)
+        if lay.levels < 2 || nx * ny > 400_000 {
+            return waters;
+        }
+        let at = |c: usize| DVec3::new(lo.x + (c % nx) as f64 * step, lo.y + (c / nx) as f64 * step, 0.0);
+        let inside: Vec<bool> = (0..nx * ny).map(|c| covered(at(c))).collect();
+        let high: Vec<f64> = (0..nx * ny).map(|c| if inside[c] { lifted(at(c)) } else { 0.0 }).collect();
+        let around = |c: usize| {
+            let (i, j) = ((c % nx) as i64, (c / nx) as i64);
+            [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(move |(di, dj)| (i + di, j + dj)).map(move |(i, j)| (i >= 0 && j >= 0 && i < nx as i64 && j < ny as i64).then(|| j as usize * nx + i as usize))
+        };
+        // (heights as whole numbers, a thousandth of a cell, for the heap to order)
+        let key = |h: f64| (h * 1024.0).round() as i64;
+        // the flood, from the edge of the patch inwards
+        let mut fill = vec![f64::NAN; nx * ny];
+        let mut heap = BinaryHeap::new();
+        for c in (0..nx * ny).filter(|c| inside[*c]) {
+            if around(c).any(|n| n.is_none_or(|n| !inside[n])) {
+                fill[c] = high[c];
+                heap.push(Reverse((key(high[c]), c)));
+            }
+        }
+        while let Some(Reverse((_, c))) = heap.pop() {
+            for n in around(c).flatten() {
+                if inside[n] && fill[n].is_nan() {
+                    fill[n] = high[n].max(fill[c]);
+                    heap.push(Reverse((key(fill[n]), n)));
+                }
+            }
+        }
+        // the hollows, and of them the raised ones deep enough to hold water
+        let (mut hollow, mut raised) = (vec![u32::MAX; nx * ny], Vec::<(f64, usize)>::new());
+        let mut hollows = 0;
+        for c in 0..nx * ny {
+            if !inside[c] || hollow[c] != u32::MAX || fill[c] - high[c] <= 0.05 {
+                continue;
+            }
+            let (mut stack, mut deep) = (vec![c], 0.0f64);
+            hollow[c] = hollows;
+            while let Some(c) = stack.pop() {
+                deep = deep.max(fill[c] - high[c]);
+                for n in around(c).flatten() {
+                    if inside[n] && hollow[n] == u32::MAX && fill[n] - high[n] > 0.05 {
+                        hollow[n] = hollows;
+                        stack.push(n);
+                    }
+                }
+            }
+            let own = (fill[c] + lower).floor();
+            if deep > 1.0 - lower && own > lower + 1.5 {
+                raised.push((own, hollows as usize));
+            }
+            hollows += 1;
+        }
+        waters.nx = nx;
+        waters.ny = ny;
+        waters.high = vec![false; nx * ny];
+        waters.near = vec![u32::MAX; nx * ny];
+        if raised.is_empty() {
+            return waters;
+        }
+        waters.upper = raised.iter().map(|r| r.0).fold(f64::MAX, f64::min);
+        let upper = waters.upper;
+        // each raised hollow and its banks, three cells of the grid out but not over its rim and down the far side
+        let mut edge: Vec<usize> = (0..nx * ny).filter(|c| hollow[*c] != u32::MAX && raised.iter().any(|r| r.1 == hollow[*c] as usize)).collect();
+        for c in &edge {
+            waters.high[*c] = true;
+        }
+        for _ in 0..3 {
+            let mut next = Vec::new();
+            for c in edge {
+                for n in around(c).flatten() {
+                    if inside[n] && !waters.high[n] && fill[n] >= fill[c] - 0.05 {
+                        waters.high[n] = true;
+                        fill[n] = fill[n].min(fill[c] + 0.04);
+                        next.push(n);
+                    }
+                }
+            }
+            edge = next;
+        }
+        let pond = |c: usize| inside[c] && !waters.high[c] && high[c] + 1.0 < lower;
+        // the streams: at most eight, each a search of the whole grid
+        let mut near = vec![f32::MAX; nx * ny];
+        for &(_, which) in raised.iter().take(8) {
+            let (mut cost, mut from) = (vec![f64::MAX; nx * ny], vec![u32::MAX; nx * ny]);
+            let mut heap = BinaryHeap::new();
+            let mut rim = f64::MIN;
+            for c in (0..nx * ny).filter(|c| hollow[*c] == which as u32) {
+                rim = rim.max(fill[c]);
+                if high[c] + 1.0 < upper {
+                    cost[c] = 0.0;
+                    heap.push(Reverse((0i64, c)));
+                }
+            }
+            let mut end = None;
+            while let Some(Reverse((k, c))) = heap.pop() {
+                if k > key(cost[c]) {
+                    continue;
+                }
+                if pond(c) {
+                    end = Some(c);
+                    break;
+                }
+                for n in around(c).flatten().filter(|n| inside[*n]) {
+                    let long = if n % nx != c % nx && n / nx != c / nx { step * std::f64::consts::SQRT_2 } else { step };
+                    let to = cost[c] + long * (1.0 + 3.0 * (high[n] - upper).max(0.0));
+                    if key(to) < key(cost[n]) {
+                        cost[n] = to;
+                        from[n] = c as u32;
+                        heap.push(Reverse((key(to), n)));
+                    }
+                }
+            }
+            let Some(mut c) = end else { continue };
+            let mut way = vec![at(c)];
+            let mut top = high[c];
+            while from[c] != u32::MAX {
+                c = from[c] as usize;
+                top = top.max(high[c]);
+                way.push(at(c));
+            }
+            // no way that does not climb over more than its own rim: no stream
+            if top > rim + 1.0 || way.len() < 2 {
+                continue;
+            }
+            way.reverse();
+            for _ in 0..2 {
+                let was = way.clone();
+                for i in 1..way.len() - 1 {
+                    way[i] = (was[i - 1] + was[i] * 2.0 + was[i + 1]) / 4.0;
+                }
+            }
+            // along it a cell at a time, wandering to each side by the seed, most in its middle and not at all at its ends
+            let lengths: Vec<f64> = std::iter::once(0.0).chain(way.windows(2).scan(0.0, |sum, w| { *sum += (w[1] - w[0]).length(); Some(*sum) })).collect();
+            let long = *lengths.last().unwrap();
+            let (phase, swing) = (hash(which as i32, 0, 9, seed) * TAU, (long / 10.0).min(2.4));
+            let mut leg = 0;
+            let mut places: Vec<(DVec3, f64)> = Vec::new();
+            for n in 0..=long.floor() as usize {
+                let s = (n as f64).min(long);
+                while leg + 2 < way.len() && lengths[leg + 1] < s {
+                    leg += 1;
+                }
+                let (a, b) = (way[leg], way[leg + 1]);
+                let along = (b - a).normalize_or_zero();
+                let across = DVec3::new(-along.y, along.x, 0.0);
+                let p = a.lerp(b, ((s - lengths[leg]) / (lengths[leg + 1] - lengths[leg]).max(1e-9)).clamp(0.0, 1.0)) + across * swing * (std::f64::consts::PI * s / long).sin() * (phase + s * TAU / 28.0).sin();
+                // (under the lower of its two banks, so that it stands above neither)
+                let bank = [-4.4, -2.2, 0.0, 2.2, 4.4].iter().map(|side| lifted(p + across * *side)).fold(f64::MAX, f64::min);
+                places.push((p, bank));
+            }
+            let mut level = upper;
+            for (n, &(p, _)) in places.iter().enumerate() {
+                // (Still at the pond's own level until it is out through the rim. From there, under its banks here and for three cells on: a cell of water takes the level of the place on the stream nearest it, which may be a little upstream of it.)
+                if !waters.cell(p).is_some_and(|c| waters.high[c]) {
+                    let bank = places[n..(n + 4).min(places.len())].iter().map(|place| place.1).fold(f64::MAX, f64::min);
+                    level = level.min((bank - 0.5).floor()).max(lower);
+                }
+                let k = waters.stream.len() as u32;
+                waters.stream.push((p, level));
+                let reach = (16.0 / step).ceil() as i64;
+                let (ci, cj) = (((p.x - lo.x) / step).round() as i64, ((p.y - lo.y) / step).round() as i64);
+                for j in (cj - reach).max(0)..=(cj + reach).min(ny as i64 - 1) {
+                    for i in (ci - reach).max(0)..=(ci + reach).min(nx as i64 - 1) {
+                        let c = j as usize * nx + i as usize;
+                        let far = (at(c) - p).length() as f32;
+                        if far < 16.0 && far < near[c] {
+                            near[c] = far;
+                            waters.near[c] = k;
+                        }
+                    }
+                }
+            }
+            // (a gap in the numbering, so that one stream's places are not taken for the next's)
+            for _ in 0..12 {
+                waters.stream.push((DVec3::splat(f64::MAX / 4.0), lower));
+            }
+        }
+        waters
+    }
+}
+
 fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
     let (thick, lean) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let run = Run::new(lay);
     let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
-    let lifted = |p: DVec3| ground(&lay.mounds, p);
-    let (water, seed) = (lay.water, tree.seed as u32 ^ 0x9A55);
+    let sculpted = |p: DVec3| ground(&lay.mounds, p);
+    let seed = tree.seed as u32 ^ 0x9A55;
     let (lo, hi) = run.points.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p - spread), hi.max(*p + spread)));
+    // (the grid the water is found on is the grid the soil is laid on)
+    let step = 2.4;
+    let waters = lay.water.map(|lower| Waters::found(lay, lower, &covered, &sculpted, lo, hi, step, seed));
+    let lifted = |p: DVec3| waters.as_ref().map_or(sculpted(p), |w| w.ground(p, sculpted(p)));
+    let water = |p: DVec3| -> Option<Wet> { waters.as_ref().map(|w| w.level(p, sculpted(p))) };
     g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.0, 1.0], None, 0);
     // the soil: a skin of flat balls, close enough to run together
-    let step = 2.4;
     let across = |low: f64, high: f64, step: f64| (0..=((high - low) / step).ceil() as usize).map(move |i| low + i as f64 * step);
     for y in across(lo.y, hi.y, step) {
         for x in across(lo.x, hi.x, step) {
@@ -2299,9 +2652,11 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
                 let here = lifted(p);
                 let lowest = [DVec3::X, -DVec3::X, DVec3::Y, -DVec3::Y].iter().map(|way| lifted(p + *way * step)).fold(here, f64::min);
                 // by the water it is sand, and under it the bed of the pond
-                let skin = match water {
-                    Some(level) if here <= level - 1.5 => BED,
-                    Some(level) if here <= level + 1.2 => SAND,
+                // (a stream's bed is sand and stones all through: it runs too fast for mud to settle)
+                let wet = water(p);
+                let skin = match wet {
+                    Some((level, None)) if here <= level - 1.5 => BED,
+                    Some((level, _)) if here <= level + 1.2 => SAND,
                     _ => TRUNK,
                 };
                 let mut z = here;
@@ -2309,7 +2664,8 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
                     g.blob(p + DVec3::Z * (z + 0.45), DVec3::new(2.3, 2.3, 1.15), skin, false);
                     z -= 1.6;
                 }
-                if let Some(level) = water.filter(|level| here + 1.0 < *level) {
+                // (a stream's water only in its channel, and not wherever the ground beside it happens to lie lower)
+                if let Some((level, _)) = wet.filter(|(level, by)| here + 1.0 < *level && by.is_none_or(|far| far < 3.0)) {
                     // The water: a column from the bed to the level, flat
                     // on top, wide enough to run into its neighbours.
                     // Eight-sided and upright, as a trunk is, so that it
@@ -2339,12 +2695,13 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
                 continue;
             }
             let here = lifted(p);
-            if let Some(level) = water {
+            if let Some((level, by)) = water(p) {
                 // Reeds in the shallows and on the bank, by a throw of
                 // their own for each place, so that the same seed has
                 // them in the same places whatever else changes.
                 let (throw, thin) = (hash(x.round() as i32, y.round() as i32, 5, seed), hash(x.round() as i32, y.round() as i32, 6, seed));
-                if (here - level).abs() < 2.6 && throw < lay.reeds * 0.14 {
+                // (a third as many along a stream as round a pond)
+                if (here - level).abs() < 2.6 && throw < lay.reeds * if by.is_some() { 0.05 } else { 0.14 } {
                     let tall = 14.0 + 12.0 * thin + height;
                     let (foot, top) = (p + DVec3::Z * (here + 0.8), p + DVec3::new(drawn[0].0.x, drawn[0].0.y, 0.0) * 1.5 + DVec3::Z * (here + tall));
                     g.cone(foot, top, 1.0, 0.9, LEAF_DARK);
@@ -2406,7 +2763,8 @@ impl Grown {
     /// half it is too thin to be eight-sided and is round as before.
     fn trunk(&mut self, foot: DVec3, top: f64, thick: &dyn Fn(f64) -> f64, shade: u8) -> usize {
         let size = |z: f64| (thick(z) - 0.5).round() + 0.5;
-        let (mut path, mut radius) = (vec![foot], vec![thick(0.0)]);
+        // the lengths of one size, from the ground up
+        let mut lengths: Vec<(f64, f64, f64)> = Vec::new();
         let mut from = 0.0;
         while from < top {
             let now = size(from);
@@ -2414,15 +2772,31 @@ impl Grown {
             while to < top && size(to) == now {
                 to = (to + 1.0).min(top);
             }
-            let (a, b) = (foot + DVec3::Z * from, foot + DVec3::Z * to);
+            lengths.push((from, to, now));
+            from = to;
+        }
+        let (mut path, mut radius) = (vec![foot], vec![thick(0.0)]);
+        for (i, &(from, to, now)) in lengths.iter().enumerate() {
+            // Where the next length is narrower, the top of this one
+            // slopes in to it, two cells up for each cell in: a face of
+            // long ramps. Left square, each change of size was a ledge
+            // round the trunk, and a trunk that widens to its foot was a
+            // post standing on a plinth.
+            let next = lengths.get(i + 1).map_or(now, |l| l.2);
+            let slope = if next < now && next >= 1.5 { (2.0 * (now - next)).min(to - from) } else { 0.0 };
+            let (a, m, b) = (foot + DVec3::Z * from, foot + DVec3::Z * (to - slope), foot + DVec3::Z * to);
             if now >= 1.5 {
-                self.parts.push(Part { shape: Shape::Column { a, b, ra: now, rb: now, slack: 1.0, cut: (now * std::f64::consts::SQRT_2).round() }, shade });
+                if to - slope > from {
+                    self.parts.push(Part { shape: Shape::Column { a, b: m, ra: now, rb: now, slack: 1.0, cut: (now * std::f64::consts::SQRT_2).round() }, shade });
+                }
+                if slope > 0.0 {
+                    self.parts.push(Part { shape: Shape::Column { a: m, b, ra: now, rb: next, slack: 1.0 / (1.0 + ((now - next) / slope).powi(2)).sqrt(), cut: 0.0 }, shade });
+                }
             } else {
                 self.cone(a, b, thick(from).max(0.7), thick(to).max(0.7), shade);
             }
             path.push(b);
             radius.push(thick(to));
-            from = to;
         }
         self.limb_record(path, radius, None, 0)
     }
@@ -3052,7 +3426,7 @@ mod tests {
     fn no_two_bricks_share_a_cell_and_each_has_its_colour() {
         for (kind, name) in KINDS {
             // (with its extras, but a broadleaf tree's, which is to be bare)
-            let built = build(&Spec { tree: Tree { extras: !matches!(kind, Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::ScotsPine), ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
+            let built = build(&Spec { tree: Tree { extras: !matches!(kind, Kind::Oak | Kind::Beech | Kind::Birch | Kind::Willow | Kind::ScotsPine | Kind::Cherry), ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
             let mut seen = std::collections::HashSet::new();
             for b in &built.bricks {
                 for z in 0..b.ext[2] {
@@ -3711,7 +4085,7 @@ mod tests {
         assert!(west(&ring) == 40 && west(&open) < 10, "{} of 40 closed, {} open", west(&ring), west(&open));
 
         // reeds stand along a line the same way
-        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, sharp: false, water: None, reeds: 0.0, mounds: vec![] });
+        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, sharp: false, water: None, reeds: 0.0, levels: 1, mounds: vec![] });
         let feet: Vec<DVec3> = bank.limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0]).collect();
         assert!(feet.iter().any(|f| f.y > 40.0 && f.x > 50.0) && feet.iter().any(|f| f.x < 20.0 && f.y.abs() < 9.0) && !feet.iter().any(|f| f.x < 40.0 && f.y > 20.0), "the reeds do not follow the bank");
     }
@@ -3921,7 +4295,7 @@ mod tests {
         assert!((top_at(&sharp, 40.5, -30.5).unwrap() - top_at(&sharp, 0.5, -30.5).unwrap()).abs() <= 4);
 
         let pond = [(-30.0, -20.0), (30.0, -25.0), (35.0, 20.0), (-20.0, 25.0)];
-        let lay = |closed: bool| Lay { run: pond.iter().map(|(x, y)| DVec3::new(*x, *y, 0.0)).collect::<Vec<_>>(), closed, sharp: true, water: None, reeds: 0.0, mounds: vec![] };
+        let lay = |closed: bool| Lay { run: pond.iter().map(|(x, y)| DVec3::new(*x, *y, 0.0)).collect::<Vec<_>>(), closed, sharp: true, water: None, reeds: 0.0, levels: 1, mounds: vec![] };
         let feet = |closed: bool| -> Vec<DVec3> { Model::laid(&Tree { count: 80, ..Tree::of(Kind::Reeds) }, DVec3::splat(0.5), 70.0, 8.0, &lay(closed)).limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0] - DVec3::new(0.5, 0.5, 0.0)).collect() };
         let (filled, along_it) = (feet(true), feet(false));
         let inner = |feet: &[DVec3]| feet.iter().filter(|f| f.x.abs() < 12.0 && f.y.abs() < 8.0).count();
@@ -3996,5 +4370,159 @@ mod tests {
         let far = |built: &crate::spec::Built| { let mut cells = std::collections::BTreeSet::new(); for b in built.bricks.iter().filter(|b| b.min[0] > 28 && b.min[2] >= 2 && b.mask == CUBE) { for x in 0..b.ext[0] { for y in 0..b.ext[1] { for z in 0..b.ext[2] { cells.insert([b.min[0] + x, b.min[1] + y, b.min[2] + z]); } } } } cells };
         let (was, now) = (far(&flat), far(&pond));
         assert!(was.len() > 300 && was.symmetric_difference(&now).count() * 50 < was.len(), "{} of {} cells differ", was.symmetric_difference(&now).count(), was.len());
+    }
+
+    /// How far a trunk reaches from its middle at a height: the least and the most of eight ways round.
+    fn reach(tree: &Model, z: f64) -> (f64, f64) {
+        // (stepping out to the first place outside it: a willow's strands hang round its trunk, and are not it)
+        let out = |way: DVec3| (1..400).map(|n| n as f64 * 0.05).find(|far| tree.eval(DVec3::new(0.5, 0.5, z) + way * *far) > 0.0).unwrap();
+        (0..8).map(|k| k as f64 * TAU / 8.0).map(|a| out(DVec3::new(a.cos(), a.sin(), 0.0))).fold((f64::MAX, f64::MIN), |(lo, hi), r| (lo.min(r), hi.max(r)))
+    }
+
+    #[test]
+    fn a_trunk_widens_to_its_foot_with_no_ledge_and_is_no_wider_than_its_limbs_make_it() {
+        for kind in [Kind::Willow, Kind::Oak, Kind::Beech, Kind::Birch, Kind::ScotsPine, Kind::Cherry] {
+            for seed in 1..=3 {
+                let tree = model(kind, seed);
+                let fork = tree.limbs[0].path.last().unwrap().z;
+                let heights: Vec<f64> = (1..(fork * 0.8) as usize).map(|k| k as f64 + 0.25).collect();
+                let reaches: Vec<(f64, f64)> = heights.iter().map(|z| reach(&tree, *z)).collect();
+                // going up, from one cell to the next it never draws in by a whole cell: its sizes run into one another on slopes, and its roots into it
+                for (n, pair) in reaches.windows(2).enumerate() {
+                    assert!(pair[0].0 - pair[1].0 < 0.8 && pair[0].1 - pair[1].1 < 1.3, "{kind:?} {seed}: from {:?} to {:?} between {} and {} up", pair[0], pair[1], heights[n], heights[n + 1]);
+                }
+                // and its foot is not a plinth: under half as wide again as the trunk half way up
+                let (foot, middle) = (reaches[0].0, reaches[reaches.len() / 2].0);
+                assert!(foot <= middle * 1.5 + 0.5, "{kind:?} {seed}: {foot} at its foot and {middle} half way up");
+                // where it divides, its limbs are together what it is there (da Vinci's rule), and it is there what its bricks are
+                let (stem, into) = &tree.forks[0];
+                let sum: f64 = into.iter().map(|r| r * r).sum();
+                assert!((sum.sqrt() - stem).abs() < 0.05 * stem, "{kind:?} {seed}: limbs of {into:?} from a trunk of {stem}");
+                let under = reach(&tree, (fork * 0.8).floor() + 0.25).0;
+                assert!((under - stem).abs() <= 0.85, "{kind:?} {seed}: the trunk is {under} under a fork of {stem}");
+            }
+        }
+        // a birch is slender: its trunk under a fortieth of its height through at breast height, and narrower at its fork than at its foot
+        let (birch, height) = (model(Kind::Birch, 1), Tree::usual_size(Kind::Birch).0);
+        let fork = birch.limbs[0].path.last().unwrap().z;
+        assert!(reach(&birch, 8.25).0 * 2.0 <= height / 22.0, "a birch {} through, {height} tall", reach(&birch, 8.25).0 * 2.0);
+        assert!(reach(&birch, (fork * 0.8).floor() + 0.25).0 < reach(&birch, 2.25).0);
+    }
+
+    #[test]
+    fn a_cherry_is_wide_and_low_with_blossom_in_small_clusters_along_its_branches() {
+        let blossom = [LEAF, LEAF_DARK, LEAF_LIGHT];
+        let cells = |built: &crate::spec::Built, wanted: &[u8]| built.bricks.iter().zip(&built.shades).filter(|(_, s)| wanted.contains(s)).map(|(b, _)| (b.ext[0] * b.ext[1] * b.ext[2]) as f64).sum::<f64>();
+        let airy = |built: &crate::spec::Built| { let (lo, hi) = extent(built, &blossom); cells(built, &blossom) / ((hi.x - lo.x) * (hi.y - lo.y) * (hi.z - lo.z)) };
+        let oak = airy(&build(&spec(Kind::Oak, 1)).unwrap());
+        for seed in 1..=3 {
+            let built = build(&spec(Kind::Cherry, seed)).unwrap();
+            // the crown: wider than it is tall
+            let (lo, hi) = extent(&built, &blossom);
+            assert!((hi.x - lo.x).min(hi.y - lo.y) > (hi.z - lo.z) * 1.1, "seed {seed}: a crown {lo} to {hi}");
+            // sky between the clusters: far less of the crown filled than an oak's
+            assert!(airy(&built) < oak * 0.6, "seed {seed}: {} of its crown filled, and {oak} of an oak's", airy(&built));
+            // blossom along the branches and not only at their ends: some of it in the inner half of the crown, in every quarter round the trunk
+            let inner = bricks_of(&built, &blossom).iter().filter(|p| p.truncate().length() < (hi.x - lo.x) * 0.22).count();
+            assert!(inner * 12 > bricks_of(&built, &blossom).len(), "seed {seed}: {inner} of {} bricks of blossom near the trunk", bricks_of(&built, &blossom).len());
+            // pinks and white, a few buds and young leaves, and bands across the trunk
+            let count = |shade: u8| bricks_of(&built, &[shade]).len();
+            assert!(count(LEAF) > count(LEAF_LIGHT) && count(LEAF_LIGHT) > count(EXTRA) && count(EXTRA) > 3 && count(TOP) > 3, "seed {seed}");
+            let fork = model(Kind::Cherry, seed).limbs[0].path.last().unwrap().z;
+            assert!(bricks_of(&built, &[STAR]).iter().filter(|p| p.z < fork).count() >= 3 && bricks_of(&built, &[STAR]).iter().all(|p| p.z < fork + 2.0), "seed {seed}: bands");
+            // no petals on the ground unless asked for; asked for, they lie on it under the crown
+            let low = |built: &crate::spec::Built| bricks_of(built, &blossom).iter().filter(|p| p.z < 3.0).count();
+            let fallen = build(&Spec { closed: true, ..spec(Kind::Cherry, seed) }).unwrap();
+            assert!(low(&built) == 0 && low(&fallen) > 30, "seed {seed}: {} and {} bricks of petals", low(&built), low(&fallen));
+            // bare: the same tree with no blossom on it nor under it
+            let bare = build(&Spec { closed: true, tree: Tree { extras: true, ..spec(Kind::Cherry, seed).tree }, ..spec(Kind::Cherry, seed) }).unwrap();
+            assert!(bricks_of(&bare, &[LEAF, LEAF_DARK, LEAF_LIGHT, EXTRA, TOP]).is_empty() && bricks_of(&bare, &[LIMB]).len() > 100, "seed {seed}: bare");
+        }
+    }
+
+    /// A lawn with a hill that has a hollow on it, and a hollow in the flat beside the hill.
+    fn two_hollows() -> Spec {
+        let lawn = Spec { depth: 4, ..along(Kind::Grass, &[(-60.0, -40.0), (60.0, -40.0), (60.0, 40.0), (-60.0, 40.0)], 4.0, true) };
+        let touch = |x: f64, range: f64, amount: f64| (DVec3::new(x + 0.5, 0.5, 0.5), DVec3::new(range, 0.0, amount));
+        Spec { pulls: vec![touch(-25.0, 34.0, 16.0), touch(-25.0, 16.0, -14.0), touch(30.0, 20.0, -10.0)], ..lawn }
+    }
+
+    /// The heights water's surface stands at over the places from `from` to `to` along x.
+    fn water_tops(built: &crate::spec::Built, from: f64, to: f64) -> std::collections::BTreeSet<i32> {
+        let mut tops = std::collections::BTreeMap::new();
+        for (b, _) in built.bricks.iter().zip(&built.shades).filter(|(b, s)| **s == WATER && (b.min[0] as f64) < to && (b.min[0] + b.ext[0]) as f64 > from) {
+            for x in (b.min[0]..b.min[0] + b.ext[0]).filter(|x| (*x as f64 + 1.0) > from && (*x as f64) < to) {
+                for y in b.min[1]..b.min[1] + b.ext[1] {
+                    let top = tops.entry((x, y)).or_insert(i32::MIN);
+                    *top = (*top).max(b.min[2] + b.ext[2]);
+                }
+            }
+        }
+        tops.into_values().collect()
+    }
+
+    #[test]
+    fn two_hollows_at_two_heights_hold_water_at_two_levels_and_a_stream_runs_down_between_them() {
+        let (one, two) = (two_hollows(), Spec { tube: true, ..two_hollows() });
+        let (flat, stepped) = (build(&one).unwrap(), build(&two).unwrap());
+        // one level: water only at the lawn's own, in the lower hollow
+        // (a cell of water at a pond's very edge may be a cell lower, under the lip of its bank)
+        let level = |tops: &std::collections::BTreeSet<i32>| { let (low, high) = (*tops.iter().next().unwrap(), *tops.iter().next_back().unwrap()); assert!(high - low <= 1, "a pond's water at {tops:?}"); high };
+        assert_eq!(level(&water_tops(&flat, -100.0, 100.0)), -3);
+        assert!(water_tops(&flat, -100.0, 5.0).is_empty());
+        // two: the hollow on the hill holds water too, higher, and each pond is level
+        let (upper, lower) = (water_tops(&stepped, -30.0, -20.0), water_tops(&stepped, 26.0, 34.0));
+        assert_eq!(level(&lower), -3);
+        let high = level(&upper);
+        assert!(high >= 0, "the upper pond stands at {high}");
+        // the stream: water all the way from one to the other, never rising on the way down, never over its banks
+        let along: Vec<i32> = (-18..=22).map(|x| water_tops(&stepped, x as f64 + 0.25, x as f64 + 0.75).into_iter().max().unwrap_or_else(|| panic!("the stream is dry at {x}"))).collect();
+        // (taken two cells apart: where it bends, the end of one reach lies beside the start of the next, and which is the higher at one x is by a cell either way)
+        assert!(along.windows(3).all(|w| w[2] <= w[0]) && along[0] == high && *along.last().unwrap() == -3, "the stream's water, going down: {along:?}");
+        assert!(along.iter().collect::<std::collections::BTreeSet<_>>().len() >= 4, "it falls in {along:?}: no steps");
+        let mut worst: f64 = f64::MIN;
+        for (b, _) in stepped.bricks.iter().zip(&stepped.shades).filter(|(b, s)| **s == WATER && b.min[0] > -12 && b.min[0] + b.ext[0] < 10) {
+            for x in 0..b.ext[0] {
+                for y in 0..b.ext[1] {
+                    let at = DVec3::new((b.min[0] + x) as f64 + 0.5, (b.min[1] + y) as f64 + 0.5, 0.5);
+                    worst = worst.max((b.min[2] + b.ext[2]) as f64 - crate::spec::grass_ground(&two, at));
+                }
+            }
+        }
+        assert!(worst <= 1.0, "the stream stands {worst} over the ground it was cut into");
+        // narrow: a few cells of water across, where it runs along x
+        let across = |x: i32| stepped.bricks.iter().zip(&stepped.shades).filter(|(b, s)| **s == WATER && b.min[0] <= x && x < b.min[0] + b.ext[0]).map(|(b, _)| (b.min[1], b.min[1] + b.ext[1])).fold((i32::MAX, i32::MIN), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)));
+        assert!((2..=9).contains(&(across(0).1 - across(0).0)), "the stream is {:?} across", across(0));
+        // its bed is sand, and the same on any number of threads
+        assert!(bricks_of(&stepped, &[SAND]).iter().filter(|p| p.x > -10.0 && p.x < 12.0).count() > 20);
+        let many = crate::spec::build_with(&two, true, crate::par::Threads::forced(5)).unwrap();
+        assert_eq!((&stepped.bricks, &stepped.shades), (&many.bricks, &many.shades));
+        // one hollow in a flat lawn: two levels are the same bricks as one
+        let single = Spec { pulls: two_hollows().pulls[2..].to_vec(), ..two_hollows() };
+        let (a, b) = (build(&single).unwrap(), build(&Spec { tube: true, ..single.clone() }).unwrap());
+        assert_eq!((&a.bricks, &a.shades), (&b.bricks, &b.shades));
+        // a hollow on a hill with no lower water to run to: a pond up there, and no stream
+        let alone = build(&Spec { tube: true, pulls: two_hollows().pulls[..2].to_vec(), ..two_hollows() }).unwrap();
+        assert!(!water_tops(&alone, -30.0, -20.0).is_empty() && water_tops(&alone, -8.0, 100.0).is_empty(), "{:?}", water_tops(&alone, -8.0, 100.0));
+    }
+
+    #[test]
+    fn a_pond_is_a_basin_as_deep_as_it_was_dug_with_water_down_to_its_bed() {
+        let lawn = Spec { closed: true, depth: 1, ..along(Kind::Grass, &[(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)], 4.0, true) };
+        for deep in [6.0, 10.0, 16.0] {
+            let pond = build(&Spec { pulls: vec![(DVec3::new(0.5, 0.5, 0.5), DVec3::new(22.0, 0.0, -deep))], ..lawn.clone() }).unwrap();
+            // the cells over the pond's middle, from the top down: which part each is
+            let mut column: Vec<(i32, u8)> = pond.bricks.iter().zip(&pond.shades).filter(|(b, _)| b.min[0] <= 0 && 0 < b.min[0] + b.ext[0] && b.min[1] <= 0 && 0 < b.min[1] + b.ext[1]).flat_map(|(b, s)| (b.min[2]..b.min[2] + b.ext[2]).map(|z| (z, *s))).collect();
+            column.sort();
+            column.reverse();
+            let water: Vec<i32> = column.iter().filter(|c| c.1 == WATER).map(|c| c.0).collect();
+            // water from the level (3 below the lawn) down to within a cell or two of the dug depth, with nothing else in it
+            assert_eq!(column[0], (-4, WATER), "dug {deep}: the top of {column:?}");
+            let bottom = *water.last().unwrap();
+            assert!(water.len() as i32 == -3 - bottom && (bottom as f64 + deep).abs() <= 2.0, "dug {deep}: water in {water:?}");
+            // and under it the bed, at the dug depth: not soil under the surface, nor a slab of water on flat ground
+            let under: Vec<(i32, u8)> = column.iter().filter(|c| c.0 < bottom).copied().collect();
+            assert!(!under.is_empty() && under.iter().all(|c| matches!(c.1, BED | STONE)) && under.len() <= 4, "dug {deep}: under the water {under:?}");
+        }
     }
 }

@@ -142,7 +142,8 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
             (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
             (Kind::Grass, _) => Stuff::Solid,
             (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
-            (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm, tree::STAR) => Stuff::Solid,
+            // (and the bands on a cherry's bark)
+            (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm | Kind::Cherry, tree::STAR) => Stuff::Solid,
             _ => Stuff::Blade,
         }
     })

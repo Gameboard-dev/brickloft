@@ -24,6 +24,10 @@ pub struct Canvas {
     pub middle: DVec3,
     pub scale: f64,
     pub brick: [f64; 3],
+    /// how solid what is drawn next is, 1 for wholly: under that it is
+    /// laid over what is drawn already and leaves no depth of its own, so
+    /// it is to be drawn after everything solid (a pond's water)
+    pub solid: f64,
     pub colour: Vec<[f64; 4]>,
     pub depth: Vec<f64>,
     pub right: DVec3,
@@ -37,7 +41,7 @@ impl Canvas {
     pub fn new(size: usize, fine: usize, middle: DVec3, scale: f64, towards: DVec3) -> Canvas {
         let side = size * fine;
         let right = DVec3::Z.cross(towards).normalize();
-        Canvas { side, fine, middle, scale: scale * fine as f64, brick: BRICK, colour: vec![[0.0; 4]; side * side], depth: vec![f64::NEG_INFINITY; side * side], right, up: towards.cross(right), towards }
+        Canvas { side, fine, middle, scale: scale * fine as f64, brick: BRICK, solid: 1.0, colour: vec![[0.0; 4]; side * side], depth: vec![f64::NEG_INFINITY; side * side], right, up: towards.cross(right), towards }
     }
 
     /// Where a point of the scene lands: across, down, and how near.
@@ -70,9 +74,14 @@ impl Canvas {
                 if near <= self.depth[at] {
                     continue;
                 }
-                self.depth[at] = near;
                 let from_rim = w[0] * rim[0] + w[1] * rim[1] + w[2] * rim[2];
                 let c = if from_rim < 0.014 { EDGE } else { self.brick.map(|v| v * shade) };
+                if self.solid < 1.0 {
+                    let (under, a) = (self.colour[at], self.solid);
+                    self.colour[at] = if under[3] > 0.0 { [under[0] + (c[0] - under[0]) * a, under[1] + (c[1] - under[1]) * a, under[2] + (c[2] - under[2]) * a, under[3]] } else { [c[0], c[1], c[2], a] };
+                    continue;
+                }
+                self.depth[at] = near;
                 self.colour[at] = [c[0], c[1], c[2], 1.0];
             }
         }
