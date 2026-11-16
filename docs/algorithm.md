@@ -39,6 +39,11 @@ staircase of cubes; another is a row of wedges laid end to end.
     ########                     /########
 ```
 
+<img src="images/slopes-and-steps.png" width="700" alt="The same arch built twice: on the left with sloped bricks that meet end to end, on the right with cubes alone, as a staircase">
+
+The same arch fitted with sloped bricks, on the left, and with cubes alone,
+on the right.
+
 Both can hold the same amount of material, so a measure of volume alone
 cannot tell them apart. Worse, the fit that is closest by volume is usually
 a staircase, because many small bricks can follow a curve a little more
@@ -499,6 +504,11 @@ it works for any solid that has a distance function. It classifies each
 cell, chooses a shape for it, removes spikes, stretches ramps and merges
 cubes, in that order.
 
+<img src="images/cell-by-cell.png" width="700" alt="Close view of a thin hollow sphere fitted cell by cell: small triangles and ramps that do not line up from one cell to the next">
+
+A hollow sphere with a wall 2 thick, fitted cell by cell. Each cell has the
+brick that suits it best, and neighbouring slopes do not line up.
+
 #### Classifying each cell
 
 The program tests 64 points in each cell, a
@@ -595,6 +605,8 @@ is fitted in two dimensions and then extended through the depth
 dimensions the bricks become flat **pieces**: rectangles, which become
 cubes, and right-angled triangles, which become ramps standing through the
 depth.
+
+<img src="images/flat-outline.png" width="700" alt="A round arch seen face on: its curve is made of a few long triangles and rectangles">
 
 This fitter is smooth because it fits an outline first and fills it
 afterwards. The fitted outline is a polygon whose corners are lattice
@@ -732,6 +744,8 @@ of repaired afterwards.
 A sphere is laid out whole, by one rule, with no cell-by-cell choosing
 ([core/src/fit_round.rs](../core/src/fit_round.rs), `fit_round`). The rule
 works because the equation of a sphere is a sum of one term for each axis.
+
+<img src="images/sphere.png" width="700" alt="A solid sphere of radius 16: rings of flat facets, with no steps">
 
 #### Turning the sphere's equation into a count
 
@@ -905,6 +919,10 @@ corner are a hip. So that pyramid is four hips and nothing else. The number
 of levels $`L`$ is as small as keeps every brick within the longest
 allowed.
 
+<img src="images/hollow-pyramid.png" width="700" alt="A hollow pyramid seen from underneath: sloped bricks line the inside, with an inner corner brick running up each ridge">
+
+A hollow pyramid seen from underneath.
+
 A pyramid that is not filled is hollow, a tent open underneath. It has a
 smaller pyramid, $`\max(i_x, i_y) + i_z \le L - 2`$, taken out of it. The
 inner one is two levels lower for the same reason a shell's wall is two
@@ -931,6 +949,8 @@ between them, all running along the curve.
       \______/
      <---w---->
 ```
+
+<img src="images/torus-section.png" width="700" alt="Close view of a torus from low down: a level top, a sloped chamfer, an upright wall and a chamfer underneath, all running along the tube">
 
 For a section $`w`$ cells across, the sloping sides are as long as the flat
 ones when each chamfer is
@@ -999,6 +1019,8 @@ pot on a potter's wheel ([core/src/fit_lathe.rs](../core/src/fit_lathe.rs),
 the axis, height), is fitted as an outline, as in 7.2. Each side of that
 outline becomes a ring when spun:
 
+<img src="images/revolve.png" width="700" alt="A vase made by spinning a profile about an upright axis, in a green blend">
+
 | A side of the section | becomes |
 |---|---|
 | upright | a wall standing on a circle |
@@ -1024,6 +1046,11 @@ kept. While a form is being dragged, only the first is built, for speed.
 When a point added to a flat curve pulls it up out of its plane, the
 curve's outline seen from above is unchanged, and only its height varies
 along it. These forms are built by [core/src/fit_ribbon.rs](../core/src/fit_ribbon.rs).
+
+<img src="images/lifted-torus.png" width="700" alt="A torus with one side pulled up out of its plane: the flat part is smooth, the lifted part is built of many small sloped bricks">
+
+A torus with one point pulled up by 10. The part still lying flat keeps its
+pipe, and the lifted part is built one cell of ground at a time.
 
 #### A lifted tube
 
@@ -1149,6 +1176,8 @@ cells at 4 cells away, and not at all 8 cells away. This is the loop in
     }
 ```
 
+<img src="images/added-point.png" width="700" alt="An arch with an orange point near its top left pulled outwards: the arch bulges there and is unchanged at its far foot">
+
 On a curve, $`d`$ is measured along the curve (`along`), not straight
 across. So a pull on one side of a narrow loop leaves the other side alone,
 even though the two are close in space. The polyline is first cut into
@@ -1194,6 +1223,8 @@ instead of the point itself. A point on the low side is left as it is, and
 a point on the high side is reflected onto the low side. For example, with
 the mirror at $`c = 10`$, a point at $`x = 13`$ is answered as if it were at
 $`10 - 3 = 7`$.
+
+<img src="images/added-point-mirrored.png" width="700" alt="The same arch with Mirror X on: the bulge appears on both sides">
 
 Because the mirror is applied to the form before fitting, a lopsided arch
 becomes a symmetric arch and is fitted as one. Added points on the high
@@ -1245,6 +1276,8 @@ pub fn out_of_grid(spec: &Spec, p: DVec3) -> DVec3 {
 }
 ```
 
+<img src="images/grids.png" width="700" alt="Two rings on grids at different angles passing through each other, with the red, green and blue rings that turn the grid being edited">
+
 Nothing in the fitting reads these values. A form on a tilted grid is
 fitted exactly as if it were level, which is why it stays as smooth as it
 was. The rotation only decides where the finished bricks are drawn and how
@@ -1282,6 +1315,10 @@ back up, so every brick is a multiple of $`g`$ cells (`build_at` in
 radius 25, and every brick is then doubled. A surface takes about
 $`1/g^2`$ as many bricks, because each brick covers $`g \times g`$ times as
 much of it, and it is followed $`g`$ times as coarsely.
+
+<img src="images/brick-size.png" width="700" alt="The same sphere at brick size 1, on the left, and at brick size 4, on the right, where it has a few large facets">
+
+A sphere of radius 28 at brick size 1 and at brick size 4.
 
 **Automatic** tries sizes 8, 6, 4, 3, 2 and 1 in that order and keeps the
 finest that is within the brick budget. It keeps a wall at least two bricks

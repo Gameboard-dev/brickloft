@@ -219,6 +219,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ui.checkbox(&mut state.show_ruler, "Rulers");
             ui.checkbox(&mut state.show_rings, "Rings");
             ui.checkbox(&mut state.show_arrows, "Arrows");
+            ui.checkbox(&mut state.show_dots, "Dots");
             hint(ui, help("show_parts"));
         });
         // a web page cannot listen for connections: see `mcp`

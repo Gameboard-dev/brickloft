@@ -103,9 +103,16 @@ pub struct Server {
     calls: Receiver<Call>,
     stop: Arc<AtomicBool>,
     /// Those waiting for a picture of the window: the widest each will
-    /// take, and where to send it. A picture can only be taken once the
-    /// frame has been drawn, which is after the calls are carried out.
-    waiting: Vec<(u32, Sender<Answered>)>,
+    /// take, whether it is to have the panel in it, and where to send it. A
+    /// picture can only be taken once the frame has been drawn, which is
+    /// after the calls are carried out.
+    waiting: Vec<(u32, bool, Sender<Answered>)>,
+    /// How many of those have waited a whole frame. A picture is of the
+    /// frame after the one it was asked in: the panel of the frame it was
+    /// asked in was laid out before the call was read, with whatever notice
+    /// the call before it had put up, and the notice of a call is not part
+    /// of what the caller asked to see.
+    ripe: usize,
 }
 
 /// The widest picture given unless a narrower or wider one is asked for,
@@ -151,17 +158,19 @@ impl Server {
                 }
             }
         });
-        Ok((Server { calls, stop, waiting: Vec::new() }, port))
+        Ok((Server { calls, stop, waiting: Vec::new(), ripe: 0 }, port))
     }
 
     /// Carry out the tool calls that have arrived, on the workspace. Called
     /// once a frame. Returns the names of the tools called, to be shown.
     pub fn serve(&mut self, state: &mut State, now_ms: impl Fn() -> f64 + Copy) -> Vec<String> {
         let mut called = Vec::new();
+        self.ripe = self.waiting.len();
         while let Ok(call) = self.calls.try_recv() {
             if call.name == "take_screenshot" {
                 let width = call.arguments.get("max_width").and_then(Value::as_u64).map_or(USUAL_WIDTH, |w| (w as u32).clamp(64, WIDEST));
-                self.waiting.push((width, call.answer));
+                let panel = call.arguments.get("panel").and_then(Value::as_bool).unwrap_or(true);
+                self.waiting.push((width, panel, call.answer));
             } else {
                 let answer = apply(state, &call.name, &call.arguments, now_ms).map(Answer::Text);
                 // (the asker may have given up waiting: nothing to do about that)
@@ -172,15 +181,22 @@ impl Server {
         called
     }
 
-    /// Whether anyone is waiting for a picture of the window.
-    pub fn wants_picture(&self) -> bool {
-        !self.waiting.is_empty()
+    /// Whether anyone is waiting for a picture of the window: with the
+    /// panel in it, or of the view before the panel is drawn over it.
+    pub fn wants_picture(&self, panel: bool) -> bool {
+        self.waiting[..self.ripe].iter().any(|w| w.1 == panel)
     }
 
-    /// Give those waiting the picture of the window as it was just drawn,
-    /// as rows of pixels from the top: each one no wider than it asked for.
-    pub fn give_picture(&mut self, width: u32, height: u32, pixels: &[[u8; 4]]) {
-        for (widest, answer) in self.waiting.drain(..) {
+    /// Give those waiting for it the picture of the window as it was just
+    /// drawn, with the panel or before it, as rows of pixels from the top:
+    /// each one no wider than it asked for.
+    pub fn give_picture(&mut self, panel: bool, width: u32, height: u32, pixels: &[[u8; 4]]) {
+        let mut late = self.waiting.split_off(self.ripe);
+        let (ready, mut still): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting).into_iter().partition(|w| w.1 == panel);
+        self.ripe = still.len();
+        still.append(&mut late);
+        self.waiting = still;
+        for (widest, _, answer) in ready {
             let (w, h, smaller) = shrunk(width, height, pixels, widest);
             let _ = answer.send(crate::send::png_of(w, h, &smaller).map(Answer::Picture));
         }
@@ -699,6 +715,31 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let whole: f64 = state.flight.iter().map(|l| l.seconds).sum();
             return Ok(format!("The camera is on its way: {} leg{}, {whole} seconds in all. A screenshot asked for now is taken once it has arrived.", state.flight.len(), if state.flight.len() == 1 { "" } else { "s" }));
         }
+        "set_view" => {
+            let flag = |name: &str| -> Result<Option<bool>, String> {
+                match arguments.get(name) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(given) => given.as_bool().map(Some).ok_or(format!("{name} is true or false")),
+                }
+            };
+            let number = |name: &str, low: f64, high: f64| -> Result<Option<f64>, String> {
+                match arguments.get(name) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(given) => given.as_f64().filter(|v| (low..=high).contains(v)).map(Some).ok_or(format!("{name} is a number from {low} to {high}")),
+                }
+            };
+            // all read before any is set, so that a request with a mistake in it changes nothing
+            let (rulers, rings, arrows, dots) = (flag("rulers")?, flag("rings")?, flag("arrows")?, flag("dots")?);
+            let (floor, size) = (number("floor_below", 0.0, 40.0)?, number("arrows_and_rings_size", 0.1, 1.0)?);
+            state.show_ruler = rulers.unwrap_or(state.show_ruler);
+            state.show_rings = rings.unwrap_or(state.show_rings);
+            state.show_arrows = arrows.unwrap_or(state.show_arrows);
+            state.show_dots = dots.unwrap_or(state.show_dots);
+            state.floor_gap = floor.unwrap_or(state.floor_gap);
+            state.gizmo_size = size.unwrap_or(state.gizmo_size);
+            state.scene += 1;
+            return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap, "arrows_and_rings_size": state.gizmo_size }).to_string());
+        }
         "measure_between" => {
             let which = |name: &str| -> Result<usize, String> {
                 let index = arguments.get(name).and_then(Value::as_u64).ok_or(format!("{name} is a form's place in the list get_workspace gives"))? as usize;
@@ -831,7 +872,7 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 9);
+        assert_eq!(tool_names().len(), 10);
     }
 
     #[test]
@@ -965,15 +1006,20 @@ mod tests {
             server.serve(&mut state, || 0.0);
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(server.wants_picture());
+        assert!(!server.wants_picture(true), "a picture was due in the frame it was asked for");
+        server.serve(&mut state, || 0.0);
+        assert!(server.wants_picture(true) && !server.wants_picture(false));
+        // the view before the panel is drawn is not what was asked for
+        server.give_picture(false, 1, 1, &[[0, 0, 0, 255]]);
+        assert!(server.wants_picture(true));
         // a window 200 by 100, red on the left and blue on the right
         let window: Vec<[u8; 4]> = (0..200 * 100).map(|i| if i % 200 < 100 { [255, 0, 0, 255] } else { [0, 0, 255, 255] }).collect();
-        server.give_picture(200, 100, &window);
+        server.give_picture(true, 200, 100, &window);
         let answer = asking.join().unwrap();
         assert!(answer.contains(r#""type":"image""#) && answer.contains(r#""mimeType":"image/png""#), "{answer}");
         // (a PNG file begins with these bytes, which in base64 are these letters)
         assert!(answer.contains(r#""data":"iVBORw0KGgo"#), "{answer}");
-        assert!(!server.wants_picture());
+        assert!(!server.wants_picture(true));
         // once it is dropped nothing listens there
         drop(server);
         std::thread::sleep(Duration::from_millis(120));
@@ -1046,6 +1092,18 @@ mod tests {
             assert!(apply(&mut state, "move_camera", &bad, || 0.0).is_err(), "{bad} was accepted");
         }
         assert_eq!(state.flight.len(), 2, "a flight that was refused replaced the one being flown");
+    }
+
+    #[test]
+    fn what_is_drawn_over_the_bricks_is_switched_on_and_off() {
+        let mut state = State::new();
+        let said: Value = serde_json::from_str(&apply(&mut state, "set_view", &json!({ "rulers": false, "dots": false, "floor_below": 12 }), || 0.0).unwrap()).unwrap();
+        assert_eq!((state.show_ruler, state.show_dots, state.show_rings, state.show_arrows, state.floor_gap), (false, false, true, true, 12.0));
+        assert_eq!(said["rings"], true);
+        // a mistake anywhere in it, and none of it is done
+        assert!(apply(&mut state, "set_view", &json!({ "rulers": true, "floor_below": 900 }), || 0.0).is_err());
+        assert!(apply(&mut state, "set_view", &json!({ "rings": "no" }), || 0.0).is_err());
+        assert_eq!((state.show_ruler, state.show_rings), (false, true));
     }
 
     #[test]

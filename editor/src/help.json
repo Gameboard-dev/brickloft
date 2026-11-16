@@ -49,7 +49,7 @@
   "saved_save": "Saves the whole workspace under this name in the chosen folder: every form, with its colours and the grid it is on. A save of the same name is replaced.",
   "segment_from": "Where the segment starts, measured up from the sphere's centre.",
   "segment_to": "Where the segment ends, measured up from the sphere's centre.",
-  "show_parts": "What is drawn over the bricks, each switched on its own. Rulers give the form's size along each axis in microbricks. Rings turn the form's grid to any angle. Arrows move it along one axis. Rings and arrows that are hidden cannot be taken hold of either, so they are never in the way of a dot.",
+  "show_parts": "What is drawn over the bricks, each switched on its own. Rulers give the form's size along each axis in microbricks. Rings turn the form's grid to any angle. Arrows move it along one axis. Dots are the form's own points and sizes, which you drag to reshape it. Anything hidden cannot be taken hold of either, so it is never in the way.",
   "simplify": "How much closer a ramp must bring the outline to be worth a brick, in microbricks of area. 0 is the closest fit whatever the count; higher gives fewer, longer pieces. Flat forms only: on a 3D form, use Brick size.",
   "sliders_go_up_to": "How far every size slider reaches, in microbricks: radius, height, thickness, depth and the reach of added points. Lower it for a finer slider. Large forms take longer to fit.",
   "snap_after_every_drag": "Runs Snap to best fit nearby by itself each time a drag ends.",

@@ -257,6 +257,9 @@ pub struct State {
     /// can be in the way of the form it stands in the middle of
     pub show_arrows: bool,
     pub show_rings: bool,
+    /// whether the form's dots are drawn and can be dragged: off for a
+    /// picture of the bricks alone
+    pub show_dots: bool,
     /// How far every slider for a size goes: as far as the core will build
     /// (`brickloft_core::spec::MAX_SPAN`) unless the user lowers it. It began at
     /// 60 to keep an even slider fine enough for small forms; the sliders
@@ -423,6 +426,7 @@ impl State {
             show_ruler: true,
             show_arrows: true,
             show_rings: true,
+            show_dots: true,
             max_size: brickloft_core::spec::MAX_SPAN,
             gizmo_size: GIZMO,
             bounds: None,

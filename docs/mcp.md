@@ -5,9 +5,11 @@ adds forms to the workspace, changes their settings, colours and grids,
 measures them, moves the camera and takes screenshots, and you watch each
 change happen in the editor's window.
 
+<img src="images/editor.png" width="700" alt="The editor with the box Let Claude drive the editor ticked at the top of the panel, and a torus Claude has built">
+
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers nine tools. Claude Code, or
+offers. The editor is the MCP server and offers ten tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -85,7 +87,8 @@ file, the entry is a server of type `http` with the URL above.
 | `measure_between` | Gives the offset and distance between two forms' centres and the gap between their boxes along each axis. |
 | `get_camera` | Gives the camera's position and the direction it looks in. |
 | `move_camera` | Sends the camera to a place, or along a path of places, looking at a chosen point at each. |
-| `take_screenshot` | Returns a picture of the editor's window, panel included, as a PNG image. |
+| `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
+| `set_view` | Switches the rulers, rings, arrows and dots on and off, lowers the floor, and sizes the rings and arrows. |
 
 ### Forms and their settings
 
@@ -136,7 +139,11 @@ a `look_at` point and, optionally, the `seconds` it takes. A leg with a
 time is flown smoothly and one without is a jump, so a single leg places
 the camera and several legs fly it round a build.
 
-`take_screenshot` returns the window as you see it. A screenshot asked for
+`take_screenshot` returns the window as you see it, or the 3D view alone
+when asked for it without the panel. With `set_view` Claude can first hide
+the rulers, rings, arrows and dots, for a picture of the bricks alone; the
+pictures in this documentation were taken that way. A notice that Claude's
+own call put up is never in the picture. A screenshot asked for
 while the camera is flying is taken when the camera arrives. The picture is
 at most 1280 pixels wide unless Claude asks for another width, because a
 picture is costly for a model to read and a window's full width is seldom
@@ -234,5 +241,5 @@ macOS and Linux and holds no file paths.
   `pulls` settings instead. Rebuilding an object from a point cloud is
   planned (see [future-work.md](future-work.md)).
 - The live tests so far were made with a script acting as the client. The
-  nine tools were each called against a running editor on Windows; macOS
+  ten tools were each called against a running editor on Windows; macOS
   and Linux run the same code and have not been tried.

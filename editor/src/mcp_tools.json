@@ -200,7 +200,7 @@
     {
       "name": "take_screenshot",
       "title": "Take a screenshot",
-      "description": "A picture of the editor's window as the player sees it now: the 3D view of the bricks and the settings panel. Use it to look at what has been built, since a form's brick count and discrepancy do not say how it looks. Returned as a PNG image.",
+      "description": "A picture of the editor's window as the player sees it now: the 3D view of the bricks and, unless `panel` is false, the settings panel down its left side. Use it to look at what has been built, since a form's brick count and discrepancy do not say how it looks. Returned as a PNG image.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -209,6 +209,10 @@
             "minimum": 64,
             "maximum": 4096,
             "description": "The widest the picture may be, in pixels. 1280 if not given. A wider window is shrunk by a whole number of pixels to fit."
+          },
+          "panel": {
+            "type": "boolean",
+            "description": "False for the 3D view alone, without the panel drawn over its left side. True if not given."
           }
         },
         "additionalProperties": false
@@ -299,6 +303,41 @@
         "required": [
           "path"
         ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_view",
+      "title": "Choose what is drawn",
+      "description": "Switch on or off what is drawn over the bricks: the rulers along each axis, the rings that turn a grid, the arrows that move it, and the dots of the form being edited. Also how far the floor is lowered below the forms, to look at one from underneath, and how large the rings and arrows are. Only what is given changes; nothing that is built is changed. Returns the settings as they now are. Switch all four off for a picture of the bricks alone, and back on afterwards: the player needs the dots to edit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rulers": {
+            "type": "boolean"
+          },
+          "rings": {
+            "type": "boolean"
+          },
+          "arrows": {
+            "type": "boolean"
+          },
+          "dots": {
+            "type": "boolean"
+          },
+          "floor_below": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 40,
+            "description": "How far the floor is lowered below the forms, in microbricks."
+          },
+          "arrows_and_rings_size": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1,
+            "description": "The size of the rings and arrows, as a share of the size of what is on the grid."
+          }
+        },
         "additionalProperties": false
       }
     }

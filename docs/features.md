@@ -8,6 +8,8 @@ and two of the game's positional units, so half steps are single units.
 
 ## The window
 
+<img src="images/window.png" width="700" alt="The editor's window: the settings panel on the left and an arch in the 3D view, with its dots, rulers, arrows and rings">
+
 A 3D view of the bricks, with a panel down the left side. The form being
 edited is drawn in its colours with its **dots**; other forms are drawn a
 little darker. Each control in the panel has a small **?** beside it. Rest
@@ -24,12 +26,14 @@ Round the middle of the grid being edited are three **arrows** and three
 **rings**, red for x, green for y and blue for z (see [Grids](#grids)). The
 **Arrows and rings** slider at the top of the panel sets how large they are
 drawn, from 0.1 to 1 of the size of what is on the grid. The **Show** boxes
-beside it switch the rulers, the rings and the arrows on and off, each on
-its own. Rings and arrows that are hidden cannot be taken hold of either.
+beside it switch the rulers, the rings, the arrows and the form's dots on
+and off, each on its own. Anything hidden cannot be taken hold of either.
 
 **Let Claude drive the editor**, also at the top of the panel, lets Claude
 build and change forms while you watch (see [mcp.md](mcp.md)). It is off
 until you tick it.
+
+<img src="images/rulers-and-gizmo.png" width="700" alt="An arch with rulers along each axis and, at its middle, the arrows that move its grid and the rings that turn it">
 
 ## Forms
 

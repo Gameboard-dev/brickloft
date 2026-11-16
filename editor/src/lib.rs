@@ -404,7 +404,12 @@ pub fn run_form(form: usize, claude: bool) {
             if let Some(server) = &mut claude {
                 // said over the view each time, so that a change the player
                 // did not make is never unexplained
-                if let Some(last) = server.serve(&mut state, now_ms).last() {
+                let called = server.serve(&mut state, now_ms);
+                if called.iter().any(|name| name == "take_screenshot") {
+                    // a picture is of the editor, not of the notice that one was asked for
+                    state.toast = None;
+                } else if let Some(last) = called.iter().rev().find(|name| !name.starts_with("get_") && *name != "measure_between") {
+                    // (asking about the workspace changes nothing, and is not announced)
                     state.toast = Some((format!("Claude: {}", last.replace('_', " ")), None));
                 }
             }
@@ -502,7 +507,7 @@ pub fn run_form(form: usize, claude: bool) {
                 eprintln!("brickloft editor: no shadows this time: {e}");
             }
         }
-        let handles = state.handles();
+        let handles = if state.show_dots { state.handles() } else { Vec::new() };
         if handles != shown_handles || first {
             let mut instances = Instances::default();
             let mut colours = Vec::new();
@@ -576,6 +581,11 @@ pub fn run_form(form: usize, claude: bool) {
         // it. The alternative, asking Windows for a picture of the window,
         // is one more system interface and cannot leave the panel out.
         // https://docs.rs/three-d/latest/three_d/core/render_target/struct.RenderTarget.html#method.read_color
+        // (and to Claude, if it asked for the view without the panel: see below)
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(server) = claude.as_mut().filter(|server| server.wants_picture(false) && state.flight.is_empty()) {
+            server.give_picture(false, frame.viewport.width, frame.viewport.height, &screen.read_color());
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if shot == Some(false) {
             state.toast = Some((send::save_screenshot(frame.viewport.width, frame.viewport.height, &screen.read_color()), None));
@@ -591,8 +601,8 @@ pub fn run_form(form: usize, claude: bool) {
         // and to Claude, if it has asked to see the window: once the camera
         // has got to where it was sent, not from somewhere on the way
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(server) = claude.as_mut().filter(|server| server.wants_picture() && state.flight.is_empty()) {
-            server.give_picture(frame.viewport.width, frame.viewport.height, &screen.read_color());
+        if let Some(server) = claude.as_mut().filter(|server| server.wants_picture(true) && state.flight.is_empty()) {
+            server.give_picture(true, frame.viewport.width, frame.viewport.height, &screen.read_color());
         }
         #[cfg(target_arch = "wasm32")]
         let _ = shot;

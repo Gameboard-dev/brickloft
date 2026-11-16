@@ -10,6 +10,8 @@ choosing: you shape the form with a few dots and sliders, it fits the bricks,
 shows them, measures how far they are from the true form, and puts the
 result on the clipboard for the game to paste.
 
+<img src="docs/images/editor.png" width="700" alt="The editor: a blue and white torus in the 3D view, with the settings panel down the left side">
+
 It is a desktop program written in Rust. Nothing is installed in the game or
 on a server.
 
@@ -43,6 +45,8 @@ same number.
 The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
 
 ## What it makes
+
+<img src="docs/images/forms.png" width="700" alt="Six forms in one workspace: an arch, a vase, a pyramid, a torus, a dome and a winding tube, each in its own colours">
 
 | Form | Shaped by |
 |---|---|
