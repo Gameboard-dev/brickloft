@@ -274,7 +274,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // limit met. The sliders are logarithmic, since a slider that reaches
         // 1000 in even steps cannot be set to 3.
         let largest = state.max_size;
-        materials(ui, state, largest);
+        texture(ui, state, largest);
         ui.separator();
         workspace(ui, state);
         ui.separator();
@@ -675,10 +675,11 @@ fn workspace(ui: &mut Ui, state: &mut State) {
     });
 }
 
-/// How the form being edited is coloured.
-/// What the form is made of: one material in place of plain brick, or
+/// How the form's faces are laid: one texture in place of plain brick, or
 /// none. The patterns of `brickloft_core::pattern`, under the name a
-/// player looks for them by.
+/// player looks for them by. (Not Materials, as it was called for a day:
+/// in the game a material is what the paint can gives a brick, plastic or
+/// glass or metal, which this is not.)
 ///
 /// It stands under the settings every form shares, in a box of its own
 /// colour. It was a list called Pattern among a form's own sliders, below
@@ -689,7 +690,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 /// For a curve or a cube, which have a flat face to lay it on (a round
 /// tube too: see `brickloft_core::spec::pattern_flat_faces`; a cube is its
 /// largest face pushed through its shortest length).
-fn materials(ui: &mut Ui, state: &mut State, largest: f64) {
+fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
     if !(state.form <= BEZIER || state.form == CUBE) {
         return;
     }
@@ -714,7 +715,7 @@ fn materials(ui: &mut Ui, state: &mut State, largest: f64) {
     let before = if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
     let mut choice = before;
     helped(ui, help("pattern"), |ui| {
-        ComboBox::from_label(egui::RichText::new("Materials").strong().color(ink)).selected_text(named(choice)).show_ui(ui, |ui| {
+        ComboBox::from_label(egui::RichText::new("Texture").strong().color(ink)).selected_text(named(choice)).show_ui(ui, |ui| {
             for n in 0..styles.len() + 2 {
                 ui.selectable_value(&mut choice, n, named(n));
             }
@@ -1015,6 +1016,7 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     }
 }
 
+/// How the form being edited is coloured.
 fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
     let paint = &mut state.paint;
