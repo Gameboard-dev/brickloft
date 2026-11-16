@@ -29,7 +29,7 @@ fn cases() -> Vec<(Furniture, [i32; 3])> {
         for (m, (board, spacing, bay, plinth)) in [(2, 11, 34, 3), (1, 6, 14, 0), (3, 16, 0, 6), (1, 3, 4, 1)].into_iter().enumerate() {
             for books in [100, 85, 40] {
                 let seed = (n * 31 + m * 7 + books as usize) as u64;
-                all.push((Furniture { kind: Kind::Bookcase, seed, board, shelves: 0, spacing, bay, plinth, back: (n + m) % 3 != 0, moulding: (n + m) % 2 == 0, books }, size));
+                all.push((Furniture { kind: Kind::Bookcase, seed, board, shelves: 0, spacing, bay, plinth, back: (n + m) % 3 != 0, moulding: (n + m) % 2 == 0, books, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) }, size));
             }
         }
     }
@@ -355,7 +355,7 @@ fn hostile_sizes_and_settings_are_brought_within_bounds_or_refused_and_never_han
     let started = std::time::Instant::now();
     // every setting at both ends of what a number can be
     for extreme in [i32::MIN, -1, 0, 1, i32::MAX] {
-        let f = Furniture { kind: Kind::Bookcase, seed: u64::MAX, board: extreme, shelves: extreme, spacing: extreme, bay: extreme, plinth: extreme, back: true, moulding: true, books: extreme };
+        let f = Furniture { kind: Kind::Bookcase, seed: u64::MAX, board: extreme, shelves: extreme, spacing: extreme, bay: extreme, plinth: extreme, back: true, moulding: true, books: extreme, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) };
         let within = f.clamped();
         assert!((1..=MOST_BOARD).contains(&within.board) && (0..=MOST_SHELVES).contains(&within.shelves) && (LEAST_SPACING..=MOST_SPACING).contains(&within.spacing) && (within.bay == 0 || (LEAST_BAY..=MOST_BAY).contains(&within.bay)) && (0..=MOST_PLINTH).contains(&within.plinth) && (0..=100).contains(&within.books));
         // unclamped, as a program might hand it over: built as if clamped, at every size from a cell to a hall

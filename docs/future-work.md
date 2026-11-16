@@ -175,6 +175,18 @@ What remains:
 - **More plants still.** A lily, a fern, a cactus and a bamboo have rules
   of their own that are not written. A hedge still cannot fork or meet
   another at a tee.
+- **Hedge on other forms.** An arch can be built as hedge, grown over
+  its distance function ([algorithm.md](algorithm.md), section 7.10). A
+  spline, a Bézier curve, a circle and a sphere have distance functions
+  too. The curves need one line in `Spec::hedged` and the panel's list,
+  and then looking at. A circle and a sphere are laid out by other
+  fitters and need a branch each.
+- **An arch of hedge to walk through.** A plant's leaves can be written
+  with their collision off. An arch's cannot yet: the plant's tickbox is
+  kept in the setting that makes an arch a round tube.
+- **A thin arch of hedge.** At the least size, 6 by 6, the tufts are as
+  large as the band and are cut level on every side, so it is a ragged
+  strand more than a clipped hedge.
 - **More single flowers.** A rose, a water lily and a gerbera are built
   from one kind of petal. A dahlia was built from it and taken out: sixty
   petals four cells wide were confetti from above at 48 cells across. It
@@ -198,11 +210,38 @@ What remains:
   twigs once more. Half-size bricks do not exist, and a wedge is a cell
   wide at its foot, so thinner twigs would be drawn with gaps.
 - **Grass.** Its blades are one cell thick, so a lawn is coarse tufts
-  close up. A pond's patch hangs below the level it was laid on. Water
-  has two levels at most, every raised pond shares one height, and a
-  stream is four to six cells of water across where two were asked for:
-  the soil is laid on a grid 2.4 apart and a narrower channel closes
-  over.
+  close up. Water has two levels at most, every raised pond shares one
+  height, and a stream is five or six cells of water across. A stream
+  could now be narrower: the soil is laid cell by cell, and the 2.4 grid
+  that closed a narrow channel over is used only to find where water
+  stands. A corner where two bare slopes meet is a step, since the
+  sloped piece for it is a different shape for each way it can face.
+- **Cliffs, waterfalls and a random landscape.** The ground can be asked
+  its height, its slope and its water cell by cell without the bricks
+  being built (`grass::Ground`, [algorithm.md](algorithm.md), section
+  7.10). A cliff would stand where the slope is steep and a waterfall
+  where a stream's level steps down, and a landscape made at random
+  would be touches chosen by rule. None of the three is written.
+- **A touch on a very large lawn.** A build works out the whole ground
+  and lays every tile each time, 16 to 22 ms for a lawn 300 by 240
+  ([performance.md](performance.md#still-slow)). A touch changes the
+  ground within its range and the bricks of the tiles it reaches. Two
+  things kept between builds would make its cost the same on any lawn:
+  the heights as they were before the last touch, to which a new touch
+  is applied where it reaches, and each tile's bricks, kept under
+  everything the tile is laid from (the ground of its cells and those
+  round it, the lawn's settings, the reeds over it) and compared in
+  full, so that a kept tile is never another tile's. They were not
+  built because the lawns measured stayed within two frames a touch.
+- **One draw call for every shape.** The form being edited is drawn by
+  one object with a call for each brick shape in it, a dozen for a lawn
+  ([performance.md](performance.md#a-touch-of-the-brush-on-a-lawn)). A
+  vertex shader that moved the corners a shape lacks onto the corners it
+  keeps would draw every shape from one cube, in one call. The other
+  forms are still drawn through three-d's instanced mesh, one object a
+  shape, which costs about 45 microseconds a shape a frame; they could go
+  the same way as the form being edited if each form's grid were given
+  as one matrix for its bricks.
 - **Speed.** A tree takes about a fifth of a second on a desktop's cores
   and up to a second on one, nearly all of it distance samples. Colouring
   is shared over threads. Growing a plant is one run of random numbers and
@@ -216,29 +255,36 @@ What remains:
 
 ## More furniture
 
-One kind of furniture is built, a bookcase, laid out board by board
+Twenty-seven kinds of furniture are built, in five styles
 ([algorithm.md](algorithm.md), section 7.12). What remains:
 
-- **Other kinds.** A table, a chair, a wall shelf, a cupboard with doors
-  and a chest of drawers are not written. Each is a function from a box
-  and the settings to boards, and the settings a form carries (a board
-  thickness, a count, a spacing, a seed) were named so that a new kind
-  needs no change to saves or to the tools Claude uses. A chair's raked
-  back and a table's turned legs need sloped or round parts, which the
-  bookcase does not.
-- **Shelves of different heights.** Every bay has the same shelves and
-  every opening is the same height to within a microbrick. A real
-  bookcase often has one tall opening at the bottom for large books.
-- **More on the shelves.** Books have no titles, bands or page edges, and
-  a book is one colour. There are three ornaments. Nothing is put on top
-  of the bookcase.
+- **Kinds not built.** A wardrobe with a mirror, a bunk bed, a rocking
+  chair, a piano, shelves on a wall, a seascape and a still life are not
+  written. An easel for a painting, and a painting that leans, were not
+  built: a picture hangs flat.
+- **Raked backs.** A wooden chair's back stands upright. A back that
+  leans is a sheared piece for every slat, which was done only for an
+  upholstered back's cushions.
+- **Trellis shapes.** A fan and an obelisk were left out. Their slats are
+  at angles other than 45 degrees, which bricks give only as steps.
+- **Smoother pictures.** A picture is whole cells. The tile code can cut a
+  cell in two along its diagonal, which would smooth a sun's rim and a
+  hill's slope, and is not used.
+- **Portraits.** A sitter looks straight ahead. There are six ways of
+  wearing hair, and no long beards, scarves or earrings.
+- **Plants in pots.** The plant is fitted, so a pot is hundreds of bricks
+  and takes tenths of a second, and when its report is saved the
+  measurement treats the plant's sloped bricks as boxes. A single
+  flower in a vase on a table is not built.
+- **Bookcases and styles.** A bookcase keeps its own settings and takes no
+  notice of the style. Every bay has the same shelves.
+- **Fronts.** A door cannot stand open, and glazed doors need a
+  translucent brick, which the view does not draw.
+- **Joining.** Furniture is joined to another form by cutting alone, and
+  a brick a join has cut is written to the game as plain plastic, not as
+  metal or light.
 - **A front facing any way.** The front is on the low Y side. Another
-  side is faced by a quarter turn of the whole form, which also turns its
-  dots.
-- **Doors and drawers.** A glazed door needs a translucent brick, which
-  the view does not draw.
-- **Joining.** A bookcase is joined to another form by cutting alone, as
-  a plant is, so it cannot be blended into a wall.
+  side is faced by a quarter turn of the whole form.
 
 Code under a licence the project cannot take was not ported and is not to
 be. That rules out the GPL generators (Veloren's `tree.rs`,

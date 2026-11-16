@@ -139,6 +139,12 @@ const LAMP_RADIUS: f32 = 120.0;
 /// the brick stood over the ground, which told blades from soil and
 /// could not tell water from a stone lying in it.
 ///
+/// A lawn is laid out and not grown (`brickloft_core::grass`), so it is
+/// asked which of its own bricks holds the place
+/// (`brickloft_core::spec::lawn`). By the place and not by the brick's
+/// number in the build, because a brick of a join is a piece cut from one
+/// of the form's bricks and has no number there.
+///
 /// Any other plant's greenery is walked through too if the form says so,
 /// and its wood is not: a crown to walk through, limbs to stand on.
 ///
@@ -147,6 +153,9 @@ const LAMP_RADIUS: f32 = 120.0;
 /// too large for single microbricks, which is built at a larger size.
 fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
     use brickloft_core::{spec::Form, tree, tree::Kind, DVec3};
+    if spec.form == Form::Furniture {
+        return furniture_stuff(spec);
+    }
     let as_grown = spec.form == Form::Tree && spec.turned == brickloft_core::shapes::UPRIGHT && !spec.flip.contains(&true);
     let kind = spec.tree.kind;
     // Grass's blades are walked through unless it says they are solid
@@ -162,11 +171,23 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
     if !as_grown || !(grass || soft || dressed) {
         return Box::new(|_| Stuff::Solid);
     }
+    // (asked where its colour was: at the middle of a sloped brick, and of a box at the middle of one of its cells, all of which are one part)
+    let middle_of = |cell: &brickloft_core::shapes::CellBrick| {
+        let ext = if cell.mask == brickloft_core::shapes::CUBE { [1; 3] } else { cell.ext };
+        DVec3::new(cell.min[0] as f64 + ext[0] as f64 / 2.0, cell.min[1] as f64 + ext[1] as f64 / 2.0, cell.min[2] as f64 + ext[2] as f64 / 2.0)
+    };
+    if grass {
+        let Some(lawn) = brickloft_core::spec::lawn(spec) else { return Box::new(|_| Stuff::Solid) };
+        // Soil, sand, stones and the bed of a pond are solid; so is whatever is no brick of the lawn's own (the fillet of a join).
+        return Box::new(move |cell| match lawn.part(middle_of(cell)) {
+            Some(tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
+            Some(tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
+            _ => Stuff::Solid,
+        });
+    }
     let Some(plant) = brickloft_core::spec::plant(spec) else { return Box::new(|_| Stuff::Solid) };
     Box::new(move |cell| {
-        // (asked where its colour was: at the middle of a sloped brick, and of a box at the middle of one of its cells, all of which are one part)
-        let ext = if cell.mask == brickloft_core::shapes::CUBE { [1; 3] } else { cell.ext };
-        let middle = DVec3::new(cell.min[0] as f64 + ext[0] as f64 / 2.0, cell.min[1] as f64 + ext[1] as f64 / 2.0, cell.min[2] as f64 + ext[2] as f64 / 2.0);
+        let middle = middle_of(cell);
         // What is wood, by the part and not by its colour, which a
         // player may change: the trunk and the limbs of anything; the
         // marks on a birch's bark; the fibre under a palm's crown; and in
@@ -175,9 +196,6 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
         // A brick is of one part all through (see `tree::Model::colour`),
         // so none is half wood and half leaf.
         match (kind, plant.shade(middle)) {
-            (Kind::Grass, tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
-            (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
-            (Kind::Grass, _) => Stuff::Solid,
             (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
             // A dressed pine's decorations, by the part and not the colour. They are solid whether or not its needles are walked through: a bauble is a thing to bump into.
             (Kind::Pine, tree::STAR | tree::EXTRA | tree::BAUBLE_GOLD | tree::BAUBLE_PALE | tree::TINSEL) => Stuff::Metal,
@@ -189,6 +207,45 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
             _ => Stuff::Blade,
         }
     })
+}
+
+/// What each brick of a piece of furniture is: its metal the game's
+/// metal, and its lights glowing, with a real light on each that the
+/// furniture says carries one (`brickloft_core::furniture::Model::lamps`:
+/// one to a lamp, one to each flame of a chandelier, eight at most) if
+/// the piece says its lights shine.
+///
+/// By the colour number the furniture gave each brick, which is a number
+/// for what the brick is made of and not for the colour a player has
+/// painted it. The piece is built again here as the workspace built it,
+/// turned and flipped as it stands, and each brick of it looked up by
+/// where it is; so a turned lamp is still lit, where a turned plant's
+/// parts are lost. A brick that a join has cut is no longer one of
+/// those, and is written as plain plastic.
+///
+/// Not a bookcase, whose numbers above the two woods are its books.
+fn furniture_stuff(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
+    use brickloft_core::furniture::{Kind, Model, LEAF, LIGHT, METAL};
+    let snapped = spec.snapped();
+    let lone = brickloft_core::spec::Spec { blend: None, ..spec.clone() };
+    // (nor a picture, whose numbers are its picture's colours)
+    let (false, Ok(built), Some(middle)) = (spec.furniture.kind == Kind::Bookcase || spec.furniture.pictured(), brickloft_core::spec::build(&lone), snapped.points.first()) else { return Box::new(|_| Stuff::Solid) };
+    // (the same bricks in the same order, before they were turned: which of them carry a light)
+    let lamps = Model::new(&snapped.furniture, brickloft_core::spec::cube_sides(&snapped, *middle), snapped.max_ext, snapped.wedges).map(|model| model.lamps).unwrap_or_default();
+    let shine = spec.furniture.shine;
+    let mut made: std::collections::HashMap<(u8, [i32; 3], [i32; 3]), Stuff> = std::collections::HashMap::new();
+    for (n, (brick, shade)) in built.bricks.iter().zip(&built.shades).enumerate() {
+        // (A plant in a pot has other numbers, and nothing of metal or light: its greenery and flowers are walked through if the piece says so, as a plant's are, and its pot, soil and stems never.)
+        let stuff = match *shade {
+            green if spec.furniture.planted() => if spec.furniture.extra && green >= LEAF { Stuff::Blade } else { continue },
+            METAL => Stuff::Metal,
+            LIGHT if shine && lamps.contains(&n) => Stuff::Lamp,
+            LIGHT => Stuff::Glow,
+            _ => continue,
+        };
+        made.insert((brick.mask, brick.min, brick.ext), stuff);
+    }
+    Box::new(move |cell| made.get(&(cell.mask, cell.min, cell.ext)).copied().unwrap_or(Stuff::Solid))
 }
 
 fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3], stuff: Stuff) -> Result<Brick, String> {
@@ -598,6 +655,48 @@ mod tests {
         assert!(read(&bare.to_brz_vec().unwrap()).unwrap_err().contains("not copied from this editor"));
         assert!(read(b"not a brz").is_err());
         // a piece no single brick can be is refused, not written wrong
+        {
+        // Furniture: a chandelier's flames glow and each carries a light, eight of them; its arms and hub are metal; with its lights not to shine they glow and carry none; and turned on its side it is lit all the same.
+        use brickloft_core::furniture::{Furniture, Kind as Piece, LIGHT, METAL};
+        use brickloft_core::spec::{build, Form, Spec};
+        use brickloft_core::DVec3;
+        let piece = |furniture: Furniture, turned: u8| {
+            let [w, d, h] = Furniture::usual_size(furniture.kind);
+            let spec = Spec { form: Form::Furniture, points: vec![DVec3::new(0.5, 0.5, h / 2.0)], radius: d / 2.0, stretch: DVec3::new(w / d, 1.0, h / d), furniture, turned, ..Spec::default() };
+            let built = build(&spec).unwrap();
+            let bricks: Vec<Painted> = built.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+            (prefab(&bricks, &[(spec, Paint::default(), [0; 3])]).unwrap(), built.shades)
+        };
+        let chandelier = Furniture { second: 3, ..Furniture::of(Piece::Chandelier) };
+        for turned in [brickloft_core::shapes::UPRIGHT, 3] {
+            let (world, shades) = piece(chandelier, turned);
+            let of = |shade: u8| -> Vec<&Brick> { world.bricks.iter().zip(&shades).filter(|(_, s)| **s == shade).map(|(b, _)| b).collect() };
+            assert!(of(LIGHT).len() == 8 && of(LIGHT).iter().all(|b| b.material == brdb::assets::materials::GLOW && b.material_intensity == 10 && b.components.len() == 1), "turned {turned}: {} flames", of(LIGHT).len());
+            assert!(of(METAL).len() >= 6 && of(METAL).iter().all(|b| b.material == brdb::assets::materials::METALLIC && b.components.is_empty()), "turned {turned}");
+            assert!(world.bricks.iter().zip(&shades).filter(|(_, s)| **s != LIGHT && **s != METAL).all(|(b, _)| b.material == brdb::assets::materials::PLASTIC && b.components.is_empty()), "turned {turned}");
+        }
+        let (dark, shades) = piece(Furniture { shine: false, ..chandelier }, brickloft_core::shapes::UPRIGHT);
+        assert!(dark.bricks.iter().all(|b| b.components.is_empty()) && dark.bricks.iter().zip(&shades).filter(|(b, s)| **s == LIGHT && b.material == brdb::assets::materials::GLOW).count() == 8);
+        // every lamp has its one light, however many bricks of it glow: a globe is three glowing bricks and one light
+        for kind in [Piece::TableLamp, Piece::FloorLamp, Piece::Pendant, Piece::Sconce, Piece::Candlestick] {
+            for choice in 1..=3 {
+                let (world, shades) = piece(Furniture { choice, ..Furniture::of(kind) }, brickloft_core::shapes::UPRIGHT);
+                assert_eq!(world.bricks.iter().filter(|b| !b.components.is_empty()).count(), 1, "{kind:?}, shade {choice}");
+                assert!(world.bricks.iter().zip(&shades).all(|(b, s)| (b.material == brdb::assets::materials::GLOW) == (*s == LIGHT)), "{kind:?}, shade {choice}");
+            }
+        }
+        // a cupboard's handles are metal and nothing of it glows; a bookcase, whose numbers are its books, is plastic all through
+        let (cupboard, shades) = piece(Furniture { choice: 2, ..Furniture::of(Piece::Cupboard) }, brickloft_core::shapes::UPRIGHT);
+        assert!(shades.contains(&METAL) && cupboard.bricks.iter().zip(&shades).all(|(b, s)| (b.material == brdb::assets::materials::METALLIC) == (*s == METAL) && b.components.is_empty()));
+        let (bookcase, _) = piece(Furniture::of(Piece::Bookcase), brickloft_core::shapes::UPRIGHT);
+        assert!(bookcase.bricks.iter().all(|b| b.material == brdb::assets::materials::PLASTIC && b.components.is_empty()));
+        // a potted plant's leaves are walked through if it says so and its pot, soil and stems never; unticked, all of it is solid
+        let (soft, shades) = piece(Furniture { extra: true, ..Furniture::of(Piece::Potted) }, brickloft_core::shapes::UPRIGHT);
+        assert!(shades.iter().filter(|s| **s >= brickloft_core::furniture::LEAF).count() > 100);
+        assert!(soft.bricks.iter().zip(&shades).all(|(b, s)| b.collision.player == (*s < brickloft_core::furniture::LEAF) && b.material == brdb::assets::materials::PLASTIC));
+        let (firm, _) = piece(Furniture::of(Piece::Potted), brickloft_core::shapes::UPRIGHT);
+        assert!(firm.bricks.iter().all(|b| b.collision.player));
+        }
         let odd = (CellBrick { mask: 0b0000_1001, min: [0; 3], ext: [1; 3] }, None, 0, [0; 3]);
         assert!(prefab(&[odd], &[]).err().unwrap().contains("no brick fits"));
     }

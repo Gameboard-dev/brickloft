@@ -37,8 +37,12 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
+| Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms) | 27,600 | 0% |
+| Lawn, 128 by 88, ponds at two levels and a stream | 24 ms (8 ms) | 20,900 | 0% |
 | Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
 | Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
+| Dining table, sofa, cupboard, chandelier | under 0.01 ms each | 8 to 46 | 0% |
+| Potted plant, 26 wide, 46 tall | about 90 ms (a window box of four plants takes about 1.2 s) | about 1,300 | fitted, as a plant is |
 | Maze of 6 rings, radius 120, plain walls | 0.18 s (40 ms) | 1,122 | 3.4% |
 | The same with brick walls | 0.25 s (75 ms) | 25,045 | 3.4% |
 | The same with hedge walls 6 thick | 2.5 s (1.0 s) | 54,903 | 8.0% |
@@ -60,6 +64,12 @@ the slowest forms. Their
 times come from the test `where_the_time_goes` in
 [core/src/tree.rs](../core/src/tree.rs), run by name with `--ignored
 --nocapture` (see [Trees](#trees) below).
+
+The lawns are not fitted or measured either. Their bricks are written
+down from the height of their ground (see [a lawn](#a-lawn) below), and
+their times come from the test `how_long_a_lawn_takes` in
+[core/src/grass/tests.rs](../core/src/grass/tests.rs), run by name with
+`--release -- --ignored --nocapture`.
 
 The bookcases are not fitted or measured. Their bricks are written down
 from their size ([algorithm.md](algorithm.md), section 7.12), which is why
@@ -300,6 +310,52 @@ and filing its parts, 50 milliseconds, and colouring its bricks, 20, are
 still done on one thread and are now a third of that. A graphics card was considered for the samples and
 not used, because it cannot promise the same bricks on every machine;
 the reasons are in [algorithm.md](algorithm.md), section 7.10.
+
+### A lawn
+
+A patch of grass was built as a tree is: soil, water and every blade
+were parts of one solid, and the fitter sampled that solid's distance
+function over every cell of its box. On a lawn 180 cells by 120 with 24
+touches of the brush, timers put in for the purpose measured this:
+
+| Step | One thread | 16 threads |
+|---|---|---|
+| Growing the 27,800 parts | 7 ms | 7 ms |
+| Filing them in buckets | 0.14 s | 0.13 s |
+| 15.6 million distance samples | 3.4 s | 0.37 s |
+| Colouring 63,500 bricks | 44 ms | 12 ms |
+| All of it | 3.5 s | 0.53 s |
+
+Every touch of the brush did all of it again, so each touch was half a
+second and a stroke of ten was five.
+
+A lawn's bricks are now written down from the height of its ground, with
+no samples ([algorithm.md](algorithm.md), section 7.10, Grass). The same
+lawn, and one 128 by 88 with ponds at two levels and a stream:
+
+| Lawn | One thread | 16 threads | Bricks |
+|---|---|---|---|
+| 180 by 120, 24 touches, fitted | 3.5 s | 0.53 s | 63,500 |
+| The same, laid out | 14 ms | 4 ms | 27,600 |
+| Two pond levels and a stream, fitted | 2.0 s | 0.36 s | 37,700 |
+| The same, laid out | 24 ms | 8 ms | 20,900 |
+
+Of the 14 ms, about 5 are the ground: for every cell, whether the lawn
+covers it and how high every touch leaves it. The other 9 are the tiles'
+bricks. The lawn with a stream takes longer because the flood that finds
+its two levels and the search for each stream's way are on one thread.
+
+The bricks are fewer because a blade is one cell through, a column and a
+sloped tip, where a fitted one was nearly two cells through with sloped
+bricks round it.
+
+A shader on the graphics card was the other candidate, for the samples.
+It was not used, for the reason given under [Trees](#trees): the shading
+language does not fix how its arithmetic rounds, so two cards could
+build different bricks from one lawn. Laying the lawn out removed the
+samples, and nothing as heavy is left for a card to do. What a build
+spends now is spread over the ground's table, the joining of soil into
+boxes and the blades, none of which is more than a few milliseconds.
 
 ### Stretched ramps
 
@@ -691,7 +747,9 @@ long before the number of triangles does. So there is one mesh for each of
 the 125 poses of the nine shapes, and each is drawn once with a list of
 positions and sizes, one per brick in that pose
 ([editor/src/lib.rs](../editor/src/lib.rs)). A build takes at most one draw
-call per pose it uses, however many bricks it has.
+call per pose it uses, however many bricks it has. The form being edited
+is drawn the same way by an object of its own, described under
+[a touch of the brush on a lawn](#a-touch-of-the-brush-on-a-lawn) below.
 
 Shadows are redrawn only when the bricks change, not every frame, because
 turning the camera does not move a shadow. Edge lines cost no extra
@@ -703,6 +761,118 @@ each corner of a face that says how near the face's edge it is
 Undo keeps settings, not bricks. A step in the history is each form's
 settings, colours and place, a few hundred bytes, and the bricks are
 rebuilt from them. 200 steps are kept.
+
+### A touch of the brush on a lawn
+
+A touch of the brush on a large lawn took about 0.7 s to show, and froze
+single frames for up to 0.39 s on the way. The table follows one touch
+through a frame, on the lawn 180 cells by 120 with 24 touches, before
+and after the lawn was laid out and the form being edited was given a
+shorter way to the graphics card. The times are from timers put in the
+frame loop for the purpose and taken out again, with the same touches
+made from a script (see below).
+
+| Step of the frame | Before | After |
+|---|---|---|
+| Building the lawn | 500 to 650 ms, on another thread | 5 to 9 ms, in the frame |
+| Every brick with its colour (`State::painted`) | 0.7 to 0.9 ms | 0.5 to 0.6 ms |
+| The water's and the ghosts' sets | 10 to 20 ms | 0.1 ms |
+| The bricks given to the card | 22 to 29 ms | 0.8 ms to find what changed, 1.0 to 1.5 to fill the buffers |
+| The shadow map | 3 to 8 ms | 1.6 to 2.0 ms |
+| The frame after | 45 to 55 ms | 16.7 ms, as any frame |
+| From the touch to its bricks on screen | about 700 ms | 7 to 10 ms: the frame the touch is made in |
+
+A stroke of ten touches, one every third frame, held 60 frames a second
+throughout. Before, it drew three or four of its ten states, each half a
+second late.
+
+The form being edited goes to the card as a corner, a size and a colour
+for each brick, and a vertex shader puts the brick's shape there
+([editor/src/bricks.rs](../editor/src/bricks.rs),
+[shaders/brick.vert](../editor/src/shaders/brick.vert)). The instanced
+mesh the view used takes a matrix for each instance. Setting its
+instances copied them, turned each instance's box by its matrix to find
+the box round them all, split each matrix into three attributes and
+converted each colour with a power function: 11 to 17 ms for the 27,600
+bricks of the laid-out lawn. Filling three buffers with ten numbers a
+brick takes 1.0 to 1.5 ms. The other forms are still drawn through the
+instanced mesh, because each may stand on a grid turned its own way,
+which is a matrix an instance, and they change only when one of them is
+edited.
+
+The water has two sets, as the solid bricks have, and a set is made
+again only when its bricks change. One set was made again at every
+change of the scene, by going through every brick of the workspace once
+for each of the 125 shapes. That was 10 to 20 ms a touch, and as much
+for every step of dragging any form that stood beside a lawn.
+
+The bricks and their colours are asked for only when a set is to be
+made again. A form that is only moved asks for none.
+
+A form of many bricks is divided into tiles of ground, each with buffers
+of its own, and only the tiles a change reaches are filled again
+([editor/src/tiles.rs](../editor/src/tiles.rs)). A lawn is built in tiles
+so that a touch changes few of them. A form has one tile for every
+16,000 bricks, so the lawn above is one tile and is filled whole. A lawn
+300 by 240, of 86,000 bricks, is four tiles, and a touch on it costs:
+
+| Step | Lawn of 27,600 bricks | Lawn of 86,000 bricks |
+|---|---|---|
+| Building | 5 to 9 ms | 16 to 22 ms |
+| Bricks with their colours | 0.5 ms | 1.4 to 2.8 ms |
+| Finding the tiles that changed | 0.8 ms | 2.0 to 3.9 ms |
+| Filling them | 1.0 to 1.5 ms | 1.3 to 5.1 ms |
+| The shadow map | 1.6 to 2.0 ms | 1.6 to 1.9 ms |
+
+The larger lawn's touch is 25 to 35 ms, so a stroke on it draws every
+other frame.
+
+Shadows are redrawn when the bricks change and at most thirty times a
+second while something is being dragged. Each redrawing draws every
+brick once more, and during a drag the bricks change at every frame.
+
+### Frames a second
+
+With the lawn in view and nothing changing, the window draws at the
+display's 60 frames a second before and after. With the wait for the
+display switched off (a setting of the timers' build, not of the
+editor), the same views measured:
+
+| View | Before | After |
+|---|---|---|
+| Still, the whole lawn in view | 181 a second (5.5 ms a frame) | 273 (3.7 ms) |
+| Flying over it, five legs of two seconds | 156 (6.4 ms) | 195 to 231 (4.3 to 5.1 ms) |
+
+Part of the gain is the lawn's own: it is 27,600 bricks where it was
+63,500. The panel takes 1.1 to 1.6 ms of every frame, and the drawing
+calls for everything else 0.9 ms. A frame's drawing was 1.2 ms of the
+processor's time with the lawn as 13 instanced meshes, since each mesh
+is drawn as an object of its own and sets the lights again. As one
+object it is 0.9 ms.
+
+The blades are tens of thousands of thin boxes, which overlap on screen
+many times over. The card draws them with the depth test on and writes a
+pixel's colour only for the nearest so far. At these sizes the card
+finishes a frame in under 2 ms, so nothing was done about the overlap.
+
+Choosing a brush tool builds nothing and gives the card nothing: the
+frames in which each of the three tools was chosen took 16.6 to 18.1 ms,
+as the frames beside them did, before these changes and after. A tool's
+settings are the brush's own and change no touch already made. The
+freezes reported on choosing a tool were not reproduced as such. What
+did freeze frames, before, was any build under way on another thread: it
+took all sixteen of the processor's threads for half a second, and
+frames in that half second took up to 0.39 s wherever the window's own
+thread happened to be. A tool chosen within half a second of a touch
+fell among those frames.
+
+These figures were taken on a desktop with a Ryzen 7 5800X3D and an RTX
+4060 Ti while other programs were using both, so the times of single
+steps are the lower ends of what was seen, and the worst frames in a run
+were often another program's doing. The mouse was stood in for by a
+script in the frame loop that called what the mouse calls: `add_pull`
+for an Alt + click, the same push onto the form's added points that a
+stroke makes for each step, and the button held down or let go.
 
 ## Compile times
 
@@ -729,6 +899,16 @@ still need tens of thousands of bricks.
 A tree takes up to a second at its usual size on one thread, which is
 what the browser has, and four times as long at twice the size, since its
 time grows with its surface.
+
+A lawn's time grows with its area. One 300 cells by 240 takes 16 to 22
+ms to build on sixteen threads and a touch on it 25 to 35 ms in all, so
+a stroke on it draws every other frame, and a lawn four times that area
+would take about a tenth of a second a touch. Every touch works out the
+whole ground again and lays every tile again, though it changes the
+ground within its range only and the bricks of a few tiles. Keeping the
+ground and the unchanged tiles from one build to the next would make a
+touch cost the same on a lawn of any size
+([future-work.md](future-work.md), More plants).
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at
