@@ -50,6 +50,9 @@ pub enum Form {
     /// 1 point, the foot of its trunk: the tree `tree` describes, `rise`
     /// tall and reaching `radius` to each side
     Tree,
+    /// 1 point, its middle: the furniture `furniture` describes, filling
+    /// the box a `Cube` of the same `radius` and `stretch` would fill
+    Furniture,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -158,6 +161,8 @@ pub struct Spec {
     pub blend: Option<f64>,
     /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
     pub tree: crate::tree::Tree,
+    /// Which furniture a `Form::Furniture` is (see [`crate::furniture`]). Other forms take no notice of it.
+    pub furniture: crate::furniture::Furniture,
 }
 
 impl Default for Spec {
@@ -191,6 +196,7 @@ impl Default for Spec {
             mosaic: None,
             blend: None,
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
+            furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -382,6 +388,15 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
         || spec.depth as f64 > MAX_SPAN;
     if too_far || too_big {
         return Err(format!("the form is too large to build: nothing may be more than {MAX_SPAN} microbricks across; bring its points closer together"));
+    }
+    // Furniture is laid at single microbricks whatever brick size is asked
+    // for. Its boards are a whole number of cells thick and it is exact as
+    // it stands, so a coarser lattice has nothing to save: shrunk and
+    // scaled back up, a board 2 thick on bricks of 3 would be 3 thick or
+    // gone, which is another piece of furniture and not a rougher fit of
+    // this one. Fewer bricks come from fewer books.
+    if spec.form == Form::Furniture {
+        return build_at(spec, 1, measured, threads);
     }
     if spec.grain > 0 {
         return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured, threads);
@@ -972,6 +987,9 @@ pub enum Solid {
         max: [i32; 2],
         field: Field,
     },
+    /// Furniture, which comes with its bricks and their colours and is
+    /// its bricks exactly (see [`crate::furniture`]).
+    Furniture(Box<crate::furniture::Model>),
 }
 
 /// The two axes a flat form's outline is drawn in, given the one it lies across.
@@ -990,6 +1008,7 @@ impl Solid {
             | Solid::Pyramid { field, .. }
             | Solid::Lathe { field, .. }
             | Solid::Pipe { field, .. } => field.eval(p),
+            Solid::Furniture(model) => model.distance(p),
             Solid::Flat {
                 region,
                 axis,
@@ -1056,6 +1075,7 @@ impl Probe {
             | Solid::Round { .. }
             | Solid::Pyramid { .. }
             | Solid::Lathe { .. }
+            | Solid::Furniture(_)
             | Solid::Pipe { .. } => None,
         }
     }
@@ -1318,6 +1338,8 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
         Form::Cube => cube::cube(spec, need(1)?[0], threads),
+        // (its box is a cube's, so that its dots and sizes are a cube's too; it has no curve to draw)
+        Form::Furniture => Ok((Solid::Furniture(Box::new(crate::furniture::Model::new(&spec.furniture, cube::sides(spec, need(1)?[0]), spec.max_ext, spec.wedges)?)), Vec::new())),
         Form::Tree => {
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
@@ -2705,6 +2727,8 @@ fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Thread
 
 fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
+        // nothing to fit, and nothing to measure: the furniture is these bricks
+        Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,

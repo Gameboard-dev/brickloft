@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -251,7 +251,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
         if state.form != before {
             // a tree's colours are for a tree's parts: they go when it does
-            if before == TREE && state.paint.mode == Mode::Pattern {
+            // (and a bookcase's for its wood and its books)
+            if matches!(before, TREE | FURNITURE) && state.paint.mode == Mode::Pattern {
                 state.paint = crate::paint::Paint::default();
             }
             state.preset();
@@ -284,6 +285,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         let arch_feet = state.has_rise();
         if state.form == TREE {
             tree(ui, state, largest);
+        }
+        if state.form == FURNITURE {
+            furniture(ui, state, largest);
         }
         let unblended = state.unblended();
         let s = &mut state.spec;
@@ -430,8 +434,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             CUBE => {
                 helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
             }
-            // a tree is neither filled nor hollow, and has no wall
-            TREE => {}
+            // a tree is neither filled nor hollow, and has no wall; nor is furniture, whose boards have a thickness of their own
+            TREE | FURNITURE => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -450,7 +454,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
-        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && state.form != TREE {
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve || state.form == CUBE {
@@ -514,7 +518,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         // (not a tree, which is no one's mirror image; it can still be flipped)
-        if state.form != TREE {
+        // (nor furniture: a bookcase's carcass is its own mirror image already, and its books are not meant to be)
+        if !matches!(state.form, TREE | FURNITURE) {
             ui.horizontal(|ui| {
                 ui.label("Mirror").on_hover_text(help("mirror"));
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
@@ -948,6 +953,94 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
             s.tree.seed = s.tree.seed.wrapping_add(1);
         }
         hint(ui, help("tree_seed"));
+    });
+}
+
+/// The controls of a piece of furniture: its kind, its colours, its three
+/// sizes, and the settings its parts follow from.
+fn furniture(ui: &mut Ui, state: &mut State, largest: f64) {
+    use brickloft_core::furniture::{KINDS, LEAST_BAY, LEAST_SPACING, MOST_BOARD, MOST_PLINTH, MOST_SHELVES};
+    let titled = |kind: brickloft_core::furniture::Kind| ["Bookcase"][kind as usize];
+    let before = state.spec.furniture.kind;
+    let mut kind = before;
+    helped(ui, help("furniture_kind"), |ui| {
+        ComboBox::from_label("Kind").selected_text(titled(kind)).show_ui(ui, |ui| {
+            for (k, _) in KINDS {
+                ui.selectable_value(&mut kind, k, titled(k));
+            }
+        })
+        .response
+    });
+    if kind != before {
+        state.usual_furniture(kind);
+    }
+    let named = KINDS[kind as usize].1;
+    // which of the kind's sets of colours, if it is in one of them
+    let (sets, names) = (crate::paint::palettes(named), crate::paint::furniture_palette_names(named));
+    let now = sets.iter().position(|set| state.paint.mode == Mode::Pattern && state.paint.colours == *set);
+    let mut choice = now;
+    helped(ui, help("furniture_colours"), |ui| {
+        ComboBox::from_label("Colours").selected_text(now.map_or("Your own", |n| names[n])).show_ui(ui, |ui| {
+            for (n, name) in names.iter().enumerate() {
+                ui.selectable_value(&mut choice, Some(n), *name);
+            }
+        })
+        .response
+    });
+    if let Some(n) = choice.filter(|_| choice != now) {
+        (state.paint.mode, state.paint.colours) = (Mode::Pattern, sets[n].to_vec());
+        // (drawn again now: see the same lines of `tree`)
+        state.scene += 1;
+    }
+    let s = &mut state.spec;
+    // Its three sizes in microbricks, as a cube's are shown and for a
+    // cube's reason (see `CUBE` above). The width and the depth change
+    // about its middle. The height changes at its top: a bookcase stands
+    // on a floor, and made taller about its middle it would sink into it.
+    let snapped = s.snapped();
+    if let Some(&middle) = snapped.points.first() {
+        let sides = brickloft_core::spec::cube_sides(&snapped, middle);
+        for (axis, name) in [(0, "Width"), (1, "Depth"), (2, "Height")] {
+            let (low, high) = sides[axis];
+            let before = high - low;
+            let mut size = before;
+            helped(ui, help("furniture_size"), |ui| ui.add(Slider::new(&mut size, 1.0..=(2.0 * largest).max(1.0)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text(name)));
+            if size != before && size.is_finite() {
+                let size = size.round().clamp(1.0, 2.0 * brickloft_core::spec::MAX_SPAN);
+                s.radius = snapped.radius;
+                s.stretch[axis] = size / 2.0 / snapped.radius;
+                if axis == 2 {
+                    s.points[0] = middle;
+                    s.points[0].z = low + size / 2.0;
+                }
+            }
+        }
+    }
+    let f = &mut s.furniture;
+    helped(ui, help("furniture_board"), |ui| ui.add(Slider::new(&mut f.board, 1..=MOST_BOARD).text("Board thickness")));
+    // (0 is no number at all: as many as the height has room for)
+    helped(ui, help("furniture_shelves"), |ui| ui.add(Slider::new(&mut f.shelves, 0..=MOST_SHELVES).custom_formatter(|n, _| if n == 0.0 { "by spacing".into() } else { format!("{n}") }).text("Shelves")));
+    if f.shelves == 0 {
+        helped(ui, help("furniture_spacing"), |ui| ui.add(Slider::new(&mut f.spacing, LEAST_SPACING..=(largest as i32).clamp(LEAST_SPACING + 1, brickloft_core::furniture::MOST_SPACING)).logarithmic(true).text("Shelf spacing")));
+    }
+    let mut divided = f.bay > 0;
+    if helped(ui, help("furniture_divided"), |ui| ui.checkbox(&mut divided, "Uprights where it is wide")).changed() {
+        f.bay = if divided { brickloft_core::furniture::Furniture::of(kind).bay } else { 0 };
+    }
+    if f.bay > 0 {
+        helped(ui, help("furniture_bay"), |ui| ui.add(Slider::new(&mut f.bay, LEAST_BAY..=(largest as i32).clamp(LEAST_BAY + 1, brickloft_core::furniture::MOST_BAY)).logarithmic(true).text("Widest bay")));
+    }
+    helped(ui, help("furniture_plinth"), |ui| ui.add(Slider::new(&mut f.plinth, 0..=MOST_PLINTH).text("Plinth height")));
+    helped(ui, help("furniture_back"), |ui| ui.checkbox(&mut f.back, "Back panel"));
+    helped(ui, help("furniture_moulding"), |ui| ui.checkbox(&mut f.moulding, "Cornice and skirting"));
+    helped(ui, help("furniture_books"), |ui| ui.add(Slider::new(&mut f.books, 0..=100).suffix("%").text("Books")));
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut f.seed).speed(1.0));
+        ui.label("Seed");
+        if ui.button("Another").clicked() {
+            f.seed = f.seed.wrapping_add(1);
+        }
+        hint(ui, help("furniture_seed"));
     });
 }
 

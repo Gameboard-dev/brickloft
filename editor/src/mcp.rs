@@ -789,9 +789,15 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.stretch.x = brickloft_core::tree::HEDGE_LENGTH;
                 }
             }
+            let furniture = (spec.form == brickloft_core::spec::Form::Furniture).then_some(spec.furniture.kind);
+            if let Some(kind) = furniture.filter(|_| !settings.contains_key("radius") && !settings.contains_key("stretch")) {
+                // furniture given no size is the size the editor starts its kind at: a form's usual radius each way is a crate
+                (spec.radius, spec.stretch) = brickloft_core::furniture::Furniture::usual_form(kind);
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
-                let (points, weights) = crate::state::usual_points(crate::state::form_index(spec.form), spec.radius);
+                let form = crate::state::form_index(spec.form);
+                let (points, weights) = crate::state::usual_points(form, crate::state::half_height(form, &spec));
                 spec.points = points;
                 if spec.weights.is_empty() {
                     spec.weights = weights;
@@ -803,7 +809,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.record();
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
-            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1));
+            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1)).or(furniture.map(|kind| brickloft_core::furniture::KINDS[kind as usize].1));
             state.add_form(spec);
             if let Some(paint) = paint {
                 state.paint = paint;
@@ -825,6 +831,9 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             } else if spec.form == brickloft_core::spec::Form::Tree && was != spec.form {
                 // (a form made into a tree comes in the tree's colours, as one added does)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
+            } else if spec.form == brickloft_core::spec::Form::Furniture && was != spec.form {
+                // (and one made into furniture in the furniture's: its wood, and its books')
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::furniture::KINDS[spec.furniture.kind as usize].1).to_vec(), ..Paint::default() };
             }
             if let Some(to) = arguments.get("place") {
                 *place = placed(to)?;
@@ -1350,5 +1359,57 @@ mod tests {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": bad }), || 0.0).is_err(), "{bad} was taken");
             assert_eq!(state.forms(), now, "{bad} changed the workspace");
         }
+    }
+
+    #[test]
+    fn a_bookcase_is_added_by_its_form_alone_and_resized_and_refilled() {
+        use brickloft_core::furniture::{Furniture, Kind};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        let low_high = |state: &State| {
+            let b = &state.built.bricks;
+            ([0, 1, 2].map(|k| b.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| b.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()))
+        };
+        let books = |state: &State| state.built.shades.iter().filter(|s| **s >= brickloft_core::furniture::FIRST_BOOK).count();
+        // named alone, it is the bookcase the editor starts: its usual size, on the floor, in its own colours
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture" } }), || 0.0).unwrap());
+        assert_eq!((added["forms"][0]["settings"]["form"].as_str(), added["forms"][0]["settings"]["furniture"].as_str()), (Some("furniture"), Some("bookcase,1,2,0,11,34,3,1,1,85")));
+        assert_eq!((state.spec.form, state.spec.furniture, state.others.len()), (brickloft_core::spec::Form::Furniture, Furniture::of(Kind::Bookcase), 1));
+        assert_eq!(low_high(&state), ([-18, -5, 0], [18, 5, 60]));
+        assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("bookcase")));
+        assert!(state.built.error == 0.0 && state.built.shades.len() == state.built.bricks.len() && books(&state) > 40);
+        // resized as a cube is, by half a side and a stretch, and its settings given as a list: 80 by 8 by 48, bare
+        let wide = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": ["bookcase", 7, 1, 4, 9, 0, 0, 0, 0, 0], "radius": 4, "stretch": [10, 1, 6], "points": [[0, 0, 24]] } }), || 0.0).unwrap());
+        assert_eq!(wide["forms"][0]["settings"]["furniture"], "bookcase,7,1,4,9,0,0,0,0,0");
+        assert_eq!(low_high(&state), ([-40, -4, 0], [40, 4, 48]));
+        // two sides, a top, a bottom and four shelves, each one brick
+        assert_eq!((state.built.bricks.len(), books(&state), state.built.error), (8, 0, 0.0));
+        assert_eq!(state.paint.colours.as_slice(), crate::paint::palette("bookcase"), "update_form recoloured a form it was not asked to");
+        // filled, by the kind and the settings up to the one wanted; the same seed is the same books, and another seed others
+        let fill = json!({ "index": 0, "settings": { "furniture": "bookcase,7,1,4,9,0,0,0,0,100" } });
+        apply(&mut state, "update_form", &fill, || 0.0).unwrap();
+        let first = state.built.bricks.clone();
+        assert!(books(&state) > 150, "{} books", books(&state));
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "bookcase,8,1,4,9,0,0,0,0,100" } }), || 0.0).unwrap();
+        assert!(state.built.bricks != first);
+        apply(&mut state, "update_form", &fill, || 0.0).unwrap();
+        assert_eq!(state.built.bricks, first);
+        // the kind alone is the kind as it starts, and the first few settings leave the rest its own
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "bookcase,3,4" } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.furniture, Furniture { seed: 3, board: 4, ..Furniture::of(Kind::Bookcase) });
+        // what is out of range is brought within it, and what is no furniture is refused, leaving the workspace as it was
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "bookcase,1,99,999,1,2,99,5,5,500" } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.furniture, Furniture { kind: Kind::Bookcase, seed: 1, board: 8, shelves: 60, spacing: 3, bay: 4, plinth: 20, back: true, moulding: true, books: 100 });
+        let now = state.forms();
+        for bad in [json!({ "furniture": "wardrobe" }), json!({ "furniture": "bookcase,-1" }), json!({ "furniture": "bookcase,1,thick" }), json!({ "furniture": "bookcase,1,2,0,11,34,3,1,1,85,6" }), json!({ "furniture": "bookcase", "radius": 1000 }), json!({ "furniture": "bookcase,1,1,0,3,4,0,1,0,100", "radius": 500, "stretch": [2, 0.05, 2] })] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": bad }), || 0.0).is_err(), "{bad} was taken");
+            assert_eq!(state.forms(), now, "{bad} changed the workspace");
+        }
+        // a form changed into furniture comes in the furniture's colours, and keeps the colours asked for with the change
+        apply(&mut state, "update_form", &json!({ "index": 1, "settings": { "form": "furniture", "radius": 5, "stretch": [2, 1, 3], "points": [[0, 0, 15]] } }), || 0.0).unwrap();
+        let (spec, paint, _) = &state.forms()[1];
+        assert_eq!((spec.form, paint.mode, paint.colours.as_slice()), (brickloft_core::spec::Form::Furniture, Mode::Pattern, crate::paint::palette("bookcase")));
+        apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture", "furniture": "bookcase,2" }, "colour": { "mode": "pattern", "colours": ["#ffffff", "#dddddd", "#ff0000", "#00ff00", "#0000ff"] } }), || 0.0).unwrap();
+        assert_eq!(state.paint.colours.len(), 5);
     }
 }
