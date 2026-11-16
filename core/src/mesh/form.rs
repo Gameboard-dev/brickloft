@@ -75,6 +75,16 @@ pub const FITTERS: [(Fitter, &str); 2] = [(Fitter::Smoothed, "smoothed"), (Fitte
 /// (the editor's `paint::MOST_COLOURS`).
 pub const MOST_LOOSE: i32 = 200;
 pub const MOST_COLOURS: i32 = 32;
+/// The most times over a mesh's surface may be smoothed, and how many a
+/// mesh that looks made by a network starts with (the editor's
+/// `import::looks_reconstructed`). None: on a cottage such a network made,
+/// 60 long, 20 times over took 8,095 bricks to 7,879 and the steps from
+/// 0.160 to 0.151 a cell, for a discrepancy of 2.39% in place of 2.31%,
+/// and 400 times over did no better (docs/algorithm.md, section 7.13).
+/// The roughness of such a mesh's bricks is not its bumps. The setting is
+/// there for a mesh whose bumps are worse.
+pub const MOST_SMOOTH: i32 = 60;
+pub const USUAL_SMOOTH: i32 = 0;
 /// How many colours a mesh starts with. Chosen by looking at the figure
 /// of `made::figure` built at 4, 8, 12, 16 and 32 (the pictures are in
 /// docs/images/mesh). At 4 its skin and the grass under it are one colour
@@ -109,11 +119,15 @@ pub struct Import {
     /// How many colours the mesh's own are reduced to. 0 for none: the
     /// form is then coloured as any other is.
     pub colours: i32,
+    /// How many times over the mesh's surface is smoothed before it is
+    /// fitted (see `mesh::smooth`). 0 fits it as the file has it. Like
+    /// `up`, it is done by whoever makes the mesh from its file.
+    pub smooth: i32,
 }
 
 impl PartialEq for Import {
     fn eq(&self, other: &Import) -> bool {
-        (&self.name, self.up, self.fitter, self.loose, self.colours) == (&other.name, other.up, other.fitter, other.loose, other.colours)
+        (&self.name, self.up, self.fitter, self.loose, self.colours, self.smooth) == (&other.name, other.up, other.fitter, other.loose, other.colours, other.smooth)
     }
 }
 
@@ -133,16 +147,17 @@ impl Import {
 
     /// The same, with every number brought within what it may be.
     pub fn clamped(self) -> Import {
-        Import { loose: self.loose.clamp(0, MOST_LOOSE), colours: self.colours.clamp(0, MOST_COLOURS), ..self }
+        Import { loose: self.loose.clamp(0, MOST_LOOSE), colours: self.colours.clamp(0, MOST_COLOURS), smooth: self.smooth.clamp(0, MOST_SMOOTH), ..self }
     }
 
     /// As a save has it: the name (or `none`), which way is up, the
     /// fitter, the size under which loose pieces are dropped, and how many
-    /// colours.
+    /// colours, and how many times over it is smoothed (a save from before
+    /// that could be set has no sixth value, and is not smoothed).
     pub fn text(&self) -> String {
         let word = |words: &[(u8, &'static str)], which: u8| words.iter().find(|w| w.0 == which).map_or("", |w| w.1);
         let (ups, fitters) = (UPS.map(|(up, name)| (up as u8, name)), FITTERS.map(|(fitter, name)| (fitter as u8, name)));
-        format!("{},{},{},{},{}", if self.name.is_empty() { "none" } else { &self.name }, word(&ups, self.up as u8), word(&fitters, self.fitter as u8), self.loose, self.colours)
+        format!("{},{},{},{},{},{}", if self.name.is_empty() { "none" } else { &self.name }, word(&ups, self.up as u8), word(&fitters, self.fitter as u8), self.loose, self.colours, self.smooth)
     }
 
     /// The reverse of [`Import::text`]: the name, and then as many of the
@@ -150,8 +165,8 @@ impl Import {
     pub fn read(text: &str) -> Result<Import, MeshError> {
         let bad = |why: &str| MeshError::Malformed { kind: "import setting", why: why.to_string() };
         let parts: Vec<&str> = text.split(',').map(str::trim).collect();
-        if parts.len() > 5 {
-            return Err(bad("expected `name,up,fitter,loose,colours`, or the first few of them"));
+        if parts.len() > 6 {
+            return Err(bad("expected `name,up,fitter,loose,colours,smooth`, or the first few of them"));
         }
         let mut import = Import { colours: USUAL_COLOURS, ..Import::default() };
         if parts[0] != "none" {
@@ -172,6 +187,9 @@ impl Import {
         }
         if let Some(colours) = parts.get(4) {
             import.colours = whole(colours)?;
+        }
+        if let Some(smooth) = parts.get(5) {
+            import.smooth = whole(smooth)?;
         }
         Ok(import.clamped())
     }
@@ -663,6 +681,36 @@ fn tones(shape: &[u8], sampled: &[(usize, u64)], facing: &[(DVec3, DVec3)], near
     for (cell, tone) in seen.into_iter().flatten() {
         tones[cell] = tone;
     }
+    // Specks are taken out: a cell whose colour fewer than three of the coloured cells round it share takes the
+    // commonest colour among them. A picture painted on a model, or a network's guess at one, changes colour from
+    // point to point within what the eye sees as one colour, and a brick takes its colour at one point: on a cottage
+    // such a network made, a third of the boxes were cut where one speck met another (8,095 bricks in twelve colours
+    // against 4,964 in none). A feature three cells across or more keeps its colour, since each of its cells has
+    // neighbours of its own kind. Every cell is judged by the colours as they were, so the order does not matter.
+    let coloured: Vec<usize> = (0..tones.len()).filter(|i| tones[*i] != ANY).collect();
+    let settled = threads.map(coloured.len(), 2000, |k| {
+        let cell = coloured[k];
+        let at = [cell % n[0], cell / n[0] % n[1], cell / (n[0] * n[1])].map(|v| v as i64);
+        let mut counts = [0u8; 32];
+        for round in (0..27).filter(|r| *r != 13) {
+            let to = [at[0] + round % 3 - 1, at[1] + round / 3 % 3 - 1, at[2] + round / 9 - 1];
+            if (0..3).all(|k| to[k] >= 0 && to[k] < n[k] as i64) {
+                let tone = tones[to[0] as usize + n[0] * (to[1] as usize + n[1] * to[2] as usize)];
+                if (tone as usize) < counts.len() {
+                    counts[tone as usize] += 1;
+                }
+            }
+        }
+        let own = tones[cell];
+        if counts.get(own as usize).is_some_and(|same| *same >= 3) || counts.iter().all(|c| *c == 0) {
+            return own;
+        }
+        // (the first of the commonest, which is the one that covers more of the mesh)
+        (0..counts.len()).max_by_key(|tone| (counts[*tone], std::cmp::Reverse(*tone))).unwrap_or(own as usize) as u8
+    });
+    for (cell, tone) in coloured.into_iter().zip(settled) {
+        tones[cell] = tone;
+    }
     tones
 }
 
@@ -773,14 +821,15 @@ mod tests {
             assert_eq!(Import::named(bad), Err(MeshError::NotAnImport { name: bad.to_string() }), "{bad:?}");
         }
         // and what a save says of a mesh is read back as it was written, with its numbers brought within bounds
-        let import = Import { name: "0123456789abcdef.ply".into(), mesh: None, up: Up::X, fitter: Fitter::Blocks, loose: 7, colours: 5 };
+        let import = Import { name: "0123456789abcdef.ply".into(), mesh: None, up: Up::X, fitter: Fitter::Blocks, loose: 7, colours: 5, smooth: 9 };
+        assert_eq!(Import::read("0123456789abcdef.ply,x,blocks,7,5").unwrap(), Import { smooth: 0, ..import.clone() });
         assert_eq!(Import::read(&import.text()).unwrap(), import);
         assert_eq!(Import::read("none").unwrap(), Import { colours: USUAL_COLOURS, ..Import::default() });
         // a name alone is the mesh as the editor opens it: a PLY file with z up, the others with y
         assert_eq!((Import::read("0123456789abcdef.ply").unwrap().up, Import::read("0123456789abcdef.obj").unwrap().up, Import::read("0123456789abcdef.ply,y").unwrap().up), (Up::Z, Up::Y, Up::Y));
         assert_eq!(Import::read("none,z,smoothed,99999,99999").unwrap(), Import { up: Up::Z, loose: MOST_LOOSE, colours: MOST_COLOURS, ..Import::default() });
         assert!(matches!(Import::read("../../secret.glb"), Err(MeshError::NotAnImport { .. })));
-        for bad in ["none,w", "none,y,round", "none,y,blocks,many", "none,y,blocks,1,2,3"] {
+        for bad in ["none,w", "none,y,round", "none,y,blocks,many", "none,y,blocks,1,2,3,4"] {
             assert!(matches!(Import::read(bad), Err(MeshError::Malformed { .. })), "{bad}");
         }
     }
@@ -1036,6 +1085,21 @@ mod tests {
         assert!(plain.shades.is_empty() && (volume(&plain) - volume(&laid)).abs() < 1e-9 && laid.bricks.len() >= plain.bricks.len());
         // and not many more: the inside is not cut up by the colours of the skin
         assert!(laid.bricks.len() < plain.bricks.len() * 2, "{} coloured and {} plain", laid.bricks.len(), plain.bricks.len());
+    }
+
+    #[test]
+    fn specks_of_colour_are_taken_out_and_a_patch_of_colour_is_kept() {
+        // a white ball with one point in twenty-three red, and a red cap on top a fifth of its height deep
+        let (points, triangles) = made::sphere_parts(32);
+        let colours: Vec<[u8; 3]> = points.iter().enumerate().map(|(i, p)| if i % 23 == 0 || p[2] > 0.3 { [200, 30, 30] } else { [240, 240, 240] }).collect();
+        let ball = stood(Mesh::new(&points, &triangles, &colours).unwrap(), 20.0, Import { colours: 2, ..Import::default() }, None);
+        let (palette, laid) = (ball.palette(), ball.built(true, 80, 0.0, Threads::forced(4)));
+        assert_eq!(laid.shades, ball.built(true, 80, 0.0, Threads::ONE).shades);
+        let red = (0..2u8).find(|shade| palette[*shade as usize][1] < 100).unwrap();
+        // red bricks are the cap's and next to none are below it (the cap begins 32 up, and stretched pieces take their colour at their own middle)
+        let reds: Vec<&CellBrick> = laid.bricks.iter().zip(&laid.shades).filter(|(_, shade)| **shade == red).map(|(b, _)| b).collect();
+        let below = reds.iter().filter(|b| b.min[2] + b.ext[2] <= 30).count();
+        assert!(reds.len() > 20 && below * 10 <= reds.len(), "{} red bricks, {below} of them below the cap", reds.len());
     }
 
     #[test]

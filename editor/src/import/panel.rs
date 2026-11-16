@@ -9,7 +9,7 @@
 
 use crate::panel::{help, helped, hint};
 use crate::state::State;
-use brickloft_core::mesh::form::{FITTERS, MOST_COLOURS, MOST_LOOSE, UPS};
+use brickloft_core::mesh::form::{FITTERS, MOST_COLOURS, MOST_LOOSE, MOST_SMOOTH, UPS};
 use brickloft_core::mesh::{Fitter, Up};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -78,6 +78,7 @@ pub fn show(ui: &mut Ui, state: &mut State, largest: f64) {
         helped(ui, help("import_shell"), |ui| ui.add(Slider::new(&mut s.thick, 1.0..=16.0).step_by(1.0).text("Shell thickness")));
     }
     helped(ui, help("import_loose"), |ui| ui.add(Slider::new(&mut s.import.loose, 0..=MOST_LOOSE).logarithmic(true).text("Drop loose pieces under")));
+    helped(ui, help("import_smooth"), |ui| ui.add(Slider::new(&mut s.import.smooth, 0..=MOST_SMOOTH).text("Smooth the surface")));
     helped(ui, help("import_colours"), |ui| ui.add(Slider::new(&mut s.import.colours, 0..=MOST_COLOURS).text("Colours")));
     helped(ui, help("import_simplify"), |ui| ui.add(Slider::new(&mut s.simplify, 0.0..=1.5).text("Simplify")));
     ui.horizontal(|ui| {
@@ -85,8 +86,8 @@ pub fn show(ui: &mut Ui, state: &mut State, largest: f64) {
         hint(ui, help("import_detail"));
     });
     if s.import != before {
-        if s.import.up != before.up {
-            // the same file stood another way up is another mesh to index: read again, here
+        if s.import.up != before.up || s.import.smooth != before.smooth {
+            // the same file stood another way up, or smoothed more or less, is another mesh to index: read again, here
             s.import.mesh = None;
             crate::import::attach(s);
         }

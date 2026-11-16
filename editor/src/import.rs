@@ -100,13 +100,15 @@ pub fn read(bytes: &[u8], kind: Kind) -> Result<Parts, MeshError> {
     }
 }
 
-/// The mesh in a file's bytes, stood with `up` upwards and indexed.
-pub fn mesh_of(bytes: &[u8], kind: Kind, up: Up) -> Result<Mesh, MeshError> {
+/// The mesh in a file's bytes, stood with `up` upwards, its surface
+/// smoothed `smooth` times over (see `brickloft_core::mesh::Mesh::smoothed`),
+/// and indexed.
+pub fn mesh_of(bytes: &[u8], kind: Kind, up: Up, smooth: i32) -> Result<Mesh, MeshError> {
     let mut parts = read(bytes, kind)?;
     for p in &mut parts.positions {
         *p = up.stood(*p);
     }
-    Mesh::with(parts)
+    Mesh::smoothed(parts, smooth.clamp(0, brickloft_core::mesh::form::MOST_SMOOTH) as usize)
 }
 
 /// Which way is up in a mesh, guessed from the mesh: the axis along which
@@ -208,18 +210,18 @@ fn file_error(path: &Path, error: std::io::Error) -> MeshError {
     MeshError::File { path: path.display().to_string(), why: error.to_string() }
 }
 
-type InHand = Mutex<Vec<(String, Up, Arc<Mesh>)>>;
+type InHand = Mutex<Vec<(String, Up, i32, Arc<Mesh>)>>;
 
 fn in_hand() -> &'static InHand {
     static MESHES: InHand = Mutex::new(Vec::new());
     &MESHES
 }
 
-fn keep(name: &str, up: Up, mesh: Arc<Mesh>) {
+fn keep(name: &str, up: Up, smooth: i32, mesh: Arc<Mesh>) {
     // (a thread that failed while holding the list left it as it was: it is still a list of meshes)
     let mut held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    held.retain(|(known, way, _)| !(known == name && *way == up));
-    held.insert(0, (name.to_string(), up, mesh));
+    held.retain(|(known, way, times, _)| !(known == name && *way == up && *times == smooth));
+    held.insert(0, (name.to_string(), up, smooth, mesh));
     held.truncate(IN_HAND);
 }
 
@@ -255,27 +257,29 @@ fn adopt_into(folder: &Path, path: &Path) -> Result<(String, Up, bool), MeshErro
     let parts = read(&bytes, kind)?;
     let (up, reconstructed) = (up_of(&parts, kind), looks_reconstructed(&parts));
     drop(parts);
-    let mesh = mesh_of(&bytes, kind, up)?;
+    // (smoothed as a mesh of its kind starts out, which is what the form it is opened for will ask for)
+    let smooth = if reconstructed { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 };
+    let mesh = mesh_of(&bytes, kind, up, smooth)?;
     let name = name_of(&bytes, kind);
     let kept = folder.join(&name);
     if !kept.exists() {
         std::fs::create_dir_all(folder).map_err(|e| file_error(folder, e))?;
         std::fs::write(&kept, &bytes).map_err(|e| file_error(&kept, e))?;
     }
-    keep(&name, up, Arc::new(mesh));
+    keep(&name, up, smooth, Arc::new(mesh));
     Ok((name, up, reconstructed))
 }
 
-/// The mesh kept under `name`, stood with `up` upwards: the one in hand,
-/// or read from the imports folder.
-pub fn open(name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> {
-    open_from(&folder()?, name, up)
+/// The mesh kept under `name`, stood with `up` upwards and smoothed
+/// `smooth` times over: the one in hand, or read from the imports folder.
+pub fn open(name: &str, up: Up, smooth: i32) -> Result<Arc<Mesh>, MeshError> {
+    open_from(&folder()?, name, up, smooth)
 }
 
-fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> {
+fn open_from(folder: &Path, name: &str, up: Up, smooth: i32) -> Result<Arc<Mesh>, MeshError> {
     // nothing but a name of the folder's own shape is ever joined to its path
     Import::named(name)?;
-    let held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(known, way, _)| known == name && *way == up).map(|found| found.2.clone());
+    let held = in_hand().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().find(|(known, way, times, _)| known == name && *way == up && *times == smooth).map(|found| found.3.clone());
     if let Some(mesh) = held {
         return Ok(mesh);
     }
@@ -283,8 +287,8 @@ fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> 
     if !path.is_file() {
         return Err(MeshError::Missing { name: name.to_string() });
     }
-    let mesh = Arc::new(mesh_of(&bytes_of(&path)?, Kind::of(name)?, up)?);
-    keep(name, up, mesh.clone());
+    let mesh = Arc::new(mesh_of(&bytes_of(&path)?, Kind::of(name)?, up, smooth)?);
+    keep(name, up, smooth, mesh.clone());
     Ok(mesh)
 }
 
@@ -297,7 +301,7 @@ fn open_from(folder: &Path, name: &str, up: Up) -> Result<Arc<Mesh>, MeshError> 
 /// the mesh it has.
 pub fn attach(spec: &mut Spec) {
     if spec.form == Form::Imported && spec.import.mesh.is_none() && !spec.import.name.is_empty() {
-        spec.import.mesh = open(&spec.import.name, spec.import.up).ok();
+        spec.import.mesh = open(&spec.import.name, spec.import.up, spec.import.smooth).ok();
     }
 }
 

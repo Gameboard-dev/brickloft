@@ -1178,7 +1178,7 @@ impl State {
     pub fn open_mesh(&mut self, path: &str, add: bool) {
         // (a path copied from a file manager comes in quotation marks)
         let path = path.trim().trim_matches('"');
-        let opened = crate::import::adopt(std::path::Path::new(path)).and_then(|(name, up, made)| Ok((crate::import::open(&name, up)?, name, up, made)));
+        let opened = crate::import::adopt(std::path::Path::new(path)).and_then(|(name, up, made)| { let smooth = if made { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 }; Ok((crate::import::open(&name, up, smooth)?, name, up, made)) });
         let (mesh, name, up, made) = match opened {
             Ok(opened) => opened,
             Err(why) if self.form == IMPORTED && !add => return self.problem = Some(why.to_string()),
@@ -1189,7 +1189,9 @@ impl State {
         // thread: it starts with pieces under a quarter of its length dropped. (Of its length as it is opened: the
         // setting is in microbricks, and is there to be changed.) Any other mesh starts with everything kept.
         let loose = if made { (USUAL_MESH_RADIUS / 2.0) as i32 } else { 0 };
-        let import = brickloft_core::mesh::Import { name, up, mesh: Some(mesh), ..self.spec.import.clone() };
+        // (and with its surface smoothed, which takes off the bumps such a mesh is drawn with: see `brickloft_core::mesh::smooth`)
+        let smooth = if made { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 };
+        let import = brickloft_core::mesh::Import { name, up, smooth, mesh: Some(mesh), ..self.spec.import.clone() };
         if add || self.form != IMPORTED {
             // As the editor starts a form, with a brick size chosen to keep within a budget. But with bricks priced at
             // nothing: a price buys a third fewer bricks for twice the discrepancy on a mesh (docs/algorithm.md, 7.13),

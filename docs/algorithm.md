@@ -4533,6 +4533,67 @@ same 29 files with nothing else to go by, that put 17 the right way up,
 and not the first. The setting stays in the panel for when both are
 wrong.
 
+#### Meshes a network made: what was tried on them
+
+Five of the 29 real meshes were fitted 60 long in twelve colours: a
+cottage, a chair, a dragon, a car and a barrel. Their bricks are rough.
+The cottage's roof is one slope in the picture it was made from and a
+field of mixed pieces as built, at 0.16 of a cell face of step for each
+cell of surface, twice the made figure's 0.078. Three things were tried
+against that, and measured.
+
+**Smoothing the surface.** The mesh's points are moved towards the
+middle of their neighbours and a little further back out, so many times
+over (Taubin 1995,
+[doi:10.1145/218380.218473](https://doi.org/10.1145/218380.218473)),
+which takes bumps a few points across off a surface without shrinking
+it. The bricks are fitted to the smoothed surface and judged against
+the surface the file gave. It gained little:
+
+| Cottage, 60 long, 12 colours | Bricks | Discrepancy | Steps per surface cell |
+|---|---|---|---|
+| as the file has it | 8,095 | 2.31% | 0.160 |
+| smoothed 5 times over | 7,989 | 2.35% | 0.157 |
+| 20 times | 7,879 | 2.39% | 0.151 |
+| 40 times | 7,757 | 2.43% | 0.148 |
+| 150 times | 7,656 | 2.56% | 0.145 |
+| 400 times | 7,935 | 2.97% | 0.151 |
+
+Forty times over is 4% fewer bricks and 8% less step, and no amount
+does much better. The roughness is therefore not the mesh's small bumps.
+It is the fitter choosing each stretched piece by the face nearest it,
+on a surface whose faces all differ a little, which is what the made
+lumpy ball showed too. Smoothing is kept as a setting, at 0 to begin
+with.
+
+**Colours.** The same cottage is 4,964 bricks with no colours and 8,095
+with twelve: a painted surface changes colour from point to point
+within what the eye sees as one colour, a brick takes its colour at one
+point, and a box is cut wherever two specks meet. A cell whose colour
+fewer than three of the coloured cells round it share now takes the
+commonest colour among them. A feature three cells across keeps its
+colour. Nothing about the shape changes:
+
+| Mesh, 60 long, 12 colours | Bricks before | Bricks after |
+|---|---|---|
+| Cottage | 8,095 | 7,187 |
+| Chair | 2,050 | 1,894 |
+| Dragon | 4,997 | 4,362 |
+| Car | 4,891 | 4,551 |
+| Barrel | 4,490 | 3,944 |
+
+**A price on bricks.** Simplify at 0.25 takes the cottage without
+colours from 4,964 bricks to 2,721, at 4.06% discrepancy in place of
+2.31% and 0.172 of step in place of 0.160. It is the largest lever on
+the brick count there is, and it spends closeness.
+
+What would make such a roof one slope is still to be built: finding the
+near-flat regions of the mesh and giving each one plane and one layout
+of pieces, with the hip and ridge bricks where two meet, and laying a
+curved region as one patch. Neither was begun. Nor were the two changes
+to speed: the search for stretched pieces still tries every placement
+of every size, and laying them is still on one thread.
+
 #### What it does not do
 
 - A plane that is not on the lattice is not moved onto it. The house at

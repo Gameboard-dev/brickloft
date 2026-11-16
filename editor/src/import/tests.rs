@@ -430,11 +430,14 @@ fn a_file_is_taken_in_under_a_name_from_its_content_and_found_again_by_that_name
     assert_eq!(name, name_of(&glb(&parts), Kind::Glb));
     // found again from the folder alone, with the file it came from gone; the same mesh, and the same one in hand each time
     std::fs::remove_file(&path).unwrap();
-    let mesh = open_from(&kept, &name, Up::Y).unwrap();
-    assert!(Arc::ptr_eq(&mesh, &open_from(&kept, &name, Up::Y).unwrap()));
+    let mesh = open_from(&kept, &name, Up::Y, 0).unwrap();
+    assert!(Arc::ptr_eq(&mesh, &open_from(&kept, &name, Up::Y, 0).unwrap()));
+    // smoothed, it is another mesh of the same triangles in the same box
+    let smoothed = open_from(&kept, &name, Up::Y, 5).unwrap();
+    assert!(smoothed.id != mesh.id && smoothed.triangles() == mesh.triangles() && smoothed.half == mesh.half);
     assert_eq!(mesh.triangles(), parts.triangles.len());
     // y is up in the file, so the house, 30 tall in the file's z, lies on its side until it is said that z is up
-    assert!((mesh.half.y - 30.0 / 112.0).abs() < 1e-6 && (open_from(&kept, &name, Up::Z).unwrap().half.z - 30.0 / 112.0).abs() < 1e-6, "{}", mesh.half);
+    assert!((mesh.half.y - 30.0 / 112.0).abs() < 1e-6 && (open_from(&kept, &name, Up::Z, 0).unwrap().half.z - 30.0 / 112.0).abs() < 1e-6, "{}", mesh.half);
     // taken in again, it is the one file still
     std::fs::write(&path, glb(&parts)).unwrap();
     assert_eq!(adopt_into(&kept, &path).unwrap().0, name);
@@ -446,10 +449,10 @@ fn a_file_is_taken_in_under_a_name_from_its_content_and_found_again_by_that_name
     assert!(second != name && second.ends_with(".ply") && up == Up::Z);
 
     // what is not there, and what is no name of the folder's: nothing outside it is ever looked at
-    assert_eq!(open_from(&kept, "0123456789abcdef.glb", Up::Y).err(), Some(MeshError::Missing { name: "0123456789abcdef.glb".into() }));
+    assert_eq!(open_from(&kept, "0123456789abcdef.glb", Up::Y, 0).err(), Some(MeshError::Missing { name: "0123456789abcdef.glb".into() }));
     std::fs::write(from.join("secret.glb"), glb(&parts)).unwrap();
     for outside in ["../brickloft-test-from/secret.glb", "secret.glb", &from.join("secret.glb").display().to_string(), "..\\secret.glb", "", "0123456789abcdef.glb/../secret.glb"] {
-        assert!(matches!(open_from(&kept, outside, Up::Y), Err(MeshError::NotAnImport { .. })), "{outside}");
+        assert!(matches!(open_from(&kept, outside, Up::Y, 0), Err(MeshError::NotAnImport { .. })), "{outside}");
     }
     // a file that is no mesh is refused and is not copied in; nor one of a kind that is not read, a folder, or nothing
     let bad = from.join("bad.obj");
@@ -568,7 +571,7 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
     state.spec.grain = 2;
     settle(&mut state);
     assert!(smaller < first && state.built.bricks.len() < smaller && state.built.grain == 2, "{first} bricks, then {smaller}, then {} at brick size {}", state.built.bricks.len(), state.built.grain);
-    assert!(Arc::ptr_eq(&mesh, state.spec.import.mesh.as_ref().unwrap()) && Arc::ptr_eq(&mesh, &open(&name, state.spec.import.up).unwrap()));
+    assert!(Arc::ptr_eq(&mesh, state.spec.import.mesh.as_ref().unwrap()) && Arc::ptr_eq(&mesh, &open(&name, state.spec.import.up, state.spec.import.smooth).unwrap()));
     // fewer colours asked for are the mesh's own again, as many as asked
     state.spec.import.colours = 3;
     state.paint = paint_of(&state.spec).unwrap();
@@ -576,7 +579,7 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
 
     // a save names the mesh and holds no path to it; opened, the form has its mesh back and is the form it was
     let saved = crate::store::describe(&state.forms());
-    assert!(saved.contains(&format!("import = {name},y,smoothed,0,3")) && !saved.contains("painted ball") && !saved.contains(&from.display().to_string()), "{saved}");
+    assert!(saved.contains(&format!("import = {name},y,smoothed,0,3,0")) && !saved.contains("painted ball") && !saved.contains(&from.display().to_string()), "{saved}");
     let opened = crate::store::forms_in(&saved).unwrap();
     assert!(opened[0].0 == state.forms()[0].0 && opened[0].0.import.mesh.is_some() && opened[0].1 == state.paint);
     // on a computer that has not the file, the form opens empty and says what is missing
@@ -633,7 +636,7 @@ fn a_program_driving_the_editor_names_a_mesh_in_the_folder_and_can_name_nothing_
     // by its name it is added, at the size the editor opens one at, filled, in its own colours, and built
     let added: Value = serde_json::from_str(&apply(&mut state, "add_form", &json!({ "settings": { "form": "imported", "import": name } }), || 0.0).unwrap()).unwrap();
     assert_eq!((state.form, state.spec.radius, state.spec.fill, state.others.len()), (IMPORTED, crate::state::USUAL_MESH_RADIUS, true, 1));
-    assert!(added["forms"][0]["bricks"].as_u64() > Some(100) && added["forms"][0]["settings"]["import"] == format!("{name},z,smoothed,0,12").as_str(), "{}", added["forms"][0]);
+    assert!(added["forms"][0]["bricks"].as_u64() > Some(100) && added["forms"][0]["settings"]["import"] == format!("{name},z,smoothed,0,12,0").as_str(), "{}", added["forms"][0]);
     assert_eq!((state.paint.mode, state.paint.colours.len(), state.built.shades.len()), (crate::paint::Mode::Pattern, 12, state.built.bricks.len()));
     // changed: cubes alone, four colours, and its paint follows
     apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "import": format!("{name},z,blocks,0,4") } }), || 0.0).unwrap();

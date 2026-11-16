@@ -370,8 +370,8 @@ wide, or whose walls or hedge are more than may be built, is refused
 with the reason and what to change.
 
 A model from a file is the form `imported`, and its own settings are one
-line of text, `import`: `name,up,fitter,loose,colours`, of which only
-the name is needed. The name is one that `list_meshes` gives. A mesh
+line of text, `import`: `name,up,fitter,loose,colours,smooth`, of which
+only the name is needed. The name is one that `list_meshes` gives. A mesh
 file gets into that list when you open it in the editor, by typing its
 path in the panel or dropping it on the window, which copies it into the
 editor's imports folder under a name made from its content. Claude
@@ -395,7 +395,8 @@ file and `z` for a `.ply`. `fitter` is `smoothed` or `blocks`. `loose`
 leaves out pieces of the build smaller than that many microbricks that
 touch no other piece, and 0 keeps everything. `colours` is how many
 colours the mesh's own are reduced to, 12 if left out, and 0 leaves them
-out. The form's `radius` is half the length of the mesh's longest side
+out. `smooth` is how many times over the surface is smoothed before it
+is fitted, 0 to 60, 0 if left out. The form's `radius` is half the length of the mesh's longest side
 (24 if left out), its one point is its foot, `fill` false leaves a shell
 `thick` through, and `simplify` above 0 trades closeness for fewer
 bricks. A mesh added with no `colour` comes in its own colours.
