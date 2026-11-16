@@ -101,7 +101,8 @@ pub fn spec_text(spec: &Spec) -> String {
         format!("{},{},{},{},{},{},{},{},{},{},0,{}", name, m.size, (m.bevel && name == "bricks") as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1], (m.bevel && name != "bricks") as u8)
     }));
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, whether it has its extras (1 or 0), and how thick its trunk is (a percentage of the usual; a save from before trunks could be set has none, and is read as 100)
-    line("tree", format!("{},{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8, spec.tree.girth));
+    // (and a pine's decorations: how many baubles, whether tinsel, which lights, and whether they shine in the game)
+    line("tree", format!("{},{},{},{},{},{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8, spec.tree.girth, spec.tree.baubles, spec.tree.tinsel as u8, spec.tree.lights, spec.tree.shine as u8));
     // furniture: which kind, which arrangement of books, how thick its boards are, how many shelves (0 for as many as fit at the spacing), the spacing, the widest a bay may be (0 for no uprights), how tall its plinth is, whether it has a back and mouldings (1 or 0), and how full of books it is, 0 to 100
     {
         let f = &spec.furniture;
@@ -322,8 +323,8 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 // The kind, and then as many of the rest as are given, in
                 // order: `oak` alone is the oak as it starts out, and
                 // `oak,7` the seventh of them.
-                if parts.len() > 7 {
-                    return Err(bad("expected `kind,seed,fullness,count,bend,extras,girth`, or the first few of them"));
+                if parts.len() > 11 {
+                    return Err(bad("expected `kind,seed,fullness,count,bend,extras,girth,baubles,tinsel,lights,shine`, or the first few of them"));
                 }
                 // (the rose bush is gone: read as the flower nearest it, the peony)
                 let named = if parts[0] == "rose" { "peony" } else { parts[0] };
@@ -350,6 +351,22 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 if let Some(girth) = parts.get(6) {
                     tree.girth = whole(girth)?.clamp(crate::tree::GIRTH.0 as _, crate::tree::GIRTH.1 as _) as i32;
+                }
+                // A pine saved when it had one tickbox for a star and baubles says nothing of how it is dressed: ticked, it is a tree with all of it on.
+                if parts.len() <= 7 && kind == crate::tree::Kind::Pine && tree.extras {
+                    (tree.baubles, tree.tinsel, tree.lights) = (50, true, 1);
+                }
+                if let Some(baubles) = parts.get(7) {
+                    tree.baubles = within(baubles)?;
+                }
+                if let Some(tinsel) = parts.get(8) {
+                    tree.tinsel = whole(tinsel)? != 0;
+                }
+                if let Some(lights) = parts.get(9) {
+                    tree.lights = whole(lights)?.clamp(0, 2) as u8;
+                }
+                if let Some(shine) = parts.get(10) {
+                    tree.shine = whole(shine)? != 0;
                 }
                 spec.tree = tree.clamped();
             }
@@ -1223,11 +1240,11 @@ mosaic = {values}
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
                 carve: true,
-                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165 },
+                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, lights: 2, shine: false },
                 furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100 },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
-            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50 }, ..Spec::default() },
+            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, lights: 0, shine: true }, ..Spec::default() },
             Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35 }, ..Spec::default() },
         ];
         // a save from before a trunk's width could be set has no number for it, and its tree is as it was
@@ -1235,6 +1252,13 @@ mosaic = {values}
 tree = oak,7,100,2,0,0").unwrap().tree.girth, 100);
         assert_eq!(parse_spec("form = tree
 tree = oak,7,100,2,0,0,900").unwrap().tree.girth, 200);
+        // a pine from when it had one tickbox for its decorations: ticked, it has them all; unticked, none
+        let old = parse_spec("form = tree
+tree = pine,1,60,15,50,1").unwrap().tree;
+        assert_eq!((old.extras, old.baubles, old.tinsel, old.lights, old.shine), (true, 50, true, 1, true));
+        let plain = parse_spec("form = tree
+tree = pine,1,60,15,50,0").unwrap().tree;
+        assert_eq!((plain.extras, plain.baubles, plain.tinsel, plain.lights), (false, 0, false, 0));
         // a save from before forms could be joined has no line for it, and one out of range is refused
         assert_eq!(parse_spec("form = sphere").unwrap().blend, None);
         assert_eq!(parse_spec("blend = 0").unwrap().blend, Some(0.0));

@@ -1083,11 +1083,23 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         helped(ui, help("tree_girth"), |ui| ui.add(Slider::new(&mut s.tree.girth, least..=most).suffix("%").text("Trunk width")));
     }
     match kind {
-        Kind::Pine => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "A star and baubles"));
-        }
         Kind::Palm => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
+        }
+        Kind::Pine => {
+            // a Christmas tree's decorations
+            helped(ui, help("pine_star"), |ui| ui.checkbox(&mut s.tree.extras, "Star"));
+            helped(ui, help("pine_baubles"), |ui| ui.add(Slider::new(&mut s.tree.baubles, 0..=100).suffix("%").text("Baubles")));
+            helped(ui, help("pine_tinsel"), |ui| ui.checkbox(&mut s.tree.tinsel, "Tinsel"));
+            ui.horizontal(|ui| {
+                ui.label("Lights").on_hover_text(help("pine_lights"));
+                for (n, name) in ["None", "Lights", "Candles"].into_iter().enumerate() {
+                    ui.selectable_value(&mut s.tree.lights, n as u8, name).on_hover_text(help("pine_lights"));
+                }
+            });
+            if s.tree.lights > 0 {
+                helped(ui, help("pine_shine"), |ui| ui.checkbox(&mut s.tree.shine, "Lights shine in the game"));
+            }
         }
         Kind::Cherry => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no blossom)"));

@@ -2845,7 +2845,19 @@ third at most, over about twice its own thickness of height. Buttress
 roots are ridges 0.3 of the trunk thick that run down that flare from no
 higher than half way to the fork, and a kind with $`\rho < 0.7`$ has
 none. A tree that keeps its stem narrows to 0.78 of $`g`$ at its fork,
-and the limbs there share that section by da Vinci's rule. **Trunk
+and the limbs there share that section by da Vinci's rule. A pine's decorations are parts of the same solid
+([core/src/tree.rs](../core/src/tree.rs), `pine`). Baubles are balls of
+radius 1.9, 2.4 or 2.9 under the end and the middle of a bough, taken in
+the order of a number hashed from each place, so asking for more keeps
+those already hung, and one within a cell of another is left out. Tinsel
+is one chain of round lengths wound down the outline of the boughs' ends,
+a turn for every 17 cells of fall, hung at six places a turn and sagging
+2.5 between them. A light is a box two cells each way standing on the
+grid, and a candle's flame a box one by one by two, so each is fitted as
+one brick and carries one light. Each kind of decoration has a part
+number of its own that shares a colour with one of the plant's eight,
+and the file's writer makes metal and lights by that number, whatever
+colours the player has chosen. **Trunk
 width** multiplies $`g`$ by 0.5 to 2 before any of this, so the flare, the
 ridges and the limbs all follow it; the flare's height stays that of the
 usual trunk when the trunk is made fatter, and no trunk is made under

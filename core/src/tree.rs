@@ -121,7 +121,20 @@ pub struct Tree {
     /// its kind and height: [`GIRTH`]'s least to its most, 100 as it
     /// starts out. A plant with no trunk ([`Tree::has_trunk`]) ignores it.
     pub girth: i32,
+    /// A pine: how many baubles hang on it, 0 for none to 100.
+    pub baubles: i32,
+    /// A pine: whether a garland of tinsel is wound round it.
+    pub tinsel: bool,
+    /// A pine: 0 for no lights, 1 for a string of them, 2 for candles on its boughs.
+    pub lights: u8,
+    /// A pine: whether its lights are written with a light on each in the game, or as glowing bricks alone.
+    pub shine: bool,
 }
+
+/// The most lights a pine carries, strung or as candles. Each is a light
+/// the game must draw, and dozens of them close together are what slows
+/// it, so they are few.
+pub const MOST_LIGHTS: usize = 40;
 
 /// The least and most of [`Tree::girth`]: half the usual trunk to twice it.
 pub const GIRTH: (i32, i32) = (50, 200);
@@ -155,7 +168,7 @@ impl Tree {
             Kind::Bed => (50, 14, 40),
             Kind::Cherry => (60, 7, 40),
         };
-        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100 }
+        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, lights: 0, shine: true }
     }
 
     /// The fewest and most of whatever `count` counts, for a kind.
@@ -187,7 +200,7 @@ impl Tree {
     /// file or sent by another program may say anything.
     pub fn clamped(self) -> Tree {
         let (least, most) = Tree::count_range(self.kind);
-        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), ..self }
+        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), lights: self.lights.min(2), ..self }
     }
 
     /// Whether a kind has a trunk whose thickness [`Tree::girth`] sets: the
@@ -290,6 +303,23 @@ pub const TOP: u8 = 5;
 pub const EXTRA: u8 = 6;
 /// the star, and baubles of another colour; the fibre under a palm's crown
 pub const STAR: u8 = 7;
+// A pine's decorations are parts of their own, so that the game's file
+// can make the right ones metal and give the right ones a light, whatever
+// colours they have been given. A plant has eight colours and no more
+// (see `pattern::colour_of`, which goes round them), so these take the
+// colour of a number already there: the two golds and the flame that of
+// the star, the pale bauble that of the snow on a bough, and a candle
+// that of the red bauble.
+/// a pine's baubles in the star's colour
+pub const BAUBLE_GOLD: u8 = 14;
+/// a pine's baubles in the colour of its boughs' tops (snow, on a snowy one)
+pub const BAUBLE_PALE: u8 = 12;
+/// a pine's tinsel
+pub const TINSEL: u8 = 21;
+/// a pine's lights and its candles' flames
+pub const FLAME: u8 = 28;
+/// a pine's candles
+pub const WAX: u8 = 13;
 
 // Grass and its pond: the bed under the water, which reeds' heads share; the water; sand; and stones.
 pub const BED: u8 = LIMB;
@@ -1066,20 +1096,122 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             g.cone(at, at + (out * 0.75 + DVec3::Z * 0.66) * length, 1.2, 0.85, LEAF_LIGHT);
         }
     }
+    // The decorations of a Christmas tree. Whatever random numbers they
+    // want come from the place each hangs (see [`hash`]) and not from the
+    // run the tree is grown with, so that more baubles or a string of
+    // lights leaves every bough where it was.
+    let seed = tree.seed as u32 ^ 0xC4A1;
     if tree.extras {
-        // a star of five points standing on the leader, flat and facing a side
-        let middle = top + DVec3::Z * 4.0;
+        // A star of five points on the leader, flat and facing a side:
+        // five long points and five short between them, as a star cut
+        // from card is, where five spokes from a ball, which it was, were
+        // a starfish.
+        let middle = top + DVec3::Z * 7.0;
         let face = DVec3::new(lean_way.cos(), lean_way.sin(), 0.0);
         let level = face.cross(DVec3::Z);
-        g.blob(middle, DVec3::splat(2.3), STAR, false);
-        for k in 0..5 {
-            let a = PI / 2.0 + TAU * k as f64 / 5.0;
-            g.cone(middle, middle + (level * a.cos() + DVec3::Z * a.sin()) * 5.5, 1.5, 0.55, STAR);
+        g.blob(middle, DVec3::new(2.6, 2.6, 2.6) - face.abs() * 1.2, STAR, false);
+        for k in 0..10 {
+            let a = PI / 2.0 + TAU * k as f64 / 10.0;
+            let (long, thick) = if k % 2 == 0 { (7.5, 1.9) } else { (3.2, 2.0) };
+            g.cone(middle, middle + (level * a.cos() + DVec3::Z * a.sin()) * long, thick, 0.6, STAR);
         }
-        // and baubles hanging under the ends of some boughs, of two colours
+    }
+    // how far out the boughs' ends are at a height: the tree's outline, for what is hung round it
+    let outline = |z: f64| {
+        let (mut near, mut far) = (f64::MAX, 2.0);
+        for tip in &tips {
+            let off = (tip.z - z).abs();
+            if off < near {
+                (near, far) = (off, (tip.truncate() - stem(tip.z).truncate()).length());
+            }
+        }
+        far
+    };
+    let (low, high) = tips.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    if tree.baubles > 0 && !tips.is_empty() {
+        // Baubles: balls of three sizes and three colours, one under the
+        // end of a bough and one under its middle, as many of those
+        // places as asked for and none within a cell of another.
+        let mut hung: Vec<(DVec3, f64)> = Vec::new();
+        let mut places: Vec<(f64, DVec3, usize)> = Vec::new();
         for (n, tip) in tips.iter().enumerate() {
-            if g.unit() < 0.3 {
-                g.blob(*tip - DVec3::Z * 2.6, DVec3::splat(1.9), if n % 2 == 0 { EXTRA } else { STAR }, false);
+            let inner = stem(tip.z).lerp(*tip, 0.62);
+            for (k, at) in [*tip, inner].into_iter().enumerate() {
+                places.push((hash(n as i32, k as i32, 1, seed), at, n * 2 + k));
+            }
+        }
+        // (in the order of each place's own number, so that asking for more keeps those there were)
+        places.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let wanted = (places.len() as f64 * tree.baubles.clamp(0, 100) as f64 / 100.0).ceil() as usize;
+        for (_, at, n) in places {
+            if hung.len() >= wanted {
+                break;
+            }
+            let (size, tone) = (hash(n as i32, 0, 2, seed), hash(n as i32, 0, 3, seed));
+            let r = if size < 0.3 { 1.9 } else if size < 0.75 { 2.4 } else { 2.9 };
+            let c = at - DVec3::Z * (r + 1.6);
+            if c.z < r + 0.5 || hung.iter().any(|(other, wide)| other.distance(c) < r + wide + 1.0) {
+                continue;
+            }
+            hung.push((c, r));
+            g.blob(c, DVec3::splat(r), if tone < 0.4 { EXTRA } else if tone < 0.75 { BAUBLE_GOLD } else { BAUBLE_PALE }, false);
+        }
+    }
+    if tree.tinsel && high > low {
+        // Tinsel: one garland wound down round the tree from its top to
+        // its lowest boughs, a turn for every seventeen cells it falls, lying
+        // on the ends of the boughs. It is hung up at six places in each
+        // turn and sags between them by two cells and a half; and it is
+        // ragged, a ball on it every cell and a half, larger and smaller
+        // by turns of each place's own number.
+        let turns = ((high - low) / 17.0).max(1.5);
+        let steps = (turns * 6.0 * 8.0).ceil() as usize;
+        let at = |n: usize| {
+            let t = n as f64 / steps as f64;
+            let (angle, z) = (lean_way + t * turns * TAU, high + 2.0 - (high + 2.0 - low) * t);
+            let sag = 2.5 * (angle * 3.0).sin().powi(2);
+            stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * 0.94 + 1.0) - DVec3::Z * sag
+        };
+        for n in 0..steps {
+            let (a, b) = (at(n), at(n + 1));
+            g.cone(a, b, 1.0, 1.0, TINSEL);
+            let pieces = (a.distance(b) / 1.5).ceil() as usize;
+            for k in 0..pieces {
+                let r = 0.8 + 0.7 * hash(n as i32, k as i32, 4, seed);
+                g.blob(a.lerp(b, k as f64 / pieces as f64), DVec3::new(r, r, r * 0.8), TINSEL, false);
+            }
+        }
+    }
+    if tree.lights > 0 && !tips.is_empty() {
+        // A bulb, or a candle's flame, is a box two cells each way that
+        // stands on the grid, so that it is fitted as one brick: each is
+        // to carry one light in the game, and a ball would be several
+        // bricks and several lights. (A column whose slanting faces lie
+        // beyond its corners is a box.)
+        let lamp = |g: &mut Grown, at: DVec3| {
+            // (the tree's foot is the middle of a cell across and the bottom of one up: so whole cells are these)
+            let c = DVec3::new(at.x.round() + 0.5, at.y.round() + 0.5, at.z.round());
+            g.parts.push(Part { shape: Shape::Column { a: c, b: c + DVec3::Z * 2.0, ra: 1.0, rb: 1.0, slack: 1.0, cut: 2.0 }, shade: FLAME });
+        };
+        if tree.lights == 1 {
+            // a string of lights wound round the tree the other way from the tinsel, a bulb every so far along it, just inside the ends of the boughs
+            let turns = ((high - low) / 12.0).max(1.5);
+            let long = turns * TAU * outline((low + high) / 2.0);
+            let bulbs = ((long / 7.0).ceil() as usize).clamp(6, MOST_LIGHTS);
+            for n in 0..bulbs {
+                let t = (n as f64 + 0.5) / bulbs as f64;
+                let (angle, z) = (lean_way + 1.0 - t * turns * TAU, high + 1.0 - (high + 1.0 - low) * t);
+                lamp(g, stem(z) + DVec3::new(angle.cos(), angle.sin(), 0.0) * (outline(z) * 0.9 + 0.5) + DVec3::Z * 1.5);
+            }
+        } else {
+            // candles: one standing on the end of a bough, on as many boughs as there may be lights, spread evenly over the tree
+            let every = tips.len().div_ceil(MOST_LIGHTS).max(2);
+            for tip in tips.iter().skip(1).step_by(every).take(MOST_LIGHTS) {
+                let foot = DVec3::new(tip.x.round() + 0.5, tip.y.round() + 0.5, tip.z.round());
+                g.parts.push(Part { shape: Shape::Column { a: foot, b: foot + DVec3::Z * 4.0, ra: 1.0, rb: 1.0, slack: 1.0, cut: 2.0 }, shade: WAX });
+                // (The flame is one cell through on a candle of two, and so stands to one side of its middle by half a cell. As wide as the candle, the two were fitted as one brick, which is one colour and would be one light the height of the candle.)
+                let wick = foot - DVec3::new(0.5, 0.5, -4.0);
+                g.parts.push(Part { shape: Shape::Column { a: wick, b: wick + DVec3::Z * 2.0, ra: 0.5, rb: 0.5, slack: 1.0, cut: 1.0 }, shade: FLAME });
             }
         }
     }
@@ -3539,7 +3671,8 @@ mod tests {
                     assert!(!built.shades.contains(&EXTRA) && build(&small(kind, 2)).unwrap().shades.contains(&EXTRA));
                     continue;
                 }
-                assert!(count(|s| s == EXTRA) > 3, "{name}: no extras");
+                // (a pine's is its star, its baubles being a setting of their own)
+                assert!(if kind == Kind::Pine { count(|s| s == STAR) } else { count(|s| s == EXTRA) } > 3, "{name}: no extras");
                 let plain = build(&Spec { tree: Tree { extras: false, ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
                 assert!(!plain.shades.contains(&EXTRA), "{name}: extras not asked for");
             }
@@ -3747,8 +3880,8 @@ mod tests {
     /// tree too large is refused before it is grown.
     #[test]
     fn hostile_settings_build_a_tree_or_are_refused() {
-        let wild = Tree { kind: Kind::Oak, seed: u64::MAX, fullness: i32::MAX, count: i32::MIN, bend: -7, extras: true, girth: i32::MAX };
-        assert_eq!(wild.clamped(), Tree { kind: Kind::Oak, seed: u64::MAX, fullness: 100, count: 2, bend: 0, extras: true, girth: 200 });
+        let wild = Tree { fullness: i32::MAX, count: i32::MIN, bend: -7, extras: true, girth: i32::MAX, baubles: 900, lights: 9, seed: u64::MAX, ..Tree::of(Kind::Oak) };
+        assert_eq!(wild.clamped(), Tree { fullness: 100, count: 2, bend: 0, extras: true, girth: 200, baubles: 100, lights: 2, seed: u64::MAX, ..Tree::of(Kind::Oak) });
         assert_eq!(Tree { girth: -3, ..wild }.clamped().girth, 50);
         let built = build(&Spec { tree: wild, radius: 20.0, rise: Some(40.0), ..spec(Kind::Oak, 1) }).unwrap();
         assert!(!built.bricks.is_empty());
@@ -4628,5 +4761,72 @@ mod tests {
             let under: Vec<(i32, u8)> = column.iter().filter(|c| c.0 < bottom).copied().collect();
             assert!(!under.is_empty() && under.iter().all(|c| matches!(c.1, BED | STONE)) && under.len() <= 4, "dug {deep}: under the water {under:?}");
         }
+    }
+
+    fn dressed(baubles: i32, tinsel: bool, lights: u8) -> Tree {
+        Tree { extras: true, baubles, tinsel, lights, ..Tree::of(Kind::Pine) }
+    }
+
+    #[test]
+    fn a_dressed_pine_has_baubles_by_the_slider_a_garland_round_it_and_lights_within_their_bound() {
+        let grown = |tree: Tree| { let (height, spread) = Tree::usual_size(Kind::Pine); Model::new(&tree, DVec3::splat(0.5), height, spread) };
+        let balls = |tree: &Model| -> Vec<(DVec3, f64)> { tree.parts.iter().filter(|p| matches!(p.shade, EXTRA | BAUBLE_GOLD | BAUBLE_PALE)).map(|p| match p.shape { Shape::Blob { c, least, .. } => (c, least), _ => panic!("a bauble that is no ball") }).collect() };
+        // more baubles as more are asked for, none when none are, and those of a few stay when there are many
+        let (none, few, some, many) = (grown(dressed(0, false, 0)), grown(dressed(20, false, 0)), grown(dressed(50, false, 0)), grown(dressed(100, false, 0)));
+        let count = |tree: &Model| balls(tree).len();
+        assert!(count(&none) == 0 && count(&few) >= 8 && count(&some) > count(&few) * 2 && count(&many) > count(&some) * 3 / 2, "{} {} {} {}", count(&none), count(&few), count(&some), count(&many));
+        assert!(balls(&few).iter().all(|(c, _)| balls(&many).iter().any(|(other, _)| other.distance(*c) < 1e-9)), "a bauble of the few is not among the many");
+        // none touches another, and they are of more than one size and colour and all round the tree
+        let hung = balls(&many);
+        for (n, (a, ra)) in hung.iter().enumerate() {
+            for (b, rb) in &hung[..n] {
+                assert!(a.distance(*b) >= ra + rb + 0.99, "baubles at {a} and {b} of {ra} and {rb}");
+            }
+        }
+        let sizes: std::collections::BTreeSet<i64> = hung.iter().map(|b| (b.1 * 10.0) as i64).collect();
+        let shades: std::collections::BTreeSet<u8> = many.parts.iter().map(|p| p.shade).filter(|s| matches!(*s, EXTRA | BAUBLE_GOLD | BAUBLE_PALE)).collect();
+        let quarters: std::collections::BTreeSet<(bool, bool)> = hung.iter().map(|b| (b.0.x > 0.5, b.0.y > 0.5)).collect();
+        assert!(sizes.len() == 3 && shades.len() == 3 && quarters.len() == 4, "{sizes:?} {shades:?} {quarters:?}");
+        // the boughs are where they were whatever is hung on them
+        let needles = |tree: &Model| tree.parts.iter().filter(|p| is_leaf(p.shade)).count();
+        assert_eq!(needles(&none), needles(&grown(dressed(100, true, 2))));
+
+        // tinsel: one garland, in every twelfth of the way round, in one piece, sagging between where it is hung
+        let built = build(&Spec { tree: dressed(0, true, 0), ..spec(Kind::Pine, 1) }).unwrap();
+        let tinsel: Vec<&CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(_, s)| **s == TINSEL).map(|(b, _)| b).collect();
+        let round: std::collections::BTreeSet<i64> = bricks_of(&built, &[TINSEL]).iter().map(|p| (((p.y - 0.5).atan2(p.x - 0.5) + PI) / TAU * 12.0) as i64).collect();
+        assert!(tinsel.len() > 200 && round.len() >= 12, "{} bricks of tinsel in {round:?}", tinsel.len());
+        let cells: std::collections::HashSet<[i32; 3]> = tinsel.iter().flat_map(|b| (0..b.ext[0]).flat_map(move |x| (0..b.ext[1]).flat_map(move |y| (0..b.ext[2]).map(move |z| [b.min[0] + x, b.min[1] + y, b.min[2] + z])))).collect();
+        assert!(cells.len() > 3000, "{} cells of tinsel", cells.len());
+        // (In one piece as it is grown: each length of it begins where the last ended. In bricks it is broken wherever it lies in a bough, whose bricks are the bough's.)
+        let lengths: Vec<(DVec3, DVec3)> = grown(dressed(0, true, 0)).parts.iter().filter(|p| p.shade == TINSEL).filter_map(|p| match p.shape { Shape::Cone { a, ba, .. } => Some((a, a + ba)), _ => None }).collect();
+        assert!(lengths.windows(2).all(|w| w[0].1.distance(w[1].0) < 1e-9), "the garland is in pieces");
+        let garland: Vec<DVec3> = lengths.iter().map(|l| l.0).collect();
+        // (It is hung at every eighth step and lowest half way between. Against the steady fall from its top to its bottom, it dips once in each eight steps, by two cells and more.)
+        let (first, last) = (garland[0].z, garland[garland.len() - 1].z);
+        let dips: Vec<f64> = garland.iter().enumerate().map(|(n, p)| p.z - (first + (last - first) * n as f64 / (garland.len() - 1) as f64)).collect();
+        let lows = dips.windows(3).filter(|w| w[1] < w[0] && w[1] <= w[2]).count();
+        let deep = dips.iter().fold(f64::MIN, |m, d| m.max(*d)) - dips.iter().fold(f64::MAX, |m, d| m.min(*d));
+        assert!(garland.len() > 40 && lows + 2 >= garland.len() / 8 && deep > 2.0, "{lows} dips in {} steps, {deep} deep", garland.len());
+
+        // lights: each one brick, two cells each way, and never more than the bound, strung or as candles, on a small tree or a great one
+        for (lights, rise, radius) in [(1u8, 140.0, 36.0), (2, 140.0, 36.0), (1, 400.0, 110.0), (2, 400.0, 110.0), (2, 40.0, 12.0)] {
+            let model = Model::new(&Tree { count: 40, ..dressed(0, false, lights) }, DVec3::splat(0.5), rise, radius);
+            let lamps = model.parts.iter().filter(|p| p.shade == FLAME).count();
+            assert!((3..=MOST_LIGHTS).contains(&lamps), "{lamps} lights on a tree {rise} tall");
+            assert_eq!(model.parts.iter().filter(|p| p.shade == WAX).count(), if lights == 2 { lamps } else { 0 });
+        }
+        let lit = build(&Spec { tree: dressed(0, false, 2), ..spec(Kind::Pine, 1) }).unwrap();
+        let lamps: Vec<&CellBrick> = lit.bricks.iter().zip(&lit.shades).filter(|(_, s)| **s == FLAME).map(|(b, _)| b).collect();
+        let grown_lamps = grown(dressed(0, false, 2)).parts.iter().filter(|p| p.shade == FLAME).count();
+        // (a flame that stands up into the bough over it is that bough's bricks, and is lost: a few are)
+        assert!(lamps.len() <= grown_lamps && lamps.len() * 10 >= grown_lamps * 8 && lamps.iter().all(|b| b.ext == [1, 1, 2] && b.mask == CUBE), "{} bricks for {grown_lamps} lights: {:?}", lamps.len(), lamps.iter().map(|b| b.ext).collect::<Vec<_>>());
+        let strung = build(&Spec { tree: dressed(0, false, 1), ..spec(Kind::Pine, 1) }).unwrap();
+        let bulbs: Vec<&CellBrick> = strung.bricks.iter().zip(&strung.shades).filter(|(_, s)| **s == FLAME).map(|(b, _)| b).collect();
+        let grown_bulbs = grown(dressed(0, false, 1)).parts.iter().filter(|p| p.shade == FLAME).count();
+        // (a bulb that a bough passes through is two bricks: the file's writer stops at the bound whatever the bricks)
+        assert!(bulbs.len() <= grown_bulbs + 4 && bulbs.len() * 10 >= grown_bulbs * 8 && bulbs.iter().filter(|b| b.ext == [2, 2, 2]).count() * 10 >= bulbs.len() * 8, "{} bricks for {grown_bulbs} bulbs: {:?}", bulbs.len(), bulbs.iter().map(|b| b.ext).collect::<Vec<_>>());
+        // a pine with nothing on it has none of any of it
+        assert!(grown(Tree::of(Kind::Pine)).parts.iter().all(|p| !matches!(p.shade, STAR | EXTRA | BAUBLE_GOLD | BAUBLE_PALE | TINSEL | FLAME | WAX)));
     }
 }

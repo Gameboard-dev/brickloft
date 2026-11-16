@@ -136,5 +136,10 @@
   "leaves_passable": "Ticked, the plant's greenery (leaves, needles, fronds, petals, berries, baubles) is written with its collision off, so a player walks through the crown, and its wood (trunk, limbs, stems) stays solid. Unticked, all of it is solid.",
   "cherry_petals": "Ticked, fallen petals lie scattered on the ground under the cherry's crown, thickest under its middle.",
   "grass_levels": "How many heights water stands at. With 1, every pond stands at one height, a little below the lawn. With 2, a hollow sculpted on raised ground holds its own pond higher up, and a stream runs downhill from it to the nearest lower pond. Which pond is the high one follows the ground: push up a hill, push a hollow down into its top, and dig another hollow beside the hill. A high pond with no lower water to run down to has no stream.",
-  "tree_girth": "How thick the trunk is, from half of what is usual for the tree's kind and height to twice it. The limbs that leave the trunk are thicker or thinner with it, and so are a palm's rings and swollen foot. A trunk is never made thinner than bricks can show: about three microbricks through."
+  "tree_girth": "How thick the trunk is, from half of what is usual for the tree's kind and height to twice it. The limbs that leave the trunk are thicker or thinner with it, and so are a palm's rings and swollen foot. A trunk is never made thinner than bricks can show: about three microbricks through.",
+  "pine_star": "A five-pointed star on the top of the tree. In the game it is metal.",
+  "pine_baubles": "How many baubles hang on the tree, from none to one under the end and the middle of nearly every bough. They are of three sizes and three of the tree's colours, none touching another, and metal in the game.",
+  "pine_tinsel": "A garland of tinsel wound down round the tree from its top, sagging between the boughs it lies on. It is metal in the game.",
+  "pine_lights": "None; a string of lights wound round the tree; or candles standing on the ends of its boughs. A tree has 40 at most. Each is a glowing brick.",
+  "pine_shine": "Ticked, every light or candle flame is written with a small warm light on it, so the tree lights what is round it in the game. Each light costs the game a little to draw: untick this to keep the glowing bricks without the lights."
 }
