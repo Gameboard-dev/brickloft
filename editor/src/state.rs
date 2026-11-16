@@ -1313,7 +1313,7 @@ impl State {
         // draw them.
         // (outside a drag, which settles the form it moves as it goes, and says nothing: see `move_by`)
         if !self.busy && self.settle_joins([0; 3]) {
-            self.toast = Some(("Moved a joined form half a microbrick, so that its bricks line up with those of the form it joins".to_string(), None));
+            self.toast = Some(("Moved a joined form a little, so that its bricks line up with those of the form it joins".to_string(), None));
         }
         if self.blend_shown != (self.spec.blend, self.spec.carve) {
             self.blend_shown = (self.spec.blend, self.spec.carve);

@@ -419,12 +419,17 @@ fn clusters(members: &[Member], boxes: &[Option<Box3>], order: &[usize]) -> Vec<
 /// those it would be fitted as one with (see [`clusters`]): a form joined to
 /// two that are themselves half a cell off one another can line up with one
 /// only, and it is the one it stands deeper in.
+///
+/// Two forms built at one brick size larger than a cell are lined up to
+/// whole bricks of that size, for the same reason a size larger: only then
+/// is the join fitted at their size (see [`common_size`]), and not as a
+/// band of single cells between coarse bricks.
 pub fn settled(members: &[Member], which: usize, lean: [i32; 3]) -> [i32; 3] {
     let me = &members[which];
     let all_of = |m: &Member| m.built.bricks.iter().map(|b| in_units(b, m.place)).reduce(|a, b| ([0, 1, 2].map(|k| a.0[k].min(b.0[k])), [0, 1, 2].map(|k| a.1[k].max(b.1[k]))));
     let (Some(mine), true, true) = (all_of(me), me.spec.blend.is_some(), me.built.shades.is_empty()) else { return me.place };
     // how far each form's box reaches into this one's, along the axis it reaches least: less than nothing for a gap
-    let mut best: Option<(i32, [i32; 3])> = None;
+    let mut best: Option<(i32, [i32; 3], i32)> = None;
     for (at, other) in members.iter().enumerate() {
         let (Some(theirs), Some(k)) = (all_of(other), blend_of(me.spec, other.spec)) else { continue };
         if at == which || other.grid != me.grid || !other.built.shades.is_empty() {
@@ -432,11 +437,17 @@ pub fn settled(members: &[Member], which: usize, lean: [i32; 3]) -> [i32; 3] {
         }
         let shared = (0..3).map(|k| mine.1[k].min(theirs.1[k]) - mine.0[k].max(theirs.0[k])).min().unwrap();
         if shared > -(2.0 * reach(k)).ceil() as i32 && best.is_none_or(|b| shared > b.0) {
-            best = Some((shared, other.place));
+            best = Some((shared, other.place, if other.built.grain == me.built.grain { me.built.grain.max(1) } else { 1 }));
         }
     }
-    let Some((_, theirs)) = best else { return me.place };
-    [0, 1, 2].map(|k| if (me.place[k] - theirs[k]).rem_euclid(2) == 1 { me.place[k] + if lean[k] < 0 { -1 } else { 1 } } else { me.place[k] })
+    let Some((_, theirs, size)) = best else { return me.place };
+    // how many units it is past the last place in step with the other: back to that, or on to the next
+    let step = 2 * size;
+    [0, 1, 2].map(|k| {
+        let past = (me.place[k] - theirs[k]).rem_euclid(step);
+        let back = lean[k] < 0 || (lean[k] == 0 && past < size);
+        me.place[k] + if past == 0 { 0 } else if back { -past } else { step - past }
+    })
 }
 
 /// One form of a join, on the lattice the join is fitted on.

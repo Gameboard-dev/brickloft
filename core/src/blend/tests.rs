@@ -434,6 +434,11 @@ fn forms_built_at_one_brick_size_are_joined_at_that_size_and_at_single_cells_if_
         assert!(shares_room(&fine, &pieces_fine).is_none() && !whole_bricks(&pieces_fine));
         assert_eq!(holes_and_spikes(&fine, &pieces_fine, 2.0, 1.8), (0, 0), "carve {carve}, out of step");
         assert!(fresh(&pieces_fine) > 2 * fresh(&pieces), "carve {carve}: {} bricks fitted at single cells and {} at the forms' size", fresh(&pieces_fine), fresh(&pieces));
+        // and settled, the form out of step is moved to the nearest place in step, or the way it leans
+        // (it is a cell, half a brick, out: on to the next place if it leans neither way)
+        assert_eq!(settled(&fine.members(), 1, [0; 3]), [48, 12, 20]);
+        assert_eq!(settled(&fine.members(), 1, [-1, 0, 0]), [44, 12, 20]);
+        assert_eq!(settled(&scene.members(), 1, [1; 3]), scene.places[1]);
     }
 }
 
