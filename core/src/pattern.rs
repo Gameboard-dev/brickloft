@@ -1635,11 +1635,51 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
     for (x, y, w, h, colour) in open {
         push(15, x, y, w, h, colour);
     }
-    for (brick, colour) in tops {
+    for (brick, colour) in joined(tops, opts.max_ext.max(1)) {
         bricks.push(brick);
         shades.push(colour);
     }
     fit
+}
+
+/// Bricks laid a cell at a time, joined into the longest bricks that fill
+/// the same room: the sloped bricks along one side of a bevelled stone
+/// into one long sloped brick, and the whole cells within into blocks.
+///
+/// Two bricks join if they are the same shape and colour, lie end to end
+/// along an axis with the same extent across it, and the shape is the
+/// same all the way along that axis: a sloped brick may be lengthened
+/// along its ridge and not across its slope, which would change the
+/// slope, and a hipped corner not at all. Each axis is taken in turn, so
+/// cells join into rows, rows into slabs and slabs into blocks.
+///
+/// The tops were first laid as they were worked out, a brick to a cell,
+/// and a bevelled wall was a mesh of lines: eleven bricks along the side
+/// of one stone where one would do.
+fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
+    let mut bricks = bricks;
+    for along in 0..3 {
+        // whether a shape is the same at both ends of this axis: every corner filled or not as the corner opposite it along the axis is
+        let even = |mask: u8| (0..8u8).all(|c| mask >> c & 1 == mask >> (c ^ 1 << along) & 1);
+        let (a, b) = match along {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        // (those that may join are side by side once sorted so: alike in all but where they start along the axis)
+        bricks.sort_by_key(|(brick, colour)| (brick.mask, *colour, brick.min[a], brick.min[b], brick.ext[a], brick.ext[b], brick.min[along]));
+        let mut out: Vec<(CellBrick, u8)> = Vec::with_capacity(bricks.len());
+        for (brick, colour) in bricks {
+            match out.last_mut() {
+                Some((last, shade)) if *shade == colour && last.mask == brick.mask && even(brick.mask) && last.min[a] == brick.min[a] && last.min[b] == brick.min[b] && last.ext[a] == brick.ext[a] && last.ext[b] == brick.ext[b] && last.min[along] + last.ext[along] == brick.min[along] && last.ext[along] + brick.ext[along] <= limit => last.ext[along] += brick.ext[along],
+                _ => out.push((brick, colour)),
+            }
+        }
+        bricks = out;
+    }
+    // (in the order they stand, so that one wall is always the same list of bricks)
+    bricks.sort_by_key(|(brick, _)| (brick.min[2], brick.min[1], brick.min[0], brick.mask));
+    bricks
 }
 
 /// Fit a mosaic over a region (a flat band, a filled outline) and push it
@@ -2082,6 +2122,13 @@ mod tests {
         // every sloped top keeps its four lower corners: it slopes down, and stands on what is under it
         assert!(tops.iter().all(|b| b.mask & 0x0f == 0x0f));
         assert!(clear(&bricks), "two bricks share room");
+        // The top of a whole brick, 8 by 3, is nine bricks and no more: a
+        // sloped brick the length of each side, a hipped one at each
+        // corner, and one block within. (Laid a cell at a time it was 24.)
+        let ramps: Vec<&&CellBrick> = tops.iter().filter(|b| crate::shapes::shape_info(b.mask).unwrap().kind == Kind::Ramp).collect();
+        assert!(ramps.iter().any(|b| b.ext[0] == 6) && ramps.iter().any(|b| b.ext[1] == 1) && ramps.iter().all(|b| b.ext[0] == 1 || b.ext[1] == 1), "the sloped bricks along a side are not one brick");
+        let whole_bricks = 6 * 9; // six across and nine up of whole bricks is the least a floor 60 by 40 holds
+        assert!(tops.len() < whole_bricks * 9 * 2, "{} bricks in the tops", tops.len());
         // a deeper bevel than the wall has room for is as deep as there is room: two cells of three
         assert!(lay("bricks", 3, 8, [0; 3]).0.iter().all(|b| b.min[2] + b.ext[2] <= 3) && lay("bricks", 3, 8, [0; 3]).0.iter().any(|b| b.min[2] == 1 && b.mask != 0xff));
         // Bricks uneven along and across are still rectangles, and bevel
