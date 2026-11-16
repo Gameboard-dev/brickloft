@@ -1230,23 +1230,29 @@ impl State {
     pub fn open_mesh(&mut self, path: &str, add: bool) {
         // (a path copied from a file manager comes in quotation marks)
         let path = path.trim().trim_matches('"');
-        let opened = crate::import::adopt(std::path::Path::new(path)).and_then(|(name, up)| Ok((crate::import::open(&name, up)?, name, up)));
-        let (mesh, name, up) = match opened {
+        let opened = crate::import::adopt(std::path::Path::new(path)).and_then(|(name, up, made)| { let smooth = if made { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 }; Ok((crate::import::open(&name, up, smooth)?, name, up, made)) });
+        let (mesh, name, up, made) = match opened {
             Ok(opened) => opened,
             Err(why) if self.form == IMPORTED && !add => return self.problem = Some(why.to_string()),
             Err(why) => return self.alert = Some(("Cannot open the mesh", why.to_string())),
         };
         self.toast = Some((format!("Opened a mesh of {} triangles{}", mesh.triangles(), if mesh.coloured() { ", with its colours" } else { "" }), None));
-        let import = brickloft_core::mesh::Import { name, up, mesh: Some(mesh), ..self.spec.import.clone() };
+        // A mesh that looks made by a network from a picture trails scraps of ground and stray lumps, loose or on a
+        // thread: it starts with pieces under a quarter of its length dropped. (Of its length as it is opened: the
+        // setting is in microbricks, and is there to be changed.) Any other mesh starts with everything kept.
+        let loose = if made { (USUAL_MESH_RADIUS / 2.0) as i32 } else { 0 };
+        // (and with its surface smoothed, which takes off the bumps such a mesh is drawn with: see `brickloft_core::mesh::smooth`)
+        let smooth = if made { brickloft_core::mesh::form::USUAL_SMOOTH } else { 0 };
+        let import = brickloft_core::mesh::Import { name, up, smooth, mesh: Some(mesh), ..self.spec.import.clone() };
         if add || self.form != IMPORTED {
             // As the editor starts a form, with a brick size chosen to keep within a budget. But with bricks priced at
             // nothing: a price buys a third fewer bricks for twice the discrepancy on a mesh (docs/algorithm.md, 7.13),
             // and closeness comes first.
-            let mut spec = Spec { form: Form::Imported, radius: USUAL_MESH_RADIUS, fill: true, simplify: 0.0, grain: 0, import: brickloft_core::mesh::Import { fitter: Default::default(), loose: 0, colours: brickloft_core::mesh::form::USUAL_COLOURS, ..import }, ..Spec::default() };
+            let mut spec = Spec { form: Form::Imported, radius: USUAL_MESH_RADIUS, fill: true, simplify: 0.0, grain: 0, import: brickloft_core::mesh::Import { fitter: Default::default(), loose, colours: brickloft_core::mesh::form::USUAL_COLOURS, ..import }, ..Spec::default() };
             spec.points = usual_points(IMPORTED, half_height(IMPORTED, &spec)).0;
             self.add_form(spec);
         } else {
-            self.spec.import = import;
+            self.spec.import = brickloft_core::mesh::Import { loose: if made { loose.max(import.loose) } else { import.loose }, ..import };
             // (built behind the window, like any change to a mesh)
             self.build_ms = 4.0 * SLOW_BUILD_MS;
             self.built_from = None;

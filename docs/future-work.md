@@ -312,6 +312,29 @@ generator that would make a mesh from a prompt, and the `.vox` and
 picture readers. What the mesh fitter itself still lacks is listed at
 the end of that section of algorithm.md.
 
+The largest thing it lacks, measured on real meshes from a
+reconstruction network, is a layout for a whole face. A roof that is one
+slope comes out as a field of mixed pieces, because each stretched piece
+is chosen by the triangle nearest it and a real mesh's triangles all
+face slightly different ways. Smoothing the mesh first was tried and
+gained 4%. The work that would change it, in the order it would be
+done:
+
+1. Find the near-flat regions of the mesh (growing regions over
+   neighbouring triangles by their normals, or variational shape
+   approximation, Cohen-Steiner, Alliez and Desbrun 2004,
+   [doi:10.1145/1015706.1015817](https://doi.org/10.1145/1015706.1015817)).
+   Give each region one plane, moved to the nearest whole-number slope
+   and lattice position, and lay one layout of stretched pieces over the
+   whole of it.
+2. Where two such regions meet, lay the hip, ridge and inner-corner
+   bricks of section 2 of algorithm.md along the line they share.
+3. For a region that is curved, lay a patch as the sphere and the spun
+   profile are laid (sections 7.3 and 7.6), from the region's own two
+   curvatures.
+4. Cut the search for stretched pieces down to the sizes a region's
+   plane allows, and share their laying over threads by region.
+
 ### What the two need in common
 
 A new form, **Imported**, holds what another program made: a grid of

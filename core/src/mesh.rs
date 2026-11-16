@@ -110,6 +110,12 @@ pub struct Mesh {
     pub id: u64,
     /// how many triangles were turned over to face the way their neighbours do
     pub turned: usize,
+    /// for each triangle, in the hierarchy's order, whether one of its
+    /// edges is no other triangle's: it is at the rim of a hole, or of the
+    /// whole mesh if the mesh is a sheet
+    open: Vec<bool>,
+    /// how many such edges there are in all: 0 for a mesh that is closed
+    pub open_edges: usize,
 }
 
 impl std::fmt::Debug for Mesh {
@@ -206,6 +212,15 @@ impl Mesh {
     /// `oriented`): the winding number adds each triangle with its sign, so
     /// a shell inside out counts as a hole in whatever it overlaps.
     pub fn with(parts: Parts) -> Result<Mesh, MeshError> {
+        Mesh::smoothed(parts, 0)
+    }
+
+    /// [`Mesh::with`], its surface smoothed `rounds` times over first (see
+    /// [`smooth`]). The mesh keeps the box, the middle and the size of the
+    /// surface as it was given, so that a smoothed mesh and the same mesh
+    /// unsmoothed stand in the same place and one can be measured against
+    /// the other.
+    pub fn smoothed(parts: Parts, rounds: usize) -> Result<Mesh, MeshError> {
         let Parts { positions, triangles, colours, uvs, images, image_of } = parts;
         for (what, found, most) in [(Count::Points, positions.len(), MAX_VERTICES), (Count::Triangles, triangles.len(), MAX_TRIANGLES)] {
             if found > most {
@@ -239,14 +254,17 @@ impl Mesh {
             return Err(MeshError::Empty);
         }
         let centre = (lo + hi) / 2.0;
-        let points: Vec<[f32; 3]> = positions.iter().map(|p| ((d(*p) - centre) / longest).to_array().map(|v| v as f32)).collect();
+        let mut points: Vec<[f32; 3]> = positions.iter().map(|p| ((d(*p) - centre) / longest).to_array().map(|v| v as f32)).collect();
+        if rounds > 0 {
+            smooth(&mut points, &triangles, rounds);
+        }
         let area = |t: &[u32; 3]| (d(points[t[1] as usize]) - d(points[t[0] as usize])).cross(d(points[t[2] as usize]) - d(points[t[0] as usize])).length();
         let kept: Vec<usize> = (0..triangles.len()).filter(|t| area(&triangles[*t]) > 0.0).collect();
         let mut corners: Vec<[u32; 3]> = kept.iter().map(|t| triangles[*t]).collect();
         if corners.is_empty() {
             return Err(MeshError::Empty);
         }
-        let turned = oriented(&points, &mut corners);
+        let (turned, open, open_edges) = oriented(&points, &mut corners);
         let corner_points = |t: &[u32; 3]| t.map(|v| points[v as usize]);
         // the triangles in the hierarchy's order: sorted into it by their middles
         let middles: Vec<[f32; 3]> = corners.iter().map(|t| { let c = corner_points(t); [0, 1, 2].map(|k| (c[0][k] + c[1][k] + c[2][k]) / 3.0) }).collect();
@@ -256,6 +274,7 @@ impl Mesh {
         build(&mut nodes, &mut order, 0, &middles, &tri_points);
         let tris: Vec<[[f32; 3]; 3]> = order.iter().map(|&t| tri_points[t as usize]).collect();
         let corners: Vec<[u32; 3]> = order.iter().map(|&t| corners[t as usize]).collect();
+        let open: Vec<bool> = order.iter().map(|&t| open[t as usize]).collect();
         // (no picture, no list: a mesh painted by its points alone keeps nothing for each triangle)
         let image_of: Vec<u16> = if images.is_empty() || image_of.is_empty() || uvs.is_empty() { Vec::new() } else { order.iter().map(|&t| image_of[kept[t as usize]]).collect() };
         let (uvs, images) = if image_of.is_empty() { (Vec::new(), Vec::new()) } else { (uvs, images) };
@@ -268,11 +287,16 @@ impl Mesh {
         uvs.iter().flatten().for_each(|v| mix(&v.to_le_bytes()));
         image_of.iter().for_each(|v| mix(&v.to_le_bytes()));
         images.iter().for_each(|i| mix(&i.rgb));
-        Ok(Mesh { tris, corners, colours, uvs, images, image_of, nodes, half: (hi - lo) / longest / 2.0, id, turned })
+        Ok(Mesh { tris, corners, colours, uvs, images, image_of, nodes, half: (hi - lo) / longest / 2.0, id, turned, open, open_edges })
     }
 
     pub fn triangles(&self) -> usize {
         self.tris.len()
+    }
+
+    /// Whether triangle `tri` is at the rim of a hole (see [`Mesh::open_edges`]).
+    pub fn open(&self, tri: usize) -> bool {
+        self.open[tri]
     }
 
     /// How much memory the mesh and its hierarchy take, in bytes.
@@ -458,6 +482,74 @@ impl Mesh {
     }
 }
 
+/// Smooth a surface: move each point towards the middle of the points it
+/// shares an edge with, and then a little further back out, `rounds`
+/// times over.
+///
+/// A mesh a network made from a picture is drawn on a grid of a few
+/// hundred cells, and its surface carries bumps a grid cell or two across
+/// that are the drawing's and not the thing's. Fitted as it stands, each
+/// bump turns the faces round it a few degrees, a brick is chosen by the
+/// way a face is turned, and a roof that is one slope in the picture is
+/// built of pieces at twenty slopes. Smoothed first, the bumps are gone
+/// and the shape under them is what the bricks follow. It is still the
+/// surface that is fitted and not a grid of cells: the surface of the
+/// mesh with its noise taken off.
+///
+/// Moving each point to the middle of its neighbours alone (Laplacian
+/// smoothing) shrinks the mesh: a ball gets smaller every round, and thin
+/// parts wither. So each round is two steps (Taubin 1995, "A signal
+/// processing approach to fair surface design",
+/// <https://doi.org/10.1145/218380.218473>): 0.5 of the way in, then 0.53
+/// of the way back out from the new middle. Bumps a few points across are
+/// flattened by the pair and the shape at large is left the size it was.
+///
+/// Points at the same place are one point, as in `oriented`: a file that
+/// repeats a point for each triangle would otherwise come apart at every
+/// edge. Sums are taken in the order of the points' numbers, so the result
+/// is the same on every computer.
+fn smooth(points: &mut [[f32; 3]], triangles: &[[u32; 3]], rounds: usize) {
+    use std::collections::HashMap;
+    let mut first: HashMap<[u32; 3], u32> = HashMap::with_capacity(points.len());
+    let one: Vec<u32> = points.iter().enumerate().map(|(i, p)| *first.entry(p.map(|v| (v + 0.0).to_bits())).or_insert(i as u32)).collect();
+    // every edge both ways, once: each point's neighbours side by side in one list
+    let mut pairs: Vec<(u32, u32)> = Vec::with_capacity(triangles.len() * 6);
+    for t in triangles {
+        for k in 0..3 {
+            let (a, b) = (one[t[k] as usize], one[t[(k + 1) % 3] as usize]);
+            if a != b {
+                pairs.push((a, b));
+                pairs.push((b, a));
+            }
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup();
+    let mut at: Vec<DVec3> = points.iter().map(|p| d(*p)).collect();
+    let step = |at: &mut Vec<DVec3>, by: f64| {
+        let before = at.clone();
+        let mut i = 0;
+        while i < pairs.len() {
+            let point = pairs[i].0;
+            let mut sum = DVec3::ZERO;
+            let mut count = 0.0;
+            while i < pairs.len() && pairs[i].0 == point {
+                sum += before[pairs[i].1 as usize];
+                count += 1.0;
+                i += 1;
+            }
+            at[point as usize] = before[point as usize] + (sum / count - before[point as usize]) * by;
+        }
+    };
+    for _ in 0..rounds {
+        step(&mut at, 0.5);
+        step(&mut at, -0.53);
+    }
+    for (i, p) in points.iter_mut().enumerate() {
+        *p = at[one[i] as usize].to_array().map(|v| v as f32);
+    }
+}
+
 /// Build the hierarchy over `order[..]`, the triangles of this box, and
 /// return the box's place in `nodes`. Split at the median middle along the
 /// box's longest side: the same tree for the same mesh on any computer,
@@ -510,7 +602,9 @@ fn build(nodes: &mut Vec<Node>, order: &mut [u32], first: u32, middles: &[[f32; 
 }
 
 /// Turn triangles over so that each faces the way its neighbours do, and
-/// each shell faces outwards. Returns how many were turned.
+/// each shell faces outwards. Returns how many were turned, which
+/// triangles have an edge that no other triangle shares, and how many such
+/// edges there are.
 ///
 /// Two triangles are neighbours if they share an edge that no third
 /// triangle has. Points at the same place are one point for this, since a
@@ -524,7 +618,7 @@ fn build(nodes: &mut Vec<Node>, order: &mut [u32], first: u32, middles: &[[f32; 
 /// A shell that is meant as a hollow inside another faces inwards on
 /// purpose, and is turned out with the rest, so the hollow is filled. A
 /// build from bricks has its inside filled or not by a setting of its own.
-fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
+fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> (usize, Vec<bool>, usize) {
     use std::collections::HashMap;
     // each point's first twin, by its exact place
     let mut first: HashMap<[u32; 3], u32> = HashMap::with_capacity(points.len());
@@ -547,9 +641,15 @@ fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
             *slot = (other, disagree);
         }
     };
+    let (mut open, mut open_edges) = (vec![false; corners.len()], 0);
     let mut i = 0;
     while i < edges.len() {
         let run = edges[i..].iter().take_while(|e| (e.0, e.1) == (edges[i].0, edges[i].1)).count();
+        // an edge of one triangle only is the rim of a hole
+        if run == 1 {
+            open[edges[i].2 as usize] = true;
+            open_edges += 1;
+        }
         if run == 2 && edges[i].2 != edges[i + 1].2 {
             let disagree = edges[i].3 == edges[i + 1].3;
             put(edges[i].2, edges[i + 1].2, disagree);
@@ -593,7 +693,7 @@ fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
             }
         }
     }
-    turned
+    (turned, open, open_edges)
 }
 
 #[cfg(test)]
@@ -636,6 +736,47 @@ mod tests {
             assert!((mesh.winding_exact(DVec3::ZERO) - 1.0).abs() < 1e-6 && mesh.winding_exact(DVec3::splat(0.6)).abs() < 1e-6);
             assert!((mesh.winding(DVec3::ZERO) - 1.0).abs() < 0.02 && mesh.winding(DVec3::splat(0.6)).abs() < 0.02);
         }
+    }
+
+    #[test]
+    fn the_rim_of_a_hole_is_known_and_a_closed_mesh_has_none() {
+        for closed in [made::sphere(12), made::house(), made::torus(8), made::snowman()] {
+            assert_eq!((closed.open_edges, (0..closed.triangles()).filter(|t| closed.open(*t)).count()), (0, 0), "{closed:?}");
+        }
+        // one triangle taken out of a ball: three edges are left with one triangle each, and three triangles have one
+        let (points, mut triangles) = made::sphere_parts(12);
+        triangles.remove(40);
+        let holed = Mesh::new(&points, &triangles, &[]).unwrap();
+        assert_eq!((holed.open_edges, (0..holed.triangles()).filter(|t| holed.open(*t)).count()), (3, 3));
+        // a file that writes each point again for every triangle that uses it is still one closed skin: points at one place are one point
+        let apart: Vec<[f32; 3]> = made::sphere_parts(12).1.iter().flatten().map(|v| points[*v as usize]).collect();
+        let each: Vec<[u32; 3]> = (0..apart.len() as u32 / 3).map(|t| [3 * t, 3 * t + 1, 3 * t + 2]).collect();
+        assert_eq!(Mesh::new(&apart, &each, &[]).unwrap().open_edges, 0);
+        // a sheet is all rim round its edge
+        assert!(made::bust(24).open_edges > 20 && made::holed_ball(12).open_edges > 10);
+    }
+
+    #[test]
+    fn smoothing_takes_the_bumps_off_a_surface_and_leaves_it_the_size_it_was() {
+        // a ball with every point moved in or out a little, by its number: bumps a point across
+        let (mut points, triangles) = made::sphere_parts(32);
+        let round = points.clone();
+        for (i, p) in points.iter_mut().enumerate() {
+            let by = 1.0 + 0.02 * if i % 2 == 0 { 1.0 } else { -1.0 };
+            *p = p.map(|v| v * by);
+        }
+        let rough = Mesh::new(&points, &triangles, &[]).unwrap();
+        let smooth = Mesh::smoothed(Parts { positions: points.clone(), triangles: triangles.clone(), ..Parts::default() }, 10).unwrap();
+        // how far the surface is from the round ball's, at its worst, in the mesh's own units (the ball is about 1 across)
+        let off = |mesh: &Mesh| round.iter().map(|p| { let p = d(*p) / 1.02; mesh.nearest(p, f64::INFINITY).unwrap().d2.sqrt() }).fold(0.0, f64::max);
+        assert!(off(&rough) > 0.006 && off(&smooth) < 0.004, "{} rough and {} smoothed", off(&rough), off(&smooth));
+        // the same box and the same place: one can be measured against the other
+        assert_eq!(rough.half, smooth.half);
+        // and it has not shrunk: the winding number is still 1 just inside where the round ball's skin was, all round
+        assert!(round.iter().step_by(7).all(|p| smooth.winding(d(*p) / 1.02 * 0.97) > 0.9));
+        // the same again for the same mesh; none asked for is none done
+        assert_eq!(smooth.id, Mesh::smoothed(Parts { positions: points.clone(), triangles: triangles.clone(), ..Parts::default() }, 10).unwrap().id);
+        assert_eq!(rough.id, Mesh::smoothed(Parts { positions: points, triangles, ..Parts::default() }, 0).unwrap().id);
     }
 
     #[test]

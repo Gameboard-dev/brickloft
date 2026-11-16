@@ -36,6 +36,10 @@ fn main() {
         ("rainbow_ball.ply", made::rainbow_ball(48).parts(96.0)),
         ("scattered.glb", made::scattered().parts(100.0)),
         ("figure.glb", made::figure(96).parts(102.0)),
+        ("bust.obj", made::bust(96).parts(57.0)),
+        ("holed_ball.ply", made::holed_ball(48).parts(96.0)),
+        ("snowman.glb", made::snowman().parts(77.0)),
+        ("thin.ply", made::thin(0.6).parts(117.0)),
     ];
     for (name, parts) in &all {
         let bytes = match name.rsplit('.').next() {
@@ -47,7 +51,7 @@ fn main() {
         std::fs::write(&path, &bytes).unwrap_or_else(|e| panic!("could not write {}: {e}", path.display()));
         if args.iter().any(|a| a == "adopt") {
             match adopt(&path) {
-                Ok((kept, _)) => println!("{name}: {} triangles, {} bytes, kept as {kept}", parts.triangles.len(), bytes.len()),
+                Ok((kept, _, _)) => println!("{name}: {} triangles, {} bytes, kept as {kept}", parts.triangles.len(), bytes.len()),
                 Err(why) => println!("{name}: not taken in: {why}"),
             }
         } else {
