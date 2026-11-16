@@ -67,6 +67,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Sphere | a centre and a radius: solid or a hollow shell, stretched to an ellipsoid, cut to a dome or a segment |
 | Revolve | a profile spun about an upright axis: vases, bells, bowls |
 | Pyramid | a base and a height: solid, or a hollow tent |
+| Stepping stones | any flat curve or filled outline, laid as separate stones with gaps: a winding stone path, a cobbled floor |
 
 Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and

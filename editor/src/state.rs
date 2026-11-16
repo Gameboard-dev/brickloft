@@ -733,6 +733,12 @@ impl State {
         let forms = std::iter::once((&self.built, &self.paint, self.bounds, self.place)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place)));
         for (form, (built, paint, bounds, place)) in forms.enumerate() {
             let Some((lo, hi)) = bounds else { continue };
+            if paint.mode == crate::paint::Mode::Patches {
+                // by the piece each brick is part of, which is not to be told from one brick
+                let pieces = brickloft_core::pattern::pieces(&built.bricks);
+                all.extend(built.bricks.iter().zip(pieces).map(|(b, piece)| (*b, paint.patch(piece), form, place)));
+                continue;
+            }
             all.extend(built.bricks.iter().map(|b| (*b, paint.colour(b, lo, hi), form, place)));
         }
         all
@@ -1997,6 +2003,27 @@ mod tests {
         // and fitted as an outline: far fewer bricks than cell by cell
         assert!(state.problem.is_none() && state.built.bricks.len() * 2 < cell_by_cell, "{} bricks, {cell_by_cell} before", state.built.bricks.len());
         assert!(!state.line_up(), "an arch already lined up was turned again");
+    }
+
+    #[test]
+    fn a_path_of_stones_is_coloured_a_stone_at_a_time() {
+        let mut state = State::new();
+        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 30.0, thick: 16.0, depth: 2, stones: Some(brickloft_core::pattern::Stones { size: 7.0, gap: 1.5, uneven: 0.5, seed: 2 }), ..Spec::default() };
+        state.form = CIRCLE;
+        state.paint = Paint { mode: crate::paint::Mode::Patches, colours: crate::paint::STONE.to_vec(), axis: 2, width: 2 };
+        state.refresh(|| 0.0);
+        assert!(state.problem.is_none(), "{:?}", state.problem);
+        let painted = state.painted();
+        let pieces = brickloft_core::pattern::pieces(&state.built.bricks);
+        // many stones, and every one of the colours in use
+        let stones: std::collections::HashSet<u32> = pieces.iter().copied().collect();
+        let colours: std::collections::HashSet<[u8; 3]> = painted.iter().filter_map(|p| p.1).collect();
+        assert!(stones.len() > 20 && colours.len() == 4, "{} stones in {} colours", stones.len(), colours.len());
+        // the bricks of one stone are one colour
+        let mut of_piece: std::collections::HashMap<u32, Option<[u8; 3]>> = std::collections::HashMap::new();
+        for (brick, piece) in painted.iter().zip(&pieces) {
+            assert_eq!(*of_piece.entry(*piece).or_insert(brick.1), brick.1, "a stone is in two colours");
+        }
     }
 
     #[test]

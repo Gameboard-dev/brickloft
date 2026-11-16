@@ -185,10 +185,30 @@ manager, where each save is a `.brz` file. **Delete** removes a save from disk a
 confirm (Enter deletes, Escape cancels), since Ctrl+Z cannot bring a deleted file back. Saves made by earlier versions, which were text files of
 one form's settings, are still listed and opened.
 
+## Stepping stones
+
+**Stepping stones**, on any curve built as a flat band, lays the band as
+separate stones with gaps between them in place of solid brick. The stones
+follow the curve, so a spline drawn across the ground becomes a winding
+stone path as wide as the band's **Thickness**. On a filled outline they
+make a cobbled floor.
+
+| Setting | What it does |
+|---|---|
+| **Stone size** | about how far apart the middles of neighbouring stones are |
+| **Gap** | how wide the space between stones is |
+| **Uneven** | 0 for stones as alike as scattered stones can be, 1 for small ones crowded among large |
+| **Seed** | which scattering: each number is a different path, and **Another** moves to the next |
+
+Ticking the box also sets the colouring to **Each piece its own** in four
+stone colours, unless you had already chosen a colouring.
+
 ## Colour
 
 Each form has its own colouring: one colour, or up to four as a **blend**,
-**stripes** or a **speckle** along a chosen axis. Each brick is one colour.
+**stripes** or a **speckle** along a chosen axis, or **each piece its own**,
+which gives every separate stone of a path one of the colours. Each brick
+is one colour.
 
 ## Fit and brick count
 

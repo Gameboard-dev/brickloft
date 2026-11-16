@@ -85,6 +85,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("grain", spec.grain.to_string());
     line("budget", spec.budget.to_string());
     line("max_ext", spec.max_ext.to_string());
+    // stepping stones: how far apart, the gap, how uneven, and which scattering
+    line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
 
@@ -231,6 +233,20 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             "grain" => spec.grain = whole(value)? as i32,
             "budget" => spec.budget = whole(value)?.max(0) as usize,
             "max_ext" => spec.max_ext = whole(value)? as i32,
+            "stones" => {
+                spec.stones = if value == "none" {
+                    None
+                } else {
+                    let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                    let [size, gap, uneven, seed] = parts.as_slice() else { return Err(bad("expected `size,gap,uneven,seed` or `none`")) };
+                    let (size, gap, uneven) = (num(size)?, num(gap)?, num(uneven)?);
+                    // (sizes from a file, which may be anyone's: kept to what a stone can be)
+                    if !(size.is_finite() && gap.is_finite() && uneven.is_finite()) || size > crate::spec::MAX_SPAN || gap > crate::spec::MAX_SPAN {
+                        return Err(bad("a stone's size and gap are lengths in microbricks"));
+                    }
+                    Some(crate::pattern::Stones { size: size.max(crate::pattern::LEAST_STONE), gap: gap.max(crate::pattern::LEAST_GAP), uneven: uneven.clamp(0.0, 1.0), seed: seed.parse().map_err(|_| bad("the seed is a whole number"))? })
+                }
+            }
             _ => return Err(bad("unknown key")),
         }
     }
@@ -884,6 +900,7 @@ mod tests {
                 depth: 7,
                 radius: 12.5,
                 max_ext: 40,
+                stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
             },
         ];
         for spec in specs {

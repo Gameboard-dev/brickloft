@@ -125,6 +125,10 @@ pub struct Spec {
     /// a sphere, a pyramid or a turned form has none.
     pub pulls: Vec<(DVec3, DVec3)>,
     pub pull_reach: f64,
+    /// A flat band or filled outline laid as stepping stones with gaps
+    /// between them, in place of solid brick (see [`crate::pattern`]).
+    /// `None` for solid. Forms that are not flat take no notice of it.
+    pub stones: Option<crate::pattern::Stones>,
 }
 
 impl Default for Spec {
@@ -154,6 +158,7 @@ impl Default for Spec {
             on_grid: 0,
             pulls: Vec::new(),
             pull_reach: 8.0,
+            stones: None,
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -412,6 +417,7 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.cut = coarse.cut.map(|(lo, hi)| (lo / g, hi / g));
     coarse.pulls = spec.pulls.iter().map(|(at, by)| (*at / g, *by / g)).collect();
     coarse.pull_reach /= g;
+    coarse.stones = spec.stones.map(|s| crate::pattern::Stones { size: s.size / g, gap: s.gap / g, ..s });
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
     coarse.snapped()
@@ -2232,7 +2238,14 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             depth,
         } => {
             let mut bricks = Vec::new();
-            let fit = fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks);
+            let fit = match &spec.stones {
+                // each stone its own outline, where a solid form is one
+                Some(stones) => {
+                    let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
+                    crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks)
+                }
+                None => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),
+            };
             let depth = *depth as f64;
             Built {
                 bricks,

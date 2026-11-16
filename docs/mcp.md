@@ -126,10 +126,11 @@ The settings Claude can give:
 | `stretch`, `cut`, `plane`, `weights` | Stretch per axis, the part of a sphere to keep, the axis a circle faces, a Bézier curve's pulls |
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
+| `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; `none` for solid brick |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
-A colour has a `mode` (`one`, `blend`, `stripes` or `speckle`), one to four
+A colour has a `mode` (`one`, `blend`, `stripes`, `speckle`, or `patches` for each stone its own colour), one to four
 `colours` written `#rrggbb`, the axis it `runs_along`, and a
 `stripe_width`.
 

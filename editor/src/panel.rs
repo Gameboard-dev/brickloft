@@ -412,6 +412,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve && !s.tube {
+            // a path of stones in place of solid brick: see `brickloft_core::pattern`
+            let mut stones = s.stones.is_some();
+            helped(ui, help("stones"), |ui| ui.checkbox(&mut stones, "Stepping stones"));
+            if stones != s.stones.is_some() {
+                s.stones = stones.then_some(brickloft_core::pattern::Stones { size: 8.0, gap: 1.5, uneven: 0.5, seed: 1 });
+                // stones are told apart by their colours: started in stone colours unless colours have been chosen
+                if stones && state.paint.mode == Mode::Solid {
+                    (state.paint.mode, state.paint.colours) = (Mode::Patches, crate::paint::STONE.to_vec());
+                }
+            }
+            if let Some(laid) = &mut s.stones {
+                helped(ui, help("stone_size"), |ui| ui.add(Slider::new(&mut laid.size, brickloft_core::pattern::LEAST_STONE..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Stone size")));
+                helped(ui, help("stone_gap"), |ui| ui.add(Slider::new(&mut laid.gap, brickloft_core::pattern::LEAST_GAP..=8.0).step_by(0.5).text("Gap")));
+                helped(ui, help("stone_uneven"), |ui| ui.add(Slider::new(&mut laid.uneven, 0.0..=1.0).step_by(0.05).text("Uneven")));
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
+                    ui.label("Seed");
+                    if ui.button("Another").clicked() {
+                        laid.seed = laid.seed.wrapping_add(1);
+                    }
+                    hint(ui, help("stone_seed"));
+                });
+            }
             helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
         }
         if !s.pulls.is_empty() {

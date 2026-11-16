@@ -1160,6 +1160,123 @@ brick can make the slope. In these lifted forms, and nowhere else, two
 bricks may share a box, as the two halves of a cell folded along its
 diagonal.
 
+### 7.8 Stepping stones
+
+A flat band or a filled outline can be laid as separate stones with gaps
+between them, in place of solid brick ([core/src/pattern.rs](../core/src/pattern.rs)).
+The stones follow whatever region the form gives: the band along a curved
+path, a ring, a disc.
+
+<img src="images/stepping-stones.png" width="640" alt="A curved path laid as stepping stones">
+
+#### Scattering the stones
+
+Points are scattered over the region, one for each stone, by throwing
+darts. A dart is a random place in the region, and it is kept only if it is
+no nearer than a least distance to every point already kept. This is
+called Poisson disc sampling. It spreads the points evenly, the way stones
+are, without the rows and columns a grid would show. The least distance is
+the **Stone size** made smaller by the **Uneven** setting, so uneven stones
+are allowed to crowd.
+
+The random places come from a small number generator started from the
+form's **Seed**. One seed therefore always gives the same path of stones,
+and the next seed a different one.
+
+#### The shape of a stone
+
+A stone is the ground nearer its own point than any other point. This
+division of ground among points is a Voronoi diagram. The edge between two
+stones is the line half way between their points, so a stone is a polygon.
+
+Take a stone grown from the point $`s`$ and a neighbour grown from $`t`$.
+How far a place $`p`$ is on the stone's own side of the line half way
+between them is
+
+```math
+e_t(p) = \frac{\lvert p - t\rvert^2 - \lvert p - s\rvert^2}{2\,\lvert t - s\rvert}
+```
+
+This is positive on the stone's side, zero on the line and negative past
+it. For example, with $`s`$ at the origin and $`t`$ 8 cells away along x,
+the place 1 cell along x gives $`(49 - 1)/16 = 3`$, which is its distance
+from the line at $`x = 4`$.
+
+A place is inside the stone when it is on the stone's side of every such
+line by at least half the gap $`g`$, and that far inside the region's edge
+too. Writing $`e_0(p)`$ for the distance inside the region's edge, the test
+is
+
+```math
+\min_t\, e_t(p) \ge \tfrac{g}{2}
+```
+
+That gives a polygon with sharp corners. A stone's corners are rounded, so
+the smallest of the distances is replaced by a smooth version of the
+smallest,
+
+```math
+m(p) = -\frac{1}{k}\,\ln \sum_t e^{-k\,e_t(p)}
+```
+
+Where one distance is much smaller than the others, the sum is almost its
+one largest term and $`m`$ equals that distance, so the edges stay where
+they were. Where two distances are nearly equal, at a corner, $`m`$ falls a
+little below both, which draws the corner in and rounds it. The number
+$`k`$ sets how tight the rounding is, and is 2.5 per cell, which rounds a
+corner over about half a cell. A rounder setting was tried first. It fell
+short of the true smallest along the whole of every edge, since a small
+stone has several lines within a cell or two of any place on its edge, and
+the stones came out a cell and a half short all round. This is `Stone::eval`:
+
+```rust
+        let to_me = p.distance_squared(self.at);
+        // (a distance far past the nearest adds nothing, and is left out before it can overflow)
+        let mut sum = (-self.sharp * -region(p)).exp();
+        for other in &self.near {
+            // how far p is on this stone's side of the line half way to the other
+            let inside = (p.distance_squared(*other) - to_me) / (2.0 * other.distance(self.at));
+            sum += (-self.sharp * inside).exp();
+        }
+        let least = -sum.ln() / self.sharp;
+        self.half_gap - least
+```
+
+#### Fitting the stones
+
+The stones together are one solid of many separate parts, and it is fitted
+by the outline fitter of 7.2 in one pass, so every stone gets the sloped
+edges a flat form has. They were first fitted one at a time. Two fits know
+nothing of each other, and across a narrow gap the triangle that finished
+one stone's sloped edge and the triangle that finished its neighbour's
+wanted cells of the same box. One had to be given up, and its stone was
+left with a notch. Fitted together, the fitter settles the two as it
+settles the two faces of a thin wall.
+
+#### Why not wave function collapse
+
+The patterns were asked for under the name of
+[wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse),
+which fills a grid with tiles that agree with their neighbours. It suits a
+pattern made of repeated motifs, and the mosaic floor and the rug planned
+in [future-work.md](future-work.md) will use it. It does not suit stones,
+for two reasons. Its rules reach only a few cells, and nothing that local
+says how large a stone has grown, since the tiles that make a stone's
+inside can be laid without end. Its output is also the grid's own squares,
+where a stone wants an outline at any angle. Scattered points give stones
+of a chosen size by construction and outlines the fitter can follow.
+
+#### Telling the stones apart
+
+The colouring **Each piece its own** gives every stone one of the form's
+colours. Which bricks make one stone is found from the finished bricks
+alone (`pieces` in `pattern.rs`): each brick is sampled, four samples to a
+cell each way, and samples side by side are one stone. The bricks'
+solid parts are compared and not their boxes, because across a narrow gap
+the empty half of one stone's sloped brick shares cells with its
+neighbour's. Working from the bricks means a path can be flipped, turned,
+scaled or read back from a file and still be told apart into its stones.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points

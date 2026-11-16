@@ -17,13 +17,16 @@ pub enum Mode {
     Stripes,
     /// each brick one of the colours, weighted by position: a dithered blend
     Speckle,
+    /// each separate piece of the form one of the colours: the stones of a path
+    Patches,
 }
 
-pub const MODES: [(Mode, &str); 4] = [
+pub const MODES: [(Mode, &str); 5] = [
     (Mode::Solid, "One colour"),
     (Mode::Blend, "Blend"),
     (Mode::Stripes, "Stripes"),
     (Mode::Speckle, "Speckled blend"),
+    (Mode::Patches, "Each piece its own"),
 ];
 
 /// Steps between two neighbouring colours of a blend. More would be smoother
@@ -59,7 +62,19 @@ fn scatter(at: [i32; 3]) -> f64 {
     (h >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// The colours a path of stones starts in: four browns and greys of
+/// weathered stone.
+pub const STONE: [[u8; 3]; 4] = [[168, 140, 120], [146, 122, 104], [190, 160, 130], [124, 110, 98]];
+
 impl Paint {
+    /// The colour of separate piece number `piece` of a form (see
+    /// `brickloft_core::pattern::pieces`): one of the colours, the same one
+    /// for that piece every time. `None` for a paint with no colours.
+    pub fn patch(&self, piece: u32) -> Option<[u8; 3]> {
+        let count = self.colours.len();
+        (count > 0).then(|| self.colours[((scatter([piece as i32, 7, 13]) * count as f64) as usize).min(count - 1)])
+    }
+
     /// The colour of `brick`, in a form occupying cells `lo..hi`. `None` only
     /// for a paint with no colours at all, which is then left to whatever
     /// colour the player has selected in the game.
