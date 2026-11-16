@@ -5,7 +5,7 @@
 //! a few steps between the colours; a speckled one gives each brick one of
 //! the pure colours, more often the nearer one, which reads as a texture.
 
-use arcs_core::shapes::CellBrick;
+use brickloft_core::shapes::CellBrick;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {

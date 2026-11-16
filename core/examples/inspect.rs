@@ -1,12 +1,12 @@
 //! Build a form from a report or spec file and print a fresh report on it.
 //!
-//!   cargo run -p arcs-core --example inspect -- arcs-report.txt
-//!   cargo run -p arcs-core --example inspect -- arcs-report.txt simplify=0 grain=1
+//!   cargo run -p brickloft-core --example inspect -- brickloft-report.txt
+//!   cargo run -p brickloft-core --example inspect -- brickloft-report.txt simplify=0 grain=1
 //!
 //! Extra `key=value` arguments override the file's settings, to see how a
 //! change would fit the same form.
 
-use arcs_core::report::{parse_spec, report};
+use brickloft_core::report::{parse_spec, report};
 
 fn main() {
     let mut args = std::env::args().skip(1);

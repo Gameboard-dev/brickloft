@@ -1,6 +1,6 @@
-//! The box a form's bricks fill: `cargo run -p arcs-core --example extent -- spec.txt [key=value ...]`
-use arcs_core::report::parse_spec;
-use arcs_core::spec::build;
+//! The box a form's bricks fill: `cargo run -p brickloft-core --example extent -- spec.txt [key=value ...]`
+use brickloft_core::report::parse_spec;
+use brickloft_core::spec::build;
 
 fn main() {
     let mut args = std::env::args().skip(1);

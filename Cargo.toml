@@ -22,7 +22,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 # the fitters are hot loops; keep them quick in dev builds and tests too
-[profile.dev.package.arcs-core]
+[profile.dev.package.brickloft-core]
 opt-level = 2
 
 [profile.release]

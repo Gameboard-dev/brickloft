@@ -1,13 +1,13 @@
 # Development
 
-How to build, run, test and examine arcs. It is a Rust workspace of two
+How to build, run, test and examine Brickloft. It is a Rust workspace of two
 crates and needs only [Rust](https://rustup.rs).
 
 ## Run it
 
 ```sh
-cargo run --release -p arcs-editor        # the editor (the program is called `arcs`)
-cargo run --release -p arcs-editor -- 4   # the same, opening on the fifth form in the menu
+cargo run --release -p brickloft-editor        # the editor (the program is called `brickloft`)
+cargo run --release -p brickloft-editor -- 4   # the same, opening on the fifth form in the menu
 ```
 
 Without `--release` it builds faster and the editor still runs well: the
@@ -20,10 +20,10 @@ has one place, the same on Windows, macOS and Linux
 
 | File | Written by | Where |
 |---|---|---|
-| `<folder>/<name>.brz` | Saved forms, one prefab for each save | `Documents/omegga-arcs/forms/` in the home folder |
-| `arcs-N.png` | Save screenshot, F12 | `Pictures/omegga-arcs/` in the home folder |
-| `arcs-report-N.txt` | Save report | `omegga-arcs/` in the system's temporary folder |
-| `arcs-build.brz` | Ctrl+C: the prefab put on the clipboard | the same temporary folder |
+| `<folder>/<name>.brz` | Saved forms, one prefab for each save | `Documents/brickloft/forms/` in the home folder |
+| `brickloft-N.png` | Save screenshot, F12 | `Pictures/brickloft/` in the home folder |
+| `brickloft-report-N.txt` | Save report | `brickloft/` in the system's temporary folder |
+| `brickloft-build.brz` | Ctrl+C: the prefab put on the clipboard | the same temporary folder |
 
 The temporary folder is `%TEMP%` on Windows, `$TMPDIR` on macOS and `/tmp`
 on Linux unless `TMPDIR` says otherwise. The commands below take a report's
@@ -36,8 +36,8 @@ The optional browser page is built with `sh build-editor.sh`; see
 
 ```sh
 cargo test          # everything: about 110 tests, a few seconds
-cargo test -p arcs-core
-cargo test -p arcs-editor
+cargo test -p brickloft-core
+cargo test -p brickloft-editor
 ```
 
 What the tests hold the code to:
@@ -62,22 +62,22 @@ which is how a change to a fitter is judged.
 
 ```sh
 # rebuild the form in a report and print a fresh report
-cargo run --release -p arcs-core --example inspect -- arcs-report-1.txt
+cargo run --release -p brickloft-core --example inspect -- brickloft-report-1.txt
 
 # the same form with settings changed
-cargo run --release -p arcs-core --example inspect -- arcs-report-1.txt simplify=0 grain=1
+cargo run --release -p brickloft-core --example inspect -- brickloft-report-1.txt simplify=0 grain=1
 
 # just the brick count, extent and discrepancy
-cargo run --release -p arcs-core --example extent -- arcs-report-1.txt
+cargo run --release -p brickloft-core --example extent -- brickloft-report-1.txt
 
 # draw the form's bricks as a picture, seen from 250 degrees round and 30 up
-cargo run --release -p arcs-editor --example form_picture -- arcs-report-1.txt fit.png 250 30
+cargo run --release -p brickloft-editor --example form_picture -- brickloft-report-1.txt fit.png 250 30
 
 # time a set of representative forms
-cargo run --release -p arcs-core --example timing
+cargo run --release -p brickloft-core --example timing
 
 # time the form in a report, measured and unmeasured, optionally scaled up
-cargo run --release -p arcs-core --example timing -- arcs-report-1.txt 3
+cargo run --release -p brickloft-core --example timing -- brickloft-report-1.txt 3
 ```
 
 A report has these sections:
@@ -98,10 +98,10 @@ In a section drawing, `#` is brick and form, `O` is brick outside the form,
 ## The grid-at-an-angle trial
 
 ```sh
-cargo run -p arcs-editor --example grid_trial
+cargo run -p brickloft-editor --example grid_trial
 ```
 
-writes `arcs-grid-trial.brz`: a flat ring on the world's grid and an arch on
+writes `brickloft-grid-trial.brz`: a flat ring on the world's grid and an arch on
 a second grid tilted 30° and 20°. It was written to find out whether the
 game accepts a prefab with a tilted grid from the clipboard (it does).
 

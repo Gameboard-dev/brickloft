@@ -10,7 +10,7 @@ sample, corner mask, distance function), are explained in
 
 These times are for a release build running on one thread on Windows. You
 can reproduce them with
-`cargo run --release -p arcs-core --example timing`, which runs
+`cargo run --release -p brickloft-core --example timing`, which runs
 [core/examples/timing.rs](../core/examples/timing.rs). They are for the
 closest fit, with Simplify at 0 and brick size 1.
 
@@ -277,7 +277,7 @@ something is being dragged:
             return false;
         }
         let start = now_ms();
-        match arcs_core::spec::build_as(&spec, !self.busy) {
+        match brickloft_core::spec::build_as(&spec, !self.busy) {
 ```
 
 The second argument of `build_as` says whether to measure. `owed` notes

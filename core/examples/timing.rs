@@ -1,9 +1,9 @@
 //! How long representative forms take to fit, and how well they fit.
-//! `cargo run --release -p arcs-core --example timing`
+//! `cargo run --release -p brickloft-core --example timing`
 
-use arcs_core::curves::ArchType;
-use arcs_core::spec::{build, build_as, Form, Spec};
-use arcs_core::DVec3;
+use brickloft_core::curves::ArchType;
+use brickloft_core::spec::{build, build_as, Form, Spec};
+use brickloft_core::DVec3;
 use std::time::Instant;
 
 fn main() {
@@ -12,7 +12,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(path) = args.first() {
         let text = std::fs::read_to_string(path).expect("the report could not be read");
-        let mut spec = arcs_core::report::parse_spec(&text).expect("no form in the report");
+        let mut spec = brickloft_core::report::parse_spec(&text).expect("no form in the report");
         let scale: f64 = args.get(1).map_or(1.0, |s| s.parse().expect("the scale is not a number"));
         let about = spec.points[0];
         for p in &mut spec.points {

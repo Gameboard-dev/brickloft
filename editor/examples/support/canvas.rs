@@ -8,8 +8,8 @@
 // each example uses the part of this it needs
 #![allow(dead_code)]
 
-use arcs_core::DVec3;
-use arcs_editor::mesh::shape_mesh;
+use brickloft_core::DVec3;
+use brickloft_editor::mesh::shape_mesh;
 
 pub const BRICK: [f64; 3] = [242.0, 199.0, 68.0];
 const EDGE: [f64; 3] = [70.0, 52.0, 12.0];

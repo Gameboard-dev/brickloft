@@ -694,6 +694,8 @@ pub fn report(spec: &Spec) -> Result<String, String> {
     let analysis = analyse(spec, &built)?;
     let mut out = String::new();
     let w = &mut out;
+    // (the heading keeps the program's first name: it marks the format, and
+    // reports already saved begin with it)
     writeln!(w, "# arcs report 1. Lengths are in cells (microbricks, 2 game units). Cell (x, y, z) spans x..x+1 and so on.").unwrap();
     writeln!(w, "[spec]\n{}", spec_text(spec)).unwrap();
 

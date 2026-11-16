@@ -2,7 +2,7 @@
 
 use crate::paint::{Mode, MODES};
 use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
-use arcs_core::shapes::{shape_info, Kind};
+use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
 /// What a control is for, by the name it has in `help.json`.
@@ -205,7 +205,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     }
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.heading("Arcs");
+        ui.heading("Brickloft");
         ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Shift + click on a form adds a point there to pull it out of shape; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
         ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
@@ -229,7 +229,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             if state.claude_on {
                 // the command that tells Claude Code where the editor is, to copy
-                let mut command = format!("claude mcp add --transport http arcs {}", crate::CLAUDE_ADDRESS);
+                let mut command = format!("claude mcp add --transport http brickloft {}", crate::CLAUDE_ADDRESS);
                 helped(ui, help("claude_command"), |ui| ui.add(egui::TextEdit::singleline(&mut command).desired_width(190.0)));
             }
         }
@@ -252,7 +252,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
-            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=arcs_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(help("sliders_go_up_to"));
+            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=brickloft_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(help("sliders_go_up_to"));
             hint(ui, help("sliders_go_up_to"));
         });
         ui.horizontal(|ui| {
@@ -390,7 +390,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
         }
         if is_curve && s.tube {
-            // how a round section is built: see `arcs_core::fit_stack`
+            // how a round section is built: see `brickloft_core::fit_stack`
             ui.horizontal(|ui| {
                 ui.radio_value(&mut s.protrude, false, "Rounded").on_hover_text(help("tube_rounded"));
                 ui.radio_value(&mut s.protrude, true, "Protruded").on_hover_text(help("tube_protruded"));
@@ -495,7 +495,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         helped(ui, help("brick_size"), |ui| {
             ComboBox::from_label("Brick size").selected_text(size_name(s.grain)).show_ui(ui, |ui| {
                 ui.selectable_value(&mut s.grain, 0, size_name(0));
-                for g in arcs_core::spec::GRAINS {
+                for g in brickloft_core::spec::GRAINS {
                     ui.selectable_value(&mut s.grain, g, size_name(g));
                 }
             })
@@ -562,7 +562,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 /// The workspace's forms: which is being edited, and adding and removing them.
 fn workspace(ui: &mut Ui, state: &mut State) {
     ui.label("Workspace").on_hover_text(help("workspace"));
-    let tilted = |spec: &arcs_core::spec::Spec| if crate::state::on_own_grid(spec) { ", at an angle" } else { "" };
+    let tilted = |spec: &brickloft_core::spec::Spec| if crate::state::on_own_grid(spec) { ", at an angle" } else { "" };
     ui.label(format!("> {} (editing) on grid {}{}", FORMS[state.form], state.spec.on_grid + 1, tilted(&state.spec)));
     let mut switch = None;
     for (k, item) in state.others.iter().enumerate() {

@@ -11,9 +11,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 command -v wasm-bindgen >/dev/null || { echo "build-editor: wasm-bindgen is not installed; see the top of this file." >&2; exit 1; }
-cargo build -p arcs-editor --release --target wasm32-unknown-unknown
+cargo build -p brickloft-editor --release --target wasm32-unknown-unknown
 mkdir -p dist
-wasm-bindgen --target web --no-typescript --out-dir dist --out-name arcs_editor \
-  target/wasm32-unknown-unknown/release/arcs_editor.wasm
+wasm-bindgen --target web --no-typescript --out-dir dist --out-name brickloft_editor \
+  target/wasm32-unknown-unknown/release/brickloft_editor.wasm
 cp editor/web/index.html editor/web/style.css editor/web/loader.js editor/web/icon.svg dist/
 ls -l dist

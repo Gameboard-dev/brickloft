@@ -1,11 +1,11 @@
-# arcs
+# Brickloft
 
 Design a curved form, see exactly which microbricks it becomes, and paste it
 into [Brickadia](https://brickadia.com).
 
 Brickadia's microbricks are small boxes and wedges on a grid. Building an
 arch, a dome or a torus from them by hand means choosing thousands of bricks
-so that a curve comes out as slopes and not as a staircase. arcs does the
+so that a curve comes out as slopes and not as a staircase. Brickloft does the
 choosing: you shape the form with a few dots and sliders, it fits the bricks,
 shows them, measures how far they are from the true form, and puts the
 result on the clipboard for the game to paste.
@@ -15,7 +15,7 @@ on a server.
 
 ## What algorithm does it use?
 
-arcs chooses each brick by asking which corners of its box are inside the
+Brickloft chooses each brick by asking which corners of its box are inside the
 form being built. Bricks sit on a grid, and every brick shape is a box with
 some of its eight corners kept. A box with all eight corners is a cube, one
 with six is a wedge, and one with seven is a cube with a corner sliced off.
@@ -74,22 +74,22 @@ bricks with about 1% of its faces stepped.
 
 ## Get it
 
-**Windows:** download `arcs-*-windows.zip` from the
-[releases page](../../releases), unzip it, and run `arcs.exe`. The program
+**Windows:** download `brickloft-*-windows.zip` from the
+[releases page](../../releases), unzip it, and run `brickloft.exe`. The program
 is not code-signed, so an antivirus may hold it back as unknown the first
 time.
 
 **From source,** with [Rust](https://rustup.rs) installed:
 
 ```sh
-git clone https://github.com/Gameboard-dev/omegga-arcs
-cd omegga-arcs
-cargo run --release -p arcs-editor
+git clone https://github.com/Gameboard-dev/brickloft
+cd brickloft
+cargo run --release -p brickloft-editor
 ```
 
 The first build takes about a minute. Putting the file on the clipboard is
-written for Windows; elsewhere the program still writes `arcs-build.brz`
-to the folder `omegga-arcs` in the system's temporary folder, to be loaded
+written for Windows; elsewhere the program still writes `brickloft-build.brz`
+to the folder `brickloft` in the system's temporary folder, to be loaded
 by hand.
 
 ## Use it
@@ -121,10 +121,12 @@ and every key.
 | `core/` | The geometry: curves, solids as distance functions, the fitters, the measurements. No game or interface code, and one dependency (`glam`). |
 | `editor/` | The program: the 3D view, the panel, the workspace, and the `.brz` file it copies. |
 
-The project began as an omegga plugin that placed bricks on a running server,
-which is where the repository's name comes from. The plugin was removed:
-copy and paste does the same with nothing to install, and is the only route
-that can carry forms on grids of their own.
+The project began as omegga-arcs, an omegga plugin that placed arcs of
+bricks on a running server. The plugin was removed, because copy and paste
+does the same with nothing to install and is the only route that can carry
+forms on grids of their own. The name went with it once the program had
+grown past arcs: lofting is the shipbuilder's craft of laying a hull's
+smooth curves out at full size before anything is cut.
 
 ## Licence
 

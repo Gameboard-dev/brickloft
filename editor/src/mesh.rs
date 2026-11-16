@@ -7,9 +7,9 @@
 //! code for the same meshes.
 //!
 //! One shape is not a convex hull: the inner corner, a valley (see
-//! `arcs_core::shapes`). Its seven faces are written out instead.
+//! `brickloft_core::shapes`). Its seven faces are written out instead.
 
-use arcs_core::DVec3;
+use brickloft_core::DVec3;
 
 /// A shape's triangles, three unshared vertices each.
 pub struct ShapeMesh {
@@ -31,7 +31,7 @@ pub struct ShapeMesh {
 /// Triangles for the shape with corner mask `mask`, in a unit box from
 /// (0,0,0) to (1,1,1).
 pub fn shape_mesh(mask: u8) -> ShapeMesh {
-    use arcs_core::shapes::{shape_info, sloped_triangles, Kind};
+    use brickloft_core::shapes::{shape_info, sloped_triangles, Kind};
     let (mut positions, mut normals, mut rim) = (Vec::new(), Vec::new(), Vec::new());
     // a triangle from the face's middle to each of its sides, its corners
     // taken in order around its normal
@@ -132,7 +132,7 @@ pub fn ring_mesh(thick: f32) -> (Vec<[f32; 3]>, Vec<u32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arcs_core::shapes::{all_masks, shape_info};
+    use brickloft_core::shapes::{all_masks, shape_info};
 
     #[test]
     fn every_shape_is_closed_and_has_its_volume() {

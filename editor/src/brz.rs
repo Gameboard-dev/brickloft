@@ -10,8 +10,8 @@
 
 use crate::state::{Painted, Placed};
 use crate::store::{describe, forms_in};
-use arcs_core::orient::{Models, Solver};
-use arcs_core::shapes::Kind;
+use brickloft_core::orient::{Models, Solver};
+use brickloft_core::shapes::Kind;
 use brdb::{BString, Brick, BrickSize, BrickType, Color, Direction, Rotation, World};
 
 /// The game's brick asset for each shape.
@@ -71,7 +71,7 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
 }
 
 /// One of the editor's bricks as the file has it.
-fn brick_for(solver: &Solver, cell: &arcs_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3]) -> Result<Brick, String> {
+fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3]) -> Result<Brick, String> {
     {
         let placed = solver.place(cell).ok_or_else(|| format!("no brick fits the piece at {:?}", cell.min))?;
         // a brick's size in the file is its half-extent in game units, which
@@ -105,8 +105,8 @@ fn brick_for(solver: &Solver, cell: &arcs_core::shapes::CellBrick, colour: Optio
 /// from the clipboard as one of bricks alone can is what this file is for
 /// finding out, before the editor is built to turn forms freely.
 pub fn tilted_trial() -> Result<Vec<u8>, String> {
-    use arcs_core::spec::{build, Form, Spec};
-    use arcs_core::DVec3;
+    use brickloft_core::spec::{build, Form, Spec};
+    use brickloft_core::DVec3;
     let solver = Solver::new(&Models::default());
     let mut world = World::new();
     world.register_all_components();
@@ -128,7 +128,7 @@ pub fn tilted_trial() -> Result<Vec<u8>, String> {
     world.to_brz_vec().map_err(|e| e.to_string())
 }
 
-/// Write the workspace to `arcs-build.brz` in the program's temporary
+/// Write the workspace to `brickloft-build.brz` in the program's temporary
 /// folder (see `places`), and put that file on the clipboard. Returns what to tell the
 /// player.
 pub fn copy(bricks: &[Painted], forms: &[Placed]) -> String {
@@ -143,7 +143,7 @@ pub fn copy(bricks: &[Painted], forms: &[Placed]) -> String {
     // reference to the file, so it has to exist somewhere, and a fresh name
     // for every copy would leave a pile of them.
     let path = match crate::places::passing() {
-        Ok(folder) => folder.join("arcs-build.brz"),
+        Ok(folder) => folder.join("brickloft-build.brz"),
         Err(e) => return format!("Could not make the file: {e}"),
     };
     if let Err(e) = std::fs::write(&path, &bytes) {
@@ -177,7 +177,7 @@ pub fn read(bytes: &[u8]) -> Result<Vec<Placed>, String> {
     use brdb::{Brz, IntoReader};
     let file = Brz::read_slice(bytes).map_err(|e| format!("it is not a .brz file the editor can read ({e})"))?.into_reader();
     let data = file.global_data().map_err(|e| format!("its list of bricks cannot be read ({e})"))?;
-    let ours = arcs_core::shapes::KINDS.map(asset);
+    let ours = brickloft_core::shapes::KINDS.map(asset);
     let mut foreign: Vec<&str> = data.basic_brick_asset_names.iter().chain(&data.procedural_brick_asset_names).map(String::as_str).filter(|name| !ours.contains(name)).collect();
     if !foreign.is_empty() {
         let more = foreign.len().saturating_sub(6);
@@ -229,9 +229,9 @@ fn place_on_clipboard(_: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arcs_core::spec::Spec;
+    use brickloft_core::spec::Spec;
     use crate::paint::Paint;
-    use arcs_core::shapes::{all_masks, CellBrick};
+    use brickloft_core::shapes::{all_masks, CellBrick};
     use brdb::{BrFsReader, Brz, IntoReader};
 
     #[test]
@@ -247,8 +247,8 @@ mod tests {
 
     #[test]
     fn a_form_at_an_angle_is_copied_on_a_grid_of_its_own() {
-        use arcs_core::spec::build;
-        use arcs_core::DVec3;
+        use brickloft_core::spec::build;
+        use brickloft_core::DVec3;
         let arch = Spec { points: vec![DVec3::new(-7.5, 0.5, 0.5), DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, ..Spec::default() };
         let tilted = Spec { grid: [0.0, 0.6, 0.0, 0.8], grid_at: [3.0, 0.0, 10.5], on_grid: 1, ..arch.clone() };
         let cells = build(&arch).unwrap().bricks;
@@ -285,9 +285,9 @@ mod tests {
                 (CellBrick { mask, min: [i * 7, -3, i % 4], ext: [1 + i % 3, 2, 1 + i % 2] }, (i % 2 == 0).then_some([200, 10, i as u8]), 0, [i % 3, 0, -(i % 2)])
             })
             .collect();
-        let arch = Spec { points: vec![arcs_core::DVec3::new(-7.5, 0.5, 0.5), arcs_core::DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, flip: [false, true, false], ..Spec::default() };
+        let arch = Spec { points: vec![brickloft_core::DVec3::new(-7.5, 0.5, 0.5), brickloft_core::DVec3::new(8.5, 0.5, 0.5)], thick: 3.0, flip: [false, true, false], ..Spec::default() };
         let blend = Paint { mode: crate::paint::Mode::Stripes, colours: vec![[1, 2, 3], [250, 0, 9]], axis: 0, width: 3 };
-        let forms = vec![(arch, blend, [3, 0, -1]), (Spec { form: arcs_core::spec::Form::Sphere, points: vec![arcs_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default(), [0; 3])];
+        let forms = vec![(arch, blend, [3, 0, -1]), (Spec { form: brickloft_core::spec::Form::Sphere, points: vec![brickloft_core::DVec3::splat(0.5)], ..Spec::default() }, Paint::default(), [0; 3])];
         let world = prefab(&bricks, &forms).unwrap();
         assert_eq!(world.bricks.len(), 125);
         assert_eq!(world.meta.bundle.level_type, "Prefab");

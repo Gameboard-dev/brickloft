@@ -88,29 +88,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arcs-core"
-version = "0.2.0"
-dependencies = [
- "glam",
-]
-
-[[package]]
-name = "arcs-editor"
-version = "0.2.0"
-dependencies = [
- "arcs-core",
- "brdb",
- "clipboard-win",
- "js-sys",
- "png",
- "serde_json",
- "three-d",
- "wasm-bindgen",
- "web-sys",
- "winit",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -223,6 +200,29 @@ dependencies = [
  "thiserror 2.0.21",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "brickloft-core"
+version = "0.2.0"
+dependencies = [
+ "glam",
+]
+
+[[package]]
+name = "brickloft-editor"
+version = "0.2.0"
+dependencies = [
+ "brdb",
+ "brickloft-core",
+ "clipboard-win",
+ "js-sys",
+ "png",
+ "serde_json",
+ "three-d",
+ "wasm-bindgen",
+ "web-sys",
+ "winit",
 ]
 
 [[package]]

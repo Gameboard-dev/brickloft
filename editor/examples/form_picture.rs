@@ -1,15 +1,15 @@
 //! Draw the bricks of a form from a report or spec file as a picture, to
 //! look at a fit without starting the editor:
 //!
-//!   cargo run --release -p arcs-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [key=value ...]
+//!   cargo run --release -p brickloft-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [key=value ...]
 //!
 //! `turn` is the side it is seen from, in degrees about z (default 35), and
 //! `tilt` how far above, in degrees (default 35). `zoom` enlarges the
 //! picture about the cell `x y z` (the middle of the form if not given). Extra `key=value`
 //! arguments override the file's settings, as with the `inspect` example.
 
-use arcs_core::report::parse_spec;
-use arcs_core::DVec3;
+use brickloft_core::report::parse_spec;
+use brickloft_core::DVec3;
 
 #[path = "support/canvas.rs"]
 mod canvas;
@@ -30,7 +30,7 @@ fn main() {
     let text = std::fs::read_to_string(from).unwrap_or_else(|e| panic!("could not read {from}: {e}"));
     // overrides go in a second [spec] section at the end, where a later line wins
     let spec = parse_spec(&format!("{text}\n[spec]\n{}\n", overrides.join("\n"))).unwrap_or_else(|e| panic!("{from}: {e}"));
-    let built = arcs_core::spec::build(&spec).unwrap_or_else(|e| panic!("not built: {e}"));
+    let built = brickloft_core::spec::build(&spec).unwrap_or_else(|e| panic!("not built: {e}"));
     let corner = |pick: fn(i32, i32) -> i32, far: bool| {
         DVec3::from_array([0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + if far { b.ext[k] } else { 0 }).reduce(pick).unwrap_or(0) as f64))
     };

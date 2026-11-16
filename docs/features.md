@@ -141,7 +141,7 @@ an angle is copied as a grid of its own, frozen in place.
 
 | Key | What it does |
 |---|---|
-| **Ctrl+C** | copies the form being edited, and any others marked `+`, as a Brickadia prefab (`arcs-build.brz`) on the clipboard |
+| **Ctrl+C** | copies the form being edited, and any others marked `+`, as a Brickadia prefab (`brickloft-build.brz`) on the clipboard |
 | **Ctrl + click** another form | marks it `+` to be copied too, or unmarks it |
 | **Ctrl+A** | marks every form |
 | **Ctrl+V** | adds the forms of a copied prefab back to the workspace, as forms that can still be reshaped, on the grid being worked on |
@@ -159,7 +159,7 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 
 **Save** under **Saved forms** keeps the whole workspace: every form, with
 its colours, where it stands and the grid it is on. Saves are kept in
-folders (`arches`, `domes`, or your own) under `Documents/omegga-arcs/forms`
+folders (`arches`, `domes`, or your own) under `Documents/brickloft/forms`
 in your home folder, the same on Windows, macOS and Linux.
 
 A save is a Brickadia prefab file (`.brz`), the same file Ctrl+C makes, so
@@ -210,8 +210,8 @@ form** lowers the floor so a form can be looked at from underneath.
 ## Screenshots
 
 **Save screenshot**, or **F12**, saves a picture of the window as
-`arcs-1.png`, `-2` and so on in the folder `omegga-arcs` inside your
-pictures folder (`Pictures/omegga-arcs` in your home folder on Windows,
+`brickloft-1.png`, `-2` and so on in the folder `brickloft` inside your
+pictures folder (`Pictures/brickloft` in your home folder on Windows,
 macOS and Linux). On Windows the picture is also put on the clipboard,
 ready to paste, which replaces a form copied there with Ctrl+C.
 **Shift+F12** leaves the panel out and takes the view alone. The browser
@@ -219,8 +219,8 @@ page cannot write files, so it has neither.
 
 ## Reports
 
-**Save report** writes `arcs-report-1.txt`, `-2` and so on to the folder
-`omegga-arcs` in the system's temporary folder, and says where. **Clear
+**Save report** writes `brickloft-report-1.txt`, `-2` and so on to the folder
+`brickloft` in the system's temporary folder, and says where. **Clear
 reports** deletes every report there and nothing else. A report holds the form's settings, its bricks, the
 cells where bricks and form disagree most, the share of its surface within
 10, 20, 30 and 45 degrees of the true surface, and drawings of cuts through

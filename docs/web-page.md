@@ -6,7 +6,7 @@ trying settings on a computer where installing a program is not wanted. The
 fitting, the measuring and the view are identical to the desktop program's.
 
 The page cannot hand a form to the game. The desktop program gives a form to
-Brickadia by putting a prefab file, `arcs-build.brz`, on the clipboard,
+Brickadia by putting a prefab file, `brickloft-build.brz`, on the clipboard,
 which the game then pastes. Browsers let a web page put text and pictures on
 the clipboard and nothing else, so a page has no way to offer a file there
 ([editor/src/brz.rs](../editor/src/brz.rs) is compiled into the desktop
@@ -65,7 +65,7 @@ A browser cannot run an ordinary program. It can run JavaScript, and it can
 run **WebAssembly**: a compact format for compiled programs that every
 current browser understands and runs at close to the speed of a native
 program, inside the same safety limits as the rest of the page. Rust can be
-compiled to WebAssembly as easily as to a Windows program, so arcs needs no
+compiled to WebAssembly as easily as to a Windows program, so Brickloft needs no
 second version written in another language.
 
 The editor is written as a Rust library ([editor/src/lib.rs](../editor/src/lib.rs)).
@@ -78,8 +78,8 @@ in and gives bricks out, so it runs anywhere Rust compiles to.
 ```mermaid
 flowchart TD
     A[index.html<br/>a canvas and a line of text] --> B[loader.js<br/>the page's only script]
-    B --> C[arcs_editor.js<br/>generated glue]
-    C --> D[arcs_editor_bg.wasm<br/>the editor, compiled from Rust]
+    B --> C[brickloft_editor.js<br/>generated glue]
+    C --> D[brickloft_editor_bg.wasm<br/>the editor, compiled from Rust]
     D --> E[start: opens a WebGL 2 context on the canvas]
     E --> F[The same frame loop as the desktop program:<br/>events, fit, draw]
 ```
@@ -91,8 +91,8 @@ flowchart TD
 | `index.html` | The page: a `<canvas>` filling the window and a "Loading" line. |
 | `style.css` | Three rules: no margins, canvas full size, the note centred. |
 | `loader.js` | Nine lines. Loads the module, removes the note when it starts, and says plainly if it could not. |
-| `arcs_editor_bg.wasm` | The editor, compiled to WebAssembly. |
-| `arcs_editor.js` | Glue written by `wasm-bindgen`: it loads the `.wasm` file and passes calls between it and the browser. |
+| `brickloft_editor_bg.wasm` | The editor, compiled to WebAssembly. |
+| `brickloft_editor.js` | Glue written by `wasm-bindgen`: it loads the `.wasm` file and passes calls between it and the browser. |
 | `icon.svg` | The tab's icon. |
 
 Only `index.html`, `style.css`, `loader.js` and `icon.svg` are written by
@@ -109,7 +109,7 @@ script the page loads itself:
 ```js
 // The only script on the page: it loads the editor, which is the Rust
 // program compiled to WebAssembly, and says so plainly if that fails.
-import init from "./arcs_editor.js";
+import init from "./brickloft_editor.js";
 const note = document.getElementById("note");
 init().then(() => note.remove(), (error) => {
   // three-d runs its event loop by throwing this once on purpose
@@ -157,7 +157,7 @@ another for the browser, chosen with `#[cfg(target_arch = "wasm32")]`:
 |---|---|---|
 | Window | made with an icon, maximised | the page's canvas |
 | Time | the system's monotonic clock | `Date.now()`, since that clock is not available |
-| Saved forms | `.brz` prefab files under `Documents/omegga-arcs/forms/` | the browser's local storage, one entry per save |
+| Saved forms | `.brz` prefab files under `Documents/brickloft/forms/` | the browser's local storage, one entry per save |
 | Save report | a numbered text file | the report's text on the clipboard |
 | Copy and paste of bricks | a `.brz` file on the clipboard | not available |
 
@@ -194,7 +194,7 @@ description, without the bricks:
     }
 ```
 
-A saved report, which the desktop program writes to `arcs-report-N.txt`,
+A saved report, which the desktop program writes to `brickloft-report-N.txt`,
 is put on the clipboard as text instead, ready to paste into a file or a
 message (`save_report` in [editor/src/send.rs](../editor/src/send.rs)).
 Browsers allow that only on a page served from `localhost` or over

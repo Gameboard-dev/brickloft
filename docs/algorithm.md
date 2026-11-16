@@ -1,6 +1,6 @@
 # How a form becomes bricks
 
-arcs takes a smooth form, such as an arch, a dome or a ring, and chooses the
+Brickloft takes a smooth form, such as an arch, a dome or a ring, and chooses the
 Brickadia microbricks that build it. This page explains how, for a reader
 who knows what a brick and a grid are.
 
@@ -42,7 +42,7 @@ staircase of cubes; another is a row of wedges laid end to end.
 Both can hold the same amount of material, so a measure of volume alone
 cannot tell them apart. Worse, the fit that is closest by volume is usually
 a staircase, because many small bricks can follow a curve a little more
-tightly than a few long wedges. arcs therefore gives up a little closeness
+tightly than a few long wedges. Brickloft therefore gives up a little closeness
 to get slopes that meet end to end, and it measures closeness and slopes
 separately so that the trade can be seen.
 
@@ -51,8 +51,8 @@ separately so that the trade can be seen.
 ### The grid
 
 The smallest microbrick is a cube one fifth of a stud on each side. The
-game measures positions in units, and this cube is 2 units on a side. arcs
-calls this cube a **cell**, and every length in arcs is counted in cells.
+game measures positions in units, and this cube is 2 units on a side. Brickloft
+calls this cube a **cell**, and every length in Brickloft is counted in cells.
 
 A brick's position in the game must be a whole number of units, which is a
 half cell. So before anything is computed, every point, radius and
@@ -330,7 +330,7 @@ tall or too short, and narrows the range, 200 times.
 
 ### Spline
 
-A spline is a smooth curve through any number of points. arcs uses a
+A spline is a smooth curve through any number of points. Brickloft uses a
 centripetal Catmull-Rom spline (`catmull_rom` in `curves.rs`). It passes
 through every point, and between two points it bends according to the
 points on either side. The word "centripetal" refers to how the curve's
@@ -343,7 +343,7 @@ points are unevenly spread.
 ### Bézier
 
 A Bézier curve does not pass through its points. Each point pulls the curve
-towards itself, and the curve passes near them as a blend. arcs uses the
+towards itself, and the curve passes near them as a blend. Brickloft uses the
 rational form, with a weight $`w_i`$ for each point $`P_i`$
 (`rational_bezier` in `curves.rs`):
 
@@ -371,7 +371,7 @@ circle exactly, only approximately.
 ### What a distance function is
 
 A fitter needs to ask one question many millions of times: is this point
-inside the form? arcs answers it with a **distance function**
+inside the form? Brickloft answers it with a **distance function**
 ([core/src/sdf.rs](../core/src/sdf.rs), the enum `Field`). It is a rule
 $`f(p)`$ that takes a point $`p`$ and gives one number. The number is
 negative inside the form and positive outside, and near the surface it

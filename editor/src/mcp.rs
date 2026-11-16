@@ -36,16 +36,16 @@
 //! - a request's head and body are limited in size and in the time they may
 //!   take to arrive;
 //! - every setting is read by the parser that reads a saved form
-//!   (`arcs_core::report::parse_spec`) and built by the checks any form is
+//!   (`brickloft_core::report::parse_spec`) and built by the checks any form is
 //!   built by, and the number of forms, points and colours is limited.
 //!
 //! Desktop only: a web page cannot listen for connections.
 
 use crate::paint::{Mode, Paint};
 use crate::state::{out_of_grid, Leg, Placed, State};
-use arcs_core::DVec3;
-use arcs_core::report::{parse_spec, spec_text};
-use arcs_core::spec::Spec;
+use brickloft_core::DVec3;
+use brickloft_core::report::{parse_spec, spec_text};
+use brickloft_core::spec::Spec;
 use serde_json::{json, Map, Value};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -424,8 +424,8 @@ fn answer(body: &str, call: &dyn Fn(&str, &Value) -> Answered) -> Option<Value> 
             json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "arcs", "title": "arcs editor", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Tools for the arcs editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one example arch. To build something of your own, change that arch into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
+                "serverInfo": { "name": "brickloft", "title": "Brickloft editor", "version": env!("CARGO_PKG_VERSION") },
+                "instructions": "Tools for the Brickloft editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one example arch. To build something of your own, change that arch into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
             })
         }
         "ping" => json!({}),
@@ -557,8 +557,8 @@ fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
 fn placed(value: &Value) -> Result<[i32; 3], String> {
     let at: Vec<f64> = value.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
     let at = <[f64; 3]>::try_from(at).map_err(|_| "place is three numbers: x, y and z in microbricks")?;
-    if at.iter().any(|v| !v.is_finite() || v.abs() > arcs_core::spec::MAX_SPAN) {
-        return Err(format!("place is within {} microbricks of the middle", arcs_core::spec::MAX_SPAN));
+    if at.iter().any(|v| !v.is_finite() || v.abs() > brickloft_core::spec::MAX_SPAN) {
+        return Err(format!("place is within {} microbricks of the middle", brickloft_core::spec::MAX_SPAN));
     }
     Ok(at.map(|v| (v * 2.0).round() as i32))
 }
@@ -631,7 +631,7 @@ fn workspace(state: &State) -> Value {
         .enumerate()
         .map(|(index, ((spec, paint, place), built))| {
             let settings: Map<String, Value> = spec_text(spec).lines().filter_map(|line| line.split_once(" = ").or_else(|| line.split_once(" ="))).map(|(k, v)| (k.to_string(), Value::String(v.trim().to_string()))).collect();
-            let problem = if index == 0 { state.problem.clone() } else if built.bricks.is_empty() { arcs_core::spec::build(spec).err() } else { None };
+            let problem = if index == 0 { state.problem.clone() } else if built.bricks.is_empty() { brickloft_core::spec::build(spec).err() } else { None };
             json!({
                 "index": index,
                 "being_edited": index == 0,
@@ -740,7 +740,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.weights = weights;
                 }
             }
-            arcs_core::spec::build(&spec)?;
+            brickloft_core::spec::build(&spec)?;
             let paint = arguments.get("colour").map(|c| recoloured(&Paint::default(), c)).transpose()?;
             let place = arguments.get("place").map(placed).transpose()?;
             state.record();
@@ -757,7 +757,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let at = index(&forms)?;
             let (spec, paint, place) = &mut forms[at];
             *spec = changed(spec, settings)?;
-            arcs_core::spec::build(spec)?;
+            brickloft_core::spec::build(spec)?;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
             }
@@ -932,7 +932,7 @@ mod tests {
         let host = format!("127.0.0.1:{port}");
         // answered by the listener alone
         let hello = post(port, &host, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#);
-        assert!(hello.starts_with("HTTP/1.1 200 OK") && hello.contains("application/json") && hello.contains(r#""name":"arcs""#), "{hello}");
+        assert!(hello.starts_with("HTTP/1.1 200 OK") && hello.contains("application/json") && hello.contains(r#""name":"brickloft""#), "{hello}");
         // the body is one chunk: its length in hexadecimal, itself, and an empty chunk to end
         let (_, body) = hello.split_once("\r\n\r\n").unwrap();
         let (length, rest) = body.split_once("\r\n").unwrap();
@@ -952,7 +952,7 @@ mod tests {
         let answer = asking.join().unwrap();
         assert_eq!(called, ["add_form"]);
         assert!(answer.starts_with("HTTP/1.1 200 OK") && answer.contains(r#""isError":false"#), "{answer}");
-        assert_eq!((state.others.len(), state.spec.form, state.spec.radius), (1, arcs_core::spec::Form::Pyramid, 8.0));
+        assert_eq!((state.others.len(), state.spec.form, state.spec.radius), (1, brickloft_core::spec::Form::Pyramid, 8.0));
         // and the camera is sent to look at what was added, from the way it was looking
         let centre = extents(&state)[0].as_ref().unwrap().centre_in_world(&state.full_spec());
         assert_eq!((state.flight.len(), state.flight[0].look_at), (1, centre.to_array()));

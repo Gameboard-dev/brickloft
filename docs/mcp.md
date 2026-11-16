@@ -52,7 +52,7 @@ the editor starts.
    terminal, from any folder:
 
    ```sh
-   claude mcp add --transport http arcs http://127.0.0.1:7878/mcp
+   claude mcp add --transport http brickloft http://127.0.0.1:7878/mcp
    ```
 
    The panel shows the same command in a box to copy.
@@ -67,7 +67,7 @@ To have the editor listening from the moment it opens, for a script that
 starts the editor and Claude together, start it with `--claude`:
 
 ```sh
-arcs --claude
+brickloft --claude
 ```
 
 Other MCP clients take the same address. In a client configured by a JSON

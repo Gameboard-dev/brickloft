@@ -11,8 +11,8 @@ pub fn save_screenshot(width: u32, height: u32, pixels: &[[u8; 4]]) -> String {
     }
     let written = (|| -> Result<std::path::PathBuf, String> {
         let folder = crate::places::screenshots()?;
-        // arcs-1.png, -2, ...: the first number not yet used
-        let path = (1..100_000).map(|n| folder.join(format!("arcs-{n}.png"))).find(|p| !p.exists()).ok_or("the folder is full")?;
+        // brickloft-1.png, -2, ...: the first number not yet used
+        let path = (1..100_000).map(|n| folder.join(format!("brickloft-{n}.png"))).find(|p| !p.exists()).ok_or("the folder is full")?;
         std::fs::write(&path, png_of(width, height, pixels)?).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path)
     })();
@@ -97,17 +97,17 @@ fn picture_on_clipboard(_: u32, _: u32, _: &[[u8; 4]]) -> Result<(), String> {
 mod tests {
     #[test]
     fn only_files_named_as_reports_are_counted_as_reports() {
-        assert_eq!(super::report_number("arcs-report-34.txt"), Some(34));
-        for other in ["arcs-report-.txt", "arcs-report-3.txt.bak", "arcs-report-x.txt", "arcs-report--3.txt", "arcs-build.brz", "notes.txt", "arcs-report-1234567.txt", "../arcs-report-1.txt"] {
+        assert_eq!(super::report_number("brickloft-report-34.txt"), Some(34));
+        for other in ["brickloft-report-.txt", "brickloft-report-3.txt.bak", "brickloft-report-x.txt", "brickloft-report--3.txt", "brickloft-build.brz", "notes.txt", "brickloft-report-1234567.txt", "../brickloft-report-1.txt"] {
             assert_eq!(super::report_number(other), None, "{other}");
         }
     }
 
     #[test]
     fn clearing_takes_the_reports_out_of_a_folder_and_leaves_the_rest() {
-        let folder = std::env::temp_dir().join(format!("omegga-arcs-test-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("brickloft-test-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
-        for name in ["arcs-report-1.txt", "arcs-report-7.txt", "arcs-build.brz", "notes.txt"] {
+        for name in ["brickloft-report-1.txt", "brickloft-report-7.txt", "brickloft-build.brz", "notes.txt"] {
             std::fs::write(folder.join(name), "x").unwrap();
         }
         let mut found = super::reports_in(&folder);
@@ -130,11 +130,11 @@ mod tests {
     }
 }
 
-/// The number in a report's file name, `arcs-report-<number>.txt`, if
+/// The number in a report's file name, `brickloft-report-<number>.txt`, if
 /// `name` is one.
 #[cfg(not(target_arch = "wasm32"))]
 fn report_number(name: &str) -> Option<u32> {
-    let digits = name.strip_prefix("arcs-report-")?.strip_suffix(".txt")?;
+    let digits = name.strip_prefix("brickloft-report-")?.strip_suffix(".txt")?;
     (!digits.is_empty() && digits.len() <= 6 && digits.bytes().all(|b| b.is_ascii_digit())).then(|| digits.parse().ok())?
 }
 
@@ -153,7 +153,7 @@ fn reports_in(folder: &std::path::Path) -> Vec<u32> {
 pub fn save_report(text: &str) -> String {
     let saved = crate::places::passing().and_then(|folder| {
         let number = reports_in(&folder).into_iter().max().unwrap_or(0) + 1;
-        let path = folder.join(format!("arcs-report-{number}.txt"));
+        let path = folder.join(format!("brickloft-report-{number}.txt"));
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path)
     });
@@ -173,7 +173,7 @@ pub fn clear_reports() -> String {
         Err(e) => return format!("No reports cleared: {e}"),
     };
     let numbers = reports_in(&folder);
-    let gone = numbers.iter().filter(|n| std::fs::remove_file(folder.join(format!("arcs-report-{n}.txt"))).is_ok()).count();
+    let gone = numbers.iter().filter(|n| std::fs::remove_file(folder.join(format!("brickloft-report-{n}.txt"))).is_ok()).count();
     match (gone, numbers.len() - gone) {
         (0, 0) => format!("There are no reports in {}", folder.display()),
         (gone, 0) => format!("Cleared {gone} report{} from {}", if gone == 1 { "" } else { "s" }, folder.display()),

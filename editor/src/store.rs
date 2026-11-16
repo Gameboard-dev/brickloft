@@ -4,7 +4,7 @@
 //! stands and the grid it is on.
 //!
 //! On the desktop a save is a Brickadia prefab, `<folder>/<name>.brz` under
-//! `Documents/omegga-arcs/forms` (see `places`): the same file Ctrl+C makes (see
+//! `Documents/brickloft/forms` (see `places`): the same file Ctrl+C makes (see
 //! `brz`), holding the bricks and, in its description, the forms they were
 //! fitted to. That format was chosen over a text format of the editor's own
 //! (YAML, TOML, JSON) for three reasons. The editor already writes and
@@ -27,9 +27,12 @@
 
 use crate::paint::{Paint, MODES};
 use crate::state::{Painted, Placed};
-use arcs_core::report::{parse_spec, spec_text};
+use brickloft_core::report::{parse_spec, spec_text};
 
-/// The line that begins each form in a file's description.
+/// The line that begins each form in a file's description. (It keeps the
+/// program's first name, as do the names a browser keeps saves under below:
+/// they are part of what a save is, and changing them would orphan every
+/// save made before.)
 const FORM: &str = "[arcs form]";
 
 
@@ -157,12 +160,13 @@ mod files {
     /// says why it failed.
     fn root() -> PathBuf {
         let Ok(root) = crate::places::forms() else { return PathBuf::new().join("\0no home folder") };
-        // Saves used to be kept in `arcs-forms` beside where the program
-        // was started. The first time the new folder is wanted, any found
-        // there are copied over (and left where they were), so that moving
-        // the folder loses nobody's forms.
-        let old = std::env::current_dir().unwrap_or_default().join("arcs-forms");
-        if !root.exists() && old.is_dir() {
+        // Saves have been kept in two other places: `arcs-forms` beside
+        // where the program was started, and then `Documents/omegga-arcs`,
+        // which was the program's name. The first time the present folder
+        // is wanted, saves found in the later of those are copied over (and
+        // left where they were), so that neither move loses anyone's forms.
+        let before = [crate::places::forms_once_at(), Some(std::env::current_dir().unwrap_or_default().join("arcs-forms"))];
+        if let Some(old) = before.into_iter().flatten().find(|old| old.is_dir()).filter(|_| !root.exists()) {
             for folder in names(old.clone(), true) {
                 let (from, to) = (old.join(&folder), root.join(&folder));
                 if std::fs::create_dir_all(&to).is_ok() {

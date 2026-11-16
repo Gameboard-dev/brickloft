@@ -1,7 +1,7 @@
-//! The arcs editor: a view of a form and its bricks, handles to reshape it,
+//! The Brickloft editor: a view of a form and its bricks, handles to reshape it,
 //! and a copy of the bricks to the clipboard for the game to paste.
 //!
-//! All geometry comes from `arcs-core`; this crate draws it and edits the
+//! All geometry comes from `brickloft-core`; this crate draws it and edits the
 //! spec. It builds as a desktop program and, as an optional extra, as a
 //! page for a browser (see docs/web-page.md).
 
@@ -22,12 +22,12 @@ pub mod send;
 pub mod state;
 pub mod store;
 
-use arcs_core::shapes::all_masks;
+use brickloft_core::shapes::all_masks;
 
 /// Where the editor listens for Claude: `mcp::address()`, said here as well
 /// so that the panel, which the browser build has too, can show it.
 pub const CLAUDE_ADDRESS: &str = "http://127.0.0.1:7878/mcp";
-use arcs_core::DVec3;
+use brickloft_core::DVec3;
 use state::{Handle, State};
 use three_d::*;
 
@@ -54,7 +54,7 @@ fn open_window() -> Result<Window, WindowError> {
     let event_loop = winit::event_loop::EventLoop::new();
     // 256 pixels: Windows scales it down for the title bar and up for Alt+Tab
     let icon = |size: u32| Icon::from_rgba(icon::rgba(size), size, size).ok();
-    let builder = WindowBuilder::new().with_title("Arcs").with_maximized(true).with_window_icon(icon(64));
+    let builder = WindowBuilder::new().with_title("Brickloft").with_maximized(true).with_window_icon(icon(64));
     // the taskbar and Alt+Tab take their own, larger icon on Windows
     // https://docs.rs/winit/0.28/winit/platform/windows/trait.WindowBuilderExtWindows.html#tymethod.with_taskbar_icon
     #[cfg(target_os = "windows")]
@@ -69,7 +69,7 @@ fn open_window() -> Result<Window, WindowError> {
 
 #[cfg(target_arch = "wasm32")]
 fn open_window() -> Result<Window, WindowError> {
-    Window::new(WindowSettings { title: "Arcs".into(), ..Default::default() })
+    Window::new(WindowSettings { title: "Brickloft".into(), ..Default::default() })
 }
 
 /// Milliseconds from some fixed moment. `std::time::Instant` is not
@@ -103,7 +103,7 @@ pub fn run() {
 pub fn run_form(form: usize, claude: bool) {
     let window = match open_window() {
         Ok(window) => window,
-        Err(e) => panic!("arcs editor: could not open a WebGL2 window: {e}. A browser with WebGL2 (or a desktop with OpenGL 3.3) is needed."),
+        Err(e) => panic!("brickloft editor: could not open a WebGL2 window: {e}. A browser with WebGL2 (or a desktop with OpenGL 3.3) is needed."),
     };
     let context = window.gl();
 
@@ -499,7 +499,7 @@ pub fn run_form(form: usize, claude: bool) {
             // every frame: turning the camera does not move a shadow.
             let casters = brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0).map(|m| &m.geometry);
             if let Err(e) = sun.generate_shadow_map(2048, casters) {
-                eprintln!("arcs editor: no shadows this time: {e}");
+                eprintln!("brickloft editor: no shadows this time: {e}");
             }
         }
         let handles = state.handles();
@@ -540,7 +540,7 @@ pub fn run_form(form: usize, claude: bool) {
             state.report_note = send::clear_reports();
         }
         if asked.report {
-            state.report_note = match arcs_core::report::report(&state.full_spec()) {
+            state.report_note = match brickloft_core::report::report(&state.full_spec()) {
                 Ok(text) => send::save_report(&text),
                 Err(e) => format!("No report: {e}"),
             };
@@ -582,7 +582,7 @@ pub fn run_form(form: usize, claude: bool) {
         }
         if let Err(e) = screen.write(|| gui.render()) {
             // the panel failing to draw should not take the view down with it
-            eprintln!("arcs editor: could not draw the panel: {e}");
+            eprintln!("brickloft editor: could not draw the panel: {e}");
         }
         #[cfg(not(target_arch = "wasm32"))]
         if shot == Some(true) {

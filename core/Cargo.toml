@@ -1,5 +1,5 @@
 [package]
-name = "arcs-core"
+name = "brickloft-core"
 description = "Curves and solids fitted to Brickadia microbricks"
 version.workspace = true
 edition.workspace = true

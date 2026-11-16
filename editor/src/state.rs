@@ -2,10 +2,10 @@
 //! dragged to change it, and the bricks last built from it.
 
 use crate::paint::Paint;
-use arcs_core::curves::{ArchType, Circle};
-use arcs_core::shapes::CellBrick;
-use arcs_core::spec::{build, snap, Built, Form, Spec};
-use arcs_core::DVec3;
+use brickloft_core::curves::{ArchType, Circle};
+use brickloft_core::shapes::CellBrick;
+use brickloft_core::spec::{build, snap, Built, Form, Spec};
+use brickloft_core::DVec3;
 
 /// The forms on offer, in menu order. `Form` itself carries the arch type,
 /// so the menu works on this index and the arch type is kept beside it.
@@ -37,7 +37,7 @@ pub const ARCHES: [(&str, ArchType); 6] = [
 
 /// The furthest a handle may be dragged from the origin, and the largest a
 /// radius or rise may be dragged to, in microbricks. Well inside what the
-/// core will build (`arcs_core::spec::MAX_SPAN`), so that no drag can ask
+/// core will build (`brickloft_core::spec::MAX_SPAN`), so that no drag can ask
 /// for a form it would refuse.
 pub const HANDLE_LIMIT: f64 = 400.0;
 
@@ -258,7 +258,7 @@ pub struct State {
     pub show_arrows: bool,
     pub show_rings: bool,
     /// How far every slider for a size goes: as far as the core will build
-    /// (`arcs_core::spec::MAX_SPAN`) unless the user lowers it. It began at
+    /// (`brickloft_core::spec::MAX_SPAN`) unless the user lowers it. It began at
     /// 60 to keep an even slider fine enough for small forms; the sliders
     /// are logarithmic now, which does that at any reach.
     pub max_size: f64,
@@ -326,7 +326,7 @@ fn along_line(from: DVec3, a: DVec3, origin: DVec3, dir: DVec3) -> Option<f64> {
     (t.abs() <= 4.0 * w.length().max(15.0)).then_some(t)
 }
 
-/// A grid that is not turned: see `arcs_core::spec::Spec::grid`.
+/// A grid that is not turned: see `brickloft_core::spec::Spec::grid`.
 pub const LEVEL: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
 
 /// The turn that is `first` and then `then`, as quaternions (x, y, z, w).
@@ -423,7 +423,7 @@ impl State {
             show_ruler: true,
             show_arrows: true,
             show_rings: true,
-            max_size: arcs_core::spec::MAX_SPAN,
+            max_size: brickloft_core::spec::MAX_SPAN,
             gizmo_size: GIZMO,
             bounds: None,
             floor_gap: 0.0,
@@ -1002,14 +1002,14 @@ impl State {
         // (the angle of its grid changes nothing about how a form is fitted)
         let spec = Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..self.full_spec() };
         // Built while something was being dragged, a form is left unmeasured
-        // (see `arcs_core::spec::build_as`): once the mouse is let go it is
+        // (see `brickloft_core::spec::build_as`): once the mouse is let go it is
         // built again, measured this time.
         let owed = self.built.unmeasured && !self.busy;
         if self.built_from.as_ref() == Some(&spec) && !owed {
             return false;
         }
         let start = now_ms();
-        match arcs_core::spec::build_as(&spec, !self.busy) {
+        match brickloft_core::spec::build_as(&spec, !self.busy) {
             Ok(built) => {
                 // worked out once per build, not once per frame
                 self.bounds = bounds_of(&built);
@@ -1041,7 +1041,7 @@ impl State {
     /// Turn the form being edited a quarter turn about x, y or z, or with
     /// `back`, a quarter turn the other way.
     pub fn turn(&mut self, axis: usize, back: bool) {
-        use arcs_core::shapes::{compose, quarter};
+        use brickloft_core::shapes::{compose, quarter};
         for _ in 0..if back { 3 } else { 1 } {
             self.spec.turned = compose(self.spec.turned, quarter(axis));
         }
@@ -1100,7 +1100,7 @@ impl State {
     /// The dots as they are seen: where the form's dots are once it has
     /// been turned by quarter turns, and its grid by whatever angle.
     pub fn handles(&self) -> Vec<(Handle, DVec3)> {
-        let (turn, standing) = (arcs_core::spec::Turn::of(&self.spec.snapped()), self.standing());
+        let (turn, standing) = (brickloft_core::spec::Turn::of(&self.spec.snapped()), self.standing());
         self.dots().into_iter().map(|(h, at)| (h, out_of_grid(&self.spec, turn.point(at - standing) + standing))).collect()
     }
 
@@ -1299,7 +1299,7 @@ impl State {
         // the cursor's ray is turned back, and then moves the dots of the
         // form as fitted. Not a move of the whole form, which is the same
         // whichever way it faces.
-        let turn = arcs_core::spec::Turn::of(&self.spec.snapped());
+        let turn = brickloft_core::spec::Turn::of(&self.spec.snapped());
         let (origin, dir, view) = if turn.is_none() || handle == Handle::Move {
             (origin, dir, view)
         } else {
@@ -1335,7 +1335,7 @@ impl State {
         // A point added to a circle is dragged within the circle's plane, or
         // with Ctrl held, straight out of it: never a little of both, since
         // a curve pulled even slightly out of its plane can no longer be
-        // built as a flat band (see `arcs_core::spec::pulled`), and a drag
+        // built as a flat band (see `brickloft_core::spec::pulled`), and a drag
         // in the plane facing the eye is nearly always a little of both.
         // Which of the two was once decided by how the plane was seen, face
         // on or from the side; but a ring lying flat is usually looked at
@@ -1476,7 +1476,7 @@ impl State {
             SPHERE | PYRAMID => at,
             _ => self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?,
         };
-        let on = arcs_core::spec::Turn::of(&self.spec.snapped()).back(on);
+        let on = brickloft_core::spec::Turn::of(&self.spec.snapped()).back(on);
         self.spec.pulls.push((on, DVec3::ZERO));
         Some(Handle::Pull(self.spec.pulls.len() - 1))
     }
@@ -1884,10 +1884,10 @@ mod tests {
         for _ in 0..3 {
             state.turn(0, false);
         }
-        assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+        assert_eq!(state.spec.turned, brickloft_core::shapes::UPRIGHT);
         state.turn(2, false);
         state.turn(2, true);
-        assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+        assert_eq!(state.spec.turned, brickloft_core::shapes::UPRIGHT);
     }
 
     #[test]
@@ -2135,16 +2135,16 @@ mod tests {
         state.preset();
         state.cut = Cut::Dome;
         state.spec.radius = 11.0;
-        let text = arcs_core::report::spec_text(&state.full_spec());
+        let text = brickloft_core::report::spec_text(&state.full_spec());
         let mut other = State::new();
-        other.load_spec(arcs_core::report::parse_spec(&text).unwrap());
+        other.load_spec(brickloft_core::report::parse_spec(&text).unwrap());
         assert_eq!((other.form, other.cut == Cut::Dome), (SPHERE, true));
         assert_eq!(other.full_spec(), state.full_spec());
 
         let mut arch = State::new();
         arch.arch = 3;
         arch.spec.rise = Some(5.0);
-        other.load_spec(arcs_core::report::parse_spec(&arcs_core::report::spec_text(&arch.full_spec())).unwrap());
+        other.load_spec(brickloft_core::report::parse_spec(&brickloft_core::report::spec_text(&arch.full_spec())).unwrap());
         assert_eq!((other.form, other.arch), (0, 3));
         assert_eq!(other.full_spec(), arch.full_spec());
     }

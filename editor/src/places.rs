@@ -7,9 +7,9 @@
 //!
 //! | Files | Folder |
 //! |---|---|
-//! | saved forms | `Documents/omegga-arcs/forms/` |
-//! | screenshots | `Pictures/omegga-arcs/` |
-//! | reports, and the prefab a copy puts on the clipboard | `omegga-arcs/` in the system's temporary folder |
+//! | saved forms | `Documents/brickloft/forms/` |
+//! | screenshots | `Pictures/brickloft/` |
+//! | reports, and the prefab a copy puts on the clipboard | `brickloft/` in the system's temporary folder |
 //!
 //! `Documents` and `Pictures` are taken to be in the home folder, which is
 //! where all three systems keep them unless the user has moved them. A user
@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 
 /// The name of the program's folder in each place.
-const OURS: &str = "omegga-arcs";
+const OURS: &str = "brickloft";
 
 fn made(folder: PathBuf) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&folder).map_err(|e| format!("could not make {}: {e}", folder.display()))?;
@@ -38,6 +38,12 @@ fn home() -> Result<PathBuf, String> {
 /// Where saved forms are kept. Not made until something is saved: see `store`.
 pub fn forms() -> Result<PathBuf, String> {
     Ok(home()?.join("Documents").join(OURS).join("forms"))
+}
+
+/// Where saved forms were kept while the program was called omegga-arcs,
+/// for `store` to bring them from.
+pub fn forms_once_at() -> Option<PathBuf> {
+    Some(home().ok()?.join("Documents").join("omegga-arcs").join("forms"))
 }
 
 /// Where screenshots go, made if it is not there.

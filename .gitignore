@@ -3,9 +3,10 @@ target/
 dist/
 
 # written by the editor while it runs
+brickloft-report*.txt
 arcs-report*.txt
 arcs-screenshot*.png
-arcs-build.brz
+brickloft-build.brz
 arcs-forms/
 
 # written by Omegga beside a plugin
@@ -18,4 +19,4 @@ data/
 *.swp
 .DS_Store
 Thumbs.db
-arcs-grid-trial.brz
+brickloft-grid-trial.brz

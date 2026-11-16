@@ -1,16 +1,16 @@
 //! Draw the nine brick shapes as the pictures in `docs/images/`:
 //!
-//!   cargo run -p arcs-editor --example shape_pictures
+//!   cargo run -p brickloft-editor --example shape_pictures
 //!
-//! Each picture is the shape's own mesh (`arcs_editor::mesh::shape_mesh`,
+//! Each picture is the shape's own mesh (`brickloft_editor::mesh::shape_mesh`,
 //! the one the editor draws) inside the outline of its box, so the
 //! documentation shows what the code builds and cannot drift from it.
 //!
 //! The triangles are filled by `support/canvas.rs`.
 
-use arcs_core::shapes::{Kind, KINDS};
-use arcs_core::DVec3;
-use arcs_editor::mesh::shape_mesh;
+use brickloft_core::shapes::{Kind, KINDS};
+use brickloft_core::DVec3;
+use brickloft_editor::mesh::shape_mesh;
 
 #[path = "support/canvas.rs"]
 mod canvas;
