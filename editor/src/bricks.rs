@@ -11,16 +11,17 @@
 //! power function. Measured on a lawn of 28,000 bricks that was 11 to 17
 //! ms each time the lawn changed, which was every touch of the brush; and
 //! each mesh is drawn as an object of its own, which sets every light's
-//! uniforms again, 45 microseconds a mesh a frame.
+//! uniforms again, about 45 microseconds a mesh a frame (144 meshes took
+//! 6.4 to 7.8 ms a frame to draw where 13 took 1.2).
 //!
 //! A brick is a box on the lattice: a corner, a size and a colour, ten
 //! numbers, which the vertex shader (shaders/brick.vert) makes a place of
 //! with one multiply and one add. So this is one object for all the
 //! shapes: the lights are set once, and each shape is drawn with one call
 //! for each tile of ground the form is divided into (see `tiles`), usually
-//! one. Measured on the same lawn: 0.5 ms to give the card every brick
-//! again, and the drawing of a frame down from 1.3 ms of the processor's
-//! time to 0.3 (see docs/performance.md).
+//! one. Measured on the same lawn: 1.0 to 1.5 ms to give the card every
+//! brick again, after 0.8 to find that they had changed, and a frame is
+//! drawn in 0.9 ms of the processor's time (see docs/performance.md).
 //!
 //! Only the form being edited, since its grid's turn is one matrix for the
 //! whole set. The other forms may each stand on a grid at an angle of its
@@ -78,18 +79,26 @@ impl Bricks {
     /// Give the card the bricks of the tile `key` as they now are, in
     /// place of what it had for that tile; none takes the tile away.
     pub fn set_tile(&mut self, key: Key, bricks: &[Drawn]) {
-        let mut sorted: BTreeMap<u8, (Vec<Vec3>, Vec<Vec3>, Vec<Vec4>)> = BTreeMap::new();
+        // Each brick with the others of its shape. Which list a shape's
+        // bricks are in is read from a table of the 256 masks there can
+        // be, and not looked up in a map for every brick.
+        let mut sorted: Vec<(u8, Vec<Vec3>, Vec<Vec3>, Vec<Vec4>)> = Vec::new();
+        let mut list_of = [usize::MAX; 256];
         for (b, [r, g, blue]) in bricks {
-            let (at, size, colour) = sorted.entry(b.mask).or_default();
+            if list_of[b.mask as usize] == usize::MAX {
+                list_of[b.mask as usize] = sorted.len();
+                sorted.push((b.mask, Vec::new(), Vec::new(), Vec::new()));
+            }
+            let (_, at, size, colour) = &mut sorted[list_of[b.mask as usize]];
             at.push(vec3(b.min[0] as f32, b.min[1] as f32, b.min[2] as f32));
             size.push(vec3(b.ext[0] as f32, b.ext[1] as f32, b.ext[2] as f32));
             colour.push(vec4(self.linear[*r as usize], self.linear[*g as usize], self.linear[*blue as usize], 1.0));
         }
         // (a shape the tile had bricks of and has none of now)
-        for (_, shape) in self.shapes.iter_mut().filter(|(mask, _)| !sorted.contains_key(mask)) {
+        for (_, shape) in self.shapes.iter_mut().filter(|(mask, _)| list_of[**mask as usize] == usize::MAX) {
             shape.tiles.remove(&key);
         }
-        for (mask, (at, size, colour)) in sorted {
+        for (mask, at, size, colour) in sorted {
             let context = &self.context;
             let shape = self.shapes.entry(mask).or_insert_with(|| {
                 let mesh = crate::mesh::shape_mesh(mask);

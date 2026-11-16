@@ -1536,9 +1536,11 @@ impl State {
     /// ready. Returns whether new bricks were put in place this time.
     ///
     /// Built here, as every form was, a slow form stopped the window for
-    /// as long as it took: a lawn of sixty thousand bricks takes half a
-    /// second, so each touch of the brush on it was a freeze, and a stroke
-    /// of touches a run of them, several seconds together. Now the window
+    /// as long as it took: a lawn of sixty thousand bricks took half a
+    /// second when grass was fitted, so each touch of the brush on it was
+    /// a freeze, and a stroke of touches a run of them, several seconds
+    /// together. (A lawn is laid out now, in a few milliseconds, and is
+    /// built here: see `brickloft_core::grass`. A tree is still slow.) Now the window
     /// goes on drawing the bricks it has, and takes the new ones when the
     /// other thread sends them. One build at a time: a change made while
     /// one is under way waits for it, and is built next, so a run of
@@ -1549,9 +1551,9 @@ impl State {
     /// goes by how long its last build took.
     ///
     /// The alternative was to build a slow form in pieces and only the
-    /// pieces a change touches. That is the larger gain for a lawn and is
-    /// particular to each kind of form; this keeps the window answering for
-    /// every form, the ones not yet thought of among them.
+    /// pieces a change touches. That is particular to each kind of form;
+    /// this keeps the window answering for every form, the ones not yet
+    /// thought of among them.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn refresh_behind(&mut self, now_ms: impl Fn() -> f64 + Copy) -> bool {
         let wanted = |state: &State| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..state.full_spec() };

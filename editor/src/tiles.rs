@@ -3,13 +3,14 @@
 //! card only the squares it changed.
 //!
 //! The view gives the card a form's bricks as buffers of instances (see
-//! `bricks`), and filling a buffer costs by its size: measured, 0.5 ms for
-//! the 28,000 bricks of a lawn 180 cells by 120. That is nothing to save
-//! on. A lawn ten times the size is 5 ms a touch, and a touch of the
-//! brush changes the bricks of a few tiles of it only (a lawn is built in
-//! tiles so that this is so: see `brickloft_core::grass`). So a form of
-//! many bricks is divided among several buffers, a set for each tile of
-//! ground, and only the tiles whose bricks changed are filled again.
+//! `bricks`), and filling a buffer costs by its size: measured, 1.0 to 1.5
+//! ms for the 28,000 bricks of a lawn 180 cells by 120, about 45
+//! nanoseconds a brick. That is little to save on. A lawn ten times the
+//! size would be 10 to 15 ms a touch, and a touch of the brush changes
+//! the bricks of a few tiles of it only (a lawn is built in tiles so that
+//! this is so: see `brickloft_core::grass`). So a form of many bricks is
+//! divided among several buffers, a set for each tile of ground, and only
+//! the tiles whose bricks changed are filled again.
 //!
 //! A tile costs a draw call for each brick shape in it at every frame,
 //! whether anything changes or not, so a form has no more tiles than its
@@ -20,7 +21,7 @@
 //! filled a part at a time (`InstanceBuffer::fill_subset`). A touch
 //! changes how many bricks a tile has as well as which, so each part
 //! would need room to grow into and be moved when it outgrew it: an
-//! allocator, to save draw calls that are a few microseconds each.
+//! allocator, to save a few draw calls.
 //!
 //! What is here is the keeping and the comparing, which need no graphics
 //! card and are tested without one. The buffers are filled in `lib.rs`
@@ -34,13 +35,14 @@ pub type Drawn = (CellBrick, [u8; 3]);
 
 /// How many bricks earn a form one more tile.
 ///
-/// Filling a buffer was measured at about 18 nanoseconds a brick, and a
-/// draw call at 5 to 8 microseconds. A touch on a form of `n` bricks in
-/// `t` tiles fills about `4 n / t` bricks' worth (a touch reaches four
-/// tiles or so) and every frame draws `t` tiles for each of some eight
-/// shapes. At 16,000 bricks a tile, a touch fills under 1.2 ms of
-/// buffers whatever the form's size, and a form of a million bricks is
-/// 64 tiles, half a thousand calls and about 3 ms a frame to draw.
+/// Filling a buffer was measured at about 45 nanoseconds a brick. A
+/// touch on a form of `n` bricks in `t` tiles fills about `4 n / t`
+/// bricks' worth (a touch reaches four tiles or so, and fewer where the
+/// tiles are large), and every frame draws `t` tiles for each of some
+/// dozen shapes. At 16,000 bricks a tile a touch fills 3 ms of buffers at
+/// the most, whatever the form's size. What a tile's draw calls cost a
+/// frame was not measured apart from the rest: a lawn of 86,000 bricks in
+/// four tiles and one of 28,000 in one both took 1.0 ms a frame to draw.
 pub const EACH: usize = 16_000;
 
 /// The most tiles a form is divided into, however many bricks it has.

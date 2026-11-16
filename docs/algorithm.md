@@ -2692,18 +2692,31 @@ angle from upright grows with the cube of the way along the leaf.
 
 #### Grass
 
-<img src="images/plant-grass.png" width="640" alt="A lawn in bricks with a high hill and a lower one raised in it: tufts of blades in three greens over a thin skin of brown soil that follows the ground">
+<img src="images/plant-grass.png" width="640" alt="A lawn in bricks with a high hill and a lower one raised in it: blades a brick wide with sloped tips, in three greens, over a thin skin of brown soil that follows the ground">
 
 Grass covers the ground within its reach of a line, and everything the
 line encloses if it is closed, so it is a strip along a path or a lawn of
-any outline. It is a surface. Under the blades is a skin of soil about two
+any outline. It is a surface. Under the blades is a skin of soil two
 cells thick in a colour of its own, so that a patch set on a floor leaves
 no gap and a hill is closed on top. Under a hill there is nothing.
+
+Grass is the one plant that is not fitted. A lawn is a height field with
+things standing on it: the ground has one height at each place, so every
+brick can be written down from that height, as a bookcase's are from its
+size (section 7.12). It was first grown as the other plants are, soil,
+water and every blade as parts of one solid, and fitted cell by cell.
+A lawn 180 cells by 120 with 24 touches then took 15.6 million samples
+of its distance function, 0.53 s on sixteen threads, and every touch of
+the brush fitted all of it again. Written down it takes 4 ms
+([performance.md](performance.md#a-lawn)). The code is
+[core/src/grass.rs](../core/src/grass.rs).
+
+##### The ground
 
 The ground is shaped the way terrain is in games that have a tool for it,
 by touches of a brush. A touch has a place, a range $`R`$ and an amount
 $`a`$, and does one of two things. A push adds a smooth hill, or with a
-negative amount takes a hollow out of raised ground:
+negative amount takes a hollow out of the ground:
 
 ```math
 h \leftarrow h + a\,\frac{1 + \cos(\pi d / R)}{2} \qquad (d < R)
@@ -2715,11 +2728,46 @@ flat without a crease. A flattening touch moves the ground towards one
 height $`a`$: all the way within half its range, and by a share that
 falls on the same curve from there to its edge, which leaves a level
 terrace with a bank that runs back into the hill. The touches are applied
-in the order they were made, as strokes are, and the ground is never taken
-below the floor.
+in the order they were made, as strokes are.
 
-The first version raised the ground by the reach all added points share,
-8 cells, and a touch was a spike. Each touch now has its own range.
+A touch may also be a stroke: with Ctrl held while the button is down,
+the same touch is made again wherever the cursor has moved 0.4 of the
+brush's range along the ground. A patch takes 240 touches. A touch is one
+of the form's added points, so it is undone, saved and copied like any
+other. A brush dragged across the ground was considered and not built:
+the ground it leaves would have to be kept as a grid of heights in the
+form, where everything a form keeps now is a few numbers a person can
+read.
+
+The height $`h`$ is worked out once for the middle of every cell the lawn
+covers, and kept in a table with what else is at that cell (`Ground`).
+The top of the soil is the whole number
+
+```math
+t = \operatorname{round}(h + 1.6)
+```
+
+of cells over the floor the lawn lies on, so level ground has soil in the
+two cells under $`t = 2`$. The 1.6 is how far the soil stood over the
+ground when it was fitted, and keeps a lawn saved then at the height it
+had. The soil under a cell fills the cells from $`t - 2`$ up to $`t`$,
+and further down where the ground beside it is lower, to one cell under
+the lowest $`t`$ of the four cells beside it. A slope's skin then has no
+gap in it. Soil columns of the same height that stand side by side are
+joined into the largest boxes (`pattern::joined`), so level ground is one
+brick for each tile of 32 cells by 32.
+
+Where bare ground steps up one cell to one side and not on the side
+opposite, a sloped brick fills the step, so sand going down to water is a
+bank. A corner where two slopes meet is left a step.
+
+The table answers what the land is like without the bricks being built:
+`Ground::at` gives a cell's height, the top of its soil, the water
+standing there and whether that water is a stream's, and `Ground::slope`
+gives the rise each way from the heights of the cells beside it. Making
+the table takes about a third of a lawn's build.
+
+##### Ponds
 
 A push down may go below the level the lawn lies on, and a hollow dug
 deeper than the water stands is a pond. With the water $`w`$ below the
@@ -2729,17 +2777,30 @@ lawn and the ground at the height $`h`$:
 |---|---|
 | $`h > -w + 2`$ | grass as anywhere |
 | $`-w + 0.3 < h \le -w + 2`$ | grass thinning: a tuft is kept with the chance $`(h + w - 0.3) / 1.7`$ |
-| $`-w - 1.5 < h \le -w + 1.2`$ | the soil is sand |
-| $`h \le -w - 1.5`$ | the bed of the pond, with a stone on about one place in seventeen |
-| $`h < -w - 1`$ | water from the bed up to $`-w`$ |
+| $`h \le -w + 1.2`$, and not the bed | the soil is sand |
+| $`h \le -w - 1.5`$, under water | the bed of the pond, with a stone on about one cell in a hundred |
+| $`h < -w - 1`$ and $`t < -w`$ | water from the top of the soil up to $`-w`$ |
 
-The water is upright eight-sided columns with flat tops, wide enough to
-run together, so it is fitted as boxes and joined into few. Reeds stand
-where the ground is within 2.6 of the water's level, as thickly as asked.
-Stones and reeds are placed by a number worked out from each spot of
-ground and not from the run of numbers the blades use, so digging a pond
-leaves the lawn round it as it was. A patch with a pond reaches as far
-below its own level as it was dug.
+The water is the cells between the top of the soil and the level. It is
+joined into boxes greedily from the surface down: at each cell of water
+not yet in a box, a row along x widened along y or a row along y widened
+along x, whichever is larger, then made as deep as it can be. A pond is a
+bowl, so each layer of its water is a whole disc, which is a few wide
+boxes. The usual order, from the bottom up, leaves every layer above the
+lowest a ring round the box that came up through it. A pond 31 across and
+4 deep, 382 cells of water, is 58 bricks from the bottom up and 33 from
+the surface down.
+
+A stone is a low dome up to five cells across and two high, lying on
+the bed. Reeds
+stand where the ground is within 2.6 of the water's level, as thickly as
+asked. A reed is a bulrush laid out by rule: a stem one cell wide that
+leans by a cell half way up, a brown head three cells across with its
+four corners sloped and a slope at each end, the stem's tip above the
+head, and a leaf that arches away from the foot. A reed that would stand
+in another is left out. Stones and reeds are placed by numbers worked out
+from where they are, so digging a pond leaves the lawn round it as it
+was.
 
 In the game's file the water is the glass material at intensity 6 of 10,
 with all four of its collision flags off. The writer the editor uses
@@ -2749,9 +2810,9 @@ against the depth of the solid bricks and leaving none of their own. The
 basin then shows through the water, and whatever stands in front of the
 water still hides it. Ice is drawn more solid than water.
 
-With **Pond levels** at 2, water stands at two heights
-([core/src/tree.rs](../core/src/tree.rs), `Waters`). The ground is
-flooded from the edge of the patch inwards with a priority flood
+With **Pond levels** at 2, water stands at two heights (`Waters`). The
+ground is flooded from the edge of the patch inwards with a priority
+flood
 ([Barnes, Lehman and Mulla 2014](https://arxiv.org/abs/1511.04463)),
 which gives each place its spill height: the height water would reach
 there before it ran off the patch. A hollow is a connected set of places
@@ -2766,6 +2827,9 @@ and a hollow with $`s > 1.5`$ that is deeper than $`w + 1`$ is a raised
 pond. All raised ponds stand at the lowest $`\ell`$ among them, so there
 are two levels and none overflows. The lower level is $`-w`$ as before,
 and a patch with no raised hollow builds the same bricks at 2 as at 1.
+The flood is on a grid of places 2.4 cells apart, the grid the soil was
+laid on when it was fitted, so a lawn saved then has the levels and the
+streams it had.
 
 A stream leaves each raised pond for the nearest water at the lower
 level. Its way is the cheapest over the grid of the ground by Dijkstra's
@@ -2790,28 +2854,75 @@ next three cells, and $`z_0 = \ell`$ until the stream is out through the
 rim. The level never rises, it is a whole number, and it lies under both
 banks, so the water is flat reaches with a step down between them. The
 channel is cut 2.8 under the water over a width of 4.4, with banks that
-lie back further where the cut is deep. Its bed is sand, it has a third
-as many reeds as a pond's margin, and its water is the pond's water in
-the game's file, ice with it when frozen. Eight streams are made at
-most, and a patch over 400,000 places of ground keeps one level.
+lie back further where the cut is deep, which leaves water one cell deep
+along its bed. Its bed is sand, it has a third as many reeds as a pond's
+margin, and a stone in it is a single cell, since a pond's stone would
+dam it. Its water is the pond's water in the game's file, ice with it
+when frozen. Eight streams are made at most, and a patch over 400,000
+places of ground keeps one level.
 
-A touch may also be a stroke: with Ctrl held while the button is down,
-the same touch is made again wherever the cursor has moved 0.4 of the
-brush's range along the ground. A patch takes 240 touches.
+##### Blades
 
-The blades are in tufts on a grid shaken so that no rows show, two to four
-blades to a tuft, each of its own height and lean and one of three greens.
-They stand upright on the ground wherever it has been pushed to. A touch is
-one of the form's added points, so it is undone, saved and copied like any
-other. A brush dragged across the ground was considered and not built: the
-ground it leaves would have to be kept as a grid of heights in the form,
-where everything a form keeps now is a few numbers a person can read.
+The blades are in tufts on a grid shaken so that no rows show, three to
+five blades to a tuft, each on a cell of its own beside the tuft's
+middle, each of its own height and lean and one of three greens. A blade
+is a column one cell wide with a sloped brick for its tip, the top two
+fifths of it, sloping the way the blade leans. Where a blade leans far
+enough to pass over the next cell it goes on there, and its two lengths
+share one cell's height so that they meet face to face. Blades stand on
+the ground wherever it has been pushed to.
 
-The game's file gives each brick a flag for what it stops: the player,
-weapons, interaction and physics. The bricks of the blades are written
-with the first, second and fourth off, so a player walks through the grass
-and stands on the soil. Which part a brick is, is asked of the plant
-itself, grown again from the form when the file is written.
+A fitted blade was a round rib nearly two cells through, and what the
+fitter made of it was a column with sloped bricks about it. The column
+and its tip are that written down, one cell through, so a tuft has one
+more blade than it had, to cover the ground as before. The lawn of 24
+touches is 27,600 bricks where it was 63,500.
+
+Two blades may want the same cell. The tufts are always taken in one
+order, the first blade to ask for a cell has it, and nothing is put over
+a blade's tip. Each tuft is placed and shaped by numbers worked out from
+its own place on the grid of tufts. They were drawn in turn from one run
+of numbers, which gives a tuft another shape whenever a tuft before it
+changes, and makes one part of a lawn depend on all of it.
+
+##### Tiles
+
+The lawn is built in tiles of 32 cells by 32. A tile's bricks follow
+from the ground of its own cells and of the cells a little way round
+them (one cell for the soil, three for stones, a blade's reach for
+blades) and from nothing else. The tiles are shared out over the
+processor's cores and put end to end in their own order, so the bricks
+are the same on any number of threads. A touch of the brush changes the
+bricks of the tiles it reaches and of no others, which the editor uses
+to give the graphics card only those tiles of a very large lawn. Water
+and reeds belong to no tile: a pond's water is joined whole, and a reed
+is a dozen cells across with its leaf.
+
+##### Which part a brick is
+
+Each brick comes with the number of its part: soil, sand, the bed, a
+stone, water, or one of the three greens. The colours go by that
+number. The game's file gives each brick a flag for what it stops (the
+player, weapons, interaction and physics), and the bricks of the blades
+are written with the first, second and fourth off, so a player walks
+through the grass and stands on the soil. A brick's part is asked of the
+lawn by where the brick is (`grass::Model::part`), since a brick cut by a
+join is a piece of one of the lawn's bricks and has no number of its own.
+A form joined into a lawn asks how far a place is from the lawn's bricks
+(`grass::Model::distance`), as it does of furniture.
+
+##### A lawn saved before
+
+The form is kept as it was, in the same words, so a lawn saved when
+grass was fitted opens. Its ground is the same ground, its ponds stand at
+the same levels and its streams run the same ways. Its blades are the
+same number of tufts on the same grid, and each is in another place with
+another height, since their numbers are worked out differently. Its
+reeds are thinner in the stem and stand in other places along the same
+margins. The edge of the soil follows the lawn's outline cell by cell,
+where the fitted soil reached about two cells past it. A flat lawn with
+a pond dug in it has soil two cells thick everywhere, where the fitted
+one hung a cell lower over its whole area once any of it was dug.
 
 #### Trunks on the lattice
 

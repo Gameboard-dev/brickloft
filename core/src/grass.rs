@@ -45,12 +45,12 @@ use std::sync::OnceLock;
 /// How many cells a tile of ground is along each side.
 ///
 /// A touch of the brush is 8 to 50 cells across, so at 32 it reaches four
-/// to nine tiles of a lawn's twenty or more, and the editor draws a tile
-/// with one call for each brick shape in it. At 16 a touch reaches a
-/// smaller share of the bricks and the lawn is four times as many calls
-/// to draw; at 64 a lawn 120 across is four tiles and every touch reaches
-/// most of them. A flat tile's soil is one brick, so smaller tiles are
-/// also more bricks of soil.
+/// to nine tiles of a lawn's twenty or more, and the rest keep their
+/// bricks. A level tile's soil is one brick, so at 16 level ground is
+/// four times as many bricks of soil. At 64 a lawn 180 by 120 is six
+/// tiles: too few pieces of work to share among sixteen cores, and every
+/// touch changes the bricks of most of them. The editor's own tiles (its
+/// `tiles` module) are this size or a whole number of these.
 pub const TILE: i32 = 32;
 
 /// How far over the ground's own height the top of the soil is. The
@@ -794,7 +794,7 @@ impl Rule<'_> {
     /// `bricks`; `floor` is the height blades may be from over each cell
     /// of it, and `i32::MAX` where there is no lawn.
     ///
-    /// The blades are in tufts, two to five to a tuft, each on a cell of
+    /// The blades are in tufts, three to five to a tuft, each on a cell of
     /// its own beside the tuft's middle, each of its own height and lean
     /// and of one of three greens; all lean a little one way, as grass
     /// does. A blade is a column one cell wide, the thinnest that is
