@@ -165,9 +165,8 @@ enum Shape {
     /// A tube with its radius merely blended along it is cheaper and is
     /// not a distance: it claims the surface of a steep taper is further
     /// off than it is, which the fitter's skipping of empty space trusts.
-    Cone { a: DVec3, ba: DVec3, ra: f64, rb: f64, l2: f64, a2: f64 },
-    /// An ellipsoid. `leafy` ones have the rough surface of a mass of
-    /// leaves (see [`Model::rough`]).
+    Cone { a: DVec3, ba: DVec3, ra: f64, rb: f64, l2: f64, il2: f64, a2: f64 },
+    /// An ellipsoid. `leafy` ones are leaves, lit from above (see [`Model::shade`]).
     Blob { c: DVec3, inv: DVec3, least: f64, leafy: bool },
     /// A length of a palm's trunk: eight-sided in plan, from height
     /// `a.z` to `b.z`, its middle going from `a` to `b` and its size from
@@ -193,13 +192,13 @@ impl Shape {
             let (c, r) = if ra >= rb { (a, ra) } else { (b, rb) };
             return Shape::Blob { c, inv: DVec3::splat(1.0 / r), least: r, leafy: false };
         }
-        Shape::Cone { a, ba, ra, rb, l2, a2: l2 - rr * rr }
+        Shape::Cone { a, ba, ra, rb, l2, il2: 1.0 / l2, a2: l2 - rr * rr }
     }
 
     fn distance(&self, p: DVec3) -> f64 {
         match *self {
-            Shape::Cone { a, ba, ra, rb, l2, a2 } => {
-                let (pa, rr, il2) = (p - a, ra - rb, 1.0 / l2);
+            Shape::Cone { a, ba, ra, rb, l2, il2, a2 } => {
+                let (pa, rr) = (p - a, ra - rb);
                 let y = pa.dot(ba);
                 let z = y - l2;
                 let x2 = (pa * l2 - ba * y).length_squared();
@@ -284,6 +283,31 @@ impl Grown {
         self.parts.push(Part { shape: Shape::Blob { c, inv: 1.0 / radii, least: radii.min_element(), leafy }, shade });
     }
 
+    /// A tuft of leaves: a ball of them, `radii` to each side of `c`.
+    ///
+    /// Built as a smaller ball with many small ones standing out of it all
+    /// over, each a cluster of leaves two or three cells across, and the
+    /// gaps between them the hollows. A smooth ball of bricks is a
+    /// boulder. The first roughening was smooth noise added to the ball's
+    /// distance, which looked much the same and cost four times as much:
+    /// noise steepens a distance function, so every value had to be more
+    /// than halved to stay an underestimate, and the fitter then sampled
+    /// twice as deep a shell of cells, working the noise out at each. A
+    /// union of balls is an exact distance with nothing to make up for.
+    fn leaves(&mut self, c: DVec3, radii: DVec3) {
+        let least = radii.min_element();
+        self.blob(c, (radii - 1.5).max(DVec3::splat(1.0)), LEAF, true);
+        if least < 2.6 {
+            return; // too small to have clusters: the ball itself
+        }
+        // enough clusters to cover three quarters of it
+        let area = 4.0 * PI * (radii.x * radii.y + radii.x * radii.z + radii.y * radii.z) / 3.0;
+        for _ in 0..(area * 0.75 / (PI * 2.3 * 2.3)).round() as usize {
+            let (way, r) = (self.any_way(), self.between(1.6, 3.0).min(least * 0.75));
+            self.blob(c + way * (radii - 0.9), DVec3::new(r, r, r * 0.85), LEAF, true);
+        }
+    }
+
     /// A limb along `path`, as round cones end to end, and its record.
     fn limb(&mut self, path: Vec<DVec3>, radius: Vec<f64>, parent: Option<usize>, level: u8, shade: u8) -> usize {
         for i in 1..path.len() {
@@ -296,26 +320,30 @@ impl Grown {
 
 /// Smallest bucket of the grid the parts are filed in, in cells, and the
 /// most buckets it may have (as `sdf::PolyDist`).
-const BUCKET: f64 = 4.0;
+///
+/// One cell, where a path's segments are filed four cells to a bucket.
+/// A bough of a pine is side shoots two cells apart, and a bucket four
+/// cells wide lists fifty of them: measured, a pine then spent 350
+/// nanoseconds a sample and three seconds a build, all of it comparing
+/// with parts that were not the nearest. A bucket of one cell lists the
+/// three or four that could be. A tree too large for that many buckets
+/// gets larger ones.
+const BUCKET: f64 = 1.0;
 const MAX_BUCKETS: f64 = 2_000_000.0;
 
 /// How near a bucket a part must come to be filed in it. A sample whose
 /// bucket lists nothing is at least this far from the tree, which is all
 /// the fitter asks of a far sample: over 0.87 of a cell, a cell's half
 /// diagonal, it does not look closer.
-const NEAR: f64 = 1.0;
+const NEAR: f64 = 0.9;
 
-/// How far the surface of a mass of leaves is pushed in and out, in cells,
-/// and over what length the pushing changes. A smooth ellipsoid of bricks
-/// is a boulder. Pushed about by this much it has the hollows and tufts of
-/// foliage, and at two cells' depth over five the fitter can still lay
-/// slopes on it.
-const ROUGH: f64 = 1.5;
-const ROUGH_LENGTH: f64 = 4.5;
-/// The pushing steepens the distance function by up to its depth over its
-/// length, times the steepest a smoothed step gets (1.5), each way of
-/// three. The value is scaled down by that much to stay an underestimate.
-const ROUGH_SLACK: f64 = 1.0 / (1.0 + 1.5 * 1.75 * ROUGH / ROUGH_LENGTH);
+/// How many buckets, each way, to one of the coarse grid that says how far
+/// the empty buckets are from the tree.
+const COARSE: usize = 4;
+
+/// The patches of light and shade on leaves repeat every this many of
+/// their own lengths, each way: their numbers are a table.
+const LATTICE: usize = 32;
 
 /// A tree as a solid: its parts, filed for quick lookup.
 #[derive(Clone)]
@@ -332,13 +360,18 @@ pub struct Model {
     hi: DVec3,
     origin: DVec3,
     bucket: f64,
+    /// one over `bucket`
+    per_bucket: f64,
     dims: [usize; 3],
+    /// the size of the coarse grid `clear` is on
+    coarse: [usize; 3],
     /// bucket b holds `items[start[b]..start[b + 1]]`
     start: Vec<u32>,
     items: Vec<u32>,
-    /// for each bucket, a distance every point of it is at least from every part not listed in it
+    /// for each bucket of a grid `COARSE` times coarser, a distance every point of it is at least from every part not listed in its bucket
     clear: Vec<f32>,
-    seed: u32,
+    /// the numbers the patches of light on leaves are blended from (see [`LATTICE`])
+    lattice: Vec<f32>,
 }
 
 impl std::fmt::Debug for Model {
@@ -360,13 +393,14 @@ fn hash(x: i32, y: i32, z: i32, seed: u32) -> f64 {
 /// between them ("value noise"). Gradient noise is smoother still and costs
 /// three times the arithmetic, for a surface that is then cut into bricks.
 /// https://en.wikipedia.org/wiki/Value_noise
-fn noise(p: DVec3, seed: u32) -> f64 {
+fn noise(lattice: &[f32], p: DVec3) -> f64 {
     let f = p.floor();
-    let (x, y, z) = (f.x as i32, f.y as i32, f.z as i32);
+    let (x, y, z) = (f.x as i64, f.y as i64, f.z as i64);
     let t = p - f;
     let t = t * t * (3.0 - 2.0 * t);
-    let at = |i: i32, j: i32, k: i32| hash(x + i, y + j, z + k, seed);
-    let along = |j: i32, k: i32| at(0, j, k) + (at(1, j, k) - at(0, j, k)) * t.x;
+    let wrap = |v: i64| v.rem_euclid(LATTICE as i64) as usize;
+    let at = |i: i64, j: i64, k: i64| lattice[wrap(x + i) + LATTICE * (wrap(y + j) + LATTICE * wrap(z + k))] as f64;
+    let along = |j: i64, k: i64| at(0, j, k) + (at(1, j, k) - at(0, j, k)) * t.x;
     let low = along(0, 0) + (along(1, 0) - along(0, 0)) * t.y;
     let high = along(0, 1) + (along(1, 1) - along(0, 1)) * t.y;
     2.0 * (low + (high - low) * t.z) - 1.0
@@ -411,12 +445,10 @@ impl Model {
         for limb in &mut grown.limbs {
             limb.path.iter_mut().for_each(|p| *p += stand);
         }
-        let reach = |part: &Part| NEAR + if matches!(part.shape, Shape::Blob { leafy: true, .. }) { ROUGH + NEAR / ROUGH_SLACK } else { 0.0 };
         let (mut lo, mut hi) = (DVec3::MAX, DVec3::MIN);
         for part in &grown.parts {
             let (a, b) = part.shape.bounds();
-            let rough = reach(part) - NEAR;
-            (lo, hi) = (lo.min(a - rough), hi.max(b + rough));
+            (lo, hi) = (lo.min(a), hi.max(b));
         }
         lo.z = lo.z.max(ground);
         let origin = lo - NEAR - 0.01;
@@ -430,7 +462,7 @@ impl Model {
         let each = |f: &mut dyn FnMut(usize, u32)| {
             for (n, part) in grown.parts.iter().enumerate() {
                 let (a, b) = part.shape.bounds();
-                let reach = reach(part);
+                let reach = NEAR;
                 let low = ((a - reach - origin) / bucket).floor().max(DVec3::ZERO).to_array().map(|v| v as usize);
                 let high = ((b + reach - origin) / bucket).floor().to_array();
                 let high = [0, 1, 2].map(|i| (high[i].max(0.0) as usize).min(dims[i] - 1));
@@ -458,34 +490,46 @@ impl Model {
             items[next[b] as usize] = n;
             next[b] += 1;
         });
-        // How far each bucket is from the nearest one with anything in
-        // it, in buckets, up to 3: a bucket k away from all parts' buckets
-        // is (k - 1) buckets clear of every part, and the fitter passes
-        // over a block of cells whose middle is 7 cells clear.
-        let mut steps = vec![u8::MAX; dims[0] * dims[1] * dims[2]];
-        for b in 0..steps.len() {
-            if start[b + 1] > start[b] {
-                steps[b] = 0;
+        // How clear of the tree the empty buckets are, worked out on a
+        // grid `COARSE` times coarser: a coarse bucket k away from every
+        // one with anything in it is (k - 1) coarse buckets clear of every
+        // part. The fitter passes over a whole block of cells whose middle
+        // is 7 cells clear, which is most of the box round a tree. On the
+        // buckets themselves this took longer than growing the tree.
+        let coarse = dims.map(|d| d.div_ceil(COARSE));
+        let wide = |x: usize, y: usize, z: usize| x + coarse[0] * (y + coarse[1] * z);
+        let mut steps = vec![u8::MAX; coarse[0] * coarse[1] * coarse[2]];
+        for z in 0..dims[2] {
+            for y in 0..dims[1] {
+                for x in 0..dims[0] {
+                    let b = index(x, y, z);
+                    if start[b + 1] > start[b] {
+                        steps[wide(x / COARSE, y / COARSE, z / COARSE)] = 0;
+                    }
+                }
             }
         }
-        for step in 1..=3u8 {
+        let far = (8.0 / (bucket * COARSE as f64)).ceil() as u8 + 1;
+        for step in 1..=far {
             let before = steps.clone();
-            for z in 0..dims[2] {
-                for y in 0..dims[1] {
-                    for x in 0..dims[0] {
-                        if before[index(x, y, z)] != u8::MAX {
+            for z in 0..coarse[2] {
+                for y in 0..coarse[1] {
+                    for x in 0..coarse[0] {
+                        if before[wide(x, y, z)] != u8::MAX {
                             continue;
                         }
-                        let beside = (z.saturating_sub(1)..=(z + 1).min(dims[2] - 1)).any(|k| (y.saturating_sub(1)..=(y + 1).min(dims[1] - 1)).any(|j| (x.saturating_sub(1)..=(x + 1).min(dims[0] - 1)).any(|i| before[index(i, j, k)] == step - 1)));
+                        let beside = (z.saturating_sub(1)..=(z + 1).min(coarse[2] - 1)).any(|k| (y.saturating_sub(1)..=(y + 1).min(coarse[1] - 1)).any(|j| (x.saturating_sub(1)..=(x + 1).min(coarse[0] - 1)).any(|i| before[wide(i, j, k)] == step - 1)));
                         if beside {
-                            steps[index(x, y, z)] = step;
+                            steps[wide(x, y, z)] = step;
                         }
                     }
                 }
             }
         }
-        let clear = steps.iter().map(|s| (NEAR + (*s).clamp(1, 4) as f64 * bucket - bucket) as f32).collect();
-        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, dims, start, items, clear, seed: tree.seed as u32 ^ 0x5EED }
+        let clear = steps.iter().map(|s| NEAR.max(((*s).clamp(1, far + 1) - 1) as f64 * bucket * COARSE as f64) as f32).collect();
+        let seed = tree.seed as u32 ^ 0x5EED;
+        let lattice = (0..LATTICE * LATTICE * LATTICE).map(|n| hash((n % LATTICE) as i32, (n / LATTICE % LATTICE) as i32, (n / (LATTICE * LATTICE)) as i32, seed) as f32).collect();
+        Model { kind: tree.kind, parts: grown.parts, limbs: grown.limbs, forks: grown.forks, ground, lo, hi, origin, bucket, per_bucket: 1.0 / bucket, dims, coarse, start, items, clear, lattice }
     }
 
     /// The box the tree fills.
@@ -498,17 +542,22 @@ impl Model {
         self.parts.len()
     }
 
-    /// How far a mass of leaves is pushed in or out at `p` (see [`ROUGH`]):
-    /// two sizes of unevenness, the smaller half the size and half the depth.
-    fn rough(&self, p: DVec3) -> f64 {
-        ROUGH * (noise(p / ROUGH_LENGTH, self.seed) * 0.7 + noise(p / (ROUGH_LENGTH * 0.45), self.seed ^ 0xABCD) * 0.3)
-    }
-
     /// Negative inside the tree, positive outside; near its surface, no
     /// more than the distance to it in cells. Also the part `p` is deepest
     /// in or nearest to, if any is near.
-    fn nearest(&self, p: DVec3) -> (f64, Option<usize>) {
-        let c = ((p - self.origin) / self.bucket).floor();
+    ///
+    /// With `settle`, the first part found that `p` is well inside ends
+    /// the search: the answer is then that part's depth and not the
+    /// deepest, which is still no more than the distance, and it is all
+    /// the fitter asks of a point inside. Half of a fit's samples are
+    /// inside, most of them in several parts at once.
+    fn nearest(&self, p: DVec3, settle: bool) -> (f64, Option<usize>) {
+        // (no rounding down: within the grid these are not negative, and
+        // turning one into a whole number drops its fraction. Rounding
+        // down is a call into the maths library on a processor not known
+        // to have the instruction for it, and three calls a sample were a
+        // third of a fit's time.)
+        let c = (p - self.origin) * self.per_bucket;
         let under = self.ground - p.z;
         if c.min_element() < 0.0 || c.x >= self.dims[0] as f64 || c.y >= self.dims[1] as f64 || c.z >= self.dims[2] as f64 {
             // outside the grid, which reaches `NEAR` past every part
@@ -516,26 +565,20 @@ impl Model {
             return ((out + NEAR).max(under), None);
         }
         let b = c.x as usize + self.dims[0] * (c.y as usize + self.dims[1] * c.z as usize);
-        let (mut best, mut which) = (self.clear[b] as f64, None);
-        // the leaves' unevenness is the same for every mass at a point, so
-        // that two masses run into each other without a seam: worked out
-        // once, and only if some mass is near enough for it to matter
-        let mut rough = None;
+        let (mut best, mut which) = (f64::INFINITY, None);
         for &n in &self.items[self.start[b] as usize..self.start[b + 1] as usize] {
-            let part = &self.parts[n as usize];
-            let mut d = part.shape.distance(p);
-            if matches!(part.shape, Shape::Blob { leafy: true, .. }) {
-                d = if d > ROUGH + best / ROUGH_SLACK {
-                    continue;
-                } else if d < -ROUGH - 2.0 {
-                    (d + ROUGH) * ROUGH_SLACK
-                } else {
-                    (d + *rough.get_or_insert_with(|| self.rough(p))) * ROUGH_SLACK
-                };
-            }
+            let d = self.parts[n as usize].shape.distance(p);
             if d < best {
                 (best, which) = (d, Some(n as usize));
+                if settle && d < -NEAR {
+                    break;
+                }
             }
+        }
+        if best > NEAR {
+            // nothing listed is near: how clear the bucket is of everything else
+            let wide = c.x as usize / COARSE + self.coarse[0] * (c.y as usize / COARSE + self.coarse[1] * (c.z as usize / COARSE));
+            best = best.min(self.clear[wide] as f64);
         }
         (best.max(under), which)
     }
@@ -543,26 +586,30 @@ impl Model {
     /// Negative inside the tree, positive outside; near its surface, no
     /// more than the distance to it in cells.
     pub fn eval(&self, p: DVec3) -> f64 {
-        self.nearest(p).0
+        self.nearest(p, true).0
     }
 
     /// The colour number of the tree at `p`: that of the part `p` is
     /// deepest in, with the light and shade a part has within itself.
     pub fn shade(&self, p: DVec3) -> u8 {
-        let Some(n) = self.nearest(p).1 else { return TRUNK };
+        let Some(n) = self.nearest(p, false).1 else { return TRUNK };
         let part = &self.parts[n];
         match (self.kind, part.shape, part.shade) {
             // The top of a pine's boughs: needles with open air a cell
             // and a half above them. A paler green in the natural sets
             // and white in the snowy ones, where it is the snow lying.
             (Kind::Pine, _, LEAF | LEAF_DARK | LEAF_LIGHT) if self.eval(p + DVec3::Z * 1.6) > 0.0 && self.eval(p + DVec3::Z * 2.6) > 0.0 => TOP,
-            // A mass of leaves is light on top and dark underneath, with
-            // the boundary between them uneven.
-            (_, Shape::Blob { c, inv, leafy: true, .. }, _) => {
-                let up = (p.z - c.z) * inv.z + 0.55 * noise(p / 6.0, self.seed ^ 0x1234);
-                if up > 0.42 {
+            // Leaves are light where the sky is over them and dark on
+            // the underside of a mass, with the boundaries uneven. By
+            // the open air above and below, and not by where in its own
+            // ball of leaves a brick is: that lit every ball like a
+            // lamp, and a mass read as the balls it was made of.
+            (_, Shape::Blob { leafy: true, .. }, _) => {
+                let patch = noise(&self.lattice, p / 7.0 + 20.5);
+                let open = |up: f64| self.eval(p + DVec3::Z * up) > 0.0;
+                if open(2.5 + 2.0 * patch) && open(5.5) {
                     LEAF_LIGHT
-                } else if up < -0.3 {
+                } else if open(-2.2 + patch) || patch < -0.55 {
                     LEAF_DARK
                 } else {
                     LEAF
@@ -673,7 +720,7 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     // the stem: a fortieth of its height thick at the foot, which is
     // stouter than a forest spruce and what a trunk two bricks thick needs
     let foot = (height * 0.024).max(1.8);
-    let tip = 0.8;
+    let tip = 0.7;
     let (lean_way, lean) = (g.between(0.0, TAU), height * 0.008 * g.unit());
     let stem = |z: f64| DVec3::new(lean_way.cos(), lean_way.sin(), 0.0) * (lean * (z / height * PI * 1.5).sin()) + DVec3::Z * z;
     let thick = |z: f64| tip + (foot - tip) * (1.0 - z / height).max(0.0).powf(0.85) + foot * 0.4 * (-z / (foot * 1.6)).exp();
@@ -689,10 +736,11 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     for tier in 0..tiers {
         // 0 at the lowest tier, 1 at the highest
         let u = tier as f64 / (tiers - 1) as f64;
-        let z = low + (high - low) * u;
+        // the tiers closer together towards the top, where each year's growth is shorter
+        let z = low + (high - low) * (0.55 * u + 0.45 * (1.0 - (1.0 - u).powf(1.7)));
         // shortening to the top, and the lowest tiers drawn in a little
-        let reach = spread * ((1.0 - u).powf(0.9) * 0.94 + 0.06) * (0.84 + 0.16 * (u / 0.12).min(1.0));
-        let boughs = ((3.6 + 2.6 * (1.0 - u)) * (0.75 + 0.5 * full)).round().max(3.0) as usize;
+        let reach = spread * ((1.0 - u).powf(0.9) * 0.9 + 0.1) * (0.84 + 0.16 * (u / 0.12).min(1.0));
+        let boughs = ((4.0 + 3.0 * (1.0 - u)) * (0.75 + 0.5 * full)).round().max(3.0) as usize;
         let turn = g.between(0.0, TAU);
         for k in 0..boughs {
             let way = turn + TAU * (k as f64 + g.between(-0.22, 0.22)) / boughs as f64;
@@ -768,7 +816,7 @@ fn bough(g: &mut Grown, trunk: usize, from: DVec3, stem: f64, way: f64, length: 
     };
     // bare near the stem, and the lower the bough the more of it is bare:
     // its oldest needles are shaded out
-    let bare = (0.1 + 0.16 * (1.0 - u)).min(1.0 - 4.0 / length.max(5.0)).max(0.0);
+    let bare = (0.05 + 0.15 * (1.0 - u)).min(1.0 - 4.0 / length.max(5.0)).max(0.0);
     // the bough's own needles, dark: it is the inside of the spray
     let own = ((1.0 - bare) * steps as f64).ceil() as usize * 2;
     for i in 0..own {
@@ -1013,11 +1061,11 @@ struct Shoot {
 fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     let (dense, gnarl) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let limbs = tree.count.max(2) as usize;
-    let girth = (height * 0.047).max(2.4);
+    let girth = (height * 0.055).max(2.4);
     // the height the trunk divides at: low, a fifth to a quarter of the way up
-    let bole = height * g.between(0.19, 0.25);
+    let bole = height * g.between(0.17, 0.23);
     // how big a mass of leaves is
-    let mass = (spread * (0.1 + 0.07 * dense)).max(3.5);
+    let mass = (spread * (0.058 + 0.045 * dense)).max(2.6);
 
     // the trunk, a little crooked, widening to its foot
     let lengths = ((bole / 5.0).ceil() as usize).max(2);
@@ -1037,89 +1085,134 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         g.cone(out * girth * 0.4 + DVec3::Z * high, out * far - DVec3::Z * girth * 0.2, girth * 0.62, girth * 0.3, TRUNK);
     }
 
-    // the limbs the trunk divides into, sharing its cross-section
+    // The crown's outline: a dome, widest a fifth of the way up it and
+    // reaching a little below where the trunk divides, as the lowest
+    // limbs of an oak in the open do. Branch ends stop short of it by
+    // the leaves they carry.
     let fork = stem(bole);
-    let shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
-    let total: f64 = shares.iter().sum();
-    let turn = g.between(0.0, TAU);
-    let mut waiting = Vec::new();
-    let mut radii = Vec::new();
-    for (k, share) in shares.iter().enumerate() {
-        let radius = girth * (share / total).sqrt();
-        radii.push(radius);
-        let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / limbs as f64;
-        // climbing at first: 30 to 50 degrees off upright
-        let polar = g.between(0.52, 0.87);
-        waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
-    }
-    g.forks.push((girth, radii));
+    let (out, over) = ((spread - mass * 2.3).max(spread * 0.5), (height - mass * 1.7).max(height * 0.6));
+    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * 0.2);
+    let dome = DVec3::new(out, out, over - heart.z);
+    let under = heart.z - bole * 0.8;
+    // where a point is in the dome: 0 at its heart, 1 on its outline
+    let within = |p: DVec3| {
+        let q = p - heart;
+        DVec3::new(q.x / dome.x, q.y / dome.y, q.z / if q.z < 0.0 { under } else { dome.z })
+    };
 
-    // grow every branch, at no particular size; the ends are kept to hang leaves on
-    let first = g.limbs.len();
+    // The branches are grown twice from the same numbers. The first
+    // time at no particular size, to find how far they reach; the second
+    // at the size that fills the dome, and held within it: a branch near
+    // the outline turns along it. Growing once and stretching the result
+    // to fit was tried first, and one long limb then set the size of the
+    // whole crown, with the rest of it huddled round the trunk.
+    let (first, first_fork, numbers) = (g.limbs.len(), g.forks.len(), g.numbers.0);
     let mut ends: Vec<(DVec3, DVec3, f64)> = Vec::new();
-    while let Some(shoot) = waiting.pop() {
-        let (mut at, mut way, mut radius, mut roll) = (shoot.from, shoot.way, shoot.radius, shoot.roll);
-        let (mut path, mut thick) = (vec![at], vec![radius]);
-        // (it is recorded once grown, and its children are told then which limb it is)
-        let mut children = Vec::new();
-        loop {
-            // one length between forks, in two steps so that it can bend
-            let run = 6.2 * radius.powf(0.62) * g.between(0.8, 1.25);
-            for _ in 0..2 {
-                let outward = DVec3::new(at.x, at.y, 0.0).normalize_or_zero();
-                let heavy = (radius / girth).min(1.0);
-                // heavy limbs spread and sag; thin ones turn up
-                let pull = outward * (0.32 * heavy) - DVec3::Z * (0.1 * heavy) + DVec3::Z * (0.2 * (1.0 - heavy).powi(2));
-                way = (way + g.any_way() * (0.34 * gnarl) + pull).normalize();
-                // no limb of an oak dives
-                if way.z < -0.12 {
-                    way = DVec3::new(way.x, way.y, -0.12).normalize();
-                }
-                at += way * run * 0.5;
-                path.push(at);
-                thick.push(radius);
-            }
-            if radius < TWIG {
-                ends.push((at, way, 1.0));
-                break;
-            }
-            // the fork: `share` of the cross-section carries on
-            let share = g.between(0.52, 0.86);
-            let (carries, aside) = (radius * share.sqrt(), radius * (1.0 - share).sqrt());
-            g.forks.push((radius, vec![carries, aside]));
-            roll += GOLDEN_ANGLE + g.between(-0.5, 0.5);
-            let mut hinge = turned(across(way), way, roll);
-            let angle = g.between(0.6, 1.15);
-            let mut side_way = turned(way, hinge, angle);
-            // a side branch goes out or up, seldom down
-            if side_way.z < -0.05 && g.unit() < 0.85 {
-                hinge = -hinge;
-                side_way = turned(way, hinge, angle);
-            }
-            // the limb itself turns the other way, by less the more of it carries on
-            way = turned(way, hinge, -angle * (1.0 - share) * 0.9);
-            if aside >= 0.72 {
-                children.push(Shoot { from: at, way: side_way, radius: aside.max(TWIG * 0.8), parent: 0, level: shoot.level + 1, roll: g.between(0.0, TAU) });
-            } else {
-                // too thin to follow: a small mass of leaves on the limb here
-                ends.push((at + side_way * mass * 0.5, side_way, 0.7));
-            }
-            radius = carries;
+    let mut scale = 1.0;
+    for sized in [false, true] {
+        g.limbs.truncate(first);
+        g.forks.truncate(first_fork);
+        g.numbers.0 = numbers;
+        ends.clear();
+        // the limbs the trunk divides into, sharing its cross-section
+        let shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
+        let total: f64 = shares.iter().sum();
+        let turn = g.between(0.0, TAU);
+        let mut waiting = Vec::new();
+        let mut radii = Vec::new();
+        for (k, share) in shares.iter().enumerate() {
+            let radius = girth * (share / total).sqrt();
+            radii.push(radius);
+            let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / limbs as f64;
+            // climbing at first, 35 to 60 degrees off upright; and where
+            // there are four or more, one of them nearer upright, to fill
+            // the top of the crown
+            let polar = if k == 0 && limbs >= 4 { g.between(0.2, 0.42) } else { g.between(0.6, 1.05) };
+            waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
-        let me = g.limb_record(path, thick, Some(shoot.parent), shoot.level);
-        for mut child in children {
-            child.parent = me;
-            waiting.push(child);
+        g.forks.push((girth, radii));
+
+        while let Some(shoot) = waiting.pop() {
+            let (mut at, mut way, mut radius, mut roll) = (shoot.from, shoot.way, shoot.radius, shoot.roll);
+            let (mut path, mut thick) = (vec![at], vec![radius]);
+            // (it is recorded once grown, and its children are told then which limb it is)
+            let mut children = Vec::new();
+            loop {
+                // one length between forks, in two steps so that it can bend
+                let run = scale * 6.2 * radius.powf(0.62) * g.between(0.8, 1.25);
+                for _ in 0..2 {
+                    let outward = DVec3::new(at.x - fork.x, at.y - fork.y, 0.0).normalize_or_zero();
+                    let heavy = (radius / girth).min(1.0);
+                    // heavy limbs spread and sag; thin ones turn up
+                    let mut pull = outward * (0.3 * heavy) - DVec3::Z * (0.13 * heavy) + DVec3::Z * (0.2 * (1.0 - heavy).powi(2));
+                    let wander = g.any_way() * (0.44 * gnarl);
+                    if sized {
+                        // near the outline, turned back along it
+                        let q = within(at);
+                        let near = q.length();
+                        if near > 0.7 {
+                            pull -= (q / dome).normalize_or_zero() * ((near - 0.7) * 3.5);
+                        }
+                    }
+                    way = (way + wander + pull).normalize();
+                    // no limb of an oak dives
+                    if way.z < -0.15 {
+                        way = DVec3::new(way.x, way.y, -0.15).normalize();
+                    }
+                    at += way * run * 0.5;
+                    path.push(at);
+                    thick.push(radius);
+                }
+                if radius < TWIG {
+                    ends.push((at, way, 1.0));
+                    break;
+                }
+                // the outer branches carry leaves along them too
+                if radius < 1.5 {
+                    ends.push((at, way, 0.7));
+                }
+                // the fork: `share` of the cross-section carries on
+                let share = g.between(0.52, 0.86);
+                let (carries, aside) = (radius * share.sqrt(), radius * (1.0 - share).sqrt());
+                g.forks.push((radius, vec![carries, aside]));
+                roll += GOLDEN_ANGLE + g.between(-0.5, 0.5);
+                let mut hinge = turned(across(way), way, roll);
+                let angle = g.between(0.6, 1.15);
+                let mut side_way = turned(way, hinge, angle);
+                // a side branch goes out or up, seldom down
+                let chance = g.unit();
+                if side_way.z < -0.05 && chance < 0.85 {
+                    hinge = -hinge;
+                    side_way = turned(way, hinge, angle);
+                }
+                // the limb itself turns the other way, by less the more of it carries on
+                way = turned(way, hinge, -angle * (1.0 - share) * 0.9);
+                if aside >= 0.72 {
+                    children.push(Shoot { from: at, way: side_way, radius: aside, parent: 0, level: shoot.level + 1, roll: g.between(0.0, TAU) });
+                } else {
+                    // too thin to follow: a tuft of leaves on the limb here
+                    ends.push((at, side_way, 0.7));
+                }
+                radius = carries;
+            }
+            let me = g.limb_record(path, thick, Some(shoot.parent), shoot.level);
+            for mut child in children {
+                child.parent = me;
+                waiting.push(child);
+            }
+        }
+        if !sized {
+            // the size at which all but the furthest seventh of the ends are inside nine tenths of the dome
+            let mut far: Vec<f64> = ends.iter().map(|e| within(e.0).length()).collect();
+            far.sort_by(f64::total_cmp);
+            scale = 0.9 / far[(far.len() * 6 / 7).min(far.len() - 1)].max(1e-9);
         }
     }
-
-    // Stretch the crown to its size: the furthest branch end to the
-    // spread less half a mass of leaves, and the highest to the height
-    // less the leaves over it. Sideways from the trunk's line, upwards
-    // from the fork.
-    let reach = ends.iter().map(|e| e.0.truncate().length()).fold(1e-9, f64::max);
+    // What the holding in leaves over is taken up by stretching: the
+    // furthest end to the dome's width and the highest to its top.
+    let reach = ends.iter().map(|e| (e.0 - fork).truncate().length()).fold(1e-9, f64::max);
     let rise = ends.iter().map(|e| e.0.z - bole).fold(1e-9, f64::max);
-    let (wide, tall) = ((spread - mass * 0.75).max(spread * 0.5) / reach, (height - bole - mass * 0.62).max(height * 0.3) / rise);
+    let (wide, tall) = (out / reach, (over - bole) / rise);
     let place = |p: DVec3| DVec3::new(fork.x + (p.x - fork.x) * wide, fork.y + (p.y - fork.y) * wide, bole + (p.z - bole) * tall);
     for n in first..g.limbs.len() {
         let path: Vec<DVec3> = g.limbs[n].path.iter().map(|p| place(*p)).collect();
@@ -1131,17 +1224,25 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         g.limbs[n].path = path;
     }
 
-    // The leaves: at each end a mass, of one flattened ball and a few
-    // smaller ones round it, set over and beyond the end of the branch.
+    // The leaves. A branch that ends is carried on as a spray of
+    // twigs too thin to build, wandering on and up for three lengths,
+    // and at each length there is a tuft: one flattened ball of leaves
+    // and two smaller beside it. A branch's tufts run into each other
+    // and into its neighbours', which makes the masses; no mass is one
+    // ball, which in bricks is a clipped bush.
     for (end, way, size) in ends {
-        let size = mass * size * g.between(0.82, 1.2);
-        let at = place(end) + DVec3::new(way.x, way.y, 0.0) * size * 0.25 + DVec3::Z * size * 0.22;
-        g.blob(at, DVec3::new(size, size, size * 0.66), LEAF, true);
-        let more = 2 + (g.unit() * 3.0) as usize;
-        for _ in 0..more {
-            let off = g.any_way();
-            let small = size * g.between(0.5, 0.75);
-            g.blob(at + DVec3::new(off.x, off.y, off.z * 0.45) * size * 0.75, DVec3::new(small, small, small * 0.7), LEAF, true);
+        let mut at = place(end);
+        let mut way = DVec3::new(way.x * wide, way.y * wide, way.z * tall).normalize_or_zero();
+        for tuft in 0..if size >= 1.0 { 3 } else { 1 } {
+            let r = mass * size * g.between(0.85, 1.35) * (1.0 - 0.14 * tuft as f64);
+            g.leaves(at + DVec3::Z * r * 0.2, DVec3::new(r, r, r * 0.78));
+            for _ in 0..2 {
+                let (off, small) = (g.any_way(), r * g.between(0.55, 0.8));
+                g.leaves(at + DVec3::new(off.x, off.y, off.z * 0.5) * r * 0.9, DVec3::new(small, small, small * 0.72));
+            }
+            way = (way + g.any_way() * 0.6 + DVec3::Z * 0.2).normalize();
+            way.z = way.z.max(-0.1);
+            at += way * r * 1.15;
         }
     }
 }
@@ -1151,4 +1252,62 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
 fn level_middle(model: &Model, z: f64) -> Option<glam::DVec2> {
     let trunk = &model.limbs[0];
     trunk.path.windows(2).find(|w| w[0].z <= z && z <= w[1].z).map(|w| w[0].lerp(w[1], (z - w[0].z) / (w[1].z - w[0].z).max(1e-9)).truncate())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spec::{build, Form, Spec};
+
+    fn spec(kind: Kind, seed: u64) -> Spec {
+        let (height, spread) = Tree::usual_size(kind);
+        Spec { form: Form::Tree, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: spread, rise: Some(height), grain: 0, tree: Tree { seed, ..Tree::of(kind) }, ..Spec::default() }
+    }
+
+    /// Where a build's time goes, printed: run with `--nocapture`. Not a
+    /// check of anything; the bound is `a_tree_builds_in_under_a_second`.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn where_the_time_goes() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+        let _ = Duration::ZERO;
+        for (kind, name) in KINDS {
+            let spec = spec(kind, 1);
+            let start = Instant::now();
+            let model = Model::new(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius);
+            let grown = start.elapsed();
+            let (lo, hi) = model.bounds();
+            let (min, max) = ((lo - 1.0).floor().to_array().map(|v| v as i32), (hi + 1.0).ceil().to_array().map(|v| v as i32));
+            // every 16th sample is kept, to be asked again on their own
+            let (calls, kept) = (Cell::new(0u64), std::cell::RefCell::new(Vec::new()));
+            let field = |p: DVec3| {
+                calls.set(calls.get() + 1);
+                if calls.get() % 16 == 0 {
+                    kept.borrow_mut().push(p);
+                }
+                model.eval(p)
+            };
+            let start = Instant::now();
+            let fit = fit_volume::fit_volume(&field, min, max, &fit_volume::Opts::default());
+            let fitted = start.elapsed();
+            let start = Instant::now();
+            let (bricks, _) = model.colour(fit.bricks, 80);
+            let coloured = start.elapsed();
+            let kept = kept.into_inner();
+            let again = (0..3).map(|_| { let at = Instant::now(); let sum: f64 = kept.iter().map(|p| model.eval(*p).min(1.0)).sum(); std::hint::black_box(sum); at.elapsed() }).min().unwrap();
+            let timed: Duration = again * 16;
+            let listed: usize = kept.iter().map(|p| {
+                let c = ((*p - model.origin) / model.bucket).floor();
+                if c.min_element() < 0.0 || c.x >= model.dims[0] as f64 || c.y >= model.dims[1] as f64 || c.z >= model.dims[2] as f64 { return 0 }
+                let b = c.x as usize + model.dims[0] * (c.y as usize + model.dims[1] * c.z as usize);
+                (model.start[b + 1] - model.start[b]) as usize
+            }).sum();
+            println!("{name}: a sample's bucket lists {:.1} parts", listed as f64 / kept.len() as f64);
+            let whole = (0..3).map(|_| { let at = Instant::now(); build(&spec).unwrap(); at.elapsed() }).min().unwrap();
+            let occupied = (0..model.start.len() - 1).filter(|b| model.start[b + 1] > model.start[*b]).count();
+            println!("{name}: {} buckets, {occupied} with parts, {:.1} parts in each of those", model.start.len() - 1, model.items.len() as f64 / occupied as f64);
+            println!("{name}: {} parts, {} bricks; grown in {grown:?}, fitted in {fitted:?} of which the field's {} samples took about {timed:?}, coloured in {coloured:?}; a whole build {whole:?}", model.parts(), bricks.len(), calls.get());
+        }
+    }
 }

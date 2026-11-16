@@ -954,7 +954,9 @@ mod tests {
                 max_ext: 40,
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: 2, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }),
+                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true },
             },
+            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
         ];
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
