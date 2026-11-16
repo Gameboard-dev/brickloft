@@ -1565,6 +1565,19 @@ impl State {
             self.spec.points[0] = middle;
             self.spec.points[0][axis] = (low + high) / 2.0;
             self.spec.stretch[axis] = (high - low) / 2.0 / snapped.radius;
+            // A cube given quarter turns is turned about its middle, which
+            // has just moved: left at that, the whole cube shifted as a
+            // side was dragged, and the side opposite did not stay put.
+            // So the cube is moved back by as far as a point of that side
+            // has gone. (Whole cells: a turn is about a lattice point.)
+            let (was, now) = (brickloft_core::spec::Turn::of(&snapped), brickloft_core::spec::Turn::of(&self.spec.snapped()));
+            let mut kept = middle;
+            kept[axis] = if side % 2 == 0 { high } else { low };
+            let back = ((was.point(kept) - now.point(kept)) * 2.0).round();
+            if back != DVec3::ZERO {
+                self.place = [0, 1, 2].map(|k| self.place[k] + back[k] as i32);
+                self.scene += 1;
+            }
             return;
         }
         let normal = match (handle, self.lock) {
@@ -2661,5 +2674,132 @@ mod tests {
         let out = at + DVec3::X * 3.4;
         state.drag(Handle::Radius, eye, (out - eye).normalize(), DVec3::Y);
         assert_eq!(state.spec.radius, 11.5);
+    }
+    /// A cube as the menu starts one, built.
+    fn a_cube() -> State {
+        let mut state = State::new();
+        state.form = CUBE;
+        state.preset();
+        state.refresh(|| 0.0);
+        state
+    }
+
+    #[test]
+    fn a_cube_starts_the_same_each_way_with_a_dot_on_every_side() {
+        let state = a_cube();
+        assert_eq!(state.full_spec().form, Form::Cube);
+        // one brick, 17 each way, standing on the floor about the cell of its middle dot
+        assert_eq!(state.bounds, Some(([-8, -8, 0], [9, 9, 17])));
+        assert_eq!((state.built.bricks.len(), state.built.error), (1, 0.0));
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0)].into_iter().chain((0..6).map(Handle::Side)).collect::<Vec<_>>());
+        // the middle dot in the middle, and each side's dot in the middle of that side of the brick
+        assert_eq!(dots[0].1, DVec3::new(0.5, 0.5, 8.5));
+        for side in 0..6 {
+            let mut at = DVec3::new(0.5, 0.5, 8.5);
+            at[side / 2] = [-8.0, 9.0, -8.0, 9.0, 0.0, 17.0][side];
+            assert_eq!(dots[1 + side].1, at, "side {side}");
+        }
+    }
+
+    #[test]
+    fn dragging_a_side_of_a_cube_moves_that_side_and_no_other() {
+        for side in 0..6 {
+            let mut state = a_cube();
+            state.place = [6, -4, 2]; // standing somewhere else, by whole and half microbricks
+            let axis = side / 2;
+            let outwards = if side % 2 == 0 { -1.0 } else { 1.0 };
+            let (low, high) = state.bounds.unwrap();
+            let at = state.handles().iter().find(|h| h.0 == Handle::Side(side)).unwrap().1;
+            // looked at from square to the side's axis, the cursor 3.2 microbricks further out
+            let mut way = DVec3::ZERO;
+            way[axis] = outwards;
+            let mut from = DVec3::ZERO;
+            from[(axis + 1) % 3] = 1.0;
+            state.drag(Handle::Side(side), at + way * 3.2 - from * 80.0, from, from);
+            assert!(state.refresh(|| 0.0) && state.problem.is_none(), "side {side}: {:?}", state.problem);
+            let (mut low_after, mut high_after) = (low, high);
+            if side % 2 == 0 { low_after[axis] -= 3 } else { high_after[axis] += 3 };
+            assert_eq!(state.bounds, Some((low_after, high_after)), "side {side}");
+            assert_eq!((state.built.bricks.len(), state.built.error), (1, 0.0), "side {side}");
+            // the dot is on the side it moved, and the next drag starts from there
+            let now = state.handles().iter().find(|h| h.0 == Handle::Side(side)).unwrap().1;
+            assert_eq!(now[axis], at[axis] + outwards * 3.0, "side {side}");
+            // pushed in through the side opposite, it stops a microbrick short of it
+            state.drag(Handle::Side(side), now - way * 60.0 - from * 80.0, from, from);
+            state.refresh(|| 0.0);
+            let (mut low_thin, mut high_thin) = (low, high);
+            if side % 2 == 0 { low_thin[axis] = high[axis] - 1 } else { high_thin[axis] = low[axis] + 1 };
+            assert_eq!(state.bounds, Some((low_thin, high_thin)), "side {side}");
+        }
+        // a cube turned a quarter turn is dragged as it is seen: the side that now faces up moves up
+        // (where its bricks are in the workspace, in units: the cube is turned about its middle, which a side moves)
+        let stands = |state: &State| {
+            let (low, high) = state.bounds.unwrap();
+            ([0, 1, 2].map(|k| 2 * low[k] + state.place[k]), [0, 1, 2].map(|k| 2 * high[k] + state.place[k]))
+        };
+        let mut state = a_cube();
+        state.turn(0, false);
+        state.refresh(|| 0.0);
+        let (low, high) = stands(&state);
+        let top = *state.handles().iter().filter(|h| matches!(h.0, Handle::Side(_))).max_by(|a, b| a.1.z.total_cmp(&b.1.z)).unwrap();
+        state.drag(top.0, top.1 + DVec3::Z * 4.0 - DVec3::Y * 80.0, DVec3::Y, DVec3::Y);
+        state.refresh(|| 0.0);
+        assert_eq!(stands(&state), (low, [high[0], high[1], high[2] + 8]));
+        // and its dot is still on the side it moved
+        assert_eq!(state.handles().iter().find(|h| h.0 == top.0).unwrap().1, top.1 + DVec3::Z * 4.0);
+    }
+
+    #[test]
+    fn a_cube_made_short_one_way_takes_a_pattern_on_its_broad_face() {
+        // a wall: 2 through along x, by dragging its high x side in
+        let mut state = a_cube();
+        let at = state.handles().iter().find(|h| h.0 == Handle::Side(1)).unwrap().1;
+        state.drag(Handle::Side(1), at - DVec3::X * 15.0 - DVec3::Y * 80.0, DVec3::Y, DVec3::Y);
+        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 0, size: 2, bevel: 0, border: 1, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: vec![[200, 200, 200], [150, 30, 30], [30, 30, 150]], ..Paint::default() };
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert_eq!(state.bounds, Some(([-8, -8, 0], [-6, 9, 17])));
+        // tiles, each right through the wall, in more than one colour
+        assert_eq!(state.built.shades.len(), state.built.bricks.len());
+        assert!(state.built.bricks.len() > 20 && state.built.bricks.iter().all(|b| (b.min[0], b.ext[0]) == (-8, 2)));
+        let colours: std::collections::HashSet<_> = state.painted().iter().map(|b| b.1).collect();
+        assert!(colours.len() > 1, "the pattern is one colour");
+    }
+
+    #[test]
+    fn a_form_added_is_a_plain_cube_and_a_duplicate_is_a_copy() {
+        let mut state = State::new();
+        state.form = SPHERE;
+        state.preset();
+        state.spec.max_ext = 40;
+        state.paint = Paint { mode: crate::paint::Mode::Blend, colours: vec![[200, 30, 30], [20, 40, 220]], axis: 0, width: 3 };
+        state.spec.on_grid = 3;
+        state.spec.grid = [0.0, 0.0, 0.6, 0.8];
+        state.refresh(|| 0.0);
+        let (sphere, paint) = (state.full_spec(), state.paint.clone());
+        // Duplicate: the same form in the same colours, on its grid
+        state.add_copy();
+        assert_eq!((state.full_spec(), state.paint.clone(), state.others.len()), (sphere.clone(), paint.clone(), 1));
+        // Add to this grid: a cube as the menu starts one, plain, on the same grid at the same angle
+        state.add_cube();
+        state.refresh(|| 0.0);
+        let cube = state.full_spec();
+        assert_eq!((cube.form, cube.radius, cube.stretch, cube.fill, cube.points.clone()), (Form::Cube, 8.5, DVec3::ONE, true, vec![cell(0.0, 0.0, 8.0)]));
+        assert_eq!((cube.on_grid, cube.grid), (3, [0.0, 0.0, 0.6, 0.8]));
+        assert_eq!(cube.max_ext, 40, "how the build is fitted was not carried over");
+        assert!(cube.cut.is_none() && state.paint == Paint::default() && state.form == CUBE);
+        assert_eq!((state.others.len(), state.built.bricks.len()), (2, 1));
+        // set down clear of the forms already there
+        assert!(state.others.iter().all(|o| o.place[0] < state.place[0]));
+        // New grid: the same cube on a level grid of its own
+        state.paint = paint;
+        state.record();
+        state.add_grid();
+        let apart = state.full_spec();
+        assert_eq!((apart.form, apart.on_grid, apart.grid, state.paint.clone()), (Form::Cube, 4, LEVEL, Paint::default()));
+        assert_eq!(state.others.len(), 3);
+        // one step to undo
+        assert!(state.undo() && state.others.len() == 2 && state.spec.on_grid == 3);
     }
 }

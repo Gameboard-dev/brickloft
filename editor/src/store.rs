@@ -399,4 +399,29 @@ mod tests {
         let all = sorted_with_starters(vec!["Arches".into(), "towers".into()]);
         assert_eq!(all, ["Arches", "domes", "towers"]);
     }
+    #[test]
+    fn a_cube_is_saved_and_opened_as_it_was() {
+        let mut state = crate::state::State::new();
+        state.add_cube();
+        // a hollow box 30 by 12 by 6, patterned, and one left as it started
+        state.spec.stretch = brickloft_core::DVec3::new(30.0, 12.0, 6.0) / 17.0;
+        (state.spec.fill, state.spec.thick) = (false, 2.0);
+        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 0, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        let forms = state.forms();
+        assert_eq!(forms.iter().filter(|f| f.0.form == brickloft_core::spec::Form::Cube).count(), 2);
+        let bytes = pack(&state.painted(), &forms).unwrap();
+        let opened = unpack(&bytes, cfg!(not(target_arch = "wasm32"))).unwrap();
+        assert_eq!(opened, forms);
+        assert_eq!(unpack(describe(&forms).as_bytes(), false).unwrap(), forms);
+        // and builds the same bricks once opened
+        let mut other = crate::state::State::new();
+        other.open(opened);
+        other.refresh(|| 0.0);
+        assert_eq!(other.built.bricks, state.built.bricks);
+        assert_eq!(other.others[1].built.bricks, state.others[1].built.bricks);
+        assert!(!other.others[1].built.bricks.is_empty());
+    }
 }
