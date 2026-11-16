@@ -528,6 +528,8 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
     let mut state = State::new();
     state.form = IMPORTED;
     state.preset();
+    // (at single microbricks, where a smaller size is fewer bricks: left to the budget, a larger model is fitted in larger bricks)
+    state.spec.grain = 1;
     settle(&mut state);
     // no file yet: nothing is drawn, and the form says why
     assert!(state.built.bricks.is_empty() && state.problem.as_deref() == Some(MeshError::NoFile.to_string().as_str()), "{:?}", state.problem);
@@ -564,7 +566,7 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
     let smaller = state.built.bricks.len();
     state.spec.grain = 2;
     settle(&mut state);
-    assert!(smaller < first && state.built.bricks.len() < smaller && state.built.grain == 2);
+    assert!(smaller < first && state.built.bricks.len() < smaller && state.built.grain == 2, "{first} bricks, then {smaller}, then {} at brick size {}", state.built.bricks.len(), state.built.grain);
     assert!(Arc::ptr_eq(&mesh, state.spec.import.mesh.as_ref().unwrap()) && Arc::ptr_eq(&mesh, &open(&name, state.spec.import.up).unwrap()));
     // fewer colours asked for are the mesh's own again, as many as asked
     state.spec.import.colours = 3;
@@ -592,6 +594,8 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
     let before = state.others.len();
     state.open_mesh(&path.display().to_string(), true);
     assert_eq!((state.form, state.others.len(), state.spec.import.name.as_str()), (IMPORTED, before + 1, name.as_str()));
+    // (and built behind the window like any mesh, though the form it took the place of was quick to build)
+    assert!(state.built.bricks.is_empty() && !state.refresh_behind(|| 0.0) && state.fitting());
     settle(&mut state);
     assert!(!state.built.bricks.is_empty() && state.bounds.is_some());
     // what cannot be opened is said in a notice, and the workspace is as it was

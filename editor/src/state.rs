@@ -1156,8 +1156,10 @@ impl State {
         self.toast = Some((format!("Opened a mesh of {} triangles{}", mesh.triangles(), if mesh.coloured() { ", with its colours" } else { "" }), None));
         let import = brickloft_core::mesh::Import { name, up, mesh: Some(mesh), ..self.spec.import.clone() };
         if add || self.form != IMPORTED {
-            // as the editor starts a form: a brick size chosen to keep within a budget
-            let mut spec = Spec { form: Form::Imported, radius: USUAL_MESH_RADIUS, fill: true, simplify: 0.25, grain: 0, import: brickloft_core::mesh::Import { fitter: Default::default(), loose: 0, colours: brickloft_core::mesh::form::USUAL_COLOURS, ..import }, ..Spec::default() };
+            // As the editor starts a form, with a brick size chosen to keep within a budget. But with bricks priced at
+            // nothing: a price buys a third fewer bricks for twice the discrepancy on a mesh (docs/algorithm.md, 7.13),
+            // and closeness comes first.
+            let mut spec = Spec { form: Form::Imported, radius: USUAL_MESH_RADIUS, fill: true, simplify: 0.0, grain: 0, import: brickloft_core::mesh::Import { fitter: Default::default(), loose: 0, colours: brickloft_core::mesh::form::USUAL_COLOURS, ..import }, ..Spec::default() };
             spec.points = usual_points(IMPORTED, half_height(IMPORTED, &spec)).0;
             self.add_form(spec);
         } else {
@@ -1185,7 +1187,8 @@ impl State {
     fn usual_import(&mut self) {
         let s = &mut self.spec;
         (s.fill, s.radius, s.stretch) = (true, USUAL_MESH_RADIUS, DVec3::ONE);
-        (s.stones, s.mosaic) = (None, None);
+        // (bricks priced at nothing: see `open_mesh`)
+        (s.stones, s.mosaic, s.simplify) = (None, None, 0.0);
         (self.built, self.bounds) = (Built::default(), None);
         self.build_ms = 4.0 * SLOW_BUILD_MS;
         self.built_from = None;

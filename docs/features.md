@@ -49,6 +49,7 @@ until you tick it.
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a single flower (a rose, a water lily or a gerbera); a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 | **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase. Width, depth and height in whole microbricks; board thickness, shelves, uprights, a plinth, a back panel, mouldings, how full of books it is, and a seed (see [Furniture](#furniture)). |
 | **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
+| **Imported** | its foot, and a dot at the end of its longest side | A mesh from a `.glb`, `.obj` or `.ply` file. Size, which way is up in the file, smoothed or in blocks, filled or a shell, loose pieces dropped, and its own colours (see [Meshes from files](#meshes-from-files)). |
 
 ### The cube
 
@@ -754,6 +755,71 @@ hedge more than can be built in a few seconds. It can be turned,
 flipped, moved and put on a grid of its own. It cannot be mirrored and
 takes no added points.
 
+## Meshes from files
+
+<img src="images/mesh/editor.png" width="700" alt="The editor with a figure built from a mesh file: a head with brown hair, a red shirt, blue trousers, standing on a green disc, with the Imported form's settings in the panel">
+
+**Imported** builds a 3D model made in another program. Type or paste
+the file's path into the box and press Enter, or drop the file on the
+window. A file dropped while another form is being edited is added to
+the workspace as a new form. How the bricks are chosen is in
+[algorithm.md](algorithm.md), section 7.13.
+
+Three kinds of file are read. What is read of each is its triangles and
+its colours, and nothing else.
+
+| File | Colours read from |
+|---|---|
+| Binary glTF (`.glb`) | its points' colours, its materials' base colours, and a PNG picture kept inside the file |
+| Wavefront OBJ (`.obj`) | a colour written after each point (`v x y z r g b`) |
+| PLY (`.ply`), text or little-endian binary | each vertex's `red`, `green` and `blue` |
+
+A `.glb` file's JPEG or WebP picture is not read, and nor are an OBJ
+file's separate material and picture files. The mesh then has its
+points' colours, or none, and is coloured as any other form is. A file
+may be up to 400 MB and 2 million triangles. A file that is damaged, or
+that uses something not read (Draco or meshopt compression, a `.gltf`
+with its data in other files), is refused with the reason, shown in red
+where a form's problem is shown.
+
+The file is copied into `Documents/brickloft/imports` under a name made
+from its content. A saved form names that copy, so a save still opens
+after the original file has been moved or deleted. A save opened on a
+computer that has not the copy opens empty and says which file is
+missing. Opening the same file there again brings the form back.
+
+| Setting | What it does | What it costs |
+|---|---|---|
+| **Size (longest side)** | The length of the model's longest side in microbricks. The light blue dot sets it by dragging, and Ctrl + scroll changes it too. The model stays standing on its foot. | Twice the size is about four times the bricks and the time, and eight times the memory. The bricks follow the surface more closely, since they are the same size on a larger model. |
+| **Up in the file** | Which of the file's axes points up: Y for glTF and most OBJ files, Z for most PLY files. | Changing it reads the file again. |
+| **Bricks** | **Smoothed** lays ramps and corner pieces in the model's faces, stretched to the whole-number slope nearest each face. **Blocks** uses cubes alone. | On the figure 100 tall, Smoothed is 4,462 bricks at 1.8% discrepancy and Blocks is 1,355 at 4.2% with four times the area of steps. Blocks is two to four times as fast. |
+| **Fill the inside** | Ticked, the inside is brick, in boxes as large as **Longest brick** allows. Unticked, it is empty behind a wall of the **Shell thickness**. | The inside costs few bricks either way. |
+| **Drop loose pieces under** | Leaves out every piece of the build that touches no other piece and is smaller than this, for the scraps that float round a model made from a photograph. | A scrap that touches the body by one brick stays. |
+| **Colours** | How many colours the model's own are reduced to, up to 32. 0 leaves them out. | More colours are more bricks, since a brick is one colour: the figure is 3,264 bricks in 4 colours and 3,940 in 32. |
+| **Simplify** | What a brick is worth in microbricks of disagreement. Above 0, a stretched piece may stand further from the model for each brick it saves. | At 0.25 the figure is 3,247 bricks in place of 4,462, at 3.1% discrepancy in place of 1.8%. |
+
+**Brick size**, **Brick budget** and **Longest brick** apply as they do
+to every form. Bricks of 2 are about a quarter as many as bricks of 1 and
+twice as coarse, so thin parts of the model are lost first. **Automatic**
+fits the model at each size from the coarsest down until one goes over
+the budget, which takes several times as long as naming a size.
+
+The model's colours are listed under **Colour**, where each can be
+changed, and choosing another colouring there (one colour, a blend,
+stripes) paints the model that way in place of its own colours.
+
+A model can be moved, turned by quarter turns, flipped, put on a grid of
+its own and joined to other forms. It cannot be mirrored and takes no
+added points. A model that takes more than a twentieth of a second to
+fit is fitted behind the window, which goes on drawing the bricks it has
+and says **Fitting the change...** until the new ones are ready.
+
+<img src="images/mesh/house.png" width="340" alt="A house built from a mesh at the size its faces fall on the lattice: ten bricks, its roof two slopes of long ramps"> <img src="images/mesh/gem.png" width="340" alt="A cut gem of eight sloping faces built exactly, each face made of stretched corner pieces">
+
+A model drawn in whole units and built at a size equal to its length in
+those units comes out exact where its faces are flat. The house above
+is 10 bricks and the gem 133, with no discrepancy.
+
 ## Colour
 
 Each form has its own colouring.
@@ -763,7 +829,7 @@ Each form has its own colouring.
 | **One colour** | the whole form in one colour | 1 |
 | **Blend** | a gradual change from the first colour to the last along a chosen axis | up to 4 |
 | **Stripes** | bands of each colour in turn along a chosen axis | up to 4 |
-| **As the pattern has it** | each brick the colour its pattern gives it (see [The colours of a pattern](#the-colours-of-a-pattern)) | up to 8 |
+| **As the pattern has it** | each brick the colour its pattern gives it (see [The colours of a pattern](#the-colours-of-a-pattern)), or the colour a model from a file has there (see [Meshes from files](#meshes-from-files)) | up to 8 for a pattern, up to 32 for a model |
 
 Click a colour to change it. **+** adds a colour and **-** takes the last
 one away. Right-click a colour and choose **Copy colour**, then right-click
@@ -775,7 +841,7 @@ clipboard. Each brick is one colour.
 
 | Setting | What it does |
 |---|---|
-| **Simplify** | how much closer a sloped brick must bring a flat outline to be worth a brick. 0 is the closest fit; higher is fewer bricks. |
+| **Simplify** | how much closer a sloped brick must bring a flat outline, or a model from a file, to be worth a brick. 0 is the closest fit; higher is fewer bricks. |
 | **Brick size** | fits the form with bricks a multiple of this size. **Automatic** picks the finest size within the **Brick budget**. |
 | **Longest brick** | the longest edge one brick may have, 80 by default. |
 | **Sliders go up to** | how far every size slider reaches (radius, height, thickness, depth, reach of added points), 1000 microbricks by default. Lower it for a finer slider. |
@@ -848,7 +914,8 @@ passes a megabyte.
 | Ctrl+D | duplicate the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
 | Delete | remove the form being edited |
-| Ctrl + scroll | resize a circle, sphere, pyramid, cube, plant or piece of furniture |
+| Ctrl + scroll | resize a circle, sphere, pyramid, cube, plant, piece of furniture or model from a file |
+| Drop a `.glb`, `.obj` or `.ply` file on the window | build it (see [Meshes from files](#meshes-from-files)) |
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift held | fly faster |

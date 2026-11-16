@@ -533,11 +533,9 @@ fn changed(spec: &Spec, changes: &Map<String, Value>) -> Result<Spec, String> {
     let mut spec = parse_spec(&text)?;
     // A form of a mesh says which mesh by its name in the imports folder, and nothing reaches here that is not a name
     // of that folder's own shape: the parser refuses the rest (`brickloft_core::mesh::Import::named`). The mesh is found
-    // by that name, and a name with no file behind it is refused here, before anything is added or changed.
+    // by that name. A name with no file behind it leaves the form without a mesh, and it is then refused where every
+    // change is refused that cannot be built.
     crate::import::attach(&mut spec);
-    if spec.form == brickloft_core::spec::Form::Imported && !spec.import.name.is_empty() && spec.import.mesh.is_none() {
-        return Err(brickloft_core::mesh::MeshError::Missing { name: spec.import.name.clone() }.to_string());
-    }
     if spec.points.len() > MAX_POINTS || spec.pulls.len() > crate::state::most_pulls(&spec) {
         return Err(format!("a form takes at most {MAX_POINTS} points and {} added points", crate::state::most_pulls(&spec)));
     }

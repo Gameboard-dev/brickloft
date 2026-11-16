@@ -539,9 +539,10 @@ place, and a build is the same bricks as on a desktop.
 
 ## Meshes
 
-Fitting a mesh made by another program is on trial
-([algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs)),
-and these are the trial's times. They were taken with
+A mesh made by another program is built by the Imported form
+([algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs)).
+The first two tables are the times of the trial that chose how. They
+were taken with
 `cargo run --release -p brickloft-editor --example mesh_trial` on a
 Ryzen 7 5800X3D (16 threads) while other builds were using every core,
 so each is an upper bound and the speed-ups are lower than a quiet
@@ -583,8 +584,50 @@ and takes them in order, each by what is already taken.
 The process's peak memory for that fit was 132 to 139 MB. The mesh and
 its hierarchy are 46 MB of it, shared by every thread and never copied.
 The rest is the list of which triangles are in which cell, the pieces
-found, and one byte for each of the 8.6 million cells in the box, which
-is the only part that grows with the volume.
+found, and six bytes for each of the 8.6 million cells in the box, which
+is the only part that grows with the volume: one for the piece in the
+cell, four for the place of its samples in the list of sampled cells,
+and one for whether a stretched piece has taken it.
+
+The Imported form as it is built into the editor, measured with
+`cargo run --release -p brickloft-editor --example mesh_measure`, each
+row in a process of its own so that the most memory it held could be
+read from the system. The processor was at 60 to 100% from other builds
+throughout, so the times are upper bounds, and the short fits, which
+lost their turn on the processor more than once, show times on 16
+threads above their times on one. Processor use is the time on one
+thread over 16 times the time on 16: the share of all the threads' time
+that went into the fit.
+
+| Mesh | Triangles | Size | Fitter | Bricks | 1 thread | 16 threads | Processor use | Peak memory |
+|---|---|---|---|---|---|---|---|---|
+| House | 32 | 56 | Blocks | 21 | 58 ms | 524 ms | | 7 MB |
+| | | | Smoothed | 10 | 327 ms | 555 ms | | 11 MB |
+| Sphere | 9,024 | 96 | Blocks | 3,431 | 1,062 ms | 302 ms | 22% | 18 MB |
+| | | | Smoothed | 7,642 | 3,780 ms | 2,085 ms | 11% | 34 MB |
+| Torus | 9,216 | 128 | Blocks | 2,848 | 564 ms | 91 ms | 39% | 15 MB |
+| | | | Smoothed | 10,287 | 2,143 ms | 492 ms | 27% | 30 MB |
+| Lumpy ball | 16,128 | 96 | Blocks | 3,677 | 803 ms | 109 ms | 46% | 17 MB |
+| | | | Smoothed | 10,388 | 1,957 ms | 476 ms | 26% | 24 MB |
+| Figure | 124,136 | 100 | Blocks | 1,355 | 652 ms | 144 ms | 28% | 41 MB |
+| | | | Smoothed | 4,462 | 2,510 ms | 579 ms | 27% | 41 MB |
+| | | | Smoothed, 12 colours | 5,249 | 1,282 ms | 255 ms | 31% | 41 MB |
+| | | 200 | Smoothed, 12 colours | 19,361 | 4,802 ms | 979 ms | 31% | 61 MB |
+| Lumpy ball | 499,848 | 200 | Smoothed | 44,161 | 9,311 ms | 2,315 ms | 25% | 140 MB |
+
+The two rows of the figure at 100 with and without colours were run
+minutes apart and differ by more in what else the machine was doing
+than in the work: colouring was 1% of the fit where its parts were
+timed. A quarter to a third of the threads' time is used. The rest is
+the laying of the stretched pieces, which is on one thread (696 ms of
+the last row's 2,315), and threads waiting for their turn on a
+processor that other work held.
+
+Opening the figure's file, which is 2.4 MB, reading it, indexing its
+124,136 triangles, fitting it 80 long and drawing it took 0.76 seconds
+from the request to the answer, through the editor's MCP connection.
+The mesh and its index are kept in hand afterwards, so a change of size
+or of brick size fits it again without reading the file.
 
 ## The editor
 

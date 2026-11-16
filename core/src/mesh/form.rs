@@ -830,6 +830,31 @@ mod tests {
             seen.insert(wanted);
         }
         assert_eq!(seen.len(), 3);
+        // Every cell of a box that can be seen is the colour of the surface at it: a box is never joined across two
+        // colours. (Where the colour changes within a cell of the place, either colour will do.)
+        let stand = ball.stand();
+        let colour_at = |cell: [i32; 3]| {
+            let local = DVec3::from_array([0, 1, 2].map(|k| (cell[k] - ball.low[k]) as f64 + 0.5));
+            let hit = ball.mesh.nearest(stand.to_mesh(local), f64::INFINITY).unwrap();
+            nearest_in(&palette, ball.mesh.colour(hit.tri, hit.point).unwrap())
+        };
+        let cells_of = |b: &CellBrick| { let b = *b; (0..b.ext[0] * b.ext[1] * b.ext[2]).map(move |i| [b.min[0] + i % b.ext[0], b.min[1] + i / b.ext[0] % b.ext[1], b.min[2] + i / (b.ext[0] * b.ext[1])]) };
+        let full: std::collections::HashSet<[i32; 3]> = laid.bricks.iter().filter(|b| b.mask == CUBE).flat_map(cells_of).collect();
+        let mut checked = 0;
+        for (brick, shade) in laid.bricks.iter().zip(&laid.shades).filter(|(b, _)| b.mask == CUBE) {
+            for cell in cells_of(brick) {
+                let beside: Vec<[i32; 3]> = (0..6).map(|face| { let mut c = cell; c[face / 2] += [-1, 1][face % 2]; c }).collect();
+                if beside.iter().all(|c| full.contains(c)) {
+                    continue;
+                }
+                let here = colour_at(cell);
+                if beside.iter().all(|c| colour_at(*c) == here) {
+                    assert_eq!(*shade, here, "the cell {cell:?} of {brick:?}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 300, "only {checked} cells were looked at");
         // the same bricks fill the same cells as with no colours, in more pieces: a box is one colour
         let plain = stood(made::painted_ball(24), 20.0, Import { colours: 0, ..Import::default() }, None).built(true, 80, 0.0, Threads::ONE);
         let volume = |laid: &Laid| laid.bricks.iter().map(CellBrick::volume).sum::<f64>();
