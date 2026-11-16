@@ -74,9 +74,9 @@ fn a_made_picture_becomes_a_mesh_standing_on_the_ground() {
     let (lo, hi) = read.bounds();
     assert!(lo[1].abs() < 1e-4, "its lowest point is on the ground");
     assert!(hi[1] - lo[1] > hi[0] - lo[0], "a box taller than wide gives a mesh taller than wide: {lo:?} {hi:?}");
-    // red, as the box was
+    // reddish all over, as the box was (the sides the picture did not show are the model's guess, and paler)
     let mean = read.colours.iter().fold([0f32; 3], |sum, c| [sum[0] + c[0], sum[1] + c[1], sum[2] + c[2]]).map(|v| v / read.colours.len() as f32);
-    assert!(mean[0] > 2.0 * mean[1] && mean[0] > 2.0 * mean[2], "{mean:?}");
+    assert!(mean[0] > 1.3 * mean[1] && mean[0] > 1.3 * mean[2], "{mean:?}");
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2, "the picture and the mesh, and no part-file left");
 }
 

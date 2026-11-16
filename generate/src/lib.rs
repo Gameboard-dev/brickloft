@@ -56,11 +56,13 @@ pub struct Session {
     chosen: Option<device::Chosen>,
     painter: Option<picture::Painter>,
     sculptor: Option<mesh::Sculptor>,
+    /// Whether a model has been loaded at any time in this run.
+    has_loaded: bool,
 }
 
 impl Session {
     pub fn new(weights: PathBuf, want: Want) -> Session {
-        Session { weights, want, chosen: None, painter: None, sculptor: None }
+        Session { weights, want, chosen: None, painter: None, sculptor: None, has_loaded: false }
     }
 
     /// Opens the device if it is not open, and checks that it has the memory for `step`.
@@ -69,10 +71,14 @@ impl Session {
             self.chosen = Some(device::choose(self.want)?);
         }
         let Some(chosen) = &self.chosen else { return Ok(()) };
-        // A model that is already loaded has its memory: what is free now says nothing about it.
-        if !loaded {
+        // What the card has free is asked only before this program has loaded anything. A model that is loaded has
+        // its memory already. And once one has been loaded and let go, the figure is no guide: the CUDA backend
+        // keeps the memory it was given, to use again, so the card goes on reporting it as taken while it is there
+        // for the next model.
+        if !loaded && !self.has_loaded {
             device::enough(step, chosen.kind, device::memory(chosen.name.as_deref()).as_ref())?;
         }
+        self.has_loaded = true;
         Ok(())
     }
 

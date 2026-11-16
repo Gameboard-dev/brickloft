@@ -354,22 +354,22 @@ sentence is reworded. All the wording is in one file,
 For example, on a card with too little free memory:
 
 ```json
-{"code":"not_enough_memory","event":"error","message":"making a mesh needs about 3.7 GB of free graphics memory and there is 2.1 GB: close other programs that use the graphics card"}
+{"code":"not_enough_memory","event":"error","message":"making a mesh needs about 3.6 GB of free graphics memory and there is 2.1 GB: close other programs that use the graphics card"}
 ```
 
 ### `check`
 
 ```json
 {"event":"result","command":"check","protocol":1,"version":"0.1.0",
- "built_with":["vulkan"],
- "device":{"kind":"vulkan","name":"NVIDIA GeForce RTX 4060 Ti","memory_total_mib":8188,"memory_free_mib":6710,"memory_note":null},
+ "built_with":["cuda"],
+ "device":{"kind":"cuda","name":"NVIDIA GeForce RTX 4060 Ti","memory_total_mib":8188,"memory_free_mib":6710,"memory_note":null},
  "device_problem":null,
  "weights":{"folder":"...","models":[{"model":"triposr","title":"TripoSR","step":"making a mesh from a picture","present":true,
    "bytes":1677174473,"bytes_found":1677174473,"folder":"...","page":"https://huggingface.co/oxide-lab/TripoSR",
    "licence":"MIT","licence_url":"...","restrictions":"...",
    "files":[{"file":"model.safetensors","bytes":1677170936,"bytes_found":1677170936,"right_length":true,"verified":null}]}]},
- "steps":{"picture":{"can_run":true,"needs_mib":3600,"reason":null},
-          "mesh":{"can_run":false,"needs_mib":3800,"reason":"the weights for triposr are not there (... is missing): fetch them with `brickloft-generate fetch triposr`"}}}
+ "steps":{"picture":{"can_run":false,"needs_mib":3900,"reason":"the weights for sd15 are not there (... is missing): fetch them with `brickloft-generate fetch sd15`"},
+          "mesh":{"can_run":true,"needs_mib":3700,"reason":null}}}
 ```
 
 (Shown over several lines here; the program writes it as one.)
@@ -402,7 +402,7 @@ already there is being checked) or `download`, then:
  "negative_prompt":"cropped, cut off, ...","steps":25,"width":512,"height":512,
  "candidates":[
   {"rank":1,"file":"...\\candidate-8.png","seed":8,"score":1.0,"usable":true,"problems":[],
-   "cutout":{"coverage":0.31,"on_frame":0.0,"pieces":1,"plain_frame":1.0,"shadow_removed":true,"holes":0,"rise":0.21,"view":"level"}},
+   "cutout":{"coverage":0.31,"on_frame":0.0,"pieces":1,"plain_frame":1.0,"shadow_removed":true,"holes":0,"ground_like":0.06,"rise":0.21,"view":"level"}},
   {"rank":2,"file":"...\\candidate-7.png","seed":7,"score":0.3,"usable":false,
    "problems":["the object is cut off by the edge of the picture"],"cutout":{"...":"..."}}]}
 ```
@@ -426,7 +426,9 @@ for a person. `cutout` is null when no object was found.
 `cut_by` is `ground` when the ground was cut away by its colour and
 `transparency` when the picture's own see-through pixels were used.
 `tilt.state` is `level`, `levelled`, `tilted` (found and left, with
-`--no-level`) or `unknown`. `notes` are sentences for a person: what
+`--no-level`) or `unknown`; `tilt.degrees` is how far the mesh was
+tipped towards the camera. A mesh that was laid flat for want of a
+base to level it by has `"by": "lying flattest"` as well. `notes` are sentences for a person: what
 is wrong with the picture, and what was done about a tilt.
 
 **The file.** Binary glTF with one mesh: positions, a colour for each
@@ -598,6 +600,99 @@ says it may be tilted.
 **It is set on the ground and turned Y up**, as described under
 [`mesh`](#mesh).
 
+## Measurements
+
+Measured on an RTX 4060 Ti with 8 GB, of which about 1.1 GB was in
+use by the desktop and other programs, so 7.1 GB was free. Other work
+was running on the computer at times, which shows as scatter between
+runs; where a figure was measured several times the usual one is
+given. Graphics memory is the card's highest use while the program
+ran, less what was in use before it started. Each row is one run of
+the program from a cold start, at the default settings: 25 steps and
+512 pixels for a picture, 128 cells a side for a mesh.
+
+| | CUDA | Vulkan |
+|---|---|---|
+| `mesh` | 6.2 s, 3.6 GB | 12.2 s, 3.9 GB |
+| `picture`, one candidate | 14.6 s, 3.9 GB | 30.7 s, 4.0 GB |
+| `picture`, four candidates | 38.7 s, 3.9 GB | 103 s, 4.0 GB |
+| `check` | 1.1 s | 1.0 s |
+| The program | 72.5 MB | 71.7 MB |
+| To ship beside it | six of NVIDIA's libraries, 652 MB | nothing |
+
+On CUDA the libraries are `cublasLt64_13.dll` (464 MB),
+`nvrtc64_130_0.dll`, `curand64_10.dll`, `cublas64_13.dll`,
+`nvrtc-builtins64_133.dll` and `cudart64_13.dll`, from the CUDA
+Toolkit. On Vulkan the program needs only a graphics driver that
+supports Vulkan, which every current driver does.
+
+A step needs about 4 GB of free graphics memory on either backend, so
+the two do not fit an 8 GB card together and are run one after the
+other. `check` and the steps themselves refuse to start with less
+free than the step was measured to take.
+
+**Where a picture's memory went.** Two things in Candle's example
+loop, which the generator's loop began as, took the card to 5.4 GB on
+CUDA and 6.2 GB on Vulkan. The denoiser was run on the prompt and the
+negative prompt in one pass, and the finished picture was decoded
+whole. The generator runs the two passes one after the other, and
+decodes the picture as four overlapping tiles that fade into each
+other. Together these took the peak to 3.9 GB for about a second more
+on CUDA. Candle's own option for this, sliced attention, fails in
+this version with an error about a tensor's shape.
+
+**Where the time goes.** On CUDA a mesh's 6.2 s are 1.0 s to start
+and open the device, 1.4 s to load the weights, 1.2 s for the model
+and 2.3 s to draw and colour the surface. A picture's 14.6 s are 2 s
+to start and load, 0.7 s for the text encoder, 7 s for the 25 steps,
+and 4.7 s to decode and write the first picture; each further
+candidate is 8.7 s. Vulkan's time is in the model itself, where it is
+two to three times slower than CUDA.
+
+### What keeping it running saves
+
+With `serve` the device stays open and the model stays loaded:
+
+| Request | CUDA, one run each | CUDA, `serve` | Vulkan, one run each | Vulkan, `serve` |
+|---|---|---|---|---|
+| a second picture | 14.6 s | 8.4 s | 30.7 s | 26.5 s |
+| a mesh after pictures | 6.2 s | 5.3 s | 12.2 s | 11.2 s |
+| a second mesh | 6.2 s | 2.7 s | 12.2 s | 8.8 s |
+| a picture after meshes | 14.6 s | 9.7 s | 30.7 s | 25.9 s |
+
+On CUDA that is 40% off another round of pictures and more than half
+off a second mesh, which is what a player does when the first choice
+disappoints. Only one model is loaded at a time: the one not wanted is
+let go before the other is loaded, so going from pictures to a mesh
+still pays for loading TripoSR. `serve` is built for this reason and
+is what the editor should use once the first version works.
+
+### A model for the cut-out, tried and not wired in
+
+[BiRefNet](https://huggingface.co/ZhengPeng7/BiRefNet) is a model made
+for telling an object from its ground. Its page gives its licence as
+MIT, its weights are a 444 MB safetensors file, and Lux3D already has
+code for a model of the same design (RMBG 2.0, whose own weights are
+non-commercial). That code loads BiRefNet's weights unchanged. On six
+of the hardest pictures from the runs above (a slate roof on a grey
+ground, a white wall on white, a barrel in a rack on a shelf, a boat
+against planking, a white dragon on a shelf, a car with a hard
+shadow) it cut every one cleanly. The cut-out by colour lost part of
+the object in three of them and left ground or shadow standing in the
+other three. It took 2 s a picture on CUDA and 16 s on Vulkan.
+
+It is not used by the generator yet, for two reasons that are the
+player's to weigh. It took 5.9 GB of graphics memory as Lux3D loads
+it, more than either other model, so it has to run before TripoSR is
+loaded and not beside it; loading it at half precision, which was not
+tried, should about halve that. And it is a third download with a
+third licence to show. `look birefnet` in
+[`generate/examples/look.rs`](../generate/examples/look.rs) repeats
+the trial on any picture. Wiring it in would replace the cut-out by
+colour in both `mesh` and the ranking whenever its weights are
+present, and would most help exactly the pictures that now rank low
+for a doubtful cut.
+
 ## What the editor will need
 
 The editor does not start the generator yet. The step that makes it do
@@ -666,3 +761,58 @@ so is small because of how the pieces already fit:
   pinned by commit and hash, so what is downloaded is what was read.
   If a repository is taken down, `fetch` fails with a message and the
   pins need moving to another copy.
+## What five prompts gave
+
+The trial's five prompts were run with four candidates each, twice,
+from seeds 7 and 21 (so pictures 7 to 10 and 21 to 24), on CUDA at the
+default settings. All 40 pictures and all 40 meshes were looked at,
+each mesh from the front, the side, the back, behind and to one side,
+and above. A mesh was counted good if it is one clean object,
+standing level, that reads as the thing asked for from every side.
+
+| Prompt | Seed 7: best-ranked | Seed 7: best of the four | Seed 21: best-ranked | Seed 21: best of the four |
+|---|---|---|---|---|
+| a small stone cottage | good | good | good | good |
+| an oak barrel | fair: a barrel lying open-ended | fair | good | good |
+| a wooden rowing boat | poor: a shell, still tipped | poor | poor: standing on end | fair: a shell, laid flat |
+| a red sports car | good | good | fair: laid flat, ragged beneath | fair |
+| a dragon statue | good | good | good | good |
+| Good meshes | 3 of 5 | 3 of 5 | 3 of 5 | 3 of 5 |
+
+Three of five prompts ended in a good mesh from the best-ranked
+picture, with either set of seeds, and a person choosing among the
+four did no better than the ranking on the count of good meshes. What
+a person adds is the choice among good ones (all four dragons from
+seed 21 were good, and they are four different dragons) and the
+occasional better second choice, as with the boat.
+
+The failures have one cause each.
+
+- **The boat is always seen from above.** Stable Diffusion shows a
+  boat's inside, which means from overhead, and no wording tried
+  changed that. TripoSR then builds it standing on end. Laying it
+  flat recovers a boat-shaped shell, tipped by ten or twenty degrees.
+  A boat photographed from the side would do better than any of these.
+- **Many pictures are of no use, and how many depends on the seeds.**
+  Of the 20 pictures from seeds 7 to 10, about 15 ran off the frame,
+  showed two objects or stood in a scene; of the 20 from seeds 21 to
+  24, about 6 did. The ranking put a usable picture first whenever
+  there was one, except for the boat from seed 21, where a picture
+  taken from straight overhead looked level to it: an object seen
+  from directly above shows no base to judge by.
+- **A like-coloured ground is not cut cleanly.** A slate roof against
+  a grey wall, or a white wall against a white ground, loses the roof
+  or the wall. The result says so ("the object and the ground are
+  alike in colour"), and such pictures rank low.
+
+Scraps and levelling were not what failed. No mesh among the 40 had
+pieces floating free of it. Ground stayed attached only where the
+cut-out had left it in the picture: a shadow under one car and a
+tabletop under one dragon. Every mesh with a plinth or a slab came out
+standing level, and two without one (a cropped cottage and an upright
+barrel) leaned by about ten degrees.
+
+Pictures were made here before two changes that lower the memory a
+picture takes (see [measurements](#measurements)). The same seeds now
+give the same pictures to the eye, with small differences in detail.
+

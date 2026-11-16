@@ -507,7 +507,7 @@ it needs. The plan for it:
    how much memory that device has free, and whether the weights are in
    the editor's own folder. For each of the two steps it says whether the
    step can run, and why not in a sentence the panel can show, such as
-   "making a mesh needs about 3.7 GB of free graphics memory and there is
+   "making a mesh needs about 3.6 GB of free graphics memory and there is
    2.1 GB". The weights are 3.8 GB; they are downloaded once, when the
    player asks, after the panel has shown each model's licence.
 3. **Generating.** The prompt is one argument, 500 characters at most.

@@ -161,6 +161,7 @@ colours, saved forms, the camera and every key.
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
+| [docs/generate.md](docs/generate.md) | The generator, a separate program not yet used by the editor: a mesh from a picture or a prompt, with models run on this computer |
 | [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns, the plants and the furniture |
 
 ## Layout

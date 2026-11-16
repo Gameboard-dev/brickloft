@@ -8,6 +8,9 @@
 //!       the mid grey TripoSR puts behind it. Prints what the cut-out found.
 //!   look sheet <out.png> <columns> <tile> <in.png>...
 //!       The pictures side by side, each scaled to `tile` pixels.
+//!   look stack <out.png> <in.png>...
+//!       The pictures one under another at one width: several meshes' views
+//!       to be compared.
 //!   look birefnet <model.safetensors> <picture> <out.png>
 //!       The picture cut out by BiRefNet (https://huggingface.co/ZhengPeng7/BiRefNet,
 //!       MIT), a model made for telling an object from its ground, run by
@@ -166,6 +169,21 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             sheet.save(&args[1]).map_err(|e| wrong(&e))?;
         }
+        Some("stack") if args.len() >= 3 => {
+            // each picture scaled to one width, one under another
+            let width = 1280u32;
+            let strips: Vec<RgbaImage> = args[2..].iter().filter_map(|file| mesh::read_picture(Path::new(file)).ok()).map(|p| {
+                let height = ((p.height() as f32 * width as f32 / p.width() as f32).round() as u32).max(1);
+                image::imageops::resize(&p, width, height, image::imageops::FilterType::Triangle)
+            }).collect();
+            let mut sheet = RgbaImage::from_pixel(width, strips.iter().map(|s| s.height()).sum::<u32>().max(1), GROUND);
+            let mut y = 0;
+            for strip in &strips {
+                image::imageops::replace(&mut sheet, strip, 0, y.into());
+                y += strip.height();
+            }
+            sheet.save(&args[1]).map_err(|e| wrong(&e))?;
+        }
         Some("birefnet") if args.len() == 4 => {
             let chosen = generate::device::choose(generate::args::Want::Auto).map_err(|e| wrong(&e))?;
             let started = std::time::Instant::now();
@@ -176,7 +194,7 @@ fn run(args: &[String]) -> Result<(), String> {
             tile_of(&cut, cutout::SIDE).save(&args[3]).map_err(|e| wrong(&e))?;
             println!("{}: loaded in {:.1} s, cut in {:.1} s on {}", args[2], loaded.as_secs_f32(), (started.elapsed() - loaded).as_secs_f32(), chosen.kind.name());
         }
-        _ => return Err("usage: look views <mesh.glb> <out.png> | look cut <picture> <out.png> | look sheet <out.png> <columns> <tile> <in.png>... | look birefnet <model.safetensors> <picture> <out.png>".into()),
+        _ => return Err("usage: look views <mesh.glb> <out.png> | look cut <picture> <out.png> | look sheet <out.png> <columns> <tile> <in.png>... | look stack <out.png> <in.png>... | look birefnet <model.safetensors> <picture> <out.png>".into()),
     }
     Ok(())
 }

@@ -3,6 +3,10 @@
 How to build, run, test and examine Brickloft. It is a Rust workspace of two
 crates and needs only [Rust](https://rustup.rs).
 
+A third crate, `generate/`, is the generator. It is a workspace of its own
+that nothing here builds or tests, and it needs a good deal more than Rust:
+[generate.md](generate.md) has how to build it.
+
 ## Run it
 
 ```sh

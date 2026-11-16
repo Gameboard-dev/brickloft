@@ -185,10 +185,10 @@ impl Step {
 /// what was measured on an RTX 4060 Ti (docs/generate.md has the figures).
 pub fn needs_mib(step: Step, kind: Kind) -> u64 {
     match (step, kind) {
-        (Step::Picture, Kind::Cuda) => 3600,
-        (Step::Picture, Kind::Vulkan) => 3600,
-        (Step::Mesh, Kind::Cuda) => 3800,
-        (Step::Mesh, Kind::Vulkan) => 3800,
+        (Step::Picture, Kind::Cuda) => 3900,
+        (Step::Picture, Kind::Vulkan) => 4200,
+        (Step::Mesh, Kind::Cuda) => 3700,
+        (Step::Mesh, Kind::Vulkan) => 3900,
     }
 }
 
