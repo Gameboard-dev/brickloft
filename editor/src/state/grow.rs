@@ -564,12 +564,14 @@ mod tests {
     use brickloft_core::DVec3;
 
     /// Frames as the window takes them, sixty a second by the clock they
-    /// are given, until `until` holds: the run is heard and asked, then
-    /// the form is built.
+    /// are given, until `until` holds: the change is noted for undo, the
+    /// run is heard and asked, then the form is built.
     fn frames(state: &mut State, clock: &mut f64, until: impl Fn(&State) -> bool) {
         for _ in 0..60_000 {
             *clock += 16.0;
             let now = *clock;
+            // (and a change is noted as a step to undo, as the window notes one at every frame in which nothing is held)
+            state.record();
             state.grow_frame(now);
             state.refresh_behind(move || now);
             if until(state) {

@@ -244,6 +244,12 @@ fn a_plain_finish_is_the_cells_joined_and_wedges_fill_only_flights_of_steps() {
     let striped: Vec<u8> = (0..size[0] * size[1] * size[2]).map(|i| if solid(i % 8, i / 8 % 9, i / 72) { 1 + ((i % 8) % 2) as u8 } else { 0 }).collect();
     let two_tone = bricks(&View { size, cells: &striped, letters: &['B', 'W', 'R'] }, 2, Finish::Wedged, 80, &limits).unwrap();
     assert_eq!(two_tone.wedges, 4);
+    // nor is a flight that is one colour down one side and another down the other one ramp across both: two, side by side, each its own colour
+    let halved: Vec<u8> = (0..size[0] * size[1] * size[2]).map(|i| if solid(i % 8, i / 8 % 9, i / 72) { 1 + (i / 8 % 9 >= 2) as u8 } else { 0 }).collect();
+    let two_sides = bricks(&View { size, cells: &halved, letters: &['B', 'W', 'R'] }, 2, Finish::Wedged, 80, &limits).unwrap();
+    let mut sides: Vec<_> = two_sides.bricks.iter().zip(&two_sides.shades).filter(|(b, _)| b.mask != crate::shapes::CUBE).map(|(b, shade)| (b.min[1], b.ext, *shade)).collect();
+    sides.sort();
+    assert_eq!(sides, [(0, [8, 4, 8], 1), (4, [8, 2, 8], 2)]);
     assert!(two_tone.bricks.iter().zip(&two_tone.shades).filter(|(b, _)| b.mask != crate::shapes::CUBE).all(|(b, shade)| b.ext == [2, 6, 2] && *shade == 1 + (b.min[0] / 2 % 2) as u8));
     // nothing beside the slab or the wall: a single step is not a flight
     assert!(ramps.iter().all(|b| b.min[1] < 6 && b.min[0] < 10));
