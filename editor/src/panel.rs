@@ -745,9 +745,10 @@ fn texture(ui: &mut Ui, state: &mut State, largest: f64) {
         s.maze.hedge = choice == hedge;
         s.stones = None;
         s.mosaic = (choice >= 2 && choice != hedge).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: 50, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
-        // (a hedge is thicker than a wall need be, and no thinner than a hedge can be)
+        // (a hedge is thicker than a wall need be, and no thinner than a hedge can be; and it is grown as the Plant form's hedge starts out, not as whatever plant the form last was)
         if s.maze.hedge {
             s.thick = s.thick.max(brickloft_core::maze::LEAST_HEDGE);
+            s.tree = brickloft_core::tree::Tree { seed: s.tree.seed, ..brickloft_core::tree::Tree::of(brickloft_core::tree::Kind::Hedge) };
         }
         let own = state.paint.mode == Mode::Pattern && !sets(before).iter().any(|set| state.paint.colours == *set);
         if !own {
