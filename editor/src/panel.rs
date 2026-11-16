@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -213,7 +213,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
     let panel = egui::Panel::left("settings").show_inside(ui, |ui| {
       egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("Brickloft");
-        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Ctrl + drag the form being edited moves it into another form and joins the two. Shift + click on a form adds a point there to pull it out of shape; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
+        ui.label("Drag the coloured dots to reshape the form. Drag the form itself, or one of its arrows, to move it. Ctrl + drag a form moves it into another form and joins the two. Alt + click on a form adds a point there to pull it out of shape, and Alt + right-click takes one off; on a circle it moves within the circle's plane, or out of it with Ctrl held.");
         ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
 
@@ -328,11 +328,38 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     })
                         .response
                 });
-                // within its plane, into an ellipse; across it, the depth of a round tube
+                // Within its plane, into an ellipse. There was a third
+                // slider, across the plane, for the depth of a round
+                // tube. It did what Thickness does and did it worse: the
+                // tube it deepened kept the round ends of the thinner
+                // tube and gained flat sides between them. A tube's size
+                // is its Thickness, and one control says so.
                 ui.label("Stretch:");
-                for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-                    let across = axis == s.plane.min(2);
-                    helped(ui, help("stretch_circle"), |ui| ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() })));
+                for (axis, name) in ["X", "Y", "Z"].iter().enumerate().filter(|(axis, _)| *axis != s.plane.min(2)) {
+                    helped(ui, help("stretch_circle"), |ui| ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name)));
+                }
+                // (a circle from before, deepened across its plane, is as round as its Thickness makes it from the next change on)
+                s.stretch[s.plane.min(2)] = 1.0;
+            }
+            CUBE => {
+                // Its three lengths in microbricks, as it is built. The
+                // form keeps half a side and a stretch along each axis
+                // (see `brickloft_core::spec::Form::Cube`), and a slider
+                // for each of those would be four sliders for three
+                // lengths, none of them in the units a wall is measured in.
+                let snapped = s.snapped();
+                if let Some(&middle) = snapped.points.first() {
+                    let sides = brickloft_core::spec::cube_sides(&snapped, middle);
+                    for (axis, (low, high)) in sides.into_iter().enumerate() {
+                        let before = high - low;
+                        let mut size = before;
+                        helped(ui, help("cube_size"), |ui| ui.add(Slider::new(&mut size, 1.0..=(2.0 * largest).max(1.0)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text(format!("Size along {}", ["X", "Y", "Z"][axis]))));
+                        if size != before && size.is_finite() {
+                            // about its middle, which stays where it is
+                            s.radius = snapped.radius;
+                            s.stretch[axis] = size.round().clamp(1.0, 2.0 * brickloft_core::spec::MAX_SPAN) / 2.0 / snapped.radius;
+                        }
+                    }
                 }
             }
             BEZIER => {
@@ -397,6 +424,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             PYRAMID => {
                 helped(ui, help("solid_pyramid"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)"));
             }
+            // (no round tube: see `brickloft_core::spec::Form::Cube`)
+            CUBE => {
+                helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
+            }
             // a tree is neither filled nor hollow, and has no wall
             TREE => {}
             _ => {
@@ -413,14 +444,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            SPHERE | REVOLVE | PYRAMID => "Wall thickness",
+            SPHERE | REVOLVE | PYRAMID | CUBE => "Wall thickness",
             _ => "Thickness",
         };
-        // (a pyramid's wall is measured straight up, and only a hollow one has any)
-        if !(state.form == PYRAMID && s.fill) && state.form != TREE {
+        // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && state.form != TREE {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
-        if is_curve && !s.tube {
+        // (a round tube too: a pattern is laid on whatever of a form is flat, see `brickloft_core::spec::pattern_flat_faces`)
+        // (and a cube, which is its largest face pushed through its shortest length)
+        if is_curve || state.form == CUBE {
             // One pattern in place of solid brick, or none: see
             // `brickloft_core::pattern`. One list and not a tickbox for
             // each, since a form has one pattern at most. 0 is none, 1
@@ -444,8 +477,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if choice != before {
                 s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
                 // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
-                // (cobbles start uneven: all alike, they are a grid of squares; and nothing starts bevelled, which wants a form two cells deep)
-                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 0, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60, 0] } else { [0; 3] } });
+                // (cobbles start uneven: all alike, they are a grid of squares)
+                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60] } else { [0; 2] } });
                 // A pattern is its colours, and each has colours of its
                 // own to start in (a rug's reds and golds, a floor of
                 // planks' browns). They are brought in with the pattern
@@ -484,11 +517,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     // how unlike one another the pieces are, each way (see `brickloft_core::pattern::Masonry`)
                     helped(ui, help("pattern_uneven_along"), |ui| ui.add(Slider::new(&mut laid.uneven[0], 0..=100).suffix("%").text("Uneven along")));
                     helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
-                    helped(ui, help("pattern_uneven_depth"), |ui| ui.add(Slider::new(&mut laid.uneven[2], 0..=100).suffix("%").text("Uneven in depth")));
                     helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
-                    helped(ui, help("pattern_bevel"), |ui| ui.add(Slider::new(&mut laid.bevel, 0..=4).text("Bevel")));
                 }
                 if style == "bricks" {
+                    helped(ui, help("pattern_bevel"), |ui| ui.checkbox(&mut laid.bevel, "Bevelled"));
                     // below nothing, every course is moved along by an amount of its own
                     let mut uneven = laid.stagger < 0;
                     if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
@@ -516,7 +548,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 let sets = crate::paint::palettes(named(choice));
                 state.paint.colours = sets[seed as usize % sets.len()].to_vec();
             }
-            helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
+            // (a cube's depth is one of its three lengths)
+            if state.form != CUBE {
+                helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
+            }
         }
         if !s.pulls.is_empty() {
             helped(ui, help("reach_of_added_points"), |ui| ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")));
@@ -574,7 +609,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
 
         // (There were Add point and Remove point buttons here, for the dots a
-        // form is drawn through. Shift + click and Shift + right-click on the
+        // form is drawn through. Alt + click and Alt + right-click on the
         // form add and remove a point on any form, and are the one way now.)
 
         ui.separator();
@@ -695,13 +730,16 @@ fn workspace(ui: &mut Ui, state: &mut State) {
             state.activate(k);
         }
     }
-    ui.label("Ctrl+C copies the form being edited and any marked +. Ctrl + click a form to mark it, Ctrl+A for all.");
+    ui.label("Shift + click a form to pick it as well as the one being edited (it is marked +), and again to let it go; Ctrl+A picks all. Ctrl+C copies the form being edited and any marked +. Ctrl+V pastes what was copied onto this grid. Ctrl+D duplicates the form being edited.");
     ui.horizontal(|ui| {
         if ui.button("Add to this grid").on_hover_text(help("add_to_this_grid")).clicked() {
-            state.add_copy();
+            state.add_cube();
         }
         if ui.button("New grid").on_hover_text(help("new_grid")).clicked() {
             state.add_grid();
+        }
+        if ui.button("Duplicate").on_hover_text(help("duplicate_form")).clicked() {
+            state.add_copy();
         }
         if ui.add_enabled(!state.others.is_empty(), egui::Button::new("Remove")).on_hover_text(help("remove_form")).clicked() {
             state.remove_active();
@@ -811,6 +849,11 @@ fn colours(ui: &mut Ui, state: &mut State) {
             Mode::Pattern => crate::paint::MOST_COLOURS,
             _ => 4,
         };
+        // (A form that had a pattern's eight colours and is set to blend or stripes keeps the first four: the rest would be blended through and could not be seen or changed here.)
+        // (One colour shows the first and keeps the rest, for when the form is set back.)
+        if most > 1 {
+            paint.colours.truncate(most);
+        }
         // A colour is made the same as another by copying one and pasting
         // it on the other, from the menu a right click on either opens.
         // The copied colour is kept in the panel's own memory and not on
@@ -914,7 +957,7 @@ mod tests {
                 state.preset();
                 state.refresh(|| 0.0);
                 state.spec.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
+                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
                 if choice != 0 {
                     state.paint.mode = Mode::Pattern;
                     state.paint.colours = crate::paint::palette(if choice == 1 { "stepping stones" } else { brickloft_core::pattern::STYLES[choice - 2].name }).to_vec();

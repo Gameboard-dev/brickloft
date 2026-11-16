@@ -9,12 +9,18 @@ use crate::curves::{arch, catmull_rom, circle3, rational_bezier, ArchType, Circl
 use crate::fit_lathe::{fit_lathe, Lathe};
 use crate::fit_planar::{self, fit_planar, fit_planar_towards};
 use crate::fit_pyramid::{fit_pyramid, Pyramid};
-use crate::fit_round::{fit_round, Round};
+use crate::fit_round::{fit_round_on, Round};
 use crate::fit_volume::{self, fit_volume};
+use crate::par::Threads;
 use crate::sdf::{Field, Fill, Region, Stroke};
 use crate::shapes::{CellBrick, CUBE, UPRIGHT};
 use glam::{DVec2, DVec3};
 use std::f64::consts::PI;
+
+// In a file of its own, as the newest form and one that shares nothing with
+// the others but the flat outline it ends as.
+mod cube;
+pub use cube::{sides as cube_sides, through as cube_through};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Form {
@@ -37,6 +43,10 @@ pub enum Form {
     /// 1 point, the middle of its base: a pyramid `radius` to each side of
     /// it (scaled by `stretch` along x and y) and `rise` tall
     Pyramid,
+    /// 1 point, its middle: a box `radius` to each side of it, scaled by
+    /// `stretch` along each axis. A cube until it is stretched; a floor or
+    /// a wall when one length is made short.
+    Cube,
     /// 1 point, the foot of its trunk: the tree `tree` describes, `rise`
     /// tall and reaching `radius` to each side
     Tree,
@@ -315,7 +325,19 @@ impl Turn {
 
 /// [`build`], with the choice of leaving the fit unmeasured.
 pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
-    let mut built = build_upright(spec, measured)?;
+    build_with(spec, measured, Threads::available())
+}
+
+/// [`build_as`], on so many threads.
+///
+/// A build is the same bricks in the same order whatever `threads` is (see
+/// [`crate::par`], and the test `a_build_is_the_same_on_any_number_of_threads`):
+/// the number decides only how long it takes. It is given here, where a
+/// build starts, and handed down to each part that shares work out, so
+/// that the cores are counted once a build and a test can ask for one
+/// thread or several.
+pub fn build_with(spec: &Spec, measured: bool, threads: Threads) -> Result<Built, String> {
+    let mut built = build_upright(spec, measured, threads)?;
     let turn = Turn::of(&spec.snapped());
     if !turn.is_none() {
         built.bricks = built.bricks.iter().map(|b| turn.brick(b)).collect();
@@ -333,7 +355,7 @@ pub fn build_as(spec: &Spec, measured: bool) -> Result<Built, String> {
 /// second, so the editor builds unmeasured then and measures once when the
 /// mouse is let go. An unmeasured build has `unmeasured` set and its `solid`
 /// and `error` at 0.
-fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
+fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built, String> {
     if !(spec.thick > 0.0) || spec.depth < 1 || !(spec.radius > 0.0) || spec.max_ext < 1 {
         return Err("thickness, depth and radius must all be positive".into());
     }
@@ -351,7 +373,7 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
         return Err(format!("the form is too large to build: nothing may be more than {MAX_SPAN} microbricks across; bring its points closer together"));
     }
     if spec.grain > 0 {
-        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured);
+        return build_at(spec, spec.grain.min(GRAINS[GRAINS.len() - 1]), measured, threads);
     }
     // A pattern of tiles is laid at single microbricks whatever the budget.
     // A tile is one brick, so a pattern's detail is its brick count: a rug
@@ -361,14 +383,14 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     // budget is there to keep a solid form from being more bricks than it
     // needs, and a pattern needs every one of its.
     if spec.mosaic.is_some() {
-        return build_at(spec, 1, measured);
+        return build_at(spec, 1, measured, threads);
     }
     // So is a tree, for the same reason: its boughs, twigs and leaflets
     // are a cell or two thick, and at a coarser size they are gone and
     // what is left is a trunk in a cloud. A tree is tens of thousands of
     // bricks; fewer come from a smaller tree or a brick size asked for.
     if spec.form == Form::Tree {
-        return build_at(spec, 1, measured);
+        return build_at(spec, 1, measured, threads);
     }
     // Automatic brick size: from coarse to fine, keep the finest that is
     // within budget. Coarse to fine because a fit `g` times coarser has about
@@ -379,7 +401,7 @@ fn build_upright(spec: &Spec, measured: bool) -> Result<Built, String> {
     let mut last_error = None;
     let limit = spec.snapped().coarsest_grain();
     for &grain in GRAINS.iter().rev().filter(|g| **g <= limit) {
-        match build_at(spec, grain, measured) {
+        match build_at(spec, grain, measured, threads) {
             Ok(built) if built.bricks.is_empty() => {} // too coarse to hold the form at all
             Ok(built) => {
                 let over = built.bricks.len() > spec.budget;
@@ -535,22 +557,272 @@ fn mirrors(spec: &Spec) -> [Option<f64>; 3] {
     })
 }
 
-fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
+/// Lay a form's pattern on whatever of it is flat, where the form is not
+/// flat all over: a disc with a rounded rim, a band built as a round tube
+/// that is broad enough to have a flat top. Does nothing to a build that
+/// has its pattern already, or has none to lay.
+///
+/// A pattern is tiles pushed straight through the form, so it can be laid
+/// wherever the form is whole bricks from one face to the other: there
+/// the two faces are flat and level, and a tile pushed through shows on
+/// both. Seen along each of the three axes in turn, a column of cells is
+/// such a place if unsloped bricks fill it from the form's lowest cell to
+/// its highest that way. The axis with the most such columns is the one
+/// the pattern is laid along. The bricks of those columns are taken out
+/// and the pattern laid in their place; a brick that lies partly in them
+/// is cut down to the columns that are not. Everything else (the sloped
+/// bricks of a rounded rim, and whatever is under or over them) is left
+/// as it was fitted, in the pattern's ground colour.
+///
+/// A pattern wrapped onto a curved surface was not attempted. A sloped
+/// brick is one colour and often many cells long, so a pattern there
+/// would need the surface cut into bricks a cell across, which is many
+/// times the bricks and gives up the smooth fit the sloped bricks are
+/// there for.
+fn pattern_flat_faces(spec: &Spec, built: &mut Built, threads: Threads) {
+    let Some(mosaic) = &spec.mosaic else { return };
+    if !built.shades.is_empty() || built.bricks.is_empty() {
+        return;
+    }
+    // (fewer flat cells than this is a seam and not a face)
+    const LEAST_FACE: usize = 16;
+    let mut best: Option<(usize, i32, i32, Vec<(i32, i32)>)> = None;
+    for axis in 0..3 {
+        let (ua, va) = match axis {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let low = built.bricks.iter().map(|b| b.min[axis]).min().unwrap_or(0);
+        let high = built.bricks.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap_or(0);
+        // for each column: how many of its cells unsloped bricks fill, or `None` once a sloped brick is in it
+        let mut columns: std::collections::HashMap<(i32, i32), Option<i32>> = std::collections::HashMap::new();
+        for brick in &built.bricks {
+            for v in brick.min[va]..brick.min[va] + brick.ext[va] {
+                for u in brick.min[ua]..brick.min[ua] + brick.ext[ua] {
+                    let filled = columns.entry((u, v)).or_insert(Some(0));
+                    *filled = if brick.mask == CUBE { filled.map(|cells| cells + brick.ext[axis]) } else { None };
+                }
+            }
+        }
+        let mut flat: Vec<(i32, i32)> = columns.into_iter().filter(|(_, filled)| *filled == Some(high - low)).map(|(column, _)| column).collect();
+        flat.sort_by_key(|(u, v)| (*v, *u));
+        if flat.len() >= LEAST_FACE && best.as_ref().is_none_or(|(_, _, _, most)| flat.len() > most.len()) {
+            best = Some((axis, low, high, flat));
+        }
+    }
+    let Some((axis, low, high, flat)) = best else { return };
+    let (ua, va) = match axis {
+        0 => (1, 2),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    let within: std::collections::HashSet<(i32, i32)> = flat.iter().copied().collect();
+    let mut bricks: Vec<CellBrick> = Vec::with_capacity(built.bricks.len());
+    for brick in &built.bricks {
+        let columns = || (brick.min[va]..brick.min[va] + brick.ext[va]).flat_map(|v| (brick.min[ua]..brick.min[ua] + brick.ext[ua]).map(move |u| (u, v)));
+        if !columns().any(|column| within.contains(&column)) {
+            bricks.push(*brick);
+            continue;
+        }
+        // (only an unsloped brick can lie in a flat column) what of it is in other columns stays, as rows of cells
+        for v in brick.min[va]..brick.min[va] + brick.ext[va] {
+            let mut run: Option<CellBrick> = None;
+            for u in brick.min[ua]..brick.min[ua] + brick.ext[ua] {
+                if within.contains(&(u, v)) {
+                    bricks.extend(run.take());
+                    continue;
+                }
+                run = Some(match run {
+                    Some(mut row) => {
+                        row.ext[ua] += 1;
+                        row
+                    }
+                    None => {
+                        let (mut min, mut ext) = (brick.min, brick.ext);
+                        (min[ua], min[va], ext[ua], ext[va]) = (u, v, 1, 1);
+                        CellBrick { mask: CUBE, min, ext }
+                    }
+                });
+            }
+            bricks.extend(run);
+        }
+    }
+    let mut shades = vec![0u8; bricks.len()];
+    // (the threads are for the tiles drawn on each face, see `pattern::drawn`: finding the faces is done here, on one)
+    let opts = fit_planar::Opts { brick_cost: 0.0, max_ext: spec.max_ext, wedges: spec.wedges, threads };
+    crate::pattern::lay_mosaic_on(&flat, mosaic, axis, low, high - low, &opts, &mut bricks, &mut shades);
+    (built.bricks, built.shades) = (bricks, shades);
+}
+
+/// Lay a patterned form's pattern on its flat sides too.
+///
+/// A pattern is tiles pushed through a form one way, so it shows on the
+/// two faces across that way and, on the form's sides, only as the tiles'
+/// ends: stripes. On a floor a cell or two deep that is all a side is.
+/// On a box with some height the sides are faces of their own, and want
+/// the pattern as much as the top does.
+///
+/// So where the form's outermost layer of cells, either of the other two
+/// ways, is whole bricks open to the air over at least half the form's
+/// length each way (and four cells at the least), that layer is taken off
+/// and the pattern laid there in its place, one cell deep, seen from that
+/// side. A box has four such sides. A disc has none: its rim is a curve,
+/// and the short flat steps a curve is built of are not faces. The top and
+/// bottom cells of the form are left to the pattern that runs through
+/// it, so that the top face's own edge is not overwritten by a side's.
+/// A cell in a corner, open two ways, goes to whichever side is taken
+/// first.
+///
+/// Which cells are open is asked of a grid of every cell the form fills,
+/// one bit apiece: a brick's neighbours are not otherwise to be found
+/// without searching every other brick. A form too large for such a grid
+/// to be reasonable keeps its sides as they are.
+fn pattern_side_faces(spec: &Spec, built: &mut Built, threads: Threads) {
+    let Some(mosaic) = &spec.mosaic else { return };
+    if built.shades.len() != built.bricks.len() || built.bricks.is_empty() {
+        return;
+    }
+    // the least a side must be each way to be a face, and the most cells a form may fill for its sides to be looked for
+    const LEAST_SIDE: i32 = 4;
+    const MOST_CELLS: i64 = 1 << 26;
+    let lo = [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k]).min().unwrap_or(0));
+    let hi = [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap_or(0));
+    let size = [0, 1, 2].map(|k| (hi[k] - lo[k]) as i64);
+    if size.iter().product::<i64>() > MOST_CELLS {
+        return;
+    }
+    // The way the pattern runs through the form: the way most of its
+    // bricks run from one face to the other, or to a cell short of the
+    // other, as the bricks under a bevelled top do. (Counting only those
+    // that ran the whole way, a wall of bevelled bricks had none, some
+    // other way was taken, and the wall's own face was patterned over as
+    // if it were a side.)
+    let through = (0..3).max_by_key(|k| built.bricks.iter().filter(|b| b.min[*k] == lo[*k] && b.ext[*k] >= (hi[*k] - lo[*k] - 1).max(1)).count()).unwrap_or(2);
+    if hi[through] - lo[through] < LEAST_SIDE + 2 {
+        return;
+    }
+    let at = |cell: [i32; 3]| (0..3).all(|k| cell[k] >= lo[k] && cell[k] < hi[k]).then(|| (((cell[2] - lo[2]) as i64 * size[1] + (cell[1] - lo[1]) as i64) * size[0] + (cell[0] - lo[0]) as i64) as usize);
+    let cells_of = |min: [i32; 3], ext: [i32; 3]| (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])));
+    let mut filled = vec![false; size.iter().product::<i64>() as usize];
+    for brick in &built.bricks {
+        for cell in cells_of(brick.min, brick.ext) {
+            filled[at(cell).unwrap()] = true;
+        }
+    }
+    // the faces: which way each looks, the layer of cells it is, and its cells
+    let mut claimed = vec![false; filled.len()];
+    let mut faces: Vec<(usize, i32, Vec<(i32, i32)>)> = Vec::new();
+    for side in (0..3).filter(|k| *k != through) {
+        let (ua, va) = match side {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        for outwards in [-1, 1] {
+            let mut layers: std::collections::BTreeMap<i32, Vec<[i32; 3]>> = std::collections::BTreeMap::new();
+            for brick in built.bricks.iter().filter(|b| b.mask == CUBE) {
+                let layer = if outwards < 0 { brick.min[side] } else { brick.min[side] + brick.ext[side] - 1 };
+                let (mut min, mut ext) = (brick.min, brick.ext);
+                (min[side], ext[side]) = (layer, 1);
+                for cell in cells_of(min, ext).filter(|cell| cell[through] > lo[through] && cell[through] < hi[through] - 1) {
+                    let mut beyond = cell;
+                    beyond[side] += outwards;
+                    if at(beyond).is_none_or(|k| !filled[k]) && !claimed[at(cell).unwrap()] {
+                        layers.entry(layer).or_default().push(cell);
+                    }
+                }
+            }
+            for (layer, cells) in layers {
+                let span = |k: usize| cells.iter().map(|cell| cell[k]).max().unwrap() - cells.iter().map(|cell| cell[k]).min().unwrap() + 1;
+                // A side of the form, and not a step of a curve: it is the
+                // form's outermost layer that way, and runs at least half
+                // the form's length each way across it. The rim of a disc
+                // is steps a few cells long, each flat and open to the
+                // air, and a patch of pattern on every one made a curve
+                // into a patchwork.
+                let outermost = layer == if outwards < 0 { lo[side] } else { hi[side] - 1 };
+                let broad = |k: usize| span(k) >= LEAST_SIDE && 2 * span(k) >= hi[k] - lo[k];
+                if !outermost || !broad(ua) || !broad(va) {
+                    continue;
+                }
+                for cell in &cells {
+                    claimed[at(*cell).unwrap()] = true;
+                }
+                let mut flat: Vec<(i32, i32)> = cells.iter().map(|cell| (cell[ua], cell[va])).collect();
+                flat.sort_by_key(|(u, v)| (*v, *u));
+                faces.push((side, layer, flat));
+            }
+        }
+    }
+    if faces.is_empty() {
+        return;
+    }
+    // Every whole brick gives up its cells that are part of a face. Such a
+    // cell is in one of the brick's six outer layers (it is open to the
+    // air one way), so the brick is peeled a layer at a time, each layer
+    // that holds any: the rest of that layer stays as loose cells, to be
+    // joined up again, and what is left of the brick stays one brick.
+    let (mut bricks, mut shades): (Vec<CellBrick>, Vec<u8>) = (Vec::with_capacity(built.bricks.len()), Vec::with_capacity(built.bricks.len()));
+    let mut loose: Vec<(CellBrick, u8)> = Vec::new();
+    for (brick, shade) in built.bricks.iter().zip(&built.shades) {
+        let (mut min, mut ext) = (brick.min, brick.ext);
+        if brick.mask == CUBE {
+            for k in 0..3 {
+                for far in [false, true] {
+                    if ext.contains(&0) {
+                        continue;
+                    }
+                    let (mut from, mut span) = (min, ext);
+                    (from[k], span[k]) = (if far { min[k] + ext[k] - 1 } else { min[k] }, 1);
+                    if !cells_of(from, span).any(|cell| claimed[at(cell).unwrap()]) {
+                        continue;
+                    }
+                    loose.extend(cells_of(from, span).filter(|cell| !claimed[at(*cell).unwrap()]).map(|cell| (CellBrick { mask: CUBE, min: cell, ext: [1; 3] }, *shade)));
+                    ext[k] -= 1;
+                    if !far {
+                        min[k] += 1;
+                    }
+                }
+            }
+        }
+        if !ext.contains(&0) {
+            bricks.push(CellBrick { mask: brick.mask, min, ext });
+            shades.push(*shade);
+        }
+    }
+    for (brick, shade) in crate::pattern::joined(loose, spec.max_ext.max(1)) {
+        bricks.push(brick);
+        shades.push(shade);
+    }
+    // (the threads are for the tiles drawn on each face, see `pattern::drawn`: finding the faces is done here, on one)
+    let opts = fit_planar::Opts { brick_cost: 0.0, max_ext: spec.max_ext, wedges: spec.wedges, threads };
+    for (side, layer, flat) in &faces {
+        crate::pattern::lay_mosaic_on(flat, mosaic, *side, *layer, 1, &opts, &mut bricks, &mut shades);
+    }
+    (built.bricks, built.shades) = (bricks, shades);
+}
+
+fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result<Built, String> {
     let g = grain.max(1) as f64;
     let coarse = coarse(spec, grain);
-    let (solid, path) = solid(&coarse)?;
+    let (solid, path) = solid(&coarse, threads)?;
     // A turned form is laid out two ways and the closer kept, which means
     // measuring both. Unmeasured, it is laid out one way only: what is on
     // screen during a drag may then change a little when the mouse is let
     // go, for a drag several times as quick.
     let quick = match &solid {
-        Solid::Lathe { .. } if !measured => [false, true].into_iter().find_map(|short_sides| turned(&coarse, &solid, g, short_sides)),
+        Solid::Lathe { .. } if !measured => [false, true].into_iter().find_map(|short_sides| turned(&coarse, &solid, g, short_sides, threads)),
         _ => None,
     };
     let mut built = match quick {
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
-        None => fit(&coarse, &solid, path, g),
+        None => fit(&coarse, &solid, path, g, threads),
     };
+    if grain == 1 {
+        pattern_flat_faces(&coarse, &mut built, threads);
+        pattern_side_faces(&coarse, &mut built, threads);
+    }
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
     if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
@@ -566,7 +838,7 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
             Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Lathe { field, min, max, .. } => (Some(field.clone()), *min, *max),
             _ => (None, [0; 3], [0; 3]),
         };
-        match crate::report::measure(&Probe::of(solid), &built) {
+        match crate::report::measure(&Probe::of(solid), &built, threads) {
             Ok((volume, wrong)) => {
                 built.solid = volume;
                 built.error = wrong;
@@ -578,6 +850,7 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
                         &Solid::Volume { field, min, max },
                         std::mem::take(&mut built.path),
                         g,
+                        threads,
                     )
                 }
                 None => return Err(e),
@@ -726,7 +999,7 @@ impl Probe {
     /// The form as it was fitted at brick size `grain` (a `Built`'s `grain`).
     pub fn new(spec: &Spec, grain: i32) -> Result<Probe, String> {
         let coarse = coarse(spec, grain);
-        let (solid, _) = solid(&coarse)?;
+        let (solid, _) = solid(&coarse, Threads::available())?;
         Ok(Probe { solid, grain: grain.max(1) as f64, mirror: mirrors(&coarse), turn: Turn::of(&spec.snapped()) })
     }
 
@@ -775,13 +1048,13 @@ impl Probe {
 /// mirrored after that, is no longer a sphere or a pyramid where it was
 /// pulled. It keeps its own layout wherever the pulls do not reach, and
 /// only what they change is fitted cell by cell (see [`patched`]).
-fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
-    let (plain, path) = solid_as_made(spec)?;
+fn solid(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
+    let (plain, path) = solid_as_made(spec, threads)?;
     if spec.pulls.is_empty() || !matches!(spec.form, Form::Sphere | Form::Pyramid) {
         return Ok((plain, path));
     }
     // the solid as it would be laid out with nothing added to it
-    let laid = fit(spec, &plain, Vec::new(), 1.0).bricks;
+    let laid = fit(spec, &plain, Vec::new(), 1.0, threads).bricks;
     let (Solid::Round { field, min, max, .. } | Solid::Pyramid { field, min, max, .. } | Solid::Volume { field, min, max }) = plain else {
         return Ok((plain, path));
     };
@@ -797,7 +1070,7 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         }
     }
     let (lo, hi) = (min.map(|v| v as f64), max.map(|v| v as f64));
-    patched(spec, laid, &before, 1.0 / (1.0 + stretch), field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path)
+    patched(spec, laid, &before, 1.0 / (1.0 + stretch), field, DVec3::from_array(lo) - furthest, DVec3::from_array(hi) + furthest, path, threads)
 }
 
 /// A form laid out whole, then changed in places: its own bricks kept
@@ -820,7 +1093,7 @@ fn solid(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
 /// out. Along the seam the two fits meet as two fits of the same solid do:
 /// nearly, with here and there a sliver's difference.
 #[allow(clippy::too_many_arguments)]
-fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after: Field, lo: DVec3, hi: DVec3, path: Vec<DVec3>) -> Result<(Solid, Vec<DVec3>), String> {
+fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after: Field, lo: DVec3, hi: DVec3, path: Vec<DVec3>, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
     let (solid, path) = volume(after.clone(), lo, hi, path)?;
     let Solid::Volume { min, max, .. } = solid else { unreachable!() };
     if laid.is_empty() || !spec.wedges {
@@ -883,7 +1156,7 @@ fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after:
     let to = [0, 1, 2].map(|k| to[k].min(max[k]) + 1);
     if (0..3).all(|k| to[k] > from[k]) {
         // every ramp one cell long, so that each can be taken or left by its own cell
-        let opts = fit_volume::Opts { max_ext: spec.max_ext, wedges: true, stretch: false };
+        let opts = fit_volume::Opts { max_ext: spec.max_ext, wedges: true, stretch: false, threads };
         for b in fit_volume(&|p| after.eval(p), from, to, &opts).bricks {
             if b.mask == CUBE {
                 loose.extend(cells(&b).filter(|c| !unchanged(*c)));
@@ -911,7 +1184,7 @@ fn patched(spec: &Spec, laid: Vec<CellBrick>, before: &Field, scale: f64, after:
 }
 
 /// [`solid`], before any points added to a sphere or pyramid are applied.
-fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
+fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
     let need = |n: usize| {
         if spec.points.len() < n {
             Err(format!(
@@ -928,7 +1201,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let p = need(3)?;
             let c = circle3(p[0], p[1], p[2]).ok_or("the three points are in a straight line")?;
             let path = c.path(0.0, if spec.closed { 2.0 * PI } else { c.a2 });
-            curve(spec, path, spec.closed, Some(c.normal))
+            curve(spec, path, spec.closed, Some(c.normal), threads)
         }
         Form::Circle => {
             let centre = need(1)?[0];
@@ -938,7 +1211,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let mut within = spec.stretch.max(DVec3::splat(0.05));
             within[spec.plane.min(2)] = 1.0;
             let path = c.path(0.0, 2.0 * PI).into_iter().map(|p| centre + (p - centre) * within).collect();
-            curve(spec, path, true, Some(c.normal))
+            curve(spec, path, true, Some(c.normal), threads)
         }
         Form::Arch(kind) => {
             let p = need(2)?;
@@ -946,10 +1219,10 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
                 .rise
                 .unwrap_or_else(|| kind.default_rise(p[0].distance(p[1]) / 2.0));
             let (path, normal) = arch(p[0], p[1], kind, rise, DVec3::Z)?;
-            curve(spec, path, false, Some(normal))
+            curve(spec, path, false, Some(normal), threads)
         }
-        Form::Spline => curve(spec, catmull_rom(need(2)?, spec.closed)?, spec.closed, None),
-        Form::Bezier => curve(spec, rational_bezier(need(2)?, &spec.weights)?, false, None),
+        Form::Spline => curve(spec, catmull_rom(need(2)?, spec.closed)?, spec.closed, None, threads),
+        Form::Bezier => curve(spec, rational_bezier(need(2)?, &spec.weights)?, false, None, threads),
         Form::Sphere => {
             let center = need(1)?[0];
             let radii = spec.stretch.max(DVec3::splat(0.05)) * spec.radius;
@@ -992,7 +1265,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
         }
         // A torus is a circle as a round tube, and is built as one. It was a
         // form of its own while it was fitted cell by cell from a formula.
-        Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }),
+        Form::Torus => solid(&Spec { form: Form::Circle, tube: true, fill: false, ..spec.clone() }, threads),
         Form::Pyramid => {
             let base = need(1)?[0];
             let half = [spec.radius * spec.stretch.x.max(0.05), spec.radius * spec.stretch.y.max(0.05)];
@@ -1020,6 +1293,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
+        Form::Cube => cube::cube(spec, need(1)?[0], threads),
         Form::Tree => {
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
@@ -1226,6 +1500,7 @@ fn curve(
     path: Vec<DVec3>,
     closed: bool,
     normal: Option<DVec3>,
+    threads: Threads,
 ) -> Result<(Solid, Vec<DVec3>), String> {
     if path.len() < 2 {
         return Err("the curve has no length".into());
@@ -1251,7 +1526,7 @@ fn curve(
     }
     if let (Some(axis), false, false) = (lay_across, spec.tube, spec.fill) {
         if path.iter().any(|p| (p[axis] - lay_at[axis]).abs() > 1e-6) {
-            if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis])? {
+            if let Some(raised) = raised(spec, &path, closed, axis, lay_at[axis], threads)? {
                 return Ok(raised);
             }
         }
@@ -1273,7 +1548,7 @@ fn curve(
                 })
                 .collect();
             let (flat, _) = stacked(spec, level.clone(), closed, axis)?;
-            let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+            let laid = fit(spec, &flat, Vec::new(), 1.0, threads).bricks;
             // The pipe may have been laid half a cell aside of its curve, to
             // land on the lattice (see `stacked`): by as much as its middle
             // is off the level curve's, across the plane. What it is
@@ -2108,7 +2383,7 @@ const LONG_RISE: f64 = 1.5;
 /// `plane` along `axis`: the flat band's bricks where the curve is still in
 /// the plane, and columns where it has left it (see `lifted_band`). `None`
 /// if the band is not a flat outline to begin with.
-fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
+fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64, threads: Threads) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
     let level: Vec<DVec3> = path
         .iter()
         .map(|p| {
@@ -2121,7 +2396,7 @@ fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) ->
     let (flat, _) = planar(spec, level, closed, axis)?;
     let Solid::Flat { w0, depth, .. } = &flat else { return Ok(None) };
     let (w0, depth) = (*w0, *depth);
-    let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+    let laid = fit(spec, &flat, Vec::new(), 1.0, threads).bricks;
     // the curve where the flat band was laid: half a cell aside if the band was (see `planar`)
     let (ua, va) = plane_axes(axis);
     let aside: Vec<DVec3> = path
@@ -2387,20 +2662,21 @@ fn volume(
 /// deeper must not change how its outline is fitted.
 /// A turned form laid out one of the two ways `fit_lathe` knows; `None` if
 /// `solid` is not one or cannot be laid out so.
-fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool) -> Option<Vec<CellBrick>> {
+fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Threads) -> Option<Vec<CellBrick>> {
     let Solid::Lathe { profile, axis, far, low, high, .. } = solid else { return None };
     let section = |out: f64, up: f64| profile.eval(DVec2::new(out, up));
-    let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext };
+    let lathe = Lathe { axis: *axis, section: &section, far: *far, low: *low, high: *high, brick_cost: spec.simplify / (g * g), short_sides, max_ext: spec.max_ext, threads };
     fit_lathe(&lathe).filter(|_| spec.wedges)
 }
 
-fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
+fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,
                 wedges: spec.wedges,
                 stretch: true,
+                threads,
             };
             let fit = fit_volume(&|p| field.eval(p), *min, *max, &opts);
             // a tree's bricks each have the colour of the part they are of
@@ -2426,12 +2702,12 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let mut seen = crate::report::Seen::new();
             let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
             let ways = [false, true].map(|short_sides| {
-                let bricks = turned(spec, solid, g, short_sides)?;
+                let bricks = turned(spec, solid, g, short_sides, threads)?;
                 let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true, shades: Vec::new() };
                 // The two totals only: the record a report keeps of every
                 // cell took most of the time here, and was thrown away. And
                 // what the form holds of each cell is asked once for both.
-                if let Ok((volume, wrong)) = crate::report::measure_with(&form, &built, &mut seen) {
+                if let Ok((volume, wrong)) = crate::report::measure_with(&form, &built, &mut seen, threads) {
                     (built.solid, built.error, built.unmeasured) = (volume, wrong, false);
                 }
                 Some(built)
@@ -2439,19 +2715,19 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let closer = ways.into_iter().flatten().min_by(|a, b| a.error.total_cmp(&b.error));
             match closer {
                 Some(built) => Built { path, ..built },
-                None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
+                None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g, threads),
             }
         }
         Solid::Pyramid { bricks, field, min, max } => match bricks.clone().filter(|_| spec.wedges) {
             Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
-            None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
+            None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g, threads),
         },
         Solid::Round {
             round,
             field,
             min,
             max,
-        } => match fit_round(round).filter(|_| spec.wedges) {
+        } => match fit_round_on(round, threads).filter(|_| spec.wedges) {
             Some(bricks) => Built {
                 bricks,
                 solid: 0.0,
@@ -2470,6 +2746,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 },
                 path,
                 g,
+                threads,
             ),
         },
         Solid::Flat {
@@ -2482,13 +2759,13 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
         } => {
             let mut bricks = Vec::new();
             let mut shades = Vec::new();
-            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
+            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges, threads };
             let fit = match (&spec.stones, &spec.mosaic) {
                 // each stone its own outline, where a solid form is one
                 (Some(stones), _) => crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
                 // each colour of the mosaic its own outline
                 (None, Some(mosaic)) => crate::pattern::lay_mosaic(&|p| region.eval(p), mosaic, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
-                (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),
+                (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, threads, &mut bricks),
             };
             let depth = *depth as f64;
             Built {
@@ -2502,7 +2779,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             }
         }
         Solid::Pipe { top, full, chamfer, rise, axis, first, layers, min, max, .. } => {
-            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: true };
+            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: true, threads };
             let narrower = |x: f64, y: f64| top.eval(DVec2::new(x, y));
             let fit = fit_planar_towards(&|x, y| full.eval(DVec2::new(x, y)), *min, *max, &opts, Some((&narrower, *chamfer)));
             let pipe = crate::fit_stack::Pipe { wall: &fit.pieces, top: &narrower, chamfer: *chamfer, rise: *rise, axis: *axis, first: *first, layers: *layers, max_ext: spec.max_ext };
@@ -2518,7 +2795,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
         } => {
             let mut bricks = Vec::new();
             for (region, w0, depth) in layers {
-                fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks);
+                fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, threads, &mut bricks);
             }
             // measured against the round tube by the caller
             Built {
@@ -2545,6 +2822,7 @@ fn fit_layer(
     w0: i32,
     depth: i32,
     g: f64,
+    threads: Threads,
     bricks: &mut Vec<CellBrick>,
 ) -> fit_planar::Fit {
     let (ua, va) = plane_axes(axis);
@@ -2552,6 +2830,7 @@ fn fit_layer(
         brick_cost: spec.simplify / (g * g),
         max_ext: spec.max_ext,
         wedges: spec.wedges,
+        threads,
     };
     let fit = fit_planar(&|x, y| region.eval(DVec2::new(x, y)), min, max, &opts);
     for piece in &fit.pieces {
@@ -2906,12 +3185,101 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_is_laid_on_the_flat_faces_of_a_form_that_is_not_flat_all_over() {
+        // A filled circle built as a round tube: a disc 8 deep with a rounded rim.
+        let disc = |mosaic| Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 30.0, thick: 8.0, depth: 8, fill: true, tube: true, plane: 2, mosaic, ..Spec::default() };
+        let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
+        let plain = build(&disc(None)).unwrap();
+        let built = build(&disc(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        assert!(plain.shades.is_empty() && plain.bricks.iter().any(|b| b.mask != CUBE), "the plain disc has no rounded rim to speak of");
+        assert_eq!(built.shades.len(), built.bricks.len());
+        // the pattern is there: several colours, on bricks that run the form's whole depth
+        let (low, high) = (built.bricks.iter().map(|b| b.min[2]).min().unwrap(), built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap());
+        let coloured: Vec<&CellBrick> = built.bricks.iter().zip(&built.shades).filter(|(_, shade)| **shade != 0).map(|(b, _)| b).collect();
+        assert!(coloured.len() > 200 && coloured.iter().all(|b| b.min[2] == low && b.min[2] + b.ext[2] == high), "{} coloured bricks", coloured.len());
+        assert!(built.shades.iter().collect::<HashSet<_>>().len() >= 3);
+        // the rim is as it was: every sloped brick of the plain disc is still there, in the ground colour
+        let sloped = |built: &Built| built.bricks.iter().filter(|b| b.mask != CUBE).map(|b| (b.mask, b.min, b.ext)).collect::<HashSet<_>>();
+        assert!(sloped(&plain).is_subset(&sloped(&built)), "the rim was changed");
+        assert!(built.bricks.iter().zip(&built.shades).filter(|(b, _)| b.mask != CUBE && sloped(&plain).contains(&(b.mask, b.min, b.ext))).all(|(_, shade)| *shade == 0));
+        // the same room is filled as before: whole bricks, and the pattern's tiles cut in two, which are half a box each
+        let cells = |built: &Built| built.bricks.iter().filter(|b| b.mask == CUBE).map(|b| b.ext.iter().product::<i32>()).sum::<i32>();
+        let halves: i32 = built.bricks.iter().filter(|b| b.mask != CUBE && !sloped(&plain).contains(&(b.mask, b.min, b.ext))).map(|b| b.ext.iter().product::<i32>()).sum();
+        assert_eq!(cells(&plain), cells(&built) + halves / 2);
+        for (n, a) in built.bricks.iter().enumerate().filter(|(_, a)| a.mask == CUBE) {
+            assert!(built.bricks[n + 1..].iter().filter(|b| b.mask == CUBE).all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
+        }
+    }
+
+    #[test]
+    fn a_pattern_is_laid_on_the_sides_of_a_form_with_some_height() {
+        // a block 40 by 30 and 12 high, as a filled closed outline, laid as planks
+        let block = |depth: i32, mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-19.5, 0.5, 0.5), DVec3::new(20.5, 0.5, 0.5)], thick: 30.0, depth, plane: 2, mosaic, ..Spec::default() };
+        let planks = crate::pattern::STYLES.iter().position(|style| style.name == "planks").unwrap();
+        let laid = |depth: i32| build(&block(depth, Some(crate::pattern::Mosaic { style: planks, size: 2, bevel: false, border: 0, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        let (plain, built) = (build(&block(12, None)).unwrap(), laid(12));
+        assert_eq!(built.shades.len(), built.bricks.len());
+        let (lo, hi) = ([0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
+        // On each of the four sides, between the top cell and the bottom
+        // one, the colours change going up the side: a pattern seen from
+        // the side, where tiles pushed through from the top would give
+        // every column of a side one colour from top to bottom.
+        let colour_at = |cell: [i32; 3]| built.bricks.iter().zip(&built.shades).find(|(b, _)| (0..3).all(|k| cell[k] >= b.min[k] && cell[k] < b.min[k] + b.ext[k])).map(|(_, shade)| *shade);
+        for (side, at) in [(0, lo[0]), (0, hi[0] - 1), (1, lo[1]), (1, hi[1] - 1)] {
+            let other = 1 - side;
+            let changing = (lo[other] + 2..hi[other] - 2).filter(|along| {
+                let column: HashSet<Option<u8>> = (lo[2] + 1..hi[2] - 1).map(|up| { let mut cell = [0, 0, up]; (cell[side], cell[other]) = (at, *along); colour_at(cell) }).collect();
+                assert!(!column.contains(&None), "a cell of the side is empty");
+                column.len() > 1
+            }).count();
+            assert!(changing > 5, "side {side} at {at}: {changing} columns change colour going up");
+        }
+        // the same room is filled as with no pattern, each cell once
+        let cells = |built: &Built| built.bricks.iter().map(|b| b.ext.iter().product::<i32>()).sum::<i32>();
+        assert_eq!(cells(&built), cells(&plain));
+        for (n, a) in built.bricks.iter().enumerate() {
+            assert!(built.bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
+        }
+        // A wall of bevelled bricks six deep: its face is the bevelled
+        // bricks' own tops, sloped, and not a layer of tiles laid over them.
+        let bricks = crate::pattern::STYLES.iter().position(|style| style.name == "bricks").unwrap();
+        let wall = build(&block(6, Some(crate::pattern::Mosaic { style: bricks, size: 2, bevel: true, border: 0, seed: 3, mortar: true, stagger: 50, upright: false, uneven: [0; 2] }))).unwrap();
+        let face = wall.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        let tops: Vec<&CellBrick> = wall.bricks.iter().filter(|b| b.min[2] + b.ext[2] == face).collect();
+        assert!(tops.iter().filter(|b| b.mask != CUBE).count() > 100 && wall.bricks.iter().zip(&wall.shades).filter(|(b, _)| b.min[2] + b.ext[2] == face).all(|(_, shade)| *shade != 0), "the wall's face was laid over");
+        // a floor two deep has no sides to speak of: every brick runs through it
+        let floor = laid(2);
+        assert!(floor.bricks.iter().all(|b| b.min[2] == floor.bricks[0].min[2] && b.ext[2] == 2));
+    }
+
+    #[test]
+    fn a_pattern_colours_a_form_and_does_not_reshape_it() {
+        // a band 20 wide curving through a third of a turn, whose edges slant
+        let band = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-61.5, 0.5, -0.5), DVec3::new(-3.5, 0.5, 6.5), DVec3::new(4.5, 0.5, 2.5), DVec3::new(47.5, 0.5, -42.5)], thick: 20.0, depth: 1, plane: 2, mosaic, ..Spec::default() };
+        let medallions = crate::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap();
+        let plain = build(&band(None)).unwrap();
+        let built = build(&band(Some(crate::pattern::Mosaic { style: medallions, size: 2, bevel: false, border: 0, seed: 14, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
+        // as close to the form as it is plain, to the last figure
+        assert_eq!((built.solid, built.error), (plain.solid, plain.error));
+        // The sloped bricks of the edge are the plain form's own, each
+        // whole or taken apart into smaller ones of its slope: every one
+        // of the patterned form's lies inside one of the plain form's,
+        // with the same shape, and none is longer than the longest there.
+        let sloped = |built: &Built| built.bricks.iter().filter(|b| b.mask != CUBE).copied().collect::<Vec<CellBrick>>();
+        let longest = |bricks: &[CellBrick]| bricks.iter().map(|b| b.ext[0].max(b.ext[1])).max().unwrap();
+        assert!(longest(&sloped(&plain)) > 5, "the plain band has no long sloped brick to keep");
+        let edge: Vec<CellBrick> = sloped(&built).into_iter().filter(|b| !sloped(&plain).iter().any(|whole| whole.mask == b.mask && (0..3).all(|k| whole.min[k] <= b.min[k] && b.min[k] + b.ext[k] <= whole.min[k] + whole.ext[k]))).collect();
+        // (what is left are the pattern's own tiles cut in two, a cell each)
+        assert!(edge.iter().all(|b| b.ext == [1, 1, 1]), "a sloped brick of the patterned band is not one of the plain band's: {:?}", edge.iter().find(|b| b.ext != [1, 1, 1]));
+    }
+
+    #[test]
     fn a_pattern_is_laid_at_single_microbricks_whatever_the_budget() {
         // (`grain: 0` is the brick size chosen by the budget, as the editor has it)
         // a floor 240 by 160 and 4 deep, which as a plain floor is a handful of bricks (a floor one deep is at single microbricks anyway: there is no coarser brick it can be built of)
         let floor = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-119.5, 0.5, 0.5), DVec3::new(120.5, 0.5, 0.5)], thick: 160.0, depth: 4, plane: 2, grain: 0, budget: 2500, mosaic, ..Spec::default() };
         let rug = crate::pattern::STYLES.iter().position(|style| style.name == "rug").unwrap();
-        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: 0, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }))).unwrap();
+        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: false, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }))).unwrap();
         // Far over the budget, at the finest size: some 25,000 bricks. (Held
         // to the budget it is built of bricks 2 or more across and is under
         // 8,000. A flat form's `grain` says 1 either way, its bricks being
@@ -3443,7 +3811,7 @@ mod tests {
         let quick = build_as(&bell, false).unwrap();
         assert!(quick.unmeasured && quick.error == 0.0 && quick.bricks.iter().any(|b| b.mask != CUBE));
         assert!(!built.unmeasured && built.error > 0.0);
-        let (volume, wrong) = crate::report::measure(&Probe::new(&bell, built.grain).unwrap(), &built).unwrap();
+        let (volume, wrong) = crate::report::measure(&Probe::new(&bell, built.grain).unwrap(), &built, Threads::available()).unwrap();
         assert!((volume - built.solid).abs() < 1e-9 && (wrong - built.error).abs() < 1e-9, "measured apart {wrong} of {volume}, together {} of {}", built.error, built.solid);
         // solid, and a plain dome's profile
         let (_, solid) = stepped(&Spec { fill: true, ..bell.clone() });
@@ -3906,5 +4274,103 @@ mod tests {
             ..Spec::default()
         })
         .contains("positive"));
+    }
+
+    /// Forms of every kind that shares work out over threads, each small
+    /// enough to build in a few milliseconds.
+    fn forms_built_on_threads() -> Vec<(&'static str, Spec)> {
+        use crate::pattern::{Mosaic, Stones};
+        let ball = Spec { form: Form::Sphere, points: vec![at(0.0, 0.0, 0.0)], radius: 14.0, fill: true, ..Spec::default() };
+        let ring = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 24.0, thick: 6.0, tube: true, ..Spec::default() };
+        let lift = vec![(at(-24.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 9.0))];
+        let wavy: Vec<DVec3> = (0..5).map(|i| at(i as f64 * 20.0 - 40.0, if i % 2 == 0 { -8.0 } else { 8.0 }, 0.0)).collect();
+        let band = Spec { form: Form::Spline, points: wavy, thick: 14.0, depth: 2, ..Spec::default() };
+        let floor = Spec { form: Form::Circle, points: vec![at(0.0, 0.0, 0.0)], radius: 26.0, fill: true, depth: 3, ..Spec::default() };
+        let mosaic = |style: usize| Mosaic { style, size: 2, bevel: false, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [40, 30] };
+        let cube = Spec { form: Form::Cube, points: vec![at(0.0, 0.0, 0.0)], radius: 13.0, stretch: DVec3::new(1.5, 1.0, 0.6), fill: true, ..Spec::default() };
+        vec![
+            // measured layer by layer
+            ("solid sphere", ball.clone()),
+            ("ellipsoid, brick size chosen for it", Spec { stretch: DVec3::new(1.0, 0.7, 1.3), grain: 0, budget: 300, ..ball.clone() }),
+            // fitted cell by cell, a row of blocks at a time
+            ("thin hollow sphere", Spec { fill: false, thick: 2.0, ..ball.clone() }),
+            ("sphere with a point pulled out", Spec { pulls: vec![(at(14.0, 0.0, 0.0), DVec3::new(5.0, 0.0, 0.0))], pull_reach: 8.0, ..ball.clone() }),
+            // circles fitted together
+            ("bell", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 29.0), at(17.0, 0.0, 9.0), at(24.0, 0.0, 16.0)], thick: 3.5, ..Spec::default() }),
+            ("vase, filled", Spec { form: Form::Revolve, points: vec![at(0.0, 0.0, 20.0), at(6.0, 0.0, 10.0), at(8.0, 0.0, 0.0)], fill: true, ..Spec::default() }),
+            // outlines sampled together
+            ("ring as a pipe", ring.clone()),
+            ("ring as stacked bands", Spec { protrude: true, ..ring.clone() }),
+            ("lifted tube", Spec { pulls: lift.clone(), pull_reach: 12.0, ..ring.clone() }),
+            ("lifted band", Spec { tube: false, thick: 4.0, depth: 3, pulls: lift, pull_reach: 12.0, ..ring.clone() }),
+            ("band along a spline", band.clone()),
+            ("arch", Spec { form: Form::Arch(ArchType::Round), points: vec![at(-30.0, 0.0, 0.0), at(30.0, 0.0, 0.0)], thick: 3.0, depth: 4, simplify: 0.25, ..Spec::default() }),
+            ("pyramid", Spec { form: Form::Pyramid, points: vec![at(0.0, 0.0, 0.0)], radius: 12.0, fill: true, ..Spec::default() }),
+            // stones fitted together, then laid in order
+            ("stepping stones on a band", Spec { stones: Some(Stones { size: 7.0, gap: 0.5, uneven: 0.6, seed: 3 }), ..band.clone() }),
+            ("small stones with no gap on a disc", Spec { stones: Some(Stones { size: 4.0, gap: 0.0, uneven: 1.0, seed: 8 }), ..floor.clone() }),
+            // tiles drawn together
+            ("medallions", Spec { mosaic: Some(mosaic(0)), ..floor.clone() }),
+            ("rug", Spec { mosaic: Some(mosaic(1)), ..floor.clone() }),
+            ("planks", Spec { mosaic: Some(mosaic(2)), ..floor.clone() }),
+            ("bricks", Spec { mosaic: Some(mosaic(3)), ..floor.clone() }),
+            ("bricks with bevelled tops", Spec { mosaic: Some(Mosaic { bevel: true, ..mosaic(3) }), ..floor.clone() }),
+            ("bevelled bricks with no mortar on a band", Spec { mosaic: Some(Mosaic { bevel: true, mortar: false, uneven: [0; 2], stagger: 50, ..mosaic(3) }), depth: 4, ..band }),
+            ("cobblestone", Spec { mosaic: Some(mosaic(4)), ..floor.clone() }),
+            // a pattern on the flat part of a form that is not flat all over, and on a form's sides
+            ("rounded disc with a rug", Spec { tube: true, thick: 6.0, mosaic: Some(mosaic(1)), ..floor.clone() }),
+            ("rounded disc with cobblestone", Spec { tube: true, thick: 6.0, mosaic: Some(mosaic(4)), ..floor.clone() }),
+            ("solid cube", cube.clone()),
+            ("hollow cube", Spec { fill: false, thick: 3.0, ..cube.clone() }),
+            ("cube with bricks on its top and sides", Spec { mosaic: Some(Mosaic { bevel: true, border: 0, ..mosaic(3) }), ..cube.clone() }),
+            ("hollow cube with cobblestone on its sides", Spec { fill: false, thick: 3.0, mosaic: Some(Mosaic { border: 0, ..mosaic(4) }), ..cube }),
+        ]
+    }
+
+    /// Whatever differs between two builds of one form: nothing, if they
+    /// are the same bricks in the same order with the same figures, to the
+    /// last bit.
+    fn difference(a: &Built, b: &Built) -> Option<String> {
+        if a.bricks.len() != b.bricks.len() {
+            return Some(format!("{} bricks against {}", a.bricks.len(), b.bricks.len()));
+        }
+        if let Some(k) = (0..a.bricks.len()).find(|k| a.bricks[*k] != b.bricks[*k]) {
+            return Some(format!("brick {k} of {} is {:?} against {:?}", a.bricks.len(), a.bricks[k], b.bricks[k]));
+        }
+        if a.shades != b.shades {
+            return Some("the same bricks in other colours".into());
+        }
+        if (a.solid.to_bits(), a.error.to_bits()) != (b.solid.to_bits(), b.error.to_bits()) {
+            return Some(format!("volume {} and discrepancy {} against {} and {}", a.solid, a.error, b.solid, b.error));
+        }
+        ((a.grain, a.unmeasured, &a.path) != (b.grain, b.unmeasured, &b.path)).then(|| "another brick size, curve, or measured and not".into())
+    }
+
+    #[test]
+    fn a_build_is_the_same_on_any_number_of_threads() {
+        // A build is compared with builds saved in reports and tests, and a
+        // seeded pattern has to be one pattern on every machine: so the
+        // number of threads may decide how long a build takes and nothing
+        // else. `forced` shares out even these small forms, which are
+        // otherwise under every threshold; 3 and 7 so that the work is cut
+        // where no block, row or power of two ends.
+        let mut bricks = 0;
+        for (name, spec) in forms_built_on_threads() {
+            for measured in [true, false] {
+                let one = build_with(&spec, measured, Threads::ONE).unwrap_or_else(|e| panic!("{name}: {e}"));
+                bricks += one.bricks.len();
+                for threads in [2, 3, 7] {
+                    let several = build_with(&spec, measured, Threads::forced(threads)).unwrap_or_else(|e| panic!("{name} on {threads} threads: {e}"));
+                    if let Some(differs) = difference(&one, &several) {
+                        panic!("{name}, {}, on {threads} threads and on one: {differs}", if measured { "measured" } else { "unmeasured" });
+                    }
+                }
+                // and as the editor builds it, on as many as there are, where there is work enough for them
+                let usual = build_as(&spec, measured).unwrap();
+                assert!(difference(&one, &usual).is_none(), "{name}: {:?}", difference(&one, &usual));
+            }
+        }
+        // (the forms did build: a pattern that laid nothing would pass every comparison)
+        assert!(bricks > 20_000, "{bricks}");
     }
 }

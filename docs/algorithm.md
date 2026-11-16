@@ -1908,21 +1908,20 @@ rest. The colour sets these two start in are shades of one material, so the
 first colour is one more shade among them. In masonry the ground is the
 mortar.
 
-#### The edge: bricks of five cells at most
+#### The edge: the form's own
 
-Along a slanting edge the outline fitter lays sloped bricks twenty cells
-long. A sloped brick is one colour, so on a patterned floor those bricks
-stood in the pattern as bare triangles the size of a medallion.
+A pattern colours a form and does not reshape it. The floor is fitted
+exactly as it is with no pattern, so its outline and its figures for
+closeness are the same either way.
 
-The floor is therefore fitted with no brick longer than five cells
-(`EDGE_BRICK`). Only the sloped bricks of the edge are more numerous for it, since the
-whole cells are joined into long bricks again by colour. The price is paid
-at the edge, because a slant drawn in bricks of five cells follows the form
-a little less closely than one drawn in bricks of twenty. On a band 20
-cells wide curving through a third of a turn, 1.5% of its area is amiss
-with bricks of five cells against 0.6% with bricks of twenty. Shorter and
-longer limits were both worse. At three cells the edge was plainly ragged,
-and at eight the bare triangles were still plain to see.
+Along a slanting edge that fit lays sloped bricks up to twenty cells long.
+A sloped brick is one colour, and each takes the pattern's colour at the
+middle of its solid half. The floor was once fitted with no brick longer
+than five cells, so that the edge's bricks were small enough to carry the
+pattern. That changed the form: on a band 20 cells wide curving through a
+third of a turn, 1.5% of its area was amiss with bricks of five cells
+against 0.6% with the fit's own. A form whose outline moved when a pattern
+was chosen was the worse fault, and the limit was taken out.
 
 A sloped brick whose two sides share a divisor is also taken apart into
 that many smaller sloped bricks of the same slope, over a staircase of

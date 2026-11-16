@@ -96,7 +96,8 @@ fn d(p: Vec3) -> DVec3 {
 }
 
 pub fn run() {
-    run_form(0, false);
+    // (on a cube: the plainest form there is, and the one new forms are added as)
+    run_form(state::CUBE, false);
 }
 
 /// Open the editor on one of `state::FORMS`, by its place in that list.
@@ -223,7 +224,7 @@ pub fn run_form(form: usize, claude: bool) {
         for event in frame.events.iter_mut() {
             match event {
                 // Shift + right click on a point that was added takes it off again
-                Event::MousePress { button: MouseButton::Right, position, modifiers, handled, .. } if !*handled && modifiers.shift => {
+                Event::MousePress { button: MouseButton::Right, position, modifiers, handled, .. } if !*handled && modifiers.alt => {
                     if let Ok(Some(hit)) = pick(&context, &camera, *position, &handle_mesh, Cull::Back) {
                         if let Some((Handle::Pull(which), _)) = shown_handles.get(hit.instance_id as usize) {
                             state.remove_pull_at(*which);
@@ -275,13 +276,16 @@ pub fn run_form(form: usize, claude: bool) {
                         if let Ok(Some(hit)) = hit {
                             let form = drawn.get(hit.geometry_id as usize).and_then(|&m| owners[m].get(hit.instance_id as usize));
                             if let Some(&form) = form {
-                                // With Shift, on the curve being edited: a new
+                                // With Alt, on the form being edited: a new
                                 // point is added there, and dragged from there.
-                                let added = if modifiers.shift && form == 0 { state.add_pull(d(hit.position)) } else { None };
+                                // (Alt, and Shift for marking forms: Shift is what
+                                // every other program picks several things with,
+                                // and it was taken here by the adding of points)
+                                let added = if modifiers.alt && form == 0 { state.add_pull(d(hit.position)) } else { None };
                                 if let Some(pull) = added {
                                     dragging = Some(pull);
-                                } else if (modifiers.ctrl || modifiers.command) && form > 0 {
-                                    // with Ctrl, another form is picked to be copied too, or let go
+                                } else if modifiers.shift && form > 0 {
+                                    // with Shift, another form is picked as well as the one being edited, or let go
                                     state.toggle_pick(form - 1);
                                 } else {
                                     if form > 0 {
@@ -353,6 +357,13 @@ pub fn run_form(form: usize, claude: bool) {
                     #[cfg(not(target_arch = "wasm32"))]
                     Key::F12 => {
                         shot_keyed = Some(!modifiers.shift);
+                        true
+                    }
+                    // (D alone is a camera key, as A is: with Ctrl it is taken here first)
+                    Key::D if held => {
+                        state.record();
+                        state.add_copy();
+                        state.toast = Some(("Duplicated the form being edited".to_string(), None));
                         true
                     }
                     Key::Z if held => state.undo() || true,
@@ -527,7 +538,7 @@ pub fn run_form(form: usize, claude: bool) {
                     Handle::Move | Handle::Slide(_) | Handle::Spin(_) => Srgba::new_opaque(250, 250, 250),
                     Handle::Point(_) => Srgba::new_opaque(255, 220, 60),
                     Handle::Pull(_) => Srgba::new_opaque(255, 140, 40),
-                    Handle::Radius | Handle::Rise => Srgba::new_opaque(70, 230, 240),
+                    Handle::Radius | Handle::Rise | Handle::Side(_) => Srgba::new_opaque(70, 230, 240),
                 });
             }
             instances.colors = Some(colours);

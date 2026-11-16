@@ -441,7 +441,7 @@ fn answer(body: &str, call: &dyn Fn(&str, &Value) -> Answered) -> Option<Value> 
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "brickloft", "title": "Brickloft editor", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Tools for the Brickloft editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one example arch. To build something of your own, change that arch into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
+                "instructions": "Tools for the Brickloft editor, which fits curved forms with Brickadia microbricks. Lengths are in microbricks (a fifth of a stud) and may end in a half. Call get_workspace first: forms are named by their place in its list, which every tool that changes the workspace returns afresh. A workspace is never empty: the editor starts with one cube. To build something of your own, change that cube into your first form with update_form, and do not leave it standing beside what you add. The player is watching the editor and sees each change as it is made."
             })
         }
         "ping" => json!({}),
@@ -1126,7 +1126,7 @@ mod tests {
     #[test]
     fn a_form_added_with_no_points_stands_where_the_editor_would_put_it() {
         let mut state = State::new();
-        for form in ["arch pointed", "circle", "spline", "bezier", "sphere", "revolve", "pyramid"] {
+        for form in ["arch pointed", "circle", "spline", "bezier", "sphere", "revolve", "pyramid", "cube"] {
             let said = apply(&mut state, "add_form", &json!({ "settings": { "form": form } }), || 0.0);
             assert!(said.is_ok(), "{form}: {said:?}");
             assert!(!state.built.bricks.is_empty(), "{form} was added with no bricks");
@@ -1168,6 +1168,13 @@ mod tests {
         let before = state.forms();
         assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "radius": 990, "rise": 990 } }), || 0.0).is_err());
         assert_eq!(state.forms(), before);
+        // a bush and a flower are kinds of the same form, each at its own size and in its own colours
+        for (kind, name) in brickloft_core::tree::KINDS {
+            apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "arch round", "points": [[0.5, 0.5, 0.5], [9.5, 0.5, 0.5]], "radius": 8, "rise": "natural" } }), || 0.0).unwrap();
+            apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "plant", "tree": name, "radius": Tree::usual_size(kind).1 / 2.0, "rise": Tree::usual_size(kind).0 / 2.0, "points": [[0.5, 0.5, 0.5]] } }), || 0.0).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let (spec, paint, _) = &state.forms()[0];
+            assert_eq!((spec.form, spec.tree, paint.colours.as_slice()), (brickloft_core::spec::Form::Tree, Tree::of(kind), crate::paint::palette(name)), "{name}");
+        }
     }
 
     #[test]
@@ -1267,5 +1274,40 @@ mod tests {
         // a quarter turn about z takes x to y
         let [x, y, z, w] = grid_from_degrees([0.0, 0.0, 90.0]);
         assert!((x.abs() + y.abs()) < 1e-12 && (z - w).abs() < 1e-12);
+    }
+    #[test]
+    fn a_cube_is_added_resized_and_moved() {
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        let low_high = |state: &State| {
+            let b = &state.built.bricks;
+            ([0, 1, 2].map(|k| b.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| b.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()))
+        };
+        // named alone, it stands where the editor would put one: 16 each way, on the floor
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "cube", "fill": true } }), || 0.0).unwrap());
+        assert_eq!(added["forms"][0]["settings"]["form"], "cube");
+        assert_eq!((state.spec.form, state.others.len()), (brickloft_core::spec::Form::Cube, 1));
+        assert_eq!(low_high(&state), ([-8, -8, 0], [8, 8, 16]));
+        // a floor 40 by 30 and 2 deep: half a side of 20, and a stretch along each axis
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "points": [[0, 0, 1]], "radius": 20, "stretch": [1, 0.75, 0.05] } }), || 0.0).unwrap();
+        assert_eq!(low_high(&state), ([-20, -15, 0], [20, 15, 2]));
+        assert_eq!((state.built.bricks.len(), state.built.error), (1, 0.0));
+        // hollow, it is a frame; and a pattern is laid through its 2
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "fill": false, "thick": 3 } }), || 0.0).unwrap();
+        assert_eq!((state.built.bricks.len(), state.built.error), (4, 0.0));
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "fill": true, "mosaic": ["planks", 2, 0, 0, 1] } }), || 0.0).unwrap();
+        assert!(state.built.bricks.len() > 20 && state.built.bricks.iter().all(|b| (b.min[2], b.ext[2]) == (0, 2)));
+        assert_eq!(state.paint.mode, crate::paint::Mode::Solid, "update_form recoloured a form it was not asked to");
+        // its one point is its middle
+        apply(&mut state, "move_point", &json!({ "index": 0, "point": 0, "to": [10, 0, 1] }), || 0.0).unwrap();
+        assert_eq!(low_high(&state), ([-10, -15, 0], [30, 15, 2]));
+        // a tube left on by another form is not kept, and what cannot be built is refused
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tube": true, "mosaic": "none" } }), || 0.0).unwrap();
+        assert!(!state.spec.tube && state.built.bricks.len() == 1);
+        let now = state.forms();
+        for bad in [json!({ "stretch": [1, 1] }), json!({ "stretch": [1e9, 1, 1] }), json!({ "radius": 0 }), json!({ "stretch": ["wide", 1, 1] })] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": bad }), || 0.0).is_err(), "{bad} was taken");
+            assert_eq!(state.forms(), now, "{bad} changed the workspace");
+        }
     }
 }

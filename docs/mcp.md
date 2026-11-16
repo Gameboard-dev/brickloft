@@ -90,7 +90,7 @@ file, the entry is a server of type `http` with the URL above.
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
 | `set_view` | Switches the rulers, rings, arrows and dots on and off, and lowers the floor. |
 | `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
-| `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Shift + click and a drag do. |
+| `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Alt + click and a drag do. |
 | `move_pull_point` | Changes how far an added point pulls the form. |
 | `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
 | `line_up_arch` | Gives an arch that stands at an angle to its grid a grid of its own, turned to line it up, so that it is fitted smoothly. Its feet stay where they are. |
@@ -119,11 +119,12 @@ The settings Claude can give:
 
 | Setting | Meaning |
 |---|---|
-| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid` or `tree` |
-| `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, or the points of a curve or profile. A form added without points starts where the editor would start one. |
+| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`, `cube` or `tree` |
+| `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, a cube's middle, or the points of a curve or profile. A form added without points starts where the editor would start one. |
 | `radius`, `rise`, `thick`, `depth` | Sizes in microbricks |
 | `fill`, `tube`, `closed` | Solid or shell, round tube or flat band, closed loop |
 | `stretch`, `cut`, `plane`, `weights` | Stretch per axis, the part of a sphere to keep, the axis a circle faces, a Bézier curve's pulls |
+| `radius` and `stretch` of a `cube` | `radius` is half the cube's side, and `stretch` scales it along x, y and z. A floor 40 by 30 and 2 deep is `radius` 20 with `stretch` `[1, 0.75, 0.05]`. Each length is rounded to a whole microbrick. With `fill` false the cube is hollow, with walls `thick` on every side. `depth`, `tube` and `plane` do nothing to a cube. |
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which tree a `tree` form is; only the kind is needed (see below) |

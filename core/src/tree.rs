@@ -1655,7 +1655,9 @@ mod tests {
     #[ignore = "a measurement, not a check: run it by name with --nocapture"]
     #[cfg(not(debug_assertions))]
     fn where_the_time_goes() {
-        use std::cell::Cell;
+        use crate::par::Threads;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Mutex;
         use std::time::{Duration, Instant};
         let _ = Duration::ZERO;
         for (kind, name) in KINDS {
@@ -1666,11 +1668,10 @@ mod tests {
             let (lo, hi) = model.bounds();
             let (min, max) = ((lo - 1.0).floor().to_array().map(|v| v as i32), (hi + 1.0).ceil().to_array().map(|v| v as i32));
             // every 16th sample is kept, to be asked again on their own
-            let (calls, kept) = (Cell::new(0u64), std::cell::RefCell::new(Vec::new()));
+            let (calls, kept) = (AtomicU64::new(0), Mutex::new(Vec::new()));
             let field = |p: DVec3| {
-                calls.set(calls.get() + 1);
-                if calls.get() % 16 == 0 {
-                    kept.borrow_mut().push(p);
+                if calls.fetch_add(1, Ordering::Relaxed) % 16 == 0 {
+                    kept.lock().unwrap().push(p);
                 }
                 model.eval(p)
             };
@@ -1680,7 +1681,7 @@ mod tests {
             let start = Instant::now();
             let (bricks, _) = model.colour(fit.bricks, 80);
             let coloured = start.elapsed();
-            let kept = kept.into_inner();
+            let (kept, calls) = (kept.into_inner().unwrap(), calls.into_inner());
             let again = (0..3).map(|_| { let at = Instant::now(); let sum: f64 = kept.iter().map(|p| model.eval(*p).min(1.0)).sum(); std::hint::black_box(sum); at.elapsed() }).min().unwrap();
             let timed: Duration = again * 16;
             let listed: usize = kept.iter().map(|p| {
@@ -1690,10 +1691,12 @@ mod tests {
                 (model.start[b + 1] - model.start[b]) as usize
             }).sum();
             println!("{name}: a sample's bucket lists {:.1} parts", listed as f64 / kept.len() as f64);
-            let whole = (0..3).map(|_| { let at = Instant::now(); build(&spec).unwrap(); at.elapsed() }).min().unwrap();
+            let timed_on = |threads: Threads| (0..3).map(|_| { let at = Instant::now(); crate::spec::build_with(&spec, true, threads).unwrap(); at.elapsed() }).min().unwrap();
+            let (whole, shared) = (timed_on(Threads::ONE), timed_on(Threads::available()));
+            println!("{name}: a whole build on {} threads {shared:?}", Threads::available().count());
             let occupied = (0..model.start.len() - 1).filter(|b| model.start[b + 1] > model.start[*b]).count();
             println!("{name}: {} buckets, {occupied} with parts, {:.1} parts in each of those", model.start.len() - 1, model.items.len() as f64 / occupied as f64);
-            println!("{name}: {} parts, {} bricks; grown in {grown:?}, fitted in {fitted:?} of which the field's {} samples took about {timed:?}, coloured in {coloured:?}; a whole build {whole:?}", model.parts(), bricks.len(), calls.get());
+            println!("{name}: {} parts, {} bricks; grown in {grown:?}, fitted in {fitted:?} of which the field's {} samples took about {timed:?}, coloured in {coloured:?}; a whole build {whole:?}", model.parts(), bricks.len(), calls);
         }
     }
 
@@ -2021,7 +2024,8 @@ mod tests {
             let (height, spread) = Tree::usual_size(kind);
             let tall = height.min(100.0);
             let spec = Spec { radius: (spread * tall / height).round(), rise: Some(tall), ..spec(kind, 1) };
-            let least = (0..4).map(|_| { let at = std::time::Instant::now(); build(&spec).unwrap(); at.elapsed() }).min().unwrap();
+            // (on one thread: with more it is quicker, by how many the machine has)
+            let least = (0..4).map(|_| { let at = std::time::Instant::now(); crate::spec::build_with(&spec, true, crate::par::Threads::ONE).unwrap(); at.elapsed() }).min().unwrap();
             println!("{name}, {tall} tall: {least:?}");
             assert!(least.as_secs_f64() < 1.2, "{name} took {least:?}");
         }

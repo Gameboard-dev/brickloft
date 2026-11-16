@@ -171,6 +171,15 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [246, 244, 236], [232, 228, 214], [200, 180, 60]],
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [240, 130, 30], [206, 50, 30], [50, 34, 26]],
         ],
+        // Light browns and greys of weathered stone, mixed; then the browns
+        // alone; then the greys alone. Eight tones to a set, so that the
+        // stones of a path differ as real ones do. (A sandstone yellow
+        // and a slate blue were tried and were no colours for a path.)
+        "stepping stones" => &[
+            &[[168, 140, 120], [150, 148, 144], [190, 160, 130], [128, 126, 122], [146, 122, 104], [170, 168, 162], [178, 150, 124], [112, 110, 106]],
+            &[[168, 140, 120], [146, 122, 104], [190, 160, 130], [124, 110, 98], [178, 150, 124], [156, 132, 110], [200, 172, 142], [136, 118, 102]],
+            &[[150, 148, 144], [128, 126, 122], [170, 168, 162], [112, 110, 106], [160, 158, 152], [138, 136, 132], [180, 178, 172], [120, 118, 114]],
+        ],
         // cream with terracotta, blue and ochre; blue and green tiles; black, grey and gold; night blue; terracotta; greens
         _ => &[
             &MOSAIC,
@@ -251,6 +260,21 @@ impl Paint {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_pattern_on_the_list_has_colours_of_its_own() {
+        // (medallions are the ones that start in the colours every other name falls back to)
+        let fallback = palettes("no such pattern");
+        for name in std::iter::once("stepping stones").chain(brickloft_core::pattern::STYLES.iter().map(|style| style.name)).filter(|name| *name != "medallions") {
+            assert!(palettes(name) != fallback, "{name} has no colours of its own");
+            assert!(palettes(name).iter().all(|set| set.len() >= 4 && set.len() <= MOST_COLOURS), "{name}: a set of too few colours or too many");
+        }
+        // stepping stones are light browns and greys: no colour of theirs is far from grey, or dark, or bright
+        for colour in palettes("stepping stones").iter().flat_map(|set| set.iter()) {
+            let (most, least) = (*colour.iter().max().unwrap() as i32, *colour.iter().min().unwrap() as i32);
+            assert!(most - least <= 70 && (100..=205).contains(&most) && colour[0] >= colour[2], "{colour:?} is no light brown or grey");
+        }
+    }
+
     use super::*;
 
     fn brick(z: i32) -> CellBrick {

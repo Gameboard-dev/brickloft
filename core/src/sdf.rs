@@ -316,6 +316,11 @@ pub enum Region {
     Fill(Fill),
     /// a closed band together with everything it encloses
     Both(Stroke, Fill),
+    /// The first outline less the second, which lies inside it: a frame.
+    /// A band drawn along the frame's middle (a `Stroke`) is the same thing
+    /// only where the path is smooth: round a corner its outer edge is an
+    /// arc, and a rectangle's corners are square.
+    Frame(Fill, Fill),
 }
 
 impl Region {
@@ -324,6 +329,7 @@ impl Region {
             Region::Stroke(s) => s.eval(p.extend(0.0)),
             Region::Fill(f) => f.eval(p),
             Region::Both(s, f) => s.eval(p.extend(0.0)).min(f.eval(p)),
+            Region::Frame(outer, hole) => outer.eval(p).max(-hole.eval(p)),
         }
     }
 }

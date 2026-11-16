@@ -8,6 +8,6 @@ fn main() {
     // (first of all, so that a crash while starting is on record too)
     brickloft_editor::crash::log_to_file();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let form = args.iter().find_map(|a| a.parse().ok()).unwrap_or(0);
+    let form = args.iter().find_map(|a| a.parse().ok()).unwrap_or(brickloft_editor::state::CUBE);
     brickloft_editor::run_form(form, args.iter().any(|a| a == "--claude"));
 }

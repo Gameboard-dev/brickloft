@@ -82,7 +82,8 @@ pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
                 <[u8; 3]>::try_from(parts).ok()
             })
             .collect();
-        let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
+        // (as many as a paint may have: four was the most until a pattern could have eight, and a form in a pattern's eight colours could then be copied and not pasted)
+        let colours = colours.filter(|c| c.len() <= crate::paint::MOST_COLOURS).ok_or("a form's colours cannot be read")?;
         let paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
         forms.push((parse_spec(spec)?, paint, place));
     }
@@ -387,6 +388,23 @@ mod tests {
     }
 
     #[test]
+    fn a_form_in_eight_colours_is_saved_and_opened_again() {
+        // a form that took a pattern's eight colours and was then set to blend, as a player's was
+        let mut state = crate::state::State::new();
+        for mode in [crate::paint::Mode::Blend, crate::paint::Mode::Pattern] {
+            state.paint = Paint { mode, colours: crate::paint::palette("rug").to_vec(), axis: 2, width: 2 };
+            assert_eq!(state.paint.colours.len(), crate::paint::MOST_COLOURS);
+            state.refresh(|| 0.0);
+            let forms = state.forms();
+            assert_eq!(unpack(&pack(&state.painted(), &forms).unwrap(), cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
+        }
+        // one colour more than a paint may have is still refused
+        let nine = describe(&state.forms()).replacen("paint ", "paint ", 1).lines().map(|line| if line.starts_with("paint ") { format!("{line} 1,2,3") } else { line.to_string() }).collect::<Vec<_>>().join("
+");
+        assert!(unpack(nine.as_bytes(), false).is_err());
+    }
+
+    #[test]
     fn a_save_from_before_saves_held_the_workspace_still_opens() {
         let spec = workspace().full_spec();
         let opened = unpack(spec_text(&spec).as_bytes(), false).unwrap();
@@ -398,5 +416,30 @@ mod tests {
     fn starter_folders_are_always_listed_once() {
         let all = sorted_with_starters(vec!["Arches".into(), "towers".into()]);
         assert_eq!(all, ["Arches", "domes", "towers"]);
+    }
+    #[test]
+    fn a_cube_is_saved_and_opened_as_it_was() {
+        let mut state = crate::state::State::new();
+        state.add_cube();
+        // a hollow box 30 by 12 by 6, patterned, and one left as it started
+        state.spec.stretch = brickloft_core::DVec3::new(30.0, 12.0, 6.0) / 17.0;
+        (state.spec.fill, state.spec.thick) = (false, 2.0);
+        state.spec.mosaic = Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: false, border: 1, seed: 5, mortar: true, stagger: -1, upright: false, uneven: [0; 2] });
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        let forms = state.forms();
+        assert_eq!(forms.iter().filter(|f| f.0.form == brickloft_core::spec::Form::Cube).count(), 2);
+        let bytes = pack(&state.painted(), &forms).unwrap();
+        let opened = unpack(&bytes, cfg!(not(target_arch = "wasm32"))).unwrap();
+        assert_eq!(opened, forms);
+        assert_eq!(unpack(describe(&forms).as_bytes(), false).unwrap(), forms);
+        // and builds the same bricks once opened
+        let mut other = crate::state::State::new();
+        other.open(opened);
+        other.refresh(|| 0.0);
+        assert_eq!(other.built.bricks, state.built.bricks);
+        assert_eq!(other.others[1].built.bricks, state.others[1].built.bricks);
+        assert!(!other.others[1].built.bricks.is_empty());
     }
 }
