@@ -198,11 +198,38 @@ What remains:
   twigs once more. Half-size bricks do not exist, and a wedge is a cell
   wide at its foot, so thinner twigs would be drawn with gaps.
 - **Grass.** Its blades are one cell thick, so a lawn is coarse tufts
-  close up. A pond's patch hangs below the level it was laid on. Water
-  has two levels at most, every raised pond shares one height, and a
-  stream is four to six cells of water across where two were asked for:
-  the soil is laid on a grid 2.4 apart and a narrower channel closes
-  over.
+  close up. Water has two levels at most, every raised pond shares one
+  height, and a stream is five or six cells of water across. A stream
+  could now be narrower: the soil is laid cell by cell, and the 2.4 grid
+  that closed a narrow channel over is used only to find where water
+  stands. A corner where two bare slopes meet is a step, since the
+  sloped piece for it is a different shape for each way it can face.
+- **Cliffs, waterfalls and a random landscape.** The ground can be asked
+  its height, its slope and its water cell by cell without the bricks
+  being built (`grass::Ground`, [algorithm.md](algorithm.md), section
+  7.10). A cliff would stand where the slope is steep and a waterfall
+  where a stream's level steps down, and a landscape made at random
+  would be touches chosen by rule. None of the three is written.
+- **A touch on a very large lawn.** A build works out the whole ground
+  and lays every tile each time, 16 to 22 ms for a lawn 300 by 240
+  ([performance.md](performance.md#still-slow)). A touch changes the
+  ground within its range and the bricks of the tiles it reaches. Two
+  things kept between builds would make its cost the same on any lawn:
+  the heights as they were before the last touch, to which a new touch
+  is applied where it reaches, and each tile's bricks, kept under
+  everything the tile is laid from (the ground of its cells and those
+  round it, the lawn's settings, the reeds over it) and compared in
+  full, so that a kept tile is never another tile's. They were not
+  built because the lawns measured stayed within two frames a touch.
+- **One draw call for every shape.** The form being edited is drawn by
+  one object with a call for each brick shape in it, a dozen for a lawn
+  ([performance.md](performance.md#a-touch-of-the-brush-on-a-lawn)). A
+  vertex shader that moved the corners a shape lacks onto the corners it
+  keeps would draw every shape from one cube, in one call. The other
+  forms are still drawn through three-d's instanced mesh, one object a
+  shape, which costs about 45 microseconds a shape a frame; they could go
+  the same way as the form being edited if each form's grid were given
+  as one matrix for its bricks.
 - **Speed.** A tree takes about a fifth of a second on a desktop's cores
   and up to a second on one, nearly all of it distance samples. Colouring
   is shared over threads. Growing a plant is one run of random numbers and

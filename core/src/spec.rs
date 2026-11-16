@@ -1052,6 +1052,9 @@ pub enum Solid {
     /// A maze, which is several outlines and colours at once and is built
     /// by its own code (see [`crate::maze::walls`]).
     Maze(Box<crate::maze::walls::Walls>),
+    /// A patch of grass, which is laid out from the height of its ground
+    /// and is its bricks exactly, as furniture is (see [`crate::grass`]).
+    Grass(std::sync::Arc<crate::grass::Model>),
 }
 
 /// The two axes a flat form's outline is drawn in, given the one it lies across.
@@ -1072,6 +1075,7 @@ impl Solid {
             | Solid::Pipe { field, .. } => field.eval(p),
             Solid::Furniture(model) => model.distance(p),
             Solid::Maze(walls) => walls.distance(p),
+            Solid::Grass(lawn) => lawn.distance(p),
             Solid::Flat {
                 region,
                 axis,
@@ -1139,6 +1143,7 @@ impl Probe {
             | Solid::Pyramid { .. }
             | Solid::Lathe { .. }
             | Solid::Furniture(_)
+            | Solid::Grass(_)
             | Solid::Maze(_)
             | Solid::Pipe { .. } => None,
         }
@@ -1428,6 +1433,10 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             // (a plant with no line takes no more room for one)
             let (long, wide) = if lay.run.is_empty() { (reach, reach) } else { ((run.1.x - run.0.x) as i64 / 2 + reach, (run.1.y - run.0.y) as i64 / 2 + reach) };
             check_size(&[long, wide, height as i64 + 8])?;
+            // Grass is laid out and not fitted (see `crate::grass`): it comes with its bricks, as furniture does.
+            if spec.tree.kind == crate::tree::Kind::Grass {
+                return Ok((Solid::Grass(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads))), path));
+            }
             let tree = std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spread, &lay));
             let (lo, hi) = tree.bounds();
             volume(Field::Tree(tree), lo, hi, path)
@@ -2800,6 +2809,8 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -
     match solid {
         // nothing to fit, and nothing to measure: the furniture is these bricks
         Solid::Furniture(model) => Built { bricks: model.bricks.clone(), solid: model.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: model.shades.clone() },
+        // (nor a lawn: it is these bricks)
+        Solid::Grass(lawn) => Built { bricks: lawn.bricks.clone(), solid: lawn.volume, error: 0.0, path, grain: 1, unmeasured: false, shades: lawn.shades.clone() },
         Solid::Maze(walls) => {
             let (bricks, shades, solid, error) = walls.built(spec.mosaic.as_ref(), spec.wedges, spec.max_ext, threads);
             Built { bricks, solid, error, path, grain: 1, unmeasured: false, shades }
@@ -3043,13 +3054,45 @@ fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
 /// solid is.
 pub fn plant(spec: &Spec) -> Option<std::sync::Arc<crate::tree::Model>> {
     let spec = spec.snapped();
-    if spec.form != Form::Tree || spec.grain > 1 {
+    // (nor grass, which is laid out and has no such solid: see `lawn`)
+    if spec.form != Form::Tree || spec.grain > 1 || spec.tree.kind == crate::tree::Kind::Grass {
         return None;
     }
     let foot = *spec.points.first()?;
     let (lay, _) = tree_lay(&spec, foot).ok()?;
     let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
     Some(std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spec.radius, &lay)))
+}
+
+/// The lawn a spec describes, as it was laid out: its bricks, which part
+/// each is, and the ground under them (see [`crate::grass`]). `None` for
+/// a spec that is no patch of grass.
+///
+/// As [`plant`] is for the other plants, and for the same askers: what a
+/// brick of a lawn is made of in the game's file goes by its part.
+pub fn lawn(spec: &Spec) -> Option<std::sync::Arc<crate::grass::Model>> {
+    if spec.form != Form::Tree || spec.tree.kind != crate::tree::Kind::Grass {
+        return None;
+    }
+    let spec = spec.snapped();
+    let foot = *spec.points.first()?;
+    let (lay, _) = tree_lay(&spec, foot).ok()?;
+    let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
+    Some(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available())))
+}
+
+/// The ground under the lawn a spec describes, without its bricks: how
+/// high each cell of it is, how it slopes, and where water stands and
+/// runs (see [`crate::grass::Ground`]). `None` for a spec that is no
+/// patch of grass. A millisecond or two, where the bricks are several.
+pub fn lawn_ground(spec: &Spec) -> Option<crate::grass::Ground> {
+    if spec.form != Form::Tree || spec.tree.kind != crate::tree::Kind::Grass {
+        return None;
+    }
+    let spec = spec.snapped();
+    let foot = *spec.points.first()?;
+    let (lay, _) = tree_lay(&spec, foot).ok()?;
+    Some(crate::grass::Ground::new(&spec.tree.clamped(), foot, spec.radius, &lay, Threads::available()))
 }
 
 /// How high the ground of a patch of grass is at a place, over the floor
