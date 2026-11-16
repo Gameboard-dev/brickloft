@@ -8,9 +8,8 @@
 //! The file is written with the `brdb` crate, which is the game community's
 //! own reader and writer of the format.
 
-use crate::paint::{Paint, MODES};
 use crate::state::{Painted, Placed};
-use arcs_core::report::{parse_spec, spec_text};
+use crate::store::{describe, forms_in};
 use arcs_core::orient::{Models, Solver};
 use arcs_core::shapes::Kind;
 use brdb::{BString, Brick, BrickSize, BrickType, Color, Direction, Rotation, World};
@@ -34,58 +33,9 @@ const fn asset(kind: Kind) -> &'static str {
 /// player to take a colour from: the neutral one the editor draws it in.
 const UNPAINTED: [u8; 3] = [214, 208, 196];
 
-/// The line that begins each form in a file's description.
-const FORM: &str = "[arcs form]";
-
 /// Largest file a paste will read. A prefab of a million bricks is a few
 /// megabytes; anything near this is not one of ours.
-const MAX_FILE: u64 = 64 << 20;
-
-/// The workspace's forms as text, kept in the file's description.
-///
-/// A .brz holds bricks, and bricks cannot be turned back into the form they
-/// were fitted to. With the forms written beside them, a file copied from
-/// the editor pastes back as forms that can still be reshaped, not as a
-/// fixed lump; the game ignores the description.
-fn describe(forms: &[Placed]) -> String {
-    let mut text = String::new();
-    for (spec, paint, place) in forms {
-        let mode = MODES.iter().position(|m| m.0 == paint.mode).unwrap_or(0);
-        let colours: Vec<String> = paint.colours.iter().map(|c| format!("{},{},{}", c[0], c[1], c[2])).collect();
-        text += &format!("{FORM}\nplace {} {} {}\npaint {mode} {} {} {}\n{}", place[0], place[1], place[2], paint.axis, paint.width, colours.join(" "), spec_text(spec));
-    }
-    text
-}
-
-/// The reverse of [`describe`]. The text is from a file, which may be anyone's.
-fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
-    let mut forms = Vec::new();
-    for part in description.split(FORM).skip(1) {
-        // where it stands, in units; a file from before forms had a place has none
-        let part = part.trim_start();
-        let (place, part) = match part.strip_prefix("place ").and_then(|rest| rest.split_once('\n')) {
-            Some((line, rest)) => {
-                let units: Vec<i32> = line.split_whitespace().filter_map(|v| v.parse().ok()).collect();
-                (<[i32; 3]>::try_from(units).map_err(|_| "where a form stands cannot be read")?.map(|u| u.clamp(-800, 800)), rest)
-            }
-            None => ([0; 3], part),
-        };
-        let (first, spec) = part.split_once('\n').ok_or("a form in it is cut short")?;
-        let mut words = first.strip_prefix("paint ").ok_or("a form in it has no colours")?.split_whitespace();
-        let mut number = || words.next().and_then(|w| w.parse::<usize>().ok());
-        let (Some(mode), Some(axis), Some(width)) = (number(), number(), number()) else { return Err("a form's colours cannot be read".into()) };
-        let colours: Option<Vec<[u8; 3]>> = words
-            .map(|w| {
-                let parts: Vec<u8> = w.split(',').filter_map(|v| v.parse().ok()).collect();
-                <[u8; 3]>::try_from(parts).ok()
-            })
-            .collect();
-        let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
-        let paint = Paint { mode: MODES.get(mode).ok_or("a form's colouring is not one this editor has")?.0, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
-        forms.push((parse_spec(spec)?, paint, place));
-    }
-    Ok(forms)
-}
+pub(crate) const MAX_FILE: u64 = 64 << 20;
 
 /// The bricks as a prefab, with the forms they were built from in its
 /// description. `Err` names the first brick that cannot be placed.
@@ -277,6 +227,7 @@ fn place_on_clipboard(_: &std::path::Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use arcs_core::spec::Spec;
+    use crate::paint::Paint;
     use arcs_core::shapes::{all_masks, CellBrick};
     use brdb::{BrFsReader, Brz, IntoReader};
 

@@ -21,7 +21,7 @@ start it from a folder you can write to:
 |---|---|
 | `arcs-build.brz` | Ctrl+C: the prefab put on the clipboard |
 | `arcs-report-N.txt` | Save report |
-| `arcs-forms/` | Saved forms |
+| `arcs-forms/` | Saved forms, one `.brz` prefab for each save |
 
 All three are in `.gitignore`.
 

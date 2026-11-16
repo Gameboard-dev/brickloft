@@ -157,7 +157,7 @@ another for the browser, chosen with `#[cfg(target_arch = "wasm32")]`:
 |---|---|---|
 | Window | made with an icon, maximised | the page's canvas |
 | Time | the system's monotonic clock | `Date.now()`, since that clock is not available |
-| Saved forms | text files under `arcs-forms/` | the browser's local storage, one entry per form |
+| Saved forms | `.brz` prefab files under `arcs-forms/` | the browser's local storage, one entry per save |
 | Save report | a numbered text file | the report's text on the clipboard |
 | Copy and paste of bricks | a `.brz` file on the clipboard | not available |
 
@@ -183,9 +183,10 @@ fn now_ms() -> f64 {
 A page cannot write files either. Saved forms therefore go into the
 browser's **local storage**, a small store of named text entries that the
 browser keeps for each web address
-([editor/src/store.rs](../editor/src/store.rs)). Each form is one entry,
-named after its folder and its name, holding the same text a desktop save
-writes to a file:
+([editor/src/store.rs](../editor/src/store.rs)). Each save is one entry,
+named after its folder and its name. It holds the workspace's forms as
+text, which is the text a desktop save carries in its prefab file's
+description, without the bricks:
 
 ```rust
     fn key(folder: &str, name: &str) -> String {

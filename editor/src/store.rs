@@ -1,14 +1,122 @@
 //! Saved forms, kept in named folders.
 //!
-//! On the desktop a form is a small text file (the same `key = value` text a
-//! report's `[spec]` section has) under `arcs-forms/<folder>/` beside where
-//! the editor was started, so saved forms can be read, copied and shared as
-//! files. A web page cannot write files, so in the browser the same folders
-//! and forms live in the page's local storage:
+//! A save is the whole workspace: every form, with its colours, where it
+//! stands and the grid it is on.
+//!
+//! On the desktop a save is a Brickadia prefab, `arcs-forms/<folder>/<name>.brz`
+//! beside where the editor was started: the same file Ctrl+C makes (see
+//! `brz`), holding the bricks and, in its description, the forms they were
+//! fitted to. That format was chosen over a text format of the editor's own
+//! (YAML, TOML, JSON) for three reasons. The editor already writes and
+//! reads it, for copy and paste, so saving adds no second format to keep in
+//! step and no parser to depend on. Reading it back goes through the checks
+//! a paste goes through. And a saved file is useful without the editor: the
+//! game loads it as a prefab. What it gives up is being edited by hand,
+//! which the forms' text inside it would allow and nothing has needed.
+//!
+//! A web page cannot write files, and the browser build has no .brz writer,
+//! so in the browser the same folders live in the page's local storage and
+//! each save is the forms' text alone:
 //! https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage
+//!
+//! Before saves were prefabs they were text files of one form's settings,
+//! `<name>.txt`. Those are still listed and opened.
 //!
 //! Folder and form names come from a text box, and on the desktop they
 //! become part of a file path, so only [`clean`] names are ever used.
+
+use crate::paint::{Paint, MODES};
+use crate::state::{Painted, Placed};
+use arcs_core::report::{parse_spec, spec_text};
+
+/// The line that begins each form in a file's description.
+const FORM: &str = "[arcs form]";
+
+
+/// The workspace's forms as text, kept in a .brz file's description.
+///
+/// A .brz holds bricks, and bricks cannot be turned back into the form they
+/// were fitted to. With the forms written beside them, a file copied from
+/// the editor pastes back as forms that can still be reshaped, not as a
+/// fixed lump; the game ignores the description.
+pub fn describe(forms: &[Placed]) -> String {
+    let mut text = String::new();
+    for (spec, paint, place) in forms {
+        let mode = MODES.iter().position(|m| m.0 == paint.mode).unwrap_or(0);
+        let colours: Vec<String> = paint.colours.iter().map(|c| format!("{},{},{}", c[0], c[1], c[2])).collect();
+        text += &format!("{FORM}\nplace {} {} {}\npaint {mode} {} {} {}\n{}", place[0], place[1], place[2], paint.axis, paint.width, colours.join(" "), spec_text(spec));
+    }
+    text
+}
+
+/// The reverse of [`describe`]. The text is from a file, which may be anyone's.
+pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
+    let mut forms = Vec::new();
+    for part in description.split(FORM).skip(1) {
+        // where it stands, in units; a file from before forms had a place has none
+        let part = part.trim_start();
+        let (place, part) = match part.strip_prefix("place ").and_then(|rest| rest.split_once('\n')) {
+            Some((line, rest)) => {
+                let units: Vec<i32> = line.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                (<[i32; 3]>::try_from(units).map_err(|_| "where a form stands cannot be read")?.map(|u| u.clamp(-800, 800)), rest)
+            }
+            None => ([0; 3], part),
+        };
+        let (first, spec) = part.split_once('\n').ok_or("a form in it is cut short")?;
+        let mut words = first.strip_prefix("paint ").ok_or("a form in it has no colours")?.split_whitespace();
+        let mut number = || words.next().and_then(|w| w.parse::<usize>().ok());
+        let (Some(mode), Some(axis), Some(width)) = (number(), number(), number()) else { return Err("a form's colours cannot be read".into()) };
+        let colours: Option<Vec<[u8; 3]>> = words
+            .map(|w| {
+                let parts: Vec<u8> = w.split(',').filter_map(|v| v.parse().ok()).collect();
+                <[u8; 3]>::try_from(parts).ok()
+            })
+            .collect();
+        let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
+        let paint = Paint { mode: MODES.get(mode).ok_or("a form's colouring is not one this editor has")?.0, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
+        forms.push((parse_spec(spec)?, paint, place));
+    }
+    Ok(forms)
+}
+
+/// The workspace as the bytes of a save.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pack(bricks: &[Painted], forms: &[Placed]) -> Result<Vec<u8>, String> {
+    crate::brz::prefab(bricks, forms).and_then(|world| world.to_brz_vec().map_err(|e| e.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn pack(_: &[Painted], forms: &[Placed]) -> Result<Vec<u8>, String> {
+    Ok(describe(forms).into_bytes())
+}
+
+/// The forms in a save's bytes; `prefab` says they are a .brz file's. The
+/// bytes are from a file, which may be anyone's.
+pub fn unpack(bytes: &[u8], prefab: bool) -> Result<Vec<Placed>, String> {
+    if prefab {
+        #[cfg(not(target_arch = "wasm32"))]
+        return crate::brz::read(bytes);
+        #[cfg(target_arch = "wasm32")]
+        return Err("a .brz file cannot be read in the browser".into());
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| "it is not text")?;
+    if text.contains(FORM) {
+        return forms_in(text);
+    }
+    // a save from before saves held the workspace: one form's settings
+    Ok(vec![(parse_spec(text)?, Paint::default(), [0; 3])])
+}
+
+/// Save the workspace under `name` in `folder`. Returns what to tell the player.
+pub fn save(folder: &str, name: &str, bricks: &[Painted], forms: &[Placed]) -> Result<String, String> {
+    files::write(folder, name, &pack(bricks, forms)?)
+}
+
+/// The forms saved under `name` in `folder`.
+pub fn load(folder: &str, name: &str) -> Result<Vec<Placed>, String> {
+    let (bytes, prefab) = files::read(folder, name)?;
+    unpack(&bytes, prefab)
+}
 
 /// Folders offered even before anything is saved in them.
 pub const STARTER_FOLDERS: [&str; 2] = ["arches", "domes"];
@@ -48,7 +156,8 @@ mod files {
         std::env::current_dir().unwrap_or_default().join("arcs-forms")
     }
 
-    /// Names of the entries of `dir` that are folders (or, if not, `.txt` files).
+    /// Names of the entries of `dir` that are folders (or, if not, saves:
+    /// `.brz` files, and the `.txt` files of earlier versions).
     fn names(dir: PathBuf, folders: bool) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
         entries
@@ -58,7 +167,7 @@ mod files {
                 let name = if folders {
                     path.is_dir().then(|| path.file_name()?.to_str().map(str::to_string))?
                 } else {
-                    (path.extension()? == "txt").then(|| path.file_stem()?.to_str().map(str::to_string))?
+                    path.extension().is_some_and(|x| x == "brz" || x == "txt").then(|| path.file_stem()?.to_str().map(str::to_string))?
                 }?;
                 // a file put there by hand under a name the editor would not
                 // have given is left alone, not listed
@@ -75,6 +184,8 @@ mod files {
         let Ok(folder) = clean(folder) else { return Vec::new() };
         let mut found = names(root().join(folder), false);
         found.sort_by_key(|s| s.to_lowercase());
+        // one name saved both ways is one save: see `read`
+        found.dedup();
         found
     }
 
@@ -85,16 +196,24 @@ mod files {
         Ok(folder)
     }
 
-    pub fn save(folder: &str, name: &str, text: &str) -> Result<String, String> {
+    pub fn write(folder: &str, name: &str, bytes: &[u8]) -> Result<String, String> {
         let (folder, name) = (add_folder(folder)?, clean(name)?);
-        let path = root().join(folder).join(format!("{name}.txt"));
-        std::fs::write(&path, text).map_err(|e| format!("could not save {}: {e}", path.display()))?;
+        let path = root().join(folder).join(format!("{name}.brz"));
+        std::fs::write(&path, bytes).map_err(|e| format!("could not save {}: {e}", path.display()))?;
         Ok(format!("Saved to {}", path.display()))
     }
 
-    pub fn load(folder: &str, name: &str) -> Result<String, String> {
-        let path = root().join(clean(folder)?).join(format!("{}.txt", clean(name)?));
-        std::fs::read_to_string(&path).map_err(|e| format!("could not open {}: {e}", path.display()))
+    /// A save's bytes, and whether they are a .brz file's. Where a name was
+    /// saved both ways, the .brz is the later one and is the one read.
+    pub fn read(folder: &str, name: &str) -> Result<(Vec<u8>, bool), String> {
+        let stem = root().join(clean(folder)?).join(clean(name)?);
+        let prefab = stem.with_extension("brz").is_file();
+        let path = stem.with_extension(if prefab { "brz" } else { "txt" });
+        let size = std::fs::metadata(&path).map_err(|e| format!("could not open {}: {e}", path.display()))?.len();
+        if size > crate::brz::MAX_FILE {
+            return Err(format!("{} is {size} bytes, more than the editor will read", path.display()));
+        }
+        std::fs::read(&path).map(|bytes| (bytes, prefab)).map_err(|e| format!("could not open {}: {e}", path.display()))
     }
 }
 
@@ -140,18 +259,20 @@ mod files {
         Ok(folder)
     }
 
-    pub fn save(folder: &str, name: &str, text: &str) -> Result<String, String> {
+    pub fn write(folder: &str, name: &str, bytes: &[u8]) -> Result<String, String> {
         let (folder, name) = (add_folder(folder)?, clean(name)?);
+        let text = std::str::from_utf8(bytes).map_err(|_| "the forms could not be written as text")?;
         storage()?.set_item(&key(&folder, &name), text).map_err(|_| "the browser's storage for this page is full".to_string())?;
         Ok(format!("Saved as {folder} / {name} in this browser"))
     }
 
-    pub fn load(folder: &str, name: &str) -> Result<String, String> {
-        storage()?.get_item(&key(&clean(folder)?, &clean(name)?)).ok().flatten().ok_or_else(|| "that form is no longer there".to_string())
+    pub fn read(folder: &str, name: &str) -> Result<(Vec<u8>, bool), String> {
+        let text = storage()?.get_item(&key(&clean(folder)?, &clean(name)?)).ok().flatten().ok_or_else(|| "that form is no longer there".to_string())?;
+        Ok((text.into_bytes(), false))
     }
 }
 
-pub use files::{add_folder, folders, forms, load, save};
+pub use files::{add_folder, folders, forms};
 
 #[cfg(test)]
 mod tests {
@@ -165,6 +286,38 @@ mod tests {
         for bad in ["", "   ", "..", "../secrets", "a/b", "a\\b", "C:", "con.txt", "na\nme","x".repeat(41).as_str(), "tab\tname", "semi;colon", "quo\"te", "amp&ersand"] {
             assert!(clean(bad).is_err(), "{bad:?} was accepted");
         }
+    }
+
+    /// A workspace of three forms: one coloured, one on a tilted grid of
+    /// its own, and the plain one being edited.
+    fn workspace() -> crate::state::State {
+        let mut state = crate::state::State::new();
+        state.paint = Paint { mode: crate::paint::Mode::Blend, colours: vec![[200, 30, 30], [20, 40, 220]], axis: 0, width: 3 };
+        state.add_copy();
+        state.add_grid();
+        state.spec.grid = [0.0, 0.0, 0.6, 0.8];
+        state.spec.grid_at = [30.0, 4.0, 12.0];
+        state.refresh(|| 0.0);
+        state
+    }
+
+    #[test]
+    fn a_save_gives_back_every_form_with_its_colours_place_and_grid() {
+        let state = workspace();
+        let forms = state.forms();
+        assert_eq!(forms.len(), 3);
+        let bytes = pack(&state.painted(), &forms).unwrap();
+        assert_eq!(unpack(&bytes, cfg!(not(target_arch = "wasm32"))).unwrap(), forms);
+        // and as the text a browser keeps
+        assert_eq!(unpack(describe(&forms).as_bytes(), false).unwrap(), forms);
+    }
+
+    #[test]
+    fn a_save_from_before_saves_held_the_workspace_still_opens() {
+        let spec = workspace().full_spec();
+        let opened = unpack(spec_text(&spec).as_bytes(), false).unwrap();
+        assert_eq!(opened, vec![(spec, Paint::default(), [0; 3])]);
+        assert!(unpack(&[0xff, 0xfe, 0x00], false).is_err(), "bytes that are not text were taken as a form");
     }
 
     #[test]

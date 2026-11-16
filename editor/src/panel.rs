@@ -7,7 +7,7 @@ use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
 /// Saved forms: a folder to choose, its forms to open, and a name to save under.
 fn saved_forms(ui: &mut Ui, state: &mut State) {
-    ui.label("Saved forms");
+    ui.label("Saved forms").on_hover_text("A save holds the whole workspace: every form, with its colours and the grid it is on.");
     let before = state.folder.clone();
     ComboBox::from_label("Folder").selected_text(state.folder.as_str()).show_ui(ui, |ui| {
         for folder in state.folders.clone() {
@@ -31,10 +31,10 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
             ui.dnd_drag_source(id, Dragged { folder: state.folder.clone(), name: name.clone() }, |ui| {
                 ui.label(format!(":: {name}")).on_hover_text("Drag onto the view to add it to the workspace.");
             });
-            if ui.small_button("Open").clicked() {
+            if ui.small_button("Open").on_hover_text("Open in place of everything in the workspace. Ctrl+Z brings the workspace back.").clicked() {
                 open = Some((name.clone(), false));
             }
-            if ui.small_button("Add").on_hover_text("Add to the workspace beside the form being edited.").clicked() {
+            if ui.small_button("Add").on_hover_text("Add its forms to the workspace, beside the form being edited and on its grid.").clicked() {
                 open = Some((name.clone(), true));
             }
         });
@@ -47,8 +47,7 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut state.save_name).hint_text("name").desired_width(110.0));
         if ui.button("Save").clicked() {
-            let text = arcs_core::report::spec_text(&state.full_spec());
-            state.store_note = crate::store::save(&state.folder, &state.save_name, &text).unwrap_or_else(|e| format!("Not saved: {e}"));
+            state.store_note = crate::store::save(&state.folder, &state.save_name, &state.painted(), &state.forms()).unwrap_or_else(|e| format!("Not saved: {e}"));
             state.list_saved();
         }
     });
@@ -517,17 +516,17 @@ struct Dragged {
     name: String,
 }
 
-/// Open a saved form: into the workspace as one more form, or in place of
-/// the one being edited.
+/// Open a save: its forms added to the workspace, as a paste adds them, or
+/// put in place of the whole workspace.
 fn open_saved(state: &mut State, folder: &str, name: &str, add: bool) {
-    let loaded = crate::store::load(folder, name).and_then(|text| arcs_core::report::parse_spec(&text));
-    state.store_note = match loaded {
-        Ok(spec) if add => {
-            state.add_form(spec);
+    state.store_note = match crate::store::load(folder, name) {
+        Ok(forms) if add => {
+            state.record();
+            state.paste(forms);
             format!("Added {name} to the workspace")
         }
-        Ok(spec) => {
-            state.load_spec(spec);
+        Ok(forms) => {
+            state.open(forms);
             state.save_name = name.to_string();
             format!("Opened {name}")
         }

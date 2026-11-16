@@ -150,10 +150,21 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 
 ### Saved forms
 
-Under **Saved forms**, forms are kept in folders (`arches`, `domes`, or your
-own) as small text files under `arcs-forms/`, beside where the program was
-started. **Open** replaces the form being edited or adds to the workspace,
-as chosen; a saved form can also be dragged from the list onto the view.
+**Save** under **Saved forms** keeps the whole workspace: every form, with
+its colours, where it stands and the grid it is on. Saves are kept in
+folders (`arches`, `domes`, or your own) under `arcs-forms/`, beside where
+the program was started.
+
+A save is a Brickadia prefab file (`.brz`), the same file Ctrl+C makes, so
+the game can load it as it stands. The file holds the bricks and, in its
+description, the forms they were fitted to, which is why it opens again as
+forms that can still be reshaped.
+
+**Open** puts a save in place of the whole workspace, and Ctrl+Z brings the
+workspace back. **Add** adds the save's forms beside the form being edited
+and on its grid, as a paste does. Dragging a save from the list onto the
+view adds it too. Saves made by earlier versions, which were text files of
+one form's settings, are still listed and opened.
 
 ## Colour
 

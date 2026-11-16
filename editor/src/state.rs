@@ -582,6 +582,19 @@ impl State {
         }
     }
 
+    /// Put `forms` in place of the whole workspace, as opening a save does:
+    /// each with its own colours, place and grid, the first the one being
+    /// edited. One step to undo.
+    pub fn open(&mut self, forms: Vec<Placed>) {
+        if forms.is_empty() {
+            return;
+        }
+        self.record();
+        self.undone.push(self.snapshot());
+        self.redone.clear();
+        self.restore(forms);
+    }
+
     fn snapshot(&self) -> Snapshot {
         std::iter::once((self.full_spec(), self.paint.clone(), self.place)).chain(self.others.iter().map(|i| (i.spec.clone(), i.paint.clone(), i.place))).collect()
     }
@@ -1808,6 +1821,24 @@ mod tests {
         state.turn(2, false);
         state.turn(2, true);
         assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+    }
+
+    #[test]
+    fn opening_a_save_replaces_the_workspace_and_can_be_undone() {
+        let mut state = State::new();
+        state.add_grid();
+        state.spec.grid = [0.0, 0.0, 0.6, 0.8];
+        state.paint.colours = vec![[9, 8, 7]];
+        let saved = state.forms();
+        let mut other = State::new();
+        other.add_copy();
+        other.add_copy();
+        let before = other.forms();
+        other.open(saved.clone());
+        assert_eq!(other.forms(), saved);
+        assert_eq!((other.spec.grid, other.paint.colours.clone()), ([0.0, 0.0, 0.6, 0.8], vec![[9, 8, 7]]));
+        assert!(other.undo());
+        assert_eq!(other.forms(), before);
     }
 
     #[test]
