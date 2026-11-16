@@ -89,7 +89,7 @@ impl Tree {
         let (fullness, count, bend) = match kind {
             Kind::Pine => (60, 15, 50),
             Kind::Palm => (60, 20, 45),
-            Kind::Oak => (60, 4, 50),
+            Kind::Oak => (60, 5, 50),
         };
         Tree { kind, seed: 1, fullness, count, bend, extras: false }
     }
@@ -733,18 +733,22 @@ fn pine(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     let (low, high) = (height * g.between(0.09, 0.14), height * 0.93);
     let gap = (high - low) / (tiers - 1) as f64;
     let mut tips = Vec::new();
+    // how long a tier's boughs are, as a share of the longest: shortening
+    // to the top, and the lowest tiers drawn in a little
+    let share = |u: f64| ((1.0 - u).powf(0.9) * 0.9 + 0.1) * (0.84 + 0.16 * (u / 0.12).min(1.0));
+    let longest = (0..tiers).map(|tier| share(tier as f64 / (tiers - 1) as f64)).fold(0.0, f64::max);
     for tier in 0..tiers {
         // 0 at the lowest tier, 1 at the highest
         let u = tier as f64 / (tiers - 1) as f64;
         // the tiers closer together towards the top, where each year's growth is shorter
         let z = low + (high - low) * (0.55 * u + 0.45 * (1.0 - (1.0 - u).powf(1.7)));
-        // shortening to the top, and the lowest tiers drawn in a little
-        let reach = spread * ((1.0 - u).powf(0.9) * 0.9 + 0.1) * (0.84 + 0.16 * (u / 0.12).min(1.0));
+        let reach = spread * share(u) / longest;
         let boughs = ((4.0 + 3.0 * (1.0 - u)) * (0.75 + 0.5 * full)).round().max(3.0) as usize;
         let turn = g.between(0.0, TAU);
         for k in 0..boughs {
             let way = turn + TAU * (k as f64 + g.between(-0.22, 0.22)) / boughs as f64;
-            let (length, at) = (reach * g.between(0.86, 1.1), z + g.between(-0.2, 0.2) * gap);
+            // (the first of a tier at its full length, so that the tree is as wide as asked)
+            let (length, at) = (reach * if k == 0 { 1.0 } else { g.between(0.84, 1.0) }, z + g.between(-0.2, 0.2) * gap);
             tips.push(bough(g, trunk, stem(at), thick(at), way, length, u, full, droop));
         }
         // and between the tiers, a few shorter boughs: fewer the higher
@@ -912,7 +916,8 @@ fn palm(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         let (z0, z1) = (i as f64 * ring, ((i + 1) as f64 * ring).min(top));
         let (a, b) = (middle(z0), middle(z1));
         let run = (b - a).truncate().length() / (z1 - z0).max(1e-9);
-        let (ra, rb) = (thick(z0) - 0.3, thick(z1) + 0.35);
+        // (the last may be cut short by the top of the trunk, and widens by as much less)
+        let (ra, rb) = (thick(z0) - 0.3, thick(z1) - 0.3 + 0.65 * (z1 - z0) / ring);
         let slack = 1.0 / (1.0 + run * run + ((rb - ra) / (z1 - z0).max(1e-9)).powi(2)).sqrt();
         // its top cell is the scar: a ring of another colour
         let scar = (z1 - 1.0).max(z0);
@@ -1090,8 +1095,8 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     // limbs of an oak in the open do. Branch ends stop short of it by
     // the leaves they carry.
     let fork = stem(bole);
-    let (out, over) = ((spread - mass * 2.3).max(spread * 0.5), (height - mass * 1.7).max(height * 0.6));
-    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * 0.2);
+    let (out, over) = ((spread - mass * 1.4).max(spread * 0.5), (height - mass * 1.3).max(height * 0.6));
+    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * 0.15);
     let dome = DVec3::new(out, out, over - heart.z);
     let under = heart.z - bole * 0.8;
     // where a point is in the dome: 0 at its heart, 1 on its outline
@@ -1124,10 +1129,10 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             let radius = girth * (share / total).sqrt();
             radii.push(radius);
             let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / limbs as f64;
-            // climbing at first, 35 to 60 degrees off upright; and where
-            // there are four or more, one of them nearer upright, to fill
-            // the top of the crown
-            let polar = if k == 0 && limbs >= 4 { g.between(0.2, 0.42) } else { g.between(0.6, 1.05) };
+            // striking out at wide angles, 45 to 70 degrees off upright;
+            // and where there are four or more, one of them nearer
+            // upright, to fill the top of the crown
+            let polar = if k == 0 && limbs >= 4 { g.between(0.15, 0.4) } else { g.between(0.78, 1.22) };
             waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
         g.forks.push((girth, radii));
@@ -1144,7 +1149,7 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
                     let outward = DVec3::new(at.x - fork.x, at.y - fork.y, 0.0).normalize_or_zero();
                     let heavy = (radius / girth).min(1.0);
                     // heavy limbs spread and sag; thin ones turn up
-                    let mut pull = outward * (0.3 * heavy) - DVec3::Z * (0.13 * heavy) + DVec3::Z * (0.2 * (1.0 - heavy).powi(2));
+                    let mut pull = outward * (0.36 * heavy) - DVec3::Z * (0.1 * heavy) + DVec3::Z * (0.15 * (1.0 - heavy).powi(2));
                     let wander = g.any_way() * (0.44 * gnarl);
                     if sized {
                         // near the outline, turned back along it
@@ -1202,10 +1207,10 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             }
         }
         if !sized {
-            // the size at which all but the furthest seventh of the ends are inside nine tenths of the dome
-            let mut far: Vec<f64> = ends.iter().map(|e| within(e.0).length()).collect();
+            // the size at which all but the furthest seventh of the ends are within nine tenths of the dome's width
+            let mut far: Vec<f64> = ends.iter().map(|e| (e.0 - fork).truncate().length()).collect();
             far.sort_by(f64::total_cmp);
-            scale = 0.9 / far[(far.len() * 6 / 7).min(far.len() - 1)].max(1e-9);
+            scale = 0.9 * out / far[(far.len() * 6 / 7).min(far.len() - 1)].max(1e-9);
         }
     }
     // What the holding in leaves over is taken up by stretching: the
@@ -1235,10 +1240,18 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         let mut way = DVec3::new(way.x * wide, way.y * wide, way.z * tall).normalize_or_zero();
         for tuft in 0..if size >= 1.0 { 3 } else { 1 } {
             let r = mass * size * g.between(0.85, 1.35) * (1.0 - 0.14 * tuft as f64);
-            g.leaves(at + DVec3::Z * r * 0.2, DVec3::new(r, r, r * 0.78));
+            // (each ball kept inside the tree's size, clusters and all: the
+            // spray wanders, and the spread asked for is the spread)
+            let held = |c: DVec3, r: f64| {
+                let (room, far) = ((spread - r - 1.7).max(0.0), (c - fork).truncate().length());
+                let back = (c - fork).truncate() * (room / far.max(1e-9)).min(1.0);
+                DVec3::new(fork.x + back.x, fork.y + back.y, c.z.min(height - r - 1.7))
+            };
+            at = held(at, r);
+            g.leaves(held(at + DVec3::Z * r * 0.2, r), DVec3::new(r, r, r * 0.78));
             for _ in 0..2 {
                 let (off, small) = (g.any_way(), r * g.between(0.55, 0.8));
-                g.leaves(at + DVec3::new(off.x, off.y, off.z * 0.5) * r * 0.9, DVec3::new(small, small, small * 0.72));
+                g.leaves(held(at + DVec3::new(off.x, off.y, off.z * 0.5) * r * 0.9, small), DVec3::new(small, small, small * 0.72));
             }
             way = (way + g.any_way() * 0.6 + DVec3::Z * 0.2).normalize();
             way.z = way.z.max(-0.1);
@@ -1267,6 +1280,7 @@ mod tests {
     /// Where a build's time goes, printed: run with `--nocapture`. Not a
     /// check of anything; the bound is `a_tree_builds_in_under_a_second`.
     #[test]
+    #[ignore = "a measurement, not a check: run it by name with --nocapture"]
     #[cfg(not(debug_assertions))]
     fn where_the_time_goes() {
         use std::cell::Cell;
@@ -1308,6 +1322,333 @@ mod tests {
             let occupied = (0..model.start.len() - 1).filter(|b| model.start[b + 1] > model.start[*b]).count();
             println!("{name}: {} buckets, {occupied} with parts, {:.1} parts in each of those", model.start.len() - 1, model.items.len() as f64 / occupied as f64);
             println!("{name}: {} parts, {} bricks; grown in {grown:?}, fitted in {fitted:?} of which the field's {} samples took about {timed:?}, coloured in {coloured:?}; a whole build {whole:?}", model.parts(), bricks.len(), calls.get());
+        }
+    }
+
+    fn model(kind: Kind, seed: u64) -> Model {
+        let spec = spec(kind, seed);
+        Model::new(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius)
+    }
+
+    /// A smaller tree of each kind, for the tests that build bricks.
+    fn small(kind: Kind, seed: u64) -> Spec {
+        let (height, spread) = Tree::usual_size(kind);
+        Spec { radius: (spread * 0.6).round(), rise: Some((height * 0.6).round()), ..spec(kind, seed) }
+    }
+
+    fn is_leaf(shade: u8) -> bool {
+        matches!(shade, LEAF | LEAF_DARK | LEAF_LIGHT | TOP)
+    }
+
+    #[test]
+    fn one_seed_is_one_tree_and_another_seed_another() {
+        for (kind, name) in KINDS {
+            let (a, again, other) = (build(&small(kind, 5)).unwrap(), build(&small(kind, 5)).unwrap(), build(&small(kind, 6)).unwrap());
+            assert!(a.bricks.len() > 2000, "{name}: only {} bricks", a.bricks.len());
+            assert_eq!((&a.bricks, &a.shades), (&again.bricks, &again.shades), "{name}: one seed gave two trees");
+            assert_ne!(a.bricks, other.bricks, "{name}: two seeds gave one tree");
+            // and each kind has numbers of its own: the same seed is not the same shape in another kind
+            let trunk = |kind| model(kind, 5).limbs[0].path.clone();
+            assert_ne!(trunk(Kind::Pine), trunk(Kind::Oak));
+        }
+    }
+
+    #[test]
+    fn no_two_bricks_share_a_cell_and_each_has_its_colour() {
+        for (kind, name) in KINDS {
+            let built = build(&Spec { tree: Tree { extras: true, ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
+            let mut seen = std::collections::HashSet::new();
+            for b in &built.bricks {
+                for z in 0..b.ext[2] {
+                    for y in 0..b.ext[1] {
+                        for x in 0..b.ext[0] {
+                            assert!(seen.insert((b.min[0] + x, b.min[1] + y, b.min[2] + z)), "{name}: two bricks in one cell");
+                        }
+                    }
+                }
+            }
+            assert_eq!(built.shades.len(), built.bricks.len(), "{name}: a brick has no colour number");
+            assert!(built.shades.iter().all(|s| *s < 8));
+            let count = |wanted: fn(u8) -> bool| built.shades.iter().filter(|s| wanted(**s)).count();
+            let (bark, leaves) = (count(|s| s == TRUNK), count(is_leaf));
+            assert!(bark > 50 && leaves > 500, "{name}: {bark} bricks of bark and {leaves} of leaves");
+            // nothing below the ground it stands on, and it stands on it
+            assert_eq!(built.bricks.iter().map(|b| b.min[2]).min(), Some(0), "{name}");
+            // its extras are there when asked for
+            if kind != Kind::Oak {
+                assert!(count(|s| s == EXTRA) > 3, "{name}: no extras");
+                let plain = build(&small(kind, 2)).unwrap();
+                assert!(!plain.shades.contains(&EXTRA), "{name}: extras not asked for");
+            }
+        }
+    }
+
+    /// A box cut by the fitter across bark and leaves is cut apart again:
+    /// no brick of bark reaches out into the needles.
+    #[test]
+    fn a_brick_is_of_one_colour_all_through() {
+        let spec = small(Kind::Pine, 3);
+        let built = build(&spec).unwrap();
+        let tree = Model::new(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius);
+        let mut boxes = 0;
+        for (b, shade) in built.bricks.iter().zip(&built.shades).filter(|(b, _)| b.mask == CUBE && b.ext != [1; 3]) {
+            boxes += 1;
+            for z in 0..b.ext[2] {
+                for y in 0..b.ext[1] {
+                    for x in 0..b.ext[0] {
+                        let middle = DVec3::new((b.min[0] + x) as f64 + 0.5, (b.min[1] + y) as f64 + 0.5, (b.min[2] + z) as f64 + 0.5);
+                        assert_eq!(tree.shade(middle), *shade, "a box at {:?} of {:?} is {shade} and holds another colour", b.min, b.ext);
+                    }
+                }
+            }
+        }
+        assert!(boxes > 100, "only {boxes} boxes looked at");
+    }
+
+    #[test]
+    fn a_pine_has_tiers_that_shorten_to_a_single_leader() {
+        for seed in 1..4 {
+            let tree = model(Kind::Pine, seed);
+            let (height, spread) = Tree::usual_size(Kind::Pine);
+            let trunk = &tree.limbs[0];
+            assert!(trunk.parent.is_none() && trunk.level == 0);
+            let top = trunk.path.last().unwrap();
+            assert!((top.z - height).abs() < 1e-9, "the stem ends at {} of {height}", top.z);
+            // every other limb is a bough springing from the stem, and none reaches as high as the stem does
+            let boughs: Vec<&Limb> = tree.limbs[1..].iter().collect();
+            assert!(boughs.len() > 60, "only {} boughs", boughs.len());
+            assert!(boughs.iter().all(|b| b.parent == Some(0) && b.level == 1));
+            assert!(boughs.iter().all(|b| b.path.iter().all(|p| p.z < top.z - 3.0)), "a bough stands as high as the leader");
+            // how far each reaches from the stem, by where it leaves it
+            let reach = |b: &Limb| (*b.path.last().unwrap() - b.path[0]).truncate().length();
+            let mean = |low: f64, high: f64| {
+                let these: Vec<f64> = boughs.iter().filter(|b| b.path[0].z >= low * height && b.path[0].z < high * height).map(|b| reach(b)).collect();
+                assert!(these.len() >= 4, "only {} boughs from {low} to {high}", these.len());
+                these.iter().sum::<f64>() / these.len() as f64
+            };
+            let (low, middle, high, highest) = (mean(0.12, 0.35), mean(0.35, 0.6), mean(0.6, 0.8), mean(0.8, 0.95));
+            assert!(low > middle * 1.08 && middle > high * 1.2 && high > highest * 1.3, "mean reach {low:.1}, {middle:.1}, {high:.1}, {highest:.1} going up");
+            // the longest reaches as far as the tree is asked to spread, about
+            let longest = boughs.iter().map(|b| reach(b)).fold(0.0, f64::max);
+            assert!(longest > spread * 0.8 && longest <= spread, "longest bough {longest:.1} of {spread}");
+            // the lowest hang and the highest climb
+            let slope = |b: &Limb| (b.path[2].z - b.path[0].z) / (b.path[2] - b.path[0]).truncate().length();
+            let slopes = |low: f64, high: f64| boughs.iter().filter(|b| b.path[0].z >= low * height && b.path[0].z < high * height).map(|b| slope(b)).sum::<f64>();
+            assert!(slopes(0.0, 0.3) < 0.0 && slopes(0.8, 1.0) > 0.0);
+            // bare stem below the lowest bough
+            let lowest = boughs.iter().map(|b| b.path[0].z).fold(f64::MAX, f64::min);
+            assert!(lowest > height * 0.06, "boughs from {lowest}");
+            // and the top is a point: a cell under the tip, the tree is under five cells across
+            let under = DVec3::new(top.x, top.y, top.z - 1.0);
+            assert!(tree.eval(under) < 0.0);
+            assert!((0..8).all(|k| tree.eval(under + DVec3::new((k as f64 * TAU / 8.0).cos(), (k as f64 * TAU / 8.0).sin(), 0.0) * 2.5) > 0.0), "the top is blunt");
+        }
+    }
+
+    /// The distance along `way` from `from` at which the tree's surface is crossed.
+    fn surface(tree: &Model, from: DVec3, way: DVec3) -> f64 {
+        let (mut low, mut high) = (0.0, 40.0);
+        assert!(tree.eval(from) < 0.0 && tree.eval(from + way * high) > 0.0);
+        for _ in 0..40 {
+            let middle = (low + high) / 2.0;
+            if tree.eval(from + way * middle) < 0.0 { low = middle } else { high = middle }
+        }
+        low
+    }
+
+    #[test]
+    fn a_palm_is_one_unbranched_eight_sided_trunk_and_a_crown_of_fronds() {
+        for seed in 1..4 {
+            let settings = Tree { seed, ..Tree::of(Kind::Palm) };
+            let (height, spread) = Tree::usual_size(Kind::Palm);
+            let tree = Model::new(&settings, DVec3::new(0.5, 0.5, 0.5), height, spread);
+            let trunk = &tree.limbs[0];
+            let top = *trunk.path.last().unwrap();
+            assert!(trunk.path.windows(2).all(|w| w[1].z > w[0].z), "the trunk does not climb all the way");
+            // every other limb is a frond, and every frond springs from the crown
+            let fronds = &tree.limbs[1..];
+            assert_eq!(fronds.len(), settings.count as usize);
+            for frond in fronds {
+                assert_eq!((frond.parent, frond.level), (Some(0), 1));
+                assert!(frond.path[0].distance(top) < height * 0.06, "a frond springs {} from the top of the trunk", frond.path[0].distance(top));
+                // as long as asked, about; and its tip hangs lower than its highest point
+                let long: f64 = frond.path.windows(2).map(|w| w[0].distance(w[1])).sum();
+                assert!(long > spread * 0.4 && long < spread * 1.1, "a frond {long:.1} long of {spread}");
+                let highest = frond.path.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+                assert!(frond.path.last().unwrap().z < highest - 0.5 || frond.path[1].z > frond.path[0].z + 2.0, "a frond neither arches nor stands");
+            }
+            // set round the trunk by the golden angle: no two neighbours in age on the same side
+            let way = |f: &Limb| (f.path[2] - f.path[0]).truncate().normalize();
+            assert!(fronds.windows(2).all(|w| way(&w[0]).dot(way(&w[1])) < 0.2));
+            // the oldest hang below the crown and the youngest stand above it
+            assert!(fronds.last().unwrap().path.last().unwrap().z < top.z - spread * 0.3);
+            assert!(fronds[0].path.last().unwrap().z > top.z + spread * 0.25);
+            // The trunk in section, half way up: as far to a face along x
+            // and along the diagonal, and further to the corner between.
+            let z = (top.z * 0.5).floor() + 0.4;
+            let middle = level_middle(&tree, z).unwrap().extend(z);
+            let to = |degrees: f64| surface(&tree, middle, DVec3::new(degrees.to_radians().cos(), degrees.to_radians().sin(), 0.0));
+            let (face, diagonal, corner) = (to(0.0), to(45.0), to(22.5));
+            assert!((face - diagonal).abs() < 0.02 * face, "faces at {face} and {diagonal}");
+            assert!((corner / face - 1.0824).abs() < 0.01, "corner at {corner}, face at {face}: not an octagon");
+            // swollen at the foot, and slender: under a twelfth of its height through
+            let foot = surface(&tree, DVec3::new(0.5, 0.5, 1.5), DVec3::X);
+            assert!(foot > face * 1.4, "foot {foot}, half way up {face}");
+            assert!(face * 2.0 < height / 12.0);
+            // ringed: both colours of trunk up one side of it
+            let side: Vec<u8> = (2..(top.z * 0.8) as i32).map(|k| {
+                let z = k as f64 + 0.5;
+                let middle = level_middle(&tree, z).unwrap().extend(z);
+                tree.shade(middle + DVec3::X * (surface(&tree, middle, DVec3::X) - 0.4))
+            }).collect();
+            let rings = side.windows(2).filter(|w| w[0] == TRUNK && w[1] == LIMB).count();
+            assert!(rings >= 8, "{rings} rings up the trunk");
+        }
+        // and the lean is the lean asked for
+        let top_of = |bend: i32| {
+            let tree = Model::new(&Tree { bend, ..Tree::of(Kind::Palm) }, DVec3::new(0.5, 0.5, 0.5), 120.0, 44.0);
+            (*tree.limbs[0].path.last().unwrap() - tree.limbs[0].path[0]).truncate().length()
+        };
+        assert!(top_of(0) < 3.0 && top_of(100) > 25.0, "{} and {}", top_of(0), top_of(100));
+    }
+
+    #[test]
+    fn an_oak_divides_by_da_vincis_rule_into_a_wide_crown_of_separate_masses() {
+        for seed in 1..5 {
+            let tree = model(Kind::Oak, seed);
+            let (height, spread) = Tree::usual_size(Kind::Oak);
+            // the squares of the radii a limb divides into sum to the square of its own
+            assert!(tree.forks.len() > 25, "only {} forks", tree.forks.len());
+            for (limb, into) in &tree.forks {
+                let sum: f64 = into.iter().map(|r| r * r).sum();
+                assert!((sum - limb * limb).abs() < 1e-9 * limb * limb, "{limb} divides into {into:?}");
+                assert!(into.len() >= 2);
+            }
+            // and the limbs really are those radii: each springs no thicker than what it springs from
+            for limb in &tree.limbs[1..] {
+                let from = &tree.limbs[limb.parent.unwrap()];
+                assert!(limb.radius[0] <= from.radius.iter().cloned().fold(0.0, f64::max) + 1e-9);
+                assert_eq!(limb.level, from.level + 1);
+                // it starts on the limb it springs from
+                assert!(from.path.iter().any(|p| p.distance(limb.path[0]) < 1e-6), "a limb starts in the air");
+                // and thins or holds along its length, never thickens
+                assert!(limb.radius.windows(2).all(|w| w[1] <= w[0] + 1e-9));
+            }
+            // a short trunk: it divides in the lowest quarter
+            let fork = tree.limbs[0].path.last().unwrap().z;
+            assert!(fork < height * 0.26 && fork > height * 0.15, "the trunk divides at {fork}");
+            // limbs fork repeatedly: some branch is four forks from the trunk
+            assert!(tree.limbs.iter().map(|l| l.level).max().unwrap() >= 3 && tree.limbs.len() > 15, "{} limbs", tree.limbs.len());
+            // the crown is as wide as asked and as tall, and wider than it is tall
+            let (lo, hi) = tree.bounds();
+            let wide = (hi.x - lo.x).max(hi.y - lo.y);
+            assert!(wide > spread * 1.6 && wide <= spread * 2.0 + 1e-6, "{wide} wide of {}", spread * 2.0);
+            assert!(hi.z > height * 0.85 && hi.z <= height + 1e-6, "{} tall of {height}", hi.z);
+            // Leaves in separate masses with sky between: seen from the
+            // side, the leaves cover well under the share of the crown's
+            // box that one ball of leaves would (which is pi / 4), and
+            // there are gaps right through the crown.
+            let leaf = |p: DVec3| tree.eval(p) < 0.0 && is_leaf(tree.shade(p));
+            let (mut covered, mut all, mut holes) = (0, 0, 0);
+            let low = fork + 10.0;
+            let mut z = low;
+            while z < hi.z {
+                let mut row = Vec::new();
+                let mut x = lo.x;
+                while x < hi.x {
+                    let mut y = lo.y;
+                    let mut any = false;
+                    while y < hi.y && !any {
+                        any = leaf(DVec3::new(x, y, z));
+                        y += 1.5;
+                    }
+                    row.push(any);
+                    x += 2.0;
+                }
+                all += row.len();
+                covered += row.iter().filter(|c| **c).count();
+                // sky with leaves to both sides of it on this level
+                let (first, last) = (row.iter().position(|c| *c), row.iter().rposition(|c| *c));
+                if let (Some(first), Some(last)) = (first, last) {
+                    holes += row[first..=last].iter().filter(|c| !**c).count();
+                }
+                z += 2.0;
+            }
+            let share = covered as f64 / all as f64;
+            assert!(share > 0.3 && share < 0.68, "leaves cover {share:.2} of the crown's box from the side");
+            assert!(holes > 20, "only {holes} gaps through the crown");
+        }
+    }
+
+    /// Settings beyond what the sliders allow are brought within it, and a
+    /// tree too large is refused before it is grown.
+    #[test]
+    fn hostile_settings_build_a_tree_or_are_refused() {
+        let wild = Tree { kind: Kind::Oak, seed: u64::MAX, fullness: i32::MAX, count: i32::MIN, bend: -7, extras: true };
+        assert_eq!(wild.clamped(), Tree { kind: Kind::Oak, seed: u64::MAX, fullness: 100, count: 2, bend: 0, extras: true });
+        let built = build(&Spec { tree: wild, radius: 20.0, rise: Some(40.0), ..spec(Kind::Oak, 1) }).unwrap();
+        assert!(!built.bricks.is_empty());
+        // the smallest there is: too small to be much, and still built
+        for (kind, name) in KINDS {
+            let tiny = build(&Spec { radius: 0.5, rise: Some(0.5), ..spec(kind, 1) }).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!tiny.bricks.is_empty(), "{name}");
+        }
+        let vast = build(&Spec { radius: 900.0, rise: Some(900.0), ..spec(Kind::Pine, 1) });
+        assert!(vast.is_err_and(|e| e.contains("too large")));
+    }
+
+    /// The field is what the fitter is told it is: never more than the
+    /// distance to the surface, so that the cells it passes over as far
+    /// from the tree are. Checked against all the parts, one by one.
+    #[test]
+    fn the_bucket_grid_agrees_with_asking_every_part() {
+        for (kind, name) in KINDS {
+            let spec = small(kind, 4);
+            let tree = Model::new(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius);
+            let (lo, hi) = tree.bounds();
+            let mut numbers = Numbers(99);
+            let (mut near, mut inside) = (0, 0);
+            for _ in 0..40_000 {
+                let p = lo - 6.0 + DVec3::new(numbers.unit(), numbers.unit(), numbers.unit()) * (hi - lo + 12.0);
+                let (nearest, exact) = tree.parts.iter().map(|part| (part, part.shape.distance(p))).fold((&tree.parts[0], f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
+                let exact = exact.max(tree.ground - p.z);
+                let got = tree.eval(p);
+                assert_eq!(got < 0.0, exact < 0.0, "{name}: {p} is on the other side");
+                // Near the tree, never less than the least any part
+                // gives: a bucket lists every part that comes near it.
+                // (to within the single precision the far distances are kept in)
+                assert!(got >= exact.min(NEAR) - 1e-6, "{name}: {got} at {p}, where a part gives {exact}");
+                // And never further than the tree is. Only a round
+                // branch's distance is exact away from its surface (a
+                // flattened ball of leaves and a length of a palm's trunk
+                // give less than theirs), so only there can it be checked.
+                if matches!(nearest.shape, Shape::Cone { .. }) && exact >= 0.0 {
+                    assert!(got <= exact + 1e-9, "{name}: {got} at {p}, which is {exact} from the tree");
+                    near += (exact <= NEAR) as usize;
+                }
+                inside += (exact < 0.0) as usize;
+                // and far from the tree it is known to be far: the fitter passes over such blocks
+                // (by more than 7, half the diagonal of a block; 24 from it
+                // any way is 14 from it along some axis, three coarse buckets)
+                if exact > 24.0 && p.cmpge(lo).all() && p.cmple(hi).all() {
+                    assert!(got > 7.0, "{name}: {got} at {p}, which is {exact} from the tree");
+                }
+            }
+            assert!((near > 100 || kind == Kind::Oak) && inside > 150, "{name}: {near} near, {inside} inside");
+        }
+    }
+
+    /// Release only: an unoptimised build is many times slower and says
+    /// nothing about the time a player waits.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn a_tree_a_hundred_tall_builds_in_about_a_second() {
+        for (kind, name) in KINDS {
+            let (height, spread) = Tree::usual_size(kind);
+            let spec = Spec { radius: (spread * 100.0 / height).round(), rise: Some(100.0), ..spec(kind, 1) };
+            let least = (0..4).map(|_| { let at = std::time::Instant::now(); build(&spec).unwrap(); at.elapsed() }).min().unwrap();
+            println!("{name}, 100 tall: {least:?}");
+            assert!(least.as_secs_f64() < 1.2, "{name} took {least:?}");
         }
     }
 }

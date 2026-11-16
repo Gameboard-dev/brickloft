@@ -813,10 +813,14 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
         "update_form" => {
             let at = index(&forms)?;
             let (spec, paint, place) = &mut forms[at];
+            let was = spec.form;
             *spec = changed(spec, settings)?;
             brickloft_core::spec::build(spec)?;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
+            } else if spec.form == brickloft_core::spec::Form::Tree && was != spec.form {
+                // (a form made into a tree comes in the tree's colours, as one added does)
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
             }
             if let Some(to) = arguments.get("place") {
                 *place = placed(to)?;
