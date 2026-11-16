@@ -87,7 +87,9 @@ a disc with a rounded rim.
 | Delete | remove the form being edited |
 | Ctrl+Z, Ctrl+Y | undo, redo |
 | Ctrl+scroll | resize a circle, sphere or pyramid, a microbrick a notch |
-| Ctrl+C | write the whole workspace (every form, where it stands, and its colours) to `arcs-build.brz`, a Brickadia prefab, and put that file on the clipboard |
+| Ctrl + click another form | pick it to be copied along with the one being edited, or let it go |
+| Ctrl+A | pick every form |
+| Ctrl+C | write the form being edited and any picked with it (where each stands, its grid and its colours) to `arcs-build.brz`, a Brickadia prefab, and put that file on the clipboard |
 | Ctrl+V | add the forms of a `.brz` copied from the editor back to the workspace |
 
 A `.brz` holding any brick other than the microbricks is refused with a

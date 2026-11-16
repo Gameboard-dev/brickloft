@@ -251,6 +251,9 @@ pub fn run_form(form: usize) {
                                 let added = if modifiers.shift && form == 0 { state.add_pull(d(hit.position)) } else { None };
                                 if let Some(pull) = added {
                                     dragging = Some(pull);
+                                } else if (modifiers.ctrl || modifiers.command) && form > 0 {
+                                    // with Ctrl, another form is picked to be copied too, or let go
+                                    state.toggle_pick(form - 1);
                                 } else {
                                     if form > 0 {
                                         state.activate(form - 1);
@@ -304,6 +307,10 @@ pub fn run_form(form: usize) {
                     Key::Delete => {
                         state.record();
                         state.remove_active();
+                        true
+                    }
+                    Key::A if held => {
+                        state.pick_all();
                         true
                     }
                     Key::Z if held => state.undo() || true,
@@ -370,6 +377,7 @@ pub fn run_form(form: usize) {
         if rebuilt || first || shown_scene != state.scene {
             shown_scene = state.scene;
             let bricks = state.painted();
+            let picked = state.picked();
             // each form's grid, where it is at an angle: turned, then moved to where the grid is
             let grids: Vec<Option<Mat4>> = state
                 .grids()
@@ -395,7 +403,9 @@ pub fn run_form(form: usize) {
                     // shown in a neutral one; the forms not being edited
                     // are shown a little darker, to tell them apart
                     let [r, g, b] = colour.unwrap_or([214, 208, 196]);
-                    let shade = |c: u8| if *form == 0 { c } else { (c as f32 * 0.72) as u8 };
+                    // (and those picked with it, to be copied, only a little)
+                    let dim = if *form == 0 { 1.0 } else if picked.get(*form).copied().unwrap_or(false) { 0.9 } else { 0.72 };
+                    let shade = |c: u8| (c as f32 * dim) as u8;
                     colours.push(Srgba::new_opaque(shade(r), shade(g), shade(b)));
                     owner.push(*form);
                 }
@@ -433,7 +443,9 @@ pub fn run_form(form: usize) {
             // Said over the view as well as in the panel: the keys give no
             // other sign that anything happened. A copy that worked is said
             // in passing; one that did not has to be read and closed.
-            let said = brz::copy(&state.painted(), &state.forms());
+            // what is picked: the form being edited, and any picked with it
+            let (bricks, forms) = state.copied();
+            let said = brz::copy(&bricks, &forms);
             if said.starts_with("Copied") {
                 state.toast = Some((said.clone(), None));
             } else {

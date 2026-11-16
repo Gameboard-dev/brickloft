@@ -435,14 +435,20 @@ fn workspace(ui: &mut Ui, state: &mut State) {
     ui.label(format!("> {} (editing) on grid {}{}", FORMS[state.form], state.spec.on_grid + 1, tilted(&state.spec)));
     let mut switch = None;
     for (k, item) in state.others.iter().enumerate() {
-        let label = format!("   {} on grid {}{}", item.name(), item.spec.on_grid + 1, tilted(&item.spec));
+        let label = format!(" {} {} on grid {}{}", if item.picked { "+" } else { " " }, item.name(), item.spec.on_grid + 1, tilted(&item.spec));
         if ui.selectable_label(false, label).on_hover_text("Edit this form, and its grid. Clicking it in the view does the same.").clicked() {
             switch = Some(k);
         }
     }
     if let Some(k) = switch {
-        state.activate(k);
+        // with Ctrl, picked to be copied along with the one being edited
+        if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
+            state.toggle_pick(k);
+        } else {
+            state.activate(k);
+        }
     }
+    ui.label("Ctrl+C copies the form being edited and any marked +. Ctrl + click a form to mark it, Ctrl+A for all.");
     ui.horizontal(|ui| {
         if ui.button("Add to this grid").on_hover_text("Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.").clicked() {
             state.add_copy();

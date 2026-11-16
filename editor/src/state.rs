@@ -110,6 +110,8 @@ pub struct Item {
     pub place: [i32; 3],
     pub built: Built,
     pub bounds: Option<Bounds>,
+    /// whether it is picked, with the form being edited, to be copied
+    pub picked: bool,
 }
 
 impl Item {
@@ -395,7 +397,7 @@ impl State {
 
     /// The form being edited, as an item to set aside.
     fn as_item(&self) -> Item {
-        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds }
+        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false }
     }
 
     /// Make `item` the form being edited, with the bricks it already has.
@@ -407,7 +409,7 @@ impl State {
         self.bounds = item.bounds;
         self.problem = None;
         // its bricks are current: nothing to rebuild until it is changed
-        self.built_from = Some(self.full_spec());
+        self.built_from = Some(Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, ..self.full_spec() });
         self.scene += 1;
     }
 
@@ -417,7 +419,43 @@ impl State {
             let mine = self.as_item();
             let item = std::mem::replace(&mut self.others[other], mine);
             self.take_item(item);
+            // choosing one form to edit is choosing it alone
+            self.others.iter_mut().for_each(|o| o.picked = false);
         }
+    }
+
+    /// Pick another form to be copied along with the one being edited, or
+    /// let it go if it is picked already: Ctrl + click.
+    pub fn toggle_pick(&mut self, other: usize) {
+        if let Some(item) = self.others.get_mut(other) {
+            item.picked = !item.picked;
+            self.scene += 1;
+        }
+    }
+
+    /// Pick every form: Ctrl + A.
+    pub fn pick_all(&mut self) {
+        self.others.iter_mut().for_each(|o| o.picked = true);
+        self.scene += 1;
+    }
+
+    /// Which forms are picked, the one being edited first; it always is.
+    pub fn picked(&self) -> Vec<bool> {
+        std::iter::once(true).chain(self.others.iter().map(|o| o.picked)).collect()
+    }
+
+    /// What Ctrl + C copies: the bricks and forms that are picked, the form
+    /// being edited among them, numbered among themselves.
+    ///
+    /// It was the whole workspace, which made copying one form out of
+    /// several a matter of removing the others first.
+    pub fn copied(&self) -> (Vec<Painted>, Vec<Placed>) {
+        let picked = self.picked();
+        // each picked form's number among the picked
+        let numbers: Vec<Option<usize>> = picked.iter().scan(0, |next, p| Some(p.then(|| std::mem::replace(next, *next + 1)))).collect();
+        let bricks = self.painted().into_iter().filter_map(|(cell, colour, form, place)| numbers[form].map(|n| (cell, colour, n, place))).collect();
+        let forms = self.forms().into_iter().zip(&picked).filter(|(_, p)| **p).map(|(f, _)| f).collect();
+        (bricks, forms)
     }
 
     /// Add a form to the workspace and edit it. It is set down clear of the
@@ -563,7 +601,7 @@ impl State {
         self.others = forms
             .map(|(spec, paint, place)| {
                 let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, place, built }
+                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false }
             })
             .collect();
         self.load_spec(spec);
@@ -1755,6 +1793,23 @@ mod tests {
         state.refresh(|| 0.0);
         assert_eq!(state.others.iter().map(|o| o.spec.on_grid).collect::<Vec<_>>(), vec![0, 0]);
         assert_eq!(state.spec.on_grid, 1);
+        // Only what is picked is copied: the form being edited, and any picked with it.
+        assert_eq!(state.copied().1.len(), 1);
+        assert!(state.copied().0.iter().all(|b| b.2 == 0) && state.copied().0.len() == state.built.bricks.len());
+        state.toggle_pick(1);
+        let (bricks, forms) = state.copied();
+        assert_eq!((forms.len(), forms[1].0.on_grid), (2, state.others[1].spec.on_grid));
+        assert_eq!(bricks.iter().filter(|b| b.2 == 1).count(), state.others[1].built.bricks.len());
+        assert!(bricks.iter().all(|b| b.2 < 2));
+        state.toggle_pick(1);
+        assert_eq!(state.copied().1.len(), 1);
+        state.pick_all();
+        assert_eq!(state.copied().1.len(), 3);
+        // choosing another form to edit lets the rest go
+        state.activate(0);
+        assert_eq!(state.picked(), vec![true, false, false]);
+        state.activate(0);
+        state.refresh(|| 0.0);
         // (a copy is coloured as what it was copied from)
         state.paint.colours = vec![[10, 200, 30]];
         state.add_copy();
