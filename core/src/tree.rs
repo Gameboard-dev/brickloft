@@ -2018,7 +2018,8 @@ impl Grown {
 /// lifts the ground round it by
 /// `h * (1 + cos(pi * d / reach)) / 2` at the distance `d`, out to the
 /// reach, the same bell the points added to other forms pull by (see
-/// `sdf::Field::Warp`). It is never lowered below the floor the patch
+/// `sdf::Field::Warp`). The reach is the form's, or `1.5 h + 8` if that
+/// is more. It is never lowered below the floor the patch
 /// stands on: a dip is made in ground that has first been raised.
 ///
 /// The blades are in tufts, on a grid shaken so that no rows show, two to
@@ -2029,10 +2030,14 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
     let (thick, lean) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let run = Run::new(lay);
     let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
-    let reach = lay.reach.max(1.0);
+    // A mound is at least as wide as it is high, half as far again and
+    // a little more, whatever reach is asked: its sides are then no
+    // steeper than grass grows on. With the reach a form starts at, 8, a
+    // point lifted 18 was a spike with its soil torn open up the sides.
+    let reach = |by: f64| lay.reach.max(1.5 * by.abs() + 8.0);
     let lifted = |p: DVec3| {
         let all: f64 = lay.mounds.iter().map(|(at, by)| {
-            let d = at.truncate().distance(p.truncate());
+            let (d, reach) = (at.truncate().distance(p.truncate()), reach(*by));
             if d < reach { by * 0.5 * (1.0 + (PI * d / reach).cos()) } else { 0.0 }
         }).sum();
         all.max(0.0)
@@ -2046,7 +2051,14 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
         for x in across(lo.x, hi.x, step) {
             let p = DVec3::new(x, y, 0.0);
             if covered(p) {
-                g.blob(p + DVec3::Z * (lifted(p) + 0.45), DVec3::new(2.3, 2.3, 1.15), TRUNK, false);
+                // (on a slope, soil down to the ground beside it as well, so that the skin has no tear in it)
+                let here = lifted(p);
+                let lowest = [DVec3::X, -DVec3::X, DVec3::Y, -DVec3::Y].iter().map(|way| lifted(p + *way * step)).fold(here, f64::min);
+                let mut z = here;
+                while z > lowest - 1.0 {
+                    g.blob(p + DVec3::Z * (z + 0.45), DVec3::new(2.3, 2.3, 1.15), TRUNK, false);
+                    z -= 1.6;
+                }
             }
         }
     }
