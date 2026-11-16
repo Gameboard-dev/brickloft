@@ -102,6 +102,24 @@ What remains:
   surface cut into bricks small enough to carry it. Stepping stones are
   laid only through a flat form.
 
+## Mazes
+
+A maze of rings or of squares is built, with plain, patterned or hedge
+walls ([algorithm.md](algorithm.md), section 7.11). What remains:
+
+- **A texture on curved faces.** A pattern on a ring wall is as coarse
+  as the long sloped bricks of its face, because a pattern may not move
+  a form's outline. A pattern mapped onto curved surfaces, which the
+  patterns still need for domes, would serve walls too.
+- **Hedge corners and feet.** A hedge wall is the Plant form's hedge
+  along each wall's line, joined to the next by running into it. A hedge
+  that turns a sharp corner would make a ring wall and its spoke one
+  hedge. The stems at a hedge's foot are few on a long wall.
+- **More mazes.** A room larger than one ring, more than one way in,
+  loops (a braid maze), cells of six sides, and a maze on several floors
+  joined by stairs. Each is a change to the cells and their walls; the
+  carving and the building would stand.
+
 ## More plants
 
 Twenty-two kinds of plant are built: eight trees, five bushes, seven

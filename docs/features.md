@@ -47,6 +47,7 @@ until you tick it.
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
 | **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch or a willow; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
 
 ### The cube
 
@@ -529,6 +530,62 @@ finest brick size that fits, so the **Height** slider never stops
 short. A tree can be turned, flipped, moved, joined to other forms and
 put on a grid of its own like any form. It cannot be mirrored and takes no
 added points.
+
+## Mazes
+
+<img src="images/maze-theta.png" width="340" alt="A theta maze of six rings seen from above, with its way through marked by a yellow strip"> <img src="images/maze-hedge.png" width="340" alt="A theta maze with walls of clipped hedge on a brown floor">
+
+**Maze** builds a maze to walk through. It has one way in, on its rim,
+and a room in the middle. Every part of it can be reached, there are no
+loops, and there is exactly one way from the way in to the room. How it
+is made is in [algorithm.md](algorithm.md), section 7.11.
+
+| Setting | What it does |
+|---|---|
+| **Kind** | **Theta** is rings of corridors about a round room, with walls that are arcs and spokes. **Grid** is square cells about a square room. |
+| **Rings** | How many rings, the room counted as the first, from 2 to 40. Changing it keeps the corridors' width, so the maze grows. |
+| **Ring gap** | A corridor and one wall, in microbricks. Changing it keeps the rings and resizes the maze. A corridor is at least 3 between its walls. |
+| **Cells in the first ring** | How many cells spokes cut the first ring into (theta only). |
+| **Cells double** | How the number of cells grows outwards (theta only): **to keep cells square**, or every 1 to 8 rings. Every 2 is what the older brickmaze tool did. |
+| **Wall thickness** | Whole microbricks. |
+| **Wall height** | How tall the walls stand above the floor. |
+| **Way in, round the rim** | Where the gap in the rim is, in degrees round from the X axis. |
+| **Floor thickness** | A floor under the whole maze, or 0 for none. |
+| **Mark the way through** | Lays a strip one microbrick high along the ground from the way in to the room, in its own colour. |
+| **Seed**, **Another** | Which maze. The same seed and settings are always the same maze. |
+
+Two dots size it in the view. The dot on the rim drags the radius, which
+widens or narrows every corridor and keeps the rings. The dot over the
+middle drags the walls' height. Ctrl + scroll resizes it too.
+
+**Texture** sets what the walls are made of:
+
+| Texture | The walls |
+|---|---|
+| **none** | plain fitted walls: long sloped bricks round every ring, a few hundred to a few thousand bricks |
+| **hedge** | the Plant form's hedge grown along every wall, with its **Density**, **Looseness**, **Berries** and seed. At least 6 thick and 12 tall. |
+| **bricks** | courses of bricks that run level along each wall and bend round the rings with it |
+| **cobblestone**, **planks**, **medallions** | the same patterns as on a floor, wrapped along each wall |
+
+<img src="images/maze-bricks.png" width="340" alt="A theta maze with brick walls: level courses of red brick round every ring wall"> <img src="images/maze-grid.png" width="340" alt="A grid maze seen from above with its way through marked">
+
+A texture colours the walls and never moves them. On the curved face of
+a ring wall each long sloped brick is one colour to a course, so upright
+joints show there only where one sloped brick ends. The straight walls
+along the axes, the wall tops and a grid maze carry the pattern exactly.
+Rug and stepping stones are not offered for a maze.
+
+Choosing a texture brings its colours unless you have set your own. With
+plain walls there are three colours: the floor, the walls, and the strip
+that marks the way through. With a texture or hedge there are eight: the
+first is the floor and the mortar or stems, and the last is the strip.
+
+A hedge maze and a textured maze are tens of thousands of bricks. A maze
+is refused, with what to change, if its corridors would be under 3
+microbricks wide, its walls over 40,000 microbricks long in all, or its
+hedge more than can be built in a few seconds. It can be turned,
+flipped, moved and put on a grid of its own. It cannot be mirrored and
+takes no added points.
 
 ## Colour
 
