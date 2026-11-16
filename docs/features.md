@@ -810,6 +810,60 @@ ready to paste, which replaces a form copied there with Ctrl+C.
 it the same way. The browser
 page cannot write files, so it has neither.
 
+## Recording a GIF
+
+**Record GIF**, or **F11**, starts recording the window as an animated GIF.
+The button then reads **Stop recording**, and it or F11 again stops the
+recording and saves it. **Shift+F11** records the view alone, without the
+panel. The browser page cannot write files, so it has no recording.
+
+While it records, a red dot in the top right corner of the view shows how
+long the recording has run and how many pictures it has taken, and for the
+first few seconds where the file is going. The dot is drawn after each
+picture is taken, so it is never in the recording. A notice over the view,
+such as the one Ctrl+D puts up, is part of the window and is recorded when
+the panel is.
+
+The file is saved beside the screenshots, in `Pictures/brickloft`, as
+`brickloft-2026-11-16-143055.gif`: the date and time the recording began.
+The time is universal time (UTC), so it differs from your clock by your
+time zone's offset; its purpose is to sort recordings in the order they
+were made. When the recording stops, a notice says where the file is, how
+long it plays, how many pictures it holds and how large it is.
+
+Two settings beside the button apply to the next recording:
+
+| Setting | Choices | What it changes |
+|---|---|---|
+| Size | Full size, Half size, A third | Each pixel of the recording is the average of a square of 1, 4 or 9 of the window's pixels. Half size, the usual one, has a quarter of the pixels of full size and under half the file. |
+| Rate | 10, 20 or 25 a second | How often a picture is taken. 20, the usual one, is every third frame of a display that shows 60. |
+
+Pictures are taken by the clock and not by counting frames, and each is
+shown for the time that passed before the next. A slow frame therefore
+costs the recording a picture and never speeds it up: a recording plays for
+as long as it took to make.
+
+A recording holds only what changed. While nothing in the window changes
+no picture is written and the last one stays on show, so five minutes of a
+still view would be no larger than one picture. When something does
+change, only the rectangle that holds the change is written. Ten seconds
+of a form being edited came to about 150 KB at half size in a window of
+1920 by 1009 pixels. Ten seconds of the camera flying round the same
+forms, where most pixels change in every picture, came to 7 MB (16.5 MB at
+full size, 4.2 MB at a third).
+
+A GIF holds 256 colours. They are chosen to fit what is being recorded, so
+a flat face stays one flat colour. If a picture brings colours the chosen
+ones are far from, such as a form of a new colour, the colours are chosen
+again from that picture on. A pixel that did not change is never written
+again, so nothing that stands still can flicker.
+
+A recording stops by itself, and says so, when it has run for 60 seconds or
+its file has reached 64 MB. It also stops if the window changes size,
+because a GIF has one size throughout. A minimised window is not drawn, so
+the recording holds its last picture until the window is back. Closing the
+editor while it records finishes the file first.
+
 ## Reports
 
 **Save report** writes `brickloft-report-1.txt`, `-2` and so on to the folder
@@ -853,4 +907,5 @@ passes a megabyte.
 | W A S D, Space, E, Q | fly |
 | Shift held | fly faster |
 | F12, Shift+F12 | save a screenshot and copy it to the clipboard, with or without the panel |
+| F11, Shift+F11 | start or stop recording a GIF, with or without the panel |
 | Enter or Escape | close a message |

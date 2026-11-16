@@ -219,6 +219,41 @@
       }
     },
     {
+      "name": "start_gif",
+      "title": "Start recording a GIF",
+      "description": "Start recording the editor's window as an animated GIF, to show a change being made or a flight of the camera. The file is written to the editor's pictures folder (Pictures/brickloft in the player's home folder) under a name with the date and time, and the answer says where. Pictures are taken at a fixed rate by the clock; while nothing in the window changes none is written, and the last one is held. Recording goes on until stop_gif, or stops by itself at 60 seconds or 64 MB. One recording at a time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "panel": {
+            "type": "boolean",
+            "description": "False to record the 3D view alone, without the panel drawn over its left side. True if not given; the panel then shows in the recording, with any notice put up over the view."
+          },
+          "size": {
+            "type": "string",
+            "enum": ["full", "half", "third"],
+            "description": "How large the recording is beside the window: each of its pixels is the average of a square of 1, 2 or 3 of the window's each way. As last chosen if not given, which is half unless the player has changed it."
+          },
+          "rate": {
+            "type": "integer",
+            "enum": [10, 20, 25],
+            "description": "Pictures a second. As last chosen if not given, which is 20 unless the player has changed it."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop_gif",
+      "title": "Stop recording the GIF",
+      "description": "Stop the recording started with start_gif and finish its file. The answer says where the file is, how long it plays, how many pictures it holds and how large it is, and what the recording cost the editor for each picture.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "measure_between",
       "title": "Measure between two forms",
       "description": "How two forms stand relative to each other: the vector and the distance from the first one's centre to the second's, in the world, and the gap between the boxes their bricks fill along each axis (a negative gap is an overlap of that much). The gap is given in the world, and also within their grid if they share one, which is the one to use for setting forms a whole number of microbricks apart.",
