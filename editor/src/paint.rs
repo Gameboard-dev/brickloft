@@ -2,8 +2,8 @@
 //!
 //! A brick is one colour, so a blend across a form is made brick by brick:
 //! each takes the colour for where its centre lies. A smooth blend picks from
-//! a few steps between the colours; a speckled one gives each brick one of
-//! the pure colours, more often the nearer one, which reads as a texture.
+//! a few steps between the colours. A pattern's bricks are coloured by the
+//! numbers the pattern gives them.
 
 use brickloft_core::shapes::CellBrick;
 
@@ -15,20 +15,14 @@ pub enum Mode {
     Blend,
     /// bands of each colour in turn
     Stripes,
-    /// each brick one of the colours, weighted by position: a dithered blend
-    Speckle,
-    /// each separate piece of the form one of the colours: the stones of a path
-    Patches,
-    /// each brick the colour its pattern gives it: the tiles of a mosaic
+    /// each brick the colour its pattern gives it: the tiles of a mosaic, the stones of a path
     Pattern,
 }
 
-pub const MODES: [(Mode, &str); 6] = [
+pub const MODES: [(Mode, &str); 4] = [
     (Mode::Solid, "One colour"),
     (Mode::Blend, "Blend"),
     (Mode::Stripes, "Stripes"),
-    (Mode::Speckle, "Speckled blend"),
-    (Mode::Patches, "Each piece its own"),
     (Mode::Pattern, "As the pattern has it"),
 ];
 
@@ -52,17 +46,6 @@ impl Default for Paint {
     fn default() -> Self {
         Paint { mode: Mode::Solid, colours: vec![[214, 208, 196], [70, 110, 190]], axis: 2, width: 2 }
     }
-}
-
-/// A well-mixed number in 0..1 from a brick's position: the same brick always
-/// gets the same one, so a speckle does not shimmer as the form is edited.
-fn scatter(at: [i32; 3]) -> f64 {
-    // a multiply-xorshift mix; any hash that spreads neighbours apart would do
-    let mut h = (at[0] as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (at[1] as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ (at[2] as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-    h ^= h >> 29;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 32;
-    (h >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// The colours a path of stones starts in: four browns and greys of
@@ -119,10 +102,16 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[176, 172, 164], [236, 232, 224], [226, 222, 212], [242, 238, 230], [218, 214, 204], [232, 228, 218], [222, 218, 208], [246, 242, 236]],
         ],
         // dark mortar and grey stone; sandstone; slate
-        "stones" => &[
+        "slabs" => &[
             &[[70, 68, 64], [150, 146, 138], [132, 128, 120], [164, 160, 150], [120, 116, 108], [156, 150, 140], [140, 136, 126], [172, 166, 154]],
             &[[96, 82, 64], [204, 176, 130], [190, 160, 116], [214, 188, 144], [178, 148, 106], [208, 180, 136], [196, 166, 122], [220, 196, 152]],
             &[[40, 44, 52], [96, 108, 124], [84, 96, 112], [108, 120, 136], [74, 86, 100], [100, 112, 128], [90, 102, 118], [114, 126, 142]],
+        ],
+        // weathered browns and greys; sandstone; slate
+        "stepping stones" => &[
+            &[[168, 140, 120], [146, 122, 104], [190, 160, 130], [124, 110, 98], [176, 150, 126], [136, 116, 100], [156, 132, 112], [200, 172, 142]],
+            &[[204, 176, 130], [190, 160, 116], [214, 188, 144], [178, 148, 106], [208, 180, 136], [196, 166, 122], [220, 196, 152], [184, 156, 112]],
+            &[[96, 108, 124], [84, 96, 112], [108, 120, 136], [74, 86, 100], [100, 112, 128], [90, 102, 118], [114, 126, 142], [80, 92, 106]],
         ],
         // ice on a night sky; pale blues; white on slate
         "snowflake" => &[
@@ -161,14 +150,6 @@ impl Paint {
         (!self.colours.is_empty()).then(|| self.colours[brickloft_core::pattern::colour_of(shade, self.colours.len())])
     }
 
-    /// The colour of separate piece number `piece` of a form (see
-    /// `brickloft_core::pattern::pieces`): one of the colours, the same one
-    /// for that piece every time. `None` for a paint with no colours.
-    pub fn patch(&self, piece: u32) -> Option<[u8; 3]> {
-        let count = self.colours.len();
-        (count > 0).then(|| self.colours[((scatter([piece as i32, 7, 13]) * count as f64) as usize).min(count - 1)])
-    }
-
     /// The colour of `brick`, in a form occupying cells `lo..hi`. `None` only
     /// for a paint with no colours at all, which is then left to whatever
     /// colour the player has selected in the game.
@@ -191,11 +172,6 @@ impl Paint {
             Mode::Stripes => {
                 let band = ((centre - lo[axis] as f64) / self.width.max(1) as f64).floor().max(0.0) as usize;
                 colours[band % count]
-            }
-            Mode::Speckle => {
-                // nudged by up to half a colour either way, then the nearest
-                let nudged = place + scatter(brick.min) - 0.5;
-                colours[(nudged.round().max(0.0) as usize).min(count - 1)]
             }
             _ => {
                 let below = (place.floor() as usize).min(count - 2);
@@ -251,20 +227,5 @@ mod tests {
         let p = paint(Mode::Stripes);
         let at = |z| p.colour(&brick(z), [0; 3], [1, 1, 40]).unwrap();
         assert_eq!([at(0), at(1), at(2), at(3), at(5), at(6)], [RED, RED, RED, BLUE, BLUE, RED]);
-    }
-
-    #[test]
-    fn a_speckle_uses_only_the_pure_colours_and_leans_the_right_way() {
-        let p = paint(Mode::Speckle);
-        let all: Vec<[u8; 3]> = (0..400).map(|z| p.colour(&brick(z), [0; 3], [1, 1, 400]).unwrap()).collect();
-        assert!(all.iter().all(|c| *c == RED || *c == BLUE));
-        let blue_in = |range: std::ops::Range<usize>| all[range].iter().filter(|c| **c == BLUE).count();
-        // almost none at the red end and almost all at the blue end
-        assert!(blue_in(0..40) <= 4, "{} blue in the first 40", blue_in(0..40));
-        assert!(blue_in(360..400) >= 36, "{} blue in the last 40", blue_in(360..400));
-        let middle = blue_in(160..240);
-        assert!((25..=55).contains(&middle), "{middle} of 80 blue in the middle");
-        // the same brick is always the same colour
-        assert_eq!(p.colour(&brick(200), [0; 3], [1, 1, 400]), p.colour(&brick(200), [0; 3], [1, 1, 400]));
     }
 }

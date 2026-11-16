@@ -86,8 +86,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("budget", spec.budget.to_string());
     line("max_ext", spec.max_ext.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
-    // a mosaic: which style, a tile's width and depth, the border's width, and which filling
-    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{}", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.tile, m.tall, m.border, m.seed)));
+    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, and which filling
+    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{}", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel, m.border, m.seed)));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -240,10 +240,10 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     None
                 } else {
                     let parts: Vec<&str> = value.split(',').map(str::trim).collect();
-                    let [style, tile, tall, border, seed] = parts.as_slice() else { return Err(bad("expected `style,tile,tall,border,seed` or `none`")) };
+                    let [style, size, bevel, border, seed] = parts.as_slice() else { return Err(bad("expected `style,size,bevel,border,seed` or `none`")) };
                     let style = crate::pattern::STYLES.iter().position(|s| s.name == *style).ok_or_else(|| bad("unknown mosaic style"))?;
-                    // (sizes from a file, which may be anyone's: kept to what a tile can be)
-                    Some(crate::pattern::Mosaic { style, tile: (whole(tile)?.clamp(1, 64)) as i32, tall: (whole(tall)?.clamp(1, 64)) as i32, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))? })
+                    // (sizes from a file, which may be anyone's: kept to what the sliders allow)
+                    Some(crate::pattern::Mosaic { style, size: (whole(size)?.clamp(1, 16)) as i32, bevel: (whole(bevel)?.clamp(0, 8)) as i32, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))? })
                 }
             }
             "stones" => {
@@ -914,7 +914,7 @@ mod tests {
                 radius: 12.5,
                 max_ext: 40,
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
-                mosaic: Some(crate::pattern::Mosaic { style: 1, tile: 3, tall: 2, border: 2, seed: 41 }),
+                mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: 2, border: 2, seed: 41 }),
             },
         ];
         for spec in specs {

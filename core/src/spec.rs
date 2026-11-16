@@ -427,7 +427,6 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.pulls = spec.pulls.iter().map(|(at, by)| (*at / g, *by / g)).collect();
     coarse.pull_reach /= g;
     coarse.stones = spec.stones.map(|s| crate::pattern::Stones { size: s.size / g, gap: s.gap / g, ..s });
-    coarse.mosaic = spec.mosaic.map(|m| crate::pattern::Mosaic { tile: ((m.tile as f64 / g).round() as i32).max(1), tall: ((m.tall as f64 / g).round() as i32).max(1), ..m });
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
     coarse.snapped()
@@ -2447,7 +2446,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
             let fit = match (&spec.stones, &spec.mosaic) {
                 // each stone its own outline, where a solid form is one
-                (Some(stones), _) => crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks),
+                (Some(stones), _) => crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
                 // each colour of the mosaic its own outline
                 (None, Some(mosaic)) => crate::pattern::lay_mosaic(&|p| region.eval(p), mosaic, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
                 (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),

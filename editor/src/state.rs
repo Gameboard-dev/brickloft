@@ -737,12 +737,6 @@ impl State {
                 all.extend(built.bricks.iter().zip(&built.shades).map(|(b, shade)| (*b, paint.shade(*shade), form, place)));
                 continue;
             }
-            if paint.mode == crate::paint::Mode::Patches {
-                // by the piece each brick is part of, which is not to be told from one brick
-                let pieces = brickloft_core::pattern::pieces(&built.bricks);
-                all.extend(built.bricks.iter().zip(pieces).map(|(b, piece)| (*b, paint.patch(piece), form, place)));
-                continue;
-            }
             all.extend(built.bricks.iter().map(|b| (*b, paint.colour(b, lo, hi), form, place)));
         }
         all
@@ -2012,7 +2006,7 @@ mod tests {
     #[test]
     fn a_mosaic_is_coloured_as_its_pattern_has_it() {
         let mut state = State::new();
-        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, tile: 2, tall: 2, border: 1, seed: 3 }), ..Spec::default() };
+        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 2, border: 1, seed: 3 }), ..Spec::default() };
         state.form = CIRCLE;
         state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::MOSAIC.to_vec(), axis: 2, width: 2 };
         state.refresh(|| 0.0);
@@ -2035,7 +2029,7 @@ mod tests {
         let mut state = State::new();
         state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 30.0, thick: 16.0, depth: 2, stones: Some(brickloft_core::pattern::Stones { size: 7.0, gap: 1.5, uneven: 0.5, seed: 2 }), ..Spec::default() };
         state.form = CIRCLE;
-        state.paint = Paint { mode: crate::paint::Mode::Patches, colours: crate::paint::STONE.to_vec(), axis: 2, width: 2 };
+        state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::STONE.to_vec(), axis: 2, width: 2 };
         state.refresh(|| 0.0);
         assert!(state.problem.is_none(), "{:?}", state.problem);
         let painted = state.painted();

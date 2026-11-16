@@ -412,19 +412,42 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve && !s.tube {
-            // a path of stones in place of solid brick: see `brickloft_core::pattern`
-            let mut stones = s.stones.is_some();
-            helped(ui, help("stones"), |ui| ui.checkbox(&mut stones, "Stepping stones"));
-            if stones != s.stones.is_some() {
-                if stones {
-                    s.mosaic = None; // one pattern at a time
-                }
-                s.stones = stones.then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                // stones are told apart by their colours: started in stone colours unless colours have been chosen
-                if stones && state.paint.mode == Mode::Solid {
-                    (state.paint.mode, state.paint.colours) = (Mode::Patches, crate::paint::STONE.to_vec());
+            // One pattern in place of solid brick, or none: see
+            // `brickloft_core::pattern`. One list and not a tickbox for
+            // each, since a form has one pattern at most. 0 is none, 1
+            // the stepping stones, and 2 onwards the styles of mosaic.
+            let styles = &brickloft_core::pattern::STYLES;
+            let named = |choice: usize| match choice {
+                0 => "none",
+                1 => "stepping stones",
+                _ => styles[(choice - 2).min(styles.len() - 1)].name,
+            };
+            let before = if s.stones.is_some() { 1 } else { s.mosaic.map_or(0, |laid| 2 + laid.style.min(styles.len() - 1)) };
+            let mut choice = before;
+            helped(ui, help("pattern"), |ui| {
+                ComboBox::from_label("Pattern").selected_text(named(choice)).show_ui(ui, |ui| {
+                    for n in 0..styles.len() + 2 {
+                        ui.selectable_value(&mut choice, n, named(n));
+                    }
+                })
+                .response
+            });
+            if choice != before {
+                s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
+                s.mosaic = (choice >= 2).then_some(brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1 });
+                // A pattern is its colours, and each has colours of its
+                // own to start in (a rug's reds and golds, a floor of
+                // planks' browns). They are brought in with the pattern
+                // unless the player has colours of their own for one:
+                // the pattern's colouring already chosen, in colours
+                // that are none of the last pattern's sets.
+                let own = state.paint.mode == Mode::Pattern && !crate::paint::palettes(named(before)).iter().any(|set| state.paint.colours == *set);
+                if choice != 0 && !own {
+                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(named(choice)).to_vec());
                 }
             }
+            // another pattern, in the next of its sets of colours
+            let mut another = None;
             if let Some(laid) = &mut s.stones {
                 helped(ui, help("stone_size"), |ui| ui.add(Slider::new(&mut laid.size, brickloft_core::pattern::LEAST_STONE..=largest.min(100.0)).logarithmic(true).step_by(0.5).text("Stone size")));
                 helped(ui, help("stone_gap"), |ui| ui.add(Slider::new(&mut laid.gap, brickloft_core::pattern::LEAST_GAP..=8.0).step_by(0.5).text("Gap")));
@@ -434,57 +457,36 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     ui.label("Seed");
                     if ui.button("Another").clicked() {
                         laid.seed = laid.seed.wrapping_add(1);
+                        another = Some(laid.seed);
                     }
-                    hint(ui, help("stone_seed"));
+                    hint(ui, help("pattern_seed"));
                 });
-            }
-            // a mosaic of coloured tiles: see `brickloft_core::pattern`
-            let mut mosaic = s.mosaic.is_some();
-            helped(ui, help("mosaic"), |ui| ui.checkbox(&mut mosaic, "Mosaic"));
-            if mosaic != s.mosaic.is_some() {
-                if mosaic {
-                    s.stones = None;
-                }
-                // A tile is one microbrick. It could once be set larger, and
-                // wider than deep, and that did nothing a player wanted:
-                // it drew the same pattern coarser, or stretched.
-                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style: 0, tile: 1, tall: 1, border: 1, seed: 1 });
-                // a mosaic is its colours: started in a mosaic's unless the pattern's colouring is already chosen
-                if mosaic && state.paint.mode != Mode::Pattern {
-                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::palette(brickloft_core::pattern::STYLES[0].name).to_vec());
-                }
             }
             if let Some(laid) = &mut s.mosaic {
-                let styles = &brickloft_core::pattern::STYLES;
-                let style_before = laid.style.min(styles.len() - 1);
-                helped(ui, help("mosaic_style"), |ui| {
-                    ComboBox::from_label("Style").selected_text(styles[laid.style.min(styles.len() - 1)].name).show_ui(ui, |ui| {
-                        for (i, style) in styles.iter().enumerate() {
-                            ui.selectable_value(&mut laid.style, i, style.name);
-                        }
-                    })
-                    .response
-                });
-                // A style has colours of its own to start in (a rug's reds
-                // and golds, a floor of planks' browns). They follow the
-                // style while they are still as the last style set them,
-                // and are left alone once the player has changed any.
-                let now = styles[laid.style.min(styles.len() - 1)].name;
-                if laid.style != style_before && crate::paint::palettes(styles[style_before].name).iter().any(|set| state.paint.colours == *set) {
-                    state.paint.colours = crate::paint::palette(now).to_vec();
+                // (each style shows the settings it has a use for)
+                let style = named(choice);
+                if matches!(style, "planks" | "bricks" | "slabs") {
+                    helped(ui, help("pattern_size"), |ui| ui.add(Slider::new(&mut laid.size, 1..=8).text("Size")));
                 }
-                helped(ui, help("mosaic_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
+                if style == "slabs" {
+                    helped(ui, help("pattern_bevel"), |ui| ui.add(Slider::new(&mut laid.bevel, 0..=4).text("Bevel")));
+                }
+                if matches!(style, "medallions" | "rug" | "snowflake") {
+                    helped(ui, help("pattern_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
+                }
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
                     ui.label("Seed");
                     if ui.button("Another").clicked() {
                         laid.seed = laid.seed.wrapping_add(1);
-                        // another pattern, in the next of the style's sets of colours
-                        let sets = crate::paint::palettes(now);
-                        state.paint.colours = sets[laid.seed as usize % sets.len()].to_vec();
+                        another = Some(laid.seed);
                     }
-                    hint(ui, help("mosaic_seed"));
+                    hint(ui, help("pattern_seed"));
                 });
+            }
+            if let Some(seed) = another {
+                let sets = crate::paint::palettes(named(choice));
+                state.paint.colours = sets[seed as usize % sets.len()].to_vec();
             }
             helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
         }
@@ -688,7 +690,7 @@ fn colours(ui: &mut Ui, state: &mut State) {
             .response
     });
     {
-        // one colour for a solid; up to four to blend, stripe or speckle between; one for each feature of a pattern
+        // one colour for a solid; up to four to blend or stripe between; one for each feature of a pattern
         let most = match paint.mode {
             Mode::Solid => 1,
             Mode::Pattern => crate::paint::MOST_COLOURS,

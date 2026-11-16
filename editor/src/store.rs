@@ -25,7 +25,14 @@
 //! Folder and form names come from a text box, and on the desktop they
 //! become part of a file path, so only [`clean`] names are ever used.
 
-use crate::paint::{Paint, MODES};
+use crate::paint::{Mode, Paint};
+
+/// The way of colouring each number in a saved form stands for. A save
+/// holds the number, so the list keeps its length and order for good. 3
+/// was a speckled blend and 4 each piece its own colour, which the
+/// editor no longer has: a save that used them opens as the nearest
+/// thing, a blend and the pattern's own colours.
+const SAVED_MODES: [Mode; 6] = [Mode::Solid, Mode::Blend, Mode::Stripes, Mode::Blend, Mode::Pattern, Mode::Pattern];
 use crate::state::{Painted, Placed};
 use brickloft_core::report::{parse_spec, spec_text};
 
@@ -45,7 +52,7 @@ const FORM: &str = "[arcs form]";
 pub fn describe(forms: &[Placed]) -> String {
     let mut text = String::new();
     for (spec, paint, place) in forms {
-        let mode = MODES.iter().position(|m| m.0 == paint.mode).unwrap_or(0);
+        let mode = SAVED_MODES.iter().position(|m| *m == paint.mode).unwrap_or(0);
         let colours: Vec<String> = paint.colours.iter().map(|c| format!("{},{},{}", c[0], c[1], c[2])).collect();
         text += &format!("{FORM}\nplace {} {} {}\npaint {mode} {} {} {}\n{}", place[0], place[1], place[2], paint.axis, paint.width, colours.join(" "), spec_text(spec));
     }
@@ -76,7 +83,7 @@ pub fn forms_in(description: &str) -> Result<Vec<Placed>, String> {
             })
             .collect();
         let colours = colours.filter(|c| c.len() <= 4).ok_or("a form's colours cannot be read")?;
-        let paint = Paint { mode: MODES.get(mode).ok_or("a form's colouring is not one this editor has")?.0, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
+        let paint = Paint { mode: *SAVED_MODES.get(mode).ok_or("a form's colouring is not one this editor has")?, colours, axis: axis.min(2), width: width.clamp(1, 1000) as i32 };
         forms.push((parse_spec(spec)?, paint, place));
     }
     Ok(forms)
