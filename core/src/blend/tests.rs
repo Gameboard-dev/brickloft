@@ -409,6 +409,35 @@ fn a_joined_form_half_a_cell_off_is_settled_onto_the_other_forms_cells_and_then_
 }
 
 #[test]
+fn forms_built_at_one_brick_size_are_joined_at_that_size_and_at_single_cells_if_out_of_step() {
+    let coarse = |radius: f64| Spec { grain: 2, ..ball(radius) };
+    // (the single cells left of cut blocks are joined into blocks by the caller: here as the caller does it)
+    let whole_bricks = |pieces: &[Piece]| {
+        let loose = crate::pattern::joined(pieces.iter().filter(|p| p.loose).map(|p| (p.brick, p.member as u8)).collect(), 80);
+        pieces.iter().filter(|p| !p.loose).map(|p| p.brick).chain(loose.into_iter().map(|l| l.0)).all(|b| b.min.iter().chain(&b.ext).all(|v| v % 2 == 0))
+    };
+    let fresh = |pieces: &[Piece]| pieces.iter().filter(|p| p.from.is_none() || p.loose).count();
+    for carve in [false, true] {
+        // a whole number of bricks apart: every brick of the join is whole bricks of that size
+        let forms = [(coarse(20.0), [0.0; 3]), (coarse(14.0), [22.0, 6.0, 10.0])];
+        let scene = if carve { Scene::carved(&forms, 2.0) } else { Scene::new(&forms, 2.0) };
+        assert!(scene.built.iter().all(|b| b.grain == 2));
+        let pieces = scene.pieces();
+        assert!(shares_room(&scene, &pieces).is_none());
+        assert!(whole_bricks(&pieces) && fresh(&pieces) > 20, "carve {carve}: a brick of the join is not whole bricks of 2, or none was fitted");
+        // (twice as far from the surface as at single cells counts as clear: the bricks are twice as coarse)
+        assert_eq!(holes_and_spikes(&scene, &pieces, 2.0, 1.8), (0, 0), "carve {carve}");
+        // one cell out of step, there is no coarser lattice the two share, and the join is single cells: sound, and several times the bricks
+        let forms = [(coarse(20.0), [0.0; 3]), (coarse(14.0), [23.0, 6.0, 10.0])];
+        let fine = if carve { Scene::carved(&forms, 2.0) } else { Scene::new(&forms, 2.0) };
+        let pieces_fine = fine.pieces();
+        assert!(shares_room(&fine, &pieces_fine).is_none() && !whole_bricks(&pieces_fine));
+        assert_eq!(holes_and_spikes(&fine, &pieces_fine, 2.0, 1.8), (0, 0), "carve {carve}, out of step");
+        assert!(fresh(&pieces_fine) > 2 * fresh(&pieces), "carve {carve}: {} bricks fitted at single cells and {} at the forms' size", fresh(&pieces_fine), fresh(&pieces));
+    }
+}
+
+#[test]
 fn three_forms_joined_in_a_chain_are_one_build() {
     // a sphere in a cube, and a smaller sphere in that sphere, clear of the cube
     let mut scene = Scene::new(&[(cube(), [0.0; 3]), (ball(12.0), [12.0, 4.0, 18.0]), (ball(8.0), [24.0, 6.0, 24.0])], 3.0);
