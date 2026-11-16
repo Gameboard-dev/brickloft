@@ -1413,7 +1413,13 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     let limbs = tree.count.max(2) as usize;
     let girth = (height * habit.girth).max(2.4);
     // the height the trunk divides at: for an oak low, a fifth to a quarter of the way up
-    let bole = height * g.between(habit.bole.0, habit.bole.1);
+    let base = height * g.between(habit.bole.0, habit.bole.1);
+    // A slender tree, a birch, is a stem to three fifths of its height
+    // with limbs off it at intervals from `base` up, and divides only
+    // there. Dividing at `base` as an oak does, which it did, it was a
+    // short post with a bush of dark limbs on it.
+    let slender = habit.leader && habit.girth < 0.03;
+    let bole = if slender { height * 0.6 } else { base };
     // how big a mass of leaves is
     let mass = (spread * (habit.mass.0 + habit.mass.1 * dense)).max(2.6);
 
@@ -1429,8 +1435,8 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     // it, and is at its fork a little over three quarters of what it is
     // near the ground; one that divides there into limbs is a column to
     // its fork. What it is at the fork is what its limbs share.
-    // (a slender one, a birch, by more)
-    let neck = if habit.leader { girth * if habit.girth < 0.03 { 0.7 } else { 0.78 } } else { girth };
+    // (a slender one, which has given limbs off all the way up, to half)
+    let neck = if slender { girth * 0.5 } else if habit.leader { girth * 0.78 } else { girth };
     let trunk = g.trunk(DVec3::ZERO, bole, &|z: f64| (girth + (neck - girth) * (z / bole).min(1.0)) * (1.0 + 0.36 * habit.roots * (-z / (girth * 2.2)).exp()), TRUNK);
     // and narrowing under its fork to what its limbs are together, so that they do not leave a shoulder
     g.cone(DVec3::Z * (bole - neck * 0.4), DVec3::Z * (bole + neck * 0.7), neck * 0.85, neck * 0.6, TRUNK);
@@ -1459,9 +1465,9 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
     // the leaves they carry.
     let fork = stem(bole);
     let (out, over) = ((spread - mass * 1.4).max(spread * 0.5), (height - mass * 1.3).max(height * 0.6));
-    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * habit.heart);
+    let heart = DVec3::new(fork.x, fork.y, base + (over - base) * habit.heart);
     let dome = DVec3::new(out, out, over - heart.z);
-    let under = heart.z - bole * 0.8;
+    let under = heart.z - base * 0.8;
     // where a point is in the dome: 0 at its heart, 1 on its outline
     let within = |p: DVec3| {
         let q = p - heart;
@@ -1483,10 +1489,12 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
         g.numbers.0 = numbers;
         ends.clear();
         // the limbs the trunk divides into, sharing its cross-section
-        let mut shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
+        // (a slender tree's top divides in three, the rest of its limbs having left its stem lower down)
+        let top = if slender { limbs.min(3) } else { limbs };
+        let mut shares: Vec<f64> = (0..top).map(|_| g.between(0.7, 1.3)).collect();
         if habit.leader {
-            // (the stem carries on as the thickest of them: of a slender tree, a birch, as most of it, its limbs being thin things off a stem)
-            shares[0] *= if habit.girth < 0.03 { 5.0 } else { 2.4 };
+            // (the stem carries on as the thickest of them: of a slender tree, a birch, the same)
+            shares[0] *= 2.4;
         }
         let total: f64 = shares.iter().sum();
         let turn = g.between(0.0, TAU);
@@ -1495,7 +1503,7 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
         for (k, share) in shares.iter().enumerate() {
             let radius = neck * (share / total).sqrt();
             radii.push(radius);
-            let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / limbs as f64;
+            let way = turn + TAU * (k as f64 + g.between(-0.2, 0.2)) / top as f64;
             // striking out at wide angles, 45 to 70 degrees off upright;
             // and where there are four or more, one of them nearer
             // upright, to fill the top of the crown
@@ -1503,6 +1511,15 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
             waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
         g.forks.push((neck, radii));
+        if slender {
+            // the limbs off the stem: one to each length of it, each round from the last by the golden angle, half as thick as the stem is there
+            for k in 0..limbs {
+                let z = base + (bole - base) * (k as f64 + g.between(0.1, 0.9)) / limbs as f64;
+                let (way, polar) = (turn + k as f64 * 2.4, g.between(habit.polar.0, habit.polar.1));
+                let radius = ((girth + (neck - girth) * z / bole) * 0.5).max(1.2);
+                waiting.push(Shoot { from: stem(z), way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
+            }
+        }
 
         while let Some(shoot) = waiting.pop() {
             let (mut at, mut way, mut radius, mut roll) = (shoot.from, shoot.way, shoot.radius, shoot.roll);
@@ -2778,12 +2795,13 @@ impl Grown {
         let (mut path, mut radius) = (vec![foot], vec![thick(0.0)]);
         for (i, &(from, to, now)) in lengths.iter().enumerate() {
             // Where the next length is narrower, the top of this one
-            // slopes in to it, two cells up for each cell in: a face of
-            // long ramps. Left square, each change of size was a ledge
+            // slopes in to it, five cells up for each cell in where it has
+            // the length: a face of long ramps. (Two up for each in, tried
+            // first, was a chamfer: a table leg, turned.) Left square, each change of size was a ledge
             // round the trunk, and a trunk that widens to its foot was a
             // post standing on a plinth.
             let next = lengths.get(i + 1).map_or(now, |l| l.2);
-            let slope = if next < now && next >= 1.5 { (2.0 * (now - next)).min(to - from) } else { 0.0 };
+            let slope = if next < now && next >= 1.5 { (5.0 * (now - next)).min(to - from) } else { 0.0 };
             let (a, m, b) = (foot + DVec3::Z * from, foot + DVec3::Z * (to - slope), foot + DVec3::Z * to);
             if now >= 1.5 {
                 if to - slope > from {
@@ -4385,7 +4403,8 @@ mod tests {
             for seed in 1..=3 {
                 let tree = model(kind, seed);
                 let fork = tree.limbs[0].path.last().unwrap().z;
-                let heights: Vec<f64> = (1..(fork * 0.8) as usize).map(|k| k as f64 + 0.25).collect();
+                // (a birch's limbs leave its stem from a quarter of the way up, and their ends hang against it: under them)
+                let heights: Vec<f64> = (1..(fork * if kind == Kind::Birch { 0.25 } else { 0.8 }) as usize).map(|k| k as f64 + 0.25).collect();
                 let reaches: Vec<(f64, f64)> = heights.iter().map(|z| reach(&tree, *z)).collect();
                 // going up, from one cell to the next it never draws in by a whole cell: its sizes run into one another on slopes, and its roots into it
                 for (n, pair) in reaches.windows(2).enumerate() {

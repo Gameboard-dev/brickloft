@@ -866,6 +866,11 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         if helped(ui, help("grass_reeds"), |ui| ui.add(Slider::new(&mut reeds, 0..=10).text("Reeds round the water"))).changed() {
             s.depth = reeds + 1;
         }
+        // (two levels are kept in `tube`, which grass has no other use for: see `brickloft_core::tree::Waters`)
+        let mut levels = if s.tube { 2 } else { 1 };
+        if helped(ui, help("grass_levels"), |ui| ui.add(Slider::new(&mut levels, 1..=2).text("Pond levels"))).changed() {
+            s.tube = levels == 2;
+        }
         brush(ui, &mut state.brush, &mut state.touched, s, largest);
         // (see `brz::walked_through`)
         helped(ui, help("grass_frozen"), |ui| ui.checkbox(&mut s.fill, "Frozen pond (ice to stand on)"));

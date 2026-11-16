@@ -46,7 +46,7 @@ until you tick it.
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
-| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch or a willow; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 
 ### The cube
 
@@ -436,6 +436,7 @@ more settings mean something different for each kind.
 | Reeds | **Stems**, 1 to 120 | **Leaves** | **Sway** | **Feathery plumes** |
 | Grass | **Water stands this far below it**, 0 to 40 | **How thick it grows** | **Lean** of the blades | none |
 | Birch, Willow, Scots pine | **Main limbs**, 3 to 9 | **Foliage** | **Crookedness** | **Bare** |
+| Cherry | **Main limbs**, 3 to 9 | **Blossom** | **Crookedness** | **Bare**, and **Fallen petals on the ground** |
 | Date palm | **Fronds**, 8 to 60 | **Leaflet length** | **Lean** | **Dates** |
 | Cypress | none | **Density** | **Looseness** | none |
 | Yucca | **Blades**, 8 to 80 | **Blade width** | **Bend of the blades** | **In flower** |
@@ -480,6 +481,17 @@ with a brush:
   its margin. Set the water to 0 for a dry hollow. A patch with a pond
   reaches below the floor it was laid on by the pond's depth, so raise it
   or set it on ground that deep.
+- **Pond levels** at 2 lets water stand at two heights. Push up a hill,
+  push a hollow down into its top, and dig another hollow beside the
+  hill: the hollow on the hill holds a pond of its own, as far below its
+  rim as the lower pond is below the lawn, and a stream steps down from
+  it to the lower pond in flat reaches. Which pond is the high one
+  follows the ground, and no height is typed. All high ponds share the
+  height of the lowest of them. A high pond with no lower water it can
+  run down to has no stream. A stream is frozen with the ponds.
+- The view draws water see-through, so the basin shows under it.
+
+<img src="images/plant-stream.png" width="420" alt="A lawn with a small pond in a hollow on a hill and a larger pond below it, joined by a narrow stream of water that steps down the slope in a sandy channel">
 
 <img src="images/plant-pond.png" width="420" alt="A lawn with a pond dug in it: blue water with a flat top, a rim of sand, and bulrushes standing round the margin">
 
