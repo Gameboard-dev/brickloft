@@ -279,6 +279,43 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [246, 244, 236], [232, 228, 214], [200, 180, 60]],
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [240, 130, 30], [206, 50, 30], [50, 34, 26]],
         ],
+        // A style of furniture's colours are for what its pieces are made
+        // of, in the order of `brickloft_core::furniture`'s numbers: the
+        // wood, a second wood or the paint of its doors, metal, upholstery,
+        // a second cloth for loose cushions, the light of a lamp, pale
+        // linen (a shade, a mattress, a candle), and a top of another
+        // stuff. One set does for every kind, so that a room of one style
+        // is in one set of colours.
+        // pale oak with white fronts and grey cloth; walnut with teal; white with black
+        "modern furniture" => &[
+            &[[206, 178, 136], [232, 230, 224], [60, 62, 66], [120, 128, 134], [222, 196, 92], [255, 232, 160], [240, 238, 230], [224, 222, 216]],
+            &[[112, 76, 52], [96, 66, 46], [196, 160, 84], [44, 104, 110], [226, 220, 206], [255, 232, 160], [238, 232, 218], [58, 58, 62]],
+            &[[238, 236, 232], [226, 224, 220], [34, 34, 38], [52, 54, 60], [200, 60, 50], [255, 232, 160], [244, 242, 238], [40, 40, 44]],
+        ],
+        // pine with cream paint and sage cloth; painted blue; sage paint with oak
+        "farmhouse furniture" => &[
+            &[[196, 152, 98], [236, 228, 206], [70, 62, 56], [150, 170, 150], [228, 214, 180], [255, 232, 160], [244, 238, 222], [170, 126, 78]],
+            &[[176, 134, 88], [120, 150, 170], [60, 56, 54], [200, 180, 150], [236, 230, 214], [255, 232, 160], [244, 238, 222], [150, 110, 72]],
+            &[[170, 130, 84], [150, 166, 140], [196, 160, 84], [214, 190, 150], [176, 84, 70], [255, 232, 160], [244, 238, 222], [140, 104, 68]],
+        ],
+        // mahogany with green; walnut with burgundy; ivory paint with gilt and pale blue
+        "classical furniture" => &[
+            &[[110, 54, 38], [96, 46, 32], [200, 164, 84], [40, 84, 60], [200, 170, 100], [255, 232, 160], [240, 232, 210], [120, 60, 42]],
+            &[[92, 62, 44], [78, 52, 38], [204, 170, 90], [120, 34, 44], [214, 196, 150], [255, 232, 160], [240, 232, 210], [100, 70, 50]],
+            &[[232, 224, 204], [240, 234, 218], [206, 170, 88], [150, 170, 196], [226, 200, 150], [255, 232, 160], [244, 240, 228], [214, 204, 180]],
+        ],
+        // weathered oak; oak with barn red; grey driftwood
+        "rustic furniture" => &[
+            &[[136, 104, 74], [118, 90, 64], [58, 54, 52], [150, 110, 80], [190, 170, 140], [255, 232, 160], [232, 224, 204], [156, 122, 88]],
+            &[[128, 96, 68], [140, 52, 44], [50, 48, 46], [96, 110, 90], [214, 200, 170], [255, 232, 160], [232, 224, 204], [150, 116, 84]],
+            &[[150, 144, 134], [128, 122, 112], [60, 58, 56], [110, 120, 130], [220, 214, 200], [255, 232, 160], [232, 228, 216], [168, 162, 150]],
+        ],
+        // black steel with oak and leather; raw steel with walnut; steel with concrete
+        "industrial furniture" => &[
+            &[[150, 110, 70], [126, 92, 60], [38, 38, 42], [90, 70, 56], [176, 160, 140], [255, 232, 160], [226, 220, 206], [176, 132, 84]],
+            &[[104, 74, 52], [88, 62, 44], [110, 114, 120], [60, 62, 66], [196, 120, 60], [255, 232, 160], [226, 220, 206], [120, 86, 60]],
+            &[[140, 120, 100], [120, 104, 88], [44, 44, 48], [70, 80, 90], [200, 196, 188], [255, 232, 160], [226, 222, 212], [176, 176, 172]],
+        ],
         // A bookcase's colours are for its parts, in the order of
         // `brickloft_core::furniture`'s numbers: the wood of the carcass,
         // a second tone of it for the back panel, and six the books and
@@ -387,6 +424,11 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
 /// order [`palettes`] has them.
 pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
     match kind {
+        "modern furniture" => &["Pale oak, white and grey", "Walnut and teal", "White and black"],
+        "farmhouse furniture" => &["Pine and cream", "Painted blue", "Sage and oak"],
+        "classical furniture" => &["Mahogany and green", "Walnut and burgundy", "Ivory and gilt"],
+        "rustic furniture" => &["Weathered oak", "Barn red", "Grey driftwood"],
+        "industrial furniture" => &["Black steel and oak", "Raw steel and walnut", "Steel and concrete"],
         _ => &["Oak with mixed spines", "Dark walnut with leather", "White with pastels", "Black with brights"],
     }
 }

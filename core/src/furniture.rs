@@ -31,14 +31,98 @@ use crate::shapes::{shape_info, CellBrick, CUBE};
 use glam::DVec3;
 use std::sync::OnceLock;
 
-/// The kinds of furniture there are. More are to come (see `docs/future-work.md`).
+// Each group of kinds in a file of its own, and what they share in two more.
+mod bed;
+mod lights;
+mod parts;
+mod seating;
+mod storage;
+mod style;
+mod tables;
+pub use lights::MOST_LIGHTS;
+pub use style::{settings, Field, Set, Setting, Style, STYLES};
+
+/// The kinds of furniture there are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Bookcase,
+    Cupboard,
+    Drawers,
+    Sideboard,
+    Kitchen,
+    Dining,
+    Coffee,
+    Side,
+    Desk,
+    Chair,
+    Armchair,
+    Stool,
+    Bench,
+    Sofa,
+    TableLamp,
+    FloorLamp,
+    Pendant,
+    Chandelier,
+    Sconce,
+    Candlestick,
+    Bed,
 }
 
-/// Every kind, with the name a save or another program calls it by.
-pub const KINDS: [(Kind, &str); 1] = [(Kind::Bookcase, "bookcase")];
+/// Every kind, in the order of [`Kind`], with the name a save or another
+/// program calls it by.
+pub const KINDS: [(Kind, &str); 21] = [
+    (Kind::Bookcase, "bookcase"),
+    (Kind::Cupboard, "cupboard"),
+    (Kind::Drawers, "drawers"),
+    (Kind::Sideboard, "sideboard"),
+    (Kind::Kitchen, "kitchen"),
+    (Kind::Dining, "dining"),
+    (Kind::Coffee, "coffee"),
+    (Kind::Side, "side"),
+    (Kind::Desk, "desk"),
+    (Kind::Chair, "chair"),
+    (Kind::Armchair, "armchair"),
+    (Kind::Stool, "stool"),
+    (Kind::Bench, "bench"),
+    (Kind::Sofa, "sofa"),
+    (Kind::TableLamp, "tablelamp"),
+    (Kind::FloorLamp, "floorlamp"),
+    (Kind::Pendant, "pendant"),
+    (Kind::Chandelier, "chandelier"),
+    (Kind::Sconce, "sconce"),
+    (Kind::Candlestick, "candlestick"),
+    (Kind::Bed, "bed"),
+];
+
+/// The kinds in the groups a list of them is shown in, each kind with
+/// what it is called there.
+pub const GROUPS: [(&str, &[(Kind, &str)]); 5] = [
+    ("Storage", &[(Kind::Bookcase, "Bookcase"), (Kind::Cupboard, "Cupboard"), (Kind::Drawers, "Chest of drawers"), (Kind::Sideboard, "Sideboard"), (Kind::Kitchen, "Kitchen cabinet")]),
+    ("Tables", &[(Kind::Dining, "Dining table"), (Kind::Coffee, "Coffee table"), (Kind::Side, "Side table"), (Kind::Desk, "Desk")]),
+    ("Seating", &[(Kind::Chair, "Chair"), (Kind::Armchair, "Armchair"), (Kind::Stool, "Stool"), (Kind::Bench, "Bench"), (Kind::Sofa, "Sofa")]),
+    ("Lights", &[(Kind::TableLamp, "Table lamp"), (Kind::FloorLamp, "Floor lamp"), (Kind::Pendant, "Pendant"), (Kind::Chandelier, "Chandelier"), (Kind::Sconce, "Wall sconce"), (Kind::Candlestick, "Candlestick")]),
+    ("Beds", &[(Kind::Bed, "Bed")]),
+];
+
+/// The colour numbers of every kind but the bookcase, whose numbers
+/// above 1 are its books. They are numbers for what a thing is made of
+/// and not for its parts, so that a set of furniture is one set of
+/// colours: a table's top and a cupboard's door are the same wood in the
+/// same number. [`WOOD`] is 0 for all of them.
+/// The second wood, or the paint of a panel, a door or a drawer front.
+pub const PANEL: u8 = 1;
+/// Metal: handles, a lamp's stem, an industrial frame. Written to the game as its metal.
+pub const METAL: u8 = 2;
+/// Upholstery, and a bed's blanket.
+pub const FABRIC: u8 = 3;
+/// A second cloth: loose cushions, pillows.
+pub const ACCENT: u8 = 4;
+/// A lamp's bulb or a candle's flame. Written to the game as a glowing brick.
+pub const LIGHT: u8 = 5;
+/// Pale cloth and wax: a lampshade, a mattress, a candle.
+pub const LINEN: u8 = 6;
+/// A top of another stuff than the piece: a worktop, a slab on a metal frame, the second tone of a plank top.
+pub const TOP: u8 = 7;
 
 /// The colour number of the carcass: sides, top, shelves, mouldings.
 pub const WOOD: u8 = 0;
@@ -99,13 +183,48 @@ pub struct Furniture {
     pub moulding: bool,
     /// how full of books it is, from 0 (bare shelves) to 100 (every shelf packed)
     pub books: i32,
+    /// Which style it is in (see [`Style`]). A bookcase takes no notice
+    /// of it: its mouldings and boards have settings of their own, from
+    /// before there were styles, and a saved bookcase has to stay as it was.
+    pub style: Style,
+    /// A number of the kind's own, 0 for as many as its size has room
+    /// for: a cupboard's doors, a chest's drawers, a sofa's seats.
+    pub count: i32,
+    /// A choice of the kind's own, 0 for whatever the style has: a
+    /// table's legs, a chair's back, a cupboard's handles, a lamp's shade.
+    pub choice: i32,
+    /// A second such choice: a table's top, a seat's cushion, what a cupboard stands on.
+    pub second: i32,
+    /// Something the kind may have or not: a chair's arms, a side table's drawer, a bed's footboard.
+    pub extra: bool,
+    /// Whether its lights shine in the game, or only glow.
+    pub shine: bool,
 }
+
+/// The most bricks the box of a piece may come to when cut to the longest brick allowed (see `Model::new`).
+pub const MOST_PIECES: i64 = 400_000;
+
+/// The most a kind's own number or choice may be, whatever the kind.
+pub const MOST_COUNT: i32 = 12;
 
 impl Furniture {
     /// A kind as it starts out.
     pub fn of(kind: Kind) -> Furniture {
-        match kind {
-            Kind::Bookcase => Furniture { kind, seed: 1, board: 2, shelves: 0, spacing: 11, bay: 34, plinth: 3, back: true, moulding: true, books: 85 },
+        // (what a kind has unless it is taken off: a side table's drawer, the drawers of a sideboard and of a kitchen's units)
+        let extra = matches!(kind, Kind::Side | Kind::Sideboard | Kind::Kitchen);
+        Furniture { kind, seed: 1, board: 2, shelves: 0, spacing: 11, bay: 34, plinth: 3, back: true, moulding: true, books: 85, style: Style::Classical, count: 0, choice: 0, second: 0, extra, shine: true }
+    }
+
+    /// The name its sets of colours go by: a bookcase's own, or its
+    /// style's (the one its seed picks, for a random style).
+    pub fn colours(&self) -> &'static str {
+        match (self.kind, self.style.resolved(self.seed)) {
+            (Kind::Bookcase, _) => "bookcase",
+            (_, Style::Modern) => "modern furniture",
+            (_, Style::Farmhouse) => "farmhouse furniture",
+            (_, Style::Rustic) => "rustic furniture",
+            (_, Style::Industrial) => "industrial furniture",
+            _ => "classical furniture",
         }
     }
 
@@ -113,9 +232,35 @@ impl Furniture {
     /// A figure in the game stands about thirty cells tall, so this is a
     /// bookcase to above head height, in boards a little heavier than
     /// life: at true scale a board is under half a cell.
+    ///
+    /// The other kinds are at one scale with each other, about four
+    /// centimetres to a cell, so that a chair set beside a table fits
+    /// under it: a table 19 tall, a seat 11 off the floor. That is one
+    /// and a half times life beside a figure, which is what leaves a
+    /// chair's leg room to be a leg and its back room for slats.
     pub fn usual_size(kind: Kind) -> [f64; 3] {
         match kind {
             Kind::Bookcase => [36.0, 10.0, 60.0],
+            Kind::Cupboard => [30.0, 14.0, 50.0],
+            Kind::Drawers => [24.0, 12.0, 26.0],
+            Kind::Sideboard => [44.0, 12.0, 22.0],
+            Kind::Kitchen => [30.0, 15.0, 23.0],
+            Kind::Dining => [44.0, 24.0, 19.0],
+            Kind::Coffee => [28.0, 16.0, 10.0],
+            Kind::Side => [12.0, 12.0, 14.0],
+            Kind::Desk => [36.0, 18.0, 19.0],
+            Kind::Chair => [11.0, 11.0, 23.0],
+            Kind::Armchair => [22.0, 20.0, 21.0],
+            Kind::Stool => [9.0, 9.0, 12.0],
+            Kind::Bench => [34.0, 10.0, 11.0],
+            Kind::Sofa => [50.0, 21.0, 21.0],
+            Kind::TableLamp => [9.0, 9.0, 15.0],
+            Kind::FloorLamp => [11.0, 11.0, 40.0],
+            Kind::Pendant => [9.0, 9.0, 17.0],
+            Kind::Chandelier => [21.0, 21.0, 17.0],
+            Kind::Sconce => [5.0, 5.0, 9.0],
+            Kind::Candlestick => [5.0, 5.0, 11.0],
+            Kind::Bed => [30.0, 52.0, 24.0],
         }
     }
 
@@ -140,6 +285,9 @@ impl Furniture {
             bay: if self.bay <= 0 { 0 } else { self.bay.clamp(LEAST_BAY, MOST_BAY) },
             plinth: self.plinth.clamp(0, MOST_PLINTH),
             books: self.books.clamp(0, 100),
+            count: self.count.clamp(0, MOST_COUNT),
+            choice: self.choice.clamp(0, MOST_COUNT),
+            second: self.second.clamp(0, MOST_COUNT),
             ..self
         }
     }
@@ -787,6 +935,10 @@ pub struct Model {
     /// the volume of all its bricks, in cells cubed
     pub volume: f64,
     pub count: Count,
+    /// Which bricks carry a light in the game, by their place in
+    /// `bricks`: a lamp's bulb, each flame of a chandelier. No more than
+    /// [`MOST_LIGHTS`] of them.
+    pub lamps: Vec<usize>,
     lo: [i32; 3],
     hi: [i32; 3],
     index: OnceLock<Index>,
@@ -802,12 +954,41 @@ impl Model {
         }
         let (lo, hi) = (sides.map(|s| s.0.round() as i32), sides.map(|s| s.1.round() as i32));
         let hi = [0, 1, 2].map(|k| hi[k].max(lo[k] + 1));
+        // A box cut into bricks of the longest length allowed is this many
+        // of them, and a solid piece (a cupboard's body, a sofa's base) is
+        // its whole box. Two thousand cells each way in bricks one cell
+        // long would be eight thousand million; refused here, before a
+        // brick is laid, it costs nothing.
+        let pieces: i64 = (0..3).map(|k| ((hi[k] - lo[k]) as i64 + longest.max(1) as i64 - 1) / longest.max(1) as i64).product();
+        if pieces > MOST_PIECES {
+            return Err(format!("the furniture is too large to build in bricks this short: its box alone would be {pieces} of them and the limit is {MOST_PIECES}; make it smaller, or the longest brick longer"));
+        }
         let mut lay = Lay { bricks: Vec::new(), shades: Vec::new(), longest: longest.max(1) };
-        let count = match f.kind {
-            Kind::Bookcase => bookcase(f, lo, hi, &mut lay, slopes)?,
-        };
+        let mut count = Count::default();
+        let mut lamps = Vec::new();
+        if f.kind == Kind::Bookcase {
+            count = bookcase(f, lo, hi, &mut lay, slopes)?;
+        } else {
+            let f = f.clamped();
+            let mut room = parts::Room { lay: &mut lay, lo, hi, set: Set::for_piece(&f), f, slopes, lamps: Vec::new() };
+            match f.kind {
+                Kind::Cupboard | Kind::Drawers | Kind::Sideboard | Kind::Kitchen => storage::cupboard(&mut room, f.kind),
+                Kind::Dining | Kind::Coffee | Kind::Side | Kind::Desk => tables::table(&mut room, f.kind),
+                Kind::Chair | Kind::Stool | Kind::Bench => seating::chair(&mut room, f.kind),
+                Kind::Armchair | Kind::Sofa => seating::sofa(&mut room, f.kind),
+                Kind::TableLamp | Kind::FloorLamp => lights::standing(&mut room, f.kind),
+                Kind::Pendant => lights::pendant(&mut room),
+                Kind::Chandelier => lights::chandelier(&mut room),
+                Kind::Sconce => lights::sconce(&mut room),
+                Kind::Candlestick => lights::candlestick(&mut room),
+                Kind::Bed => bed::bed(&mut room),
+                Kind::Bookcase => {}
+            }
+            lamps = room.lamps;
+            lamps.truncate(MOST_LIGHTS);
+        }
         let volume = lay.bricks.iter().map(CellBrick::volume).sum();
-        Ok(Model { bricks: lay.bricks, shades: lay.shades, volume, count, lo, hi, index: OnceLock::new() })
+        Ok(Model { bricks: lay.bricks, shades: lay.shades, volume, count, lamps, lo, hi, index: OnceLock::new() })
     }
 
     /// The box it fills: its low corner and its high one.
@@ -858,3 +1039,5 @@ impl Model {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_kinds;

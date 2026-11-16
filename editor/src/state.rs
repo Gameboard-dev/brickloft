@@ -1421,17 +1421,39 @@ impl State {
     /// sides, Ctrl + scroll) resizes it with no code of its own (see
     /// `brickloft_core::furniture::Furniture::usual_form`).
     pub fn usual_furniture(&mut self, kind: brickloft_core::furniture::Kind) {
-        use brickloft_core::furniture::{Furniture, KINDS};
+        use brickloft_core::furniture::Furniture;
         let tall = Furniture::usual_size(kind)[2];
         // (the floor it stands on now, to stand on it still at its new height)
         let snapped = self.spec.snapped();
         let floor = snapped.points.first().map(|middle| brickloft_core::spec::cube_sides(&snapped, *middle)[2].0);
-        self.spec.furniture = Furniture { seed: self.spec.furniture.seed, ..Furniture::of(kind) };
+        // (and the style with the seed: a chair made from a table of a set is a chair of that set)
+        self.spec.furniture = Furniture { seed: self.spec.furniture.seed, style: self.spec.furniture.style, ..Furniture::of(kind) };
         (self.spec.radius, self.spec.stretch) = Furniture::usual_form(kind);
         if let (Some(floor), Some(middle)) = (floor, self.spec.points.first_mut()) {
             middle.z = floor + tall / 2.0;
         }
-        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(self.spec.furniture.colours()).to_vec(), ..Paint::default() };
+    }
+
+    /// Give every other piece of furniture in the workspace the style,
+    /// the seed and the colours of the one being edited, so that they
+    /// are a set: the same legs, the same weight, the same wood (see
+    /// `brickloft_core::furniture::Set`). A bookcase is left as it is,
+    /// having no style. Returns how many were changed. One step to undo.
+    pub fn match_furniture(&mut self) -> usize {
+        use brickloft_core::furniture::Kind;
+        let (style, seed, paint) = (self.spec.furniture.style, self.spec.furniture.seed, self.paint.clone());
+        let mut forms = self.forms();
+        let mut changed = 0;
+        for (spec, colours, _) in forms.iter_mut().skip(1).filter(|f| f.0.form == Form::Furniture && f.0.furniture.kind != Kind::Bookcase) {
+            (spec.furniture.style, spec.furniture.seed, *colours) = (style, seed, paint.clone());
+            changed += 1;
+        }
+        if changed > 0 {
+            self.record();
+            self.open(forms);
+        }
+        changed
     }
 
     /// Make the form a maze as one starts out: its usual size, plain

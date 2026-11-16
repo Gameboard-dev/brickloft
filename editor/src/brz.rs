@@ -147,6 +147,9 @@ const LAMP_RADIUS: f32 = 120.0;
 /// too large for single microbricks, which is built at a larger size.
 fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
     use brickloft_core::{spec::Form, tree, tree::Kind, DVec3};
+    if spec.form == Form::Furniture {
+        return furniture_stuff(spec);
+    }
     let as_grown = spec.form == Form::Tree && spec.turned == brickloft_core::shapes::UPRIGHT && !spec.flip.contains(&true);
     let kind = spec.tree.kind;
     // Grass's blades are walked through unless it says they are solid
@@ -189,6 +192,42 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
             _ => Stuff::Blade,
         }
     })
+}
+
+/// What each brick of a piece of furniture is: its metal the game's
+/// metal, and its lights glowing, with a real light on each that the
+/// furniture says carries one (`brickloft_core::furniture::Model::lamps`:
+/// one to a lamp, one to each flame of a chandelier, eight at most) if
+/// the piece says its lights shine.
+///
+/// By the colour number the furniture gave each brick, which is a number
+/// for what the brick is made of and not for the colour a player has
+/// painted it. The piece is built again here as the workspace built it,
+/// turned and flipped as it stands, and each brick of it looked up by
+/// where it is; so a turned lamp is still lit, where a turned plant's
+/// parts are lost. A brick that a join has cut is no longer one of
+/// those, and is written as plain plastic.
+///
+/// Not a bookcase, whose numbers above the two woods are its books.
+fn furniture_stuff(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
+    use brickloft_core::furniture::{Kind, Model, LIGHT, METAL};
+    let snapped = spec.snapped();
+    let lone = brickloft_core::spec::Spec { blend: None, ..spec.clone() };
+    let (false, Ok(built), Some(middle)) = (spec.furniture.kind == Kind::Bookcase, brickloft_core::spec::build(&lone), snapped.points.first()) else { return Box::new(|_| Stuff::Solid) };
+    // (the same bricks in the same order, before they were turned: which of them carry a light)
+    let lamps = Model::new(&snapped.furniture, brickloft_core::spec::cube_sides(&snapped, *middle), snapped.max_ext, snapped.wedges).map(|model| model.lamps).unwrap_or_default();
+    let shine = spec.furniture.shine;
+    let mut made: std::collections::HashMap<(u8, [i32; 3], [i32; 3]), Stuff> = std::collections::HashMap::new();
+    for (n, (brick, shade)) in built.bricks.iter().zip(&built.shades).enumerate() {
+        let stuff = match *shade {
+            METAL => Stuff::Metal,
+            LIGHT if shine && lamps.contains(&n) => Stuff::Lamp,
+            LIGHT => Stuff::Glow,
+            _ => continue,
+        };
+        made.insert((brick.mask, brick.min, brick.ext), stuff);
+    }
+    Box::new(move |cell| made.get(&(cell.mask, cell.min, cell.ext)).copied().unwrap_or(Stuff::Solid))
 }
 
 fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: Option<[u8; 3]>, place: [i32; 3], stuff: Stuff) -> Result<Brick, String> {
