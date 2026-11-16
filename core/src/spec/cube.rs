@@ -1,6 +1,7 @@
 //! The cube: a box with its six sides on the lattice, solid or hollow.
 
 use super::{check_size, curve, plane_axes, Solid, Spec};
+use crate::par::Threads;
 use crate::sdf::{Field, Fill, Region};
 use crate::shapes::{CellBrick, CUBE};
 use glam::{DVec2, DVec3};
@@ -75,7 +76,7 @@ pub fn through(sides: &[(f64, f64); 3]) -> usize {
 ///
 /// It is never a round tube. A pipe bent round four square corners is not
 /// something bricks do well, and the setting is not offered for it.
-pub(super) fn cube(spec: &Spec, middle: DVec3) -> Result<(Solid, Vec<DVec3>), String> {
+pub(super) fn cube(spec: &Spec, middle: DVec3, threads: Threads) -> Result<(Solid, Vec<DVec3>), String> {
     let all = sides(spec, middle);
     let axis = through(&all);
     let (ua, va) = plane_axes(axis);
@@ -114,7 +115,7 @@ pub(super) fn cube(spec: &Spec, middle: DVec3) -> Result<(Solid, Vec<DVec3>), St
         let mut about = middle;
         (about[ua], about[va]) = ((u.0 + u.1) / 2.0, (v.0 + v.1) / 2.0);
         let as_curve = Spec { tube: false, fill: !hollow, thick: wall, depth, points: vec![about], ..spec.clone() };
-        return curve(&as_curve, outline(if hollow { wall / 2.0 } else { 0.0 }), true, Some(normal));
+        return curve(&as_curve, outline(if hollow { wall / 2.0 } else { 0.0 }), true, Some(normal), threads);
     }
     let fill = |inset: f64| Fill::new(corners(inset).map(|(x, y)| DVec2::new(x, y)).to_vec());
     let (min, max) = ([u.0 as i32 - 1, v.0 as i32 - 1], [u.1 as i32 + 1, v.1 as i32 + 1]);

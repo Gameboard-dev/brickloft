@@ -60,6 +60,7 @@ use crate::fit_planar::{fit_planar, fit_planar_towards, Opts, Piece};
 use crate::fit_round::rest_of_box;
 use crate::fit_stack::{grow, Plan};
 use crate::fit_volume::merge;
+use crate::par::Threads;
 use crate::shapes::{corners, inside_shape, shape_info, CellBrick, CUBE};
 use glam::DVec2;
 use std::collections::HashMap;
@@ -69,7 +70,7 @@ pub struct Lathe<'a> {
     /// where the upright axis stands
     pub axis: DVec2,
     /// the solid's section at (distance from the axis, height): negative inside
-    pub section: &'a dyn Fn(f64, f64) -> f64,
+    pub section: &'a (dyn Fn(f64, f64) -> f64 + Sync),
     /// the furthest it reaches from the axis, and its lowest and highest
     pub far: f64,
     pub low: f64,
@@ -81,6 +82,8 @@ pub struct Lathe<'a> {
     /// better for every form, so the caller tries both.
     pub short_sides: bool,
     pub max_ext: i32,
+    /// how many threads its circles may be fitted on (see `fit_lathe`)
+    pub threads: Threads,
 }
 
 /// A run of the section's outline going one way in height: a circle whose
@@ -198,7 +201,7 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
         return None;
     }
     let limit = lathe.max_ext.max(1);
-    let opts = Opts { brick_cost: lathe.brick_cost, max_ext: limit, wedges: true };
+    let opts = Opts { brick_cost: lathe.brick_cost, max_ext: limit, wedges: true, threads: lathe.threads };
 
     // 1. the section as an outline, measured in whole cells out from the least radius
     let across = (lathe.far - least).ceil() as i32 + 2;
@@ -232,21 +235,19 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
 
     // 2. each track's circles, from where it is widest
     let centre = |x: f64, y: f64| (x - c.x).hypot(y - c.y);
-    // a circle's outline is the same wherever it is wanted with the same reach
-    let mut fitted: HashMap<(i32, i32), Vec<Piece>> = HashMap::new();
-    let mut circle = |cells: i32, reach: i32| -> Vec<Piece> {
-        fitted
-            .entry((cells, reach))
-            .or_insert_with(|| {
-                let r = radius(cells);
-                let (lo, hi) = ([(c.x - r).floor() as i32 - 2, (c.y - r).floor() as i32 - 2], [(c.x + r).ceil() as i32 + 2, (c.y + r).ceil() as i32 + 2]);
-                let disc = |x: f64, y: f64| centre(x, y) - r;
-                // fitted knowing how far in the next circle is, where there is one: see `fit_planar_towards`
-                let narrower = |x: f64, y: f64| centre(x, y) - (r - reach as f64);
-                let fit = if reach > 0 { fit_planar_towards(&disc, lo, hi, &opts, Some((&narrower, reach))) } else { fit_planar(&disc, lo, hi, &opts) };
-                fit.pieces
-            })
-            .clone()
+    // The outline of a circle so many cells out, fitted for the next circle
+    // being `reach` cells in. Each on one thread: it is the circles that
+    // are shared out (below), and a circle's distance is one square root,
+    // too little to be worth sharing out sample by sample.
+    let alone = Opts { threads: Threads::ONE, ..opts };
+    let fit_circle = |(cells, reach): (i32, i32)| -> Vec<Piece> {
+        let r = radius(cells);
+        let (lo, hi) = ([(c.x - r).floor() as i32 - 2, (c.y - r).floor() as i32 - 2], [(c.x + r).ceil() as i32 + 2, (c.y + r).ceil() as i32 + 2]);
+        let disc = |x: f64, y: f64| centre(x, y) - r;
+        // fitted knowing how far in the next circle is, where there is one: see `fit_planar_towards`
+        let narrower = |x: f64, y: f64| centre(x, y) - (r - reach as f64);
+        let fit = if reach > 0 { fit_planar_towards(&disc, lo, hi, &alone, Some((&narrower, reach))) } else { fit_planar(&disc, lo, hi, &alone) };
+        fit.pieces
     };
     // what is outside a circle, which is what grows as the circle shrinks
     let air = |pieces: &[Piece]| Plan::new(pieces, 2).complement();
@@ -294,6 +295,60 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
         }
     }
 
+    // The circle side `k` of a track is built on, as its cells out and the
+    // reach it is fitted for; `None` for a wall about the axis itself, which
+    // has no circle.
+    let circle_of = |number: usize, k: usize| -> Option<(i32, i32)> {
+        let track = &tracks[number];
+        let n = track.nodes.len() - 1;
+        let r = |k: usize| track.nodes[k].1;
+        if r(k) == r(k + 1) {
+            if r(k) == 0 && least == 0.0 {
+                return None;
+            }
+            // A wall, standing on the outline of its circle. If a slope
+            // starts from either end of it, on the slope's outline, so
+            // that the two meet edge to edge.
+            let above = (k + 2 <= n && r(k + 2) < r(k + 1)).then(|| r(k + 1) - r(k + 2));
+            let below = (k > 0 && r(k - 1) < r(k)).then(|| r(k) - r(k - 1));
+            // Or on the outline of the crease it ends in.
+            return Some((r(k), standing.get(&(number, k)).copied().or(above).or(below).unwrap_or(0)));
+        }
+        // A sloped ring, cut back from the outline of its wide end to its
+        // narrow end; or grown from the outline of its narrow end outwards,
+        // where that end is a crease whose outline the other ring there is
+        // cut back from.
+        let (wide, narrow) = (r(k).max(r(k + 1)), r(k).min(r(k + 1)));
+        Some(match outwards.get(&(number, k)) {
+            None => (wide, inwards.get(&(number, k)).copied().unwrap_or(wide - narrow)),
+            Some(reach) => (narrow, *reach),
+        })
+    };
+    // Every circle the bands and creases below are built on, fitted before
+    // any is used, on `lathe.threads`. The circles are nearly all the time
+    // a turned form takes to lay out, a few dozen outlines none of which
+    // depends on another, and they were fitted one at a time as each band
+    // came to want its own. Which circles those are is known from the
+    // tracks alone, so they are listed first, in the order they will be
+    // wanted, and each is fitted once.
+    let mut wanted: Vec<(i32, i32)> = Vec::new();
+    for number in 0..tracks.len() {
+        wanted.extend((0..tracks[number].nodes.len() - 1).filter_map(|k| circle_of(number, k)));
+    }
+    wanted.extend(creases.iter().map(|crease| (crease.cells, crease.reach)));
+    let mut met = std::collections::HashSet::new();
+    wanted.retain(|circle| met.insert(*circle));
+    // A circle takes about 1.6 microseconds times the square of its cells
+    // out to fit (measured: 0.4 milliseconds at 13 cells out, 1.0 at 26,
+    // 4.1 at 50). So circles whose squares come to 300 are half a
+    // millisecond's work, the least worth a thread of its own (see
+    // `par::Threads::map_ranges`): one circle from 18 cells out, and
+    // several smaller ones together.
+    let mean_square = wanted.iter().map(|(cells, _)| (*cells * *cells) as usize).sum::<usize>() / wanted.len().max(1);
+    let fits = lathe.threads.map(wanted.len(), 300usize.div_ceil(mean_square.max(1)), |i| fit_circle(wanted[i]));
+    let fitted: HashMap<(i32, i32), Vec<Piece>> = wanted.into_iter().zip(fits).collect();
+    let circle = |cells: i32, reach: i32| -> Vec<Piece> { fitted.get(&(cells, reach)).cloned().unwrap_or_else(|| fit_circle((cells, reach))) };
+
     let mut bands: Vec<Band> = Vec::new();
     // which band each side of a track became
     let mut band_of: HashMap<(usize, usize), usize> = HashMap::new();
@@ -302,17 +357,10 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
         let r = |k: usize| track.nodes[k].1;
         for k in 0..n {
             let (low, high) = (track.nodes[k].0, track.nodes[k + 1].0);
+            // (about the axis itself: no circle, and nothing to build)
+            let Some((cells, reach)) = circle_of(number, k) else { continue };
             if r(k) == r(k + 1) {
-                if r(k) == 0 && least == 0.0 {
-                    continue; // about the axis itself: no circle, and nothing to build
-                }
-                // A wall, standing on the outline of its circle. If a slope
-                // starts from either end of it, on the slope's outline, so
-                // that the two meet edge to edge.
-                let above = (k + 2 <= n && r(k + 2) < r(k + 1)).then(|| r(k + 1) - r(k + 2));
-                let below = (k > 0 && r(k - 1) < r(k)).then(|| r(k) - r(k - 1));
-                // Or on the outline of the crease it ends in.
-                let outside = air(&circle(r(k), standing.get(&(number, k)).copied().or(above).or(below).unwrap_or(0)));
+                let outside = air(&circle(cells, reach));
                 // The circle's own triangles stand straight up: the solid is
                 // the half of each one's box inside the circle, or for a
                 // hollow the half outside it.
@@ -339,9 +387,9 @@ pub fn fit_lathe(lathe: &Lathe) -> Option<Vec<CellBrick>> {
                 // of the circle: solid, or for a hollow the air.
                 let from_narrow = outwards.get(&(number, k)).copied();
                 let (feet, smallest) = match from_narrow {
-                    None => grow(&air(&circle(wide, inwards.get(&(number, k)).copied().unwrap_or(wide - narrow))), &|x, y| to - centre(x, y), wide - narrow),
-                    Some(reach) => {
-                        let shared = circle(narrow, reach);
+                    None => grow(&air(&circle(cells, reach)), &|x, y| to - centre(x, y), wide - narrow),
+                    Some(_) => {
+                        let shared = circle(cells, reach);
                         let (feet, _) = grow(&Plan::new(&shared, wide - narrow + 2), &|x, y| centre(x, y) - radius(wide), wide - narrow);
                         (feet, air(&shared))
                     }
@@ -689,7 +737,7 @@ mod tests {
     fn a_cone_is_sloped_rings_and_no_steps() {
         // a cone 12 across its base and 12 high, standing on a cell's centre
         let cone = |out: f64, up: f64| (out - (12.0 - up) * 12.5 / 12.0).max(-up).max(up - 12.0);
-        let lathe = Lathe { axis: DVec2::new(0.5, 0.5), section: &cone, far: 12.5, low: 0.0, high: 12.0, brick_cost: 0.0, short_sides: false, max_ext: 80 };
+        let lathe = Lathe { axis: DVec2::new(0.5, 0.5), section: &cone, far: 12.5, low: 0.0, high: 12.0, brick_cost: 0.0, short_sides: false, max_ext: 80, threads: Threads::ONE };
         let bricks = fit_lathe(&lathe).unwrap();
         no_overlap(&bricks);
         assert!(count(&bricks, Kind::Ramp) >= 4 && count(&bricks, Kind::Tet) >= 4 && count(&bricks, Kind::Cut) >= 4);
@@ -712,7 +760,7 @@ mod tests {
     fn a_bowl_has_a_hollow_and_a_wall_all_round() {
         // a wall 3 thick: a cone frustum's shell, wider at the top
         let wall = |out: f64, up: f64| ((out - (8.0 + up * 0.5)).abs() - 1.5).max(-up).max(up - 10.0);
-        let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section: &wall, far: 14.5, low: 0.0, high: 10.0, brick_cost: 0.0, short_sides: false, max_ext: 80 };
+        let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section: &wall, far: 14.5, low: 0.0, high: 10.0, brick_cost: 0.0, short_sides: false, max_ext: 80, threads: Threads::ONE };
         let bricks = fit_lathe(&lathe).unwrap();
         no_overlap(&bricks);
         for level in [0.5, 4.5, 9.5] {
@@ -734,10 +782,10 @@ mod tests {
         // of a hollow end on the circle of radius 12.
         let ridge = |out: f64, up: f64| (up - (6.0 - (out - 12.0).abs())).max(-up);
         let groove = |out: f64, up: f64| (up - (out - 12.0).abs()).max(up - 6.0).max(-2.0 - up).max(out - 18.0);
-        let forms: [(&dyn Fn(f64, f64) -> f64, f64, i32); 2] = [(&ridge, 0.0, 5), (&groove, -2.0, 0)];
+        let forms: [(&(dyn Fn(f64, f64) -> f64 + Sync), f64, i32); 2] = [(&ridge, 0.0, 5), (&groove, -2.0, 0)];
         for (number, (section, low, crease_layer)) in forms.into_iter().enumerate() {
             for short_sides in [false, true] {
-                let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section, far: 18.0, low, high: 6.0, brick_cost: 0.0, short_sides, max_ext: 80 };
+                let lathe = Lathe { axis: DVec2::new(0.0, 0.0), section, far: 18.0, low, high: 6.0, brick_cost: 0.0, short_sides, max_ext: 80, threads: Threads::ONE };
                 let bricks = fit_lathe(&lathe).unwrap();
                 assert!(bricks.iter().all(|b| b.ext.iter().all(|e| (1..=80).contains(e)) && shape_info(b.mask).is_some()));
                 // No whole cell in the layer next to the crease, within a
@@ -781,7 +829,7 @@ mod tests {
     fn an_axis_off_the_grid_is_left_to_the_other_fitter() {
         let cone = |out: f64, up: f64| (out - (12.0 - up)).max(-up).max(up - 12.0);
         for axis in [DVec2::new(0.5, 0.0), DVec2::new(0.3, 0.3)] {
-            assert!(fit_lathe(&Lathe { axis, section: &cone, far: 12.0, low: 0.0, high: 12.0, brick_cost: 0.0, short_sides: false, max_ext: 80 }).is_none());
+            assert!(fit_lathe(&Lathe { axis, section: &cone, far: 12.0, low: 0.0, high: 12.0, brick_cost: 0.0, short_sides: false, max_ext: 80, threads: Threads::ONE }).is_none());
         }
     }
 }

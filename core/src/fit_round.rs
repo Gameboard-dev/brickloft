@@ -38,6 +38,7 @@
 //! is cut off flat at one of the cuts across z.
 
 use crate::shapes::{shape_info, CellBrick, Kind, CUBE};
+use crate::par::Threads;
 use glam::DVec3;
 
 /// An ellipsoid to fit. Everything is in cells.
@@ -267,6 +268,25 @@ pub(crate) fn rest_of_box(mask: u8) -> u8 {
 /// them, or a centre off the half-cell grid. The caller then fits the solid
 /// cell by cell instead.
 pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
+    fit_round_on(round, Threads::ONE)
+}
+
+/// How many scorings of a choice of cuts are worth a thread of their own
+/// (see `par::Threads::map_ranges`): one takes 25 to 40 microseconds, its
+/// 1,600 columns each a square root and two searches of a short list.
+const SCORINGS_A_THREAD: usize = 16;
+
+/// [`fit_round`], on so many threads.
+///
+/// Laying a sphere out is scoring: every number of rings at every swell,
+/// and for a hollow one every number of layers of wall, then the few
+/// closest improved a cut at a time. Each score is of one choice of cuts
+/// and depends on no other, so the choices are listed and scored together;
+/// and each of the few is improved by itself, so those are improved
+/// together. For a hollow sphere 80 in radius that is 834 scores of 30
+/// microseconds each, 25 of the 30 milliseconds it took to lay out. Which
+/// choice is kept goes by the scores in the order of the list, as it did.
+pub fn fit_round_on(round: &Round, threads: Threads) -> Option<Vec<CellBrick>> {
     let c = round.center.to_array();
     // each centre coordinate on a lattice plane or in the middle of a cell
     let first: [f64; 3] = [0, 1, 2].map(|k| (c[k] - c[k].floor()).min(c[k].ceil() - c[k]));
@@ -300,7 +320,9 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
     // facets but each cut is then nearer its neighbours than rounding can
     // place it, so the closest fit is somewhere in between and is found by
     // trying them all; there are few, and scoring one builds nothing.
-    let mut found: Vec<(f64, usize, [Vec<f64>; 3], usize)> = Vec::new();
+    // (the cuts of each choice with its number of rings, and each scoring to do: which cuts, and how many layers of wall)
+    let mut tried: Vec<(usize, [Vec<f64>; 3])> = Vec::new();
+    let mut scorings: Vec<(usize, usize)> = Vec::new();
     for count in 1..=least.ceil() as usize {
         for swell in SWELLS {
             let radii = true_radii.map(|r| r + swell);
@@ -328,16 +350,15 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
             } else {
                 0..1
             };
-            for layers in walls {
-                found.push((
-                    mismatch(&t, count, layers, true_radii, inner),
-                    count,
-                    t.clone(),
-                    layers,
-                ));
-            }
+            scorings.extend(walls.map(|layers| (tried.len(), layers)));
+            tried.push((count, t));
         }
     }
+    let scores = threads.map(scorings.len(), SCORINGS_A_THREAD, |k| {
+        let (which, layers) = scorings[k];
+        mismatch(&tried[which].1, tried[which].0, layers, true_radii, inner)
+    });
+    let mut found: Vec<(f64, usize, [Vec<f64>; 3], usize)> = scorings.iter().zip(scores).map(|(&(which, layers), score)| (score, tried[which].0, tried[which].1.clone(), layers)).collect();
     found.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     found.dedup_by(|a, b| a.2 == b.2 && a.3 == b.3);
     // Axes that are alike keep the same cuts, so that a sphere stays the
@@ -354,8 +375,11 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
     // does to the solid, which is the thing wanted, and from a good start
     // it has little left to do.
     // https://en.wikipedia.org/wiki/Hill_climbing
-    let mut best: Option<(f64, usize, [Vec<f64>; 3], usize)> = None;
-    for (mut score, count, mut t, layers) in found.into_iter().take(4) {
+    found.truncate(4);
+    // (one pass over a start's cuts scores each cut moved in and moved out: a thread for each start, where a pass is scorings enough)
+    let passes_a_thread = SCORINGS_A_THREAD.div_ceil(2 * found.first().map_or(1, |start| start.1));
+    let improved = threads.map(found.len(), passes_a_thread, |start| {
+        let (mut score, count, mut t, layers) = found[start].clone();
         while count <= 64 {
             let mut better: Option<(f64, [Vec<f64>; 3])> = None;
             for axis in (0..3).filter(|a| (0..*a).all(|b| !alike(*a, b))) {
@@ -386,6 +410,10 @@ pub fn fit_round(round: &Round) -> Option<Vec<CellBrick>> {
                 None => break,
             }
         }
+        (score, count, t, layers)
+    });
+    let mut best: Option<(f64, usize, [Vec<f64>; 3], usize)> = None;
+    for (score, count, t, layers) in improved {
         if best.as_ref().is_none_or(|b| score < b.0 - 1e-9) {
             best = Some((score, count, t, layers));
         }
