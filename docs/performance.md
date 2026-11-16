@@ -299,22 +299,39 @@ the one-thread and all-thread columns.
 | Torus, radius 40, 8 thick | 645 | 117 | 117 | 30 | 17 | 16 | 8.3 |
 | Spline band, 320 long, 20 wide | 243 | 61 | 64 | 36 | 66 | 67 | 38 |
 | Round arch, span 320 | 200 | 145 | 143 | 136 | 145 | 149 | 132 |
-| Stepping stones on that band | 1,457 | 160 | 164 | 27 | 156 | 185 | 27 |
-| Stepping stones on a disc, radius 70 | 2,216 | 346 | 361 | 42 | 310 | 348 | 44 |
-| Medallions on that disc | 18,501 | 51 | 46 | 19 | 49 | 46 | 18 |
-| Rug on that disc | 10,275 | 52 | 49 | 19 | 50 | 51 | 19 |
-| Planks on that disc | 697 | 39 | 41 | 16 | 39 | 41 | 18 |
-| Masonry on that disc | 10,492 | 164 | 158 | 29 | 161 | 140 | 30 |
-| Masonry on the band | 7,005 | 156 | 177 | 33 | 155 | 176 | 33 |
+| Stepping stones on that band | 1,457 | 160 | 167 | 26 | 145 | 158 | 28 |
+| Stepping stones on a disc, radius 70 | 2,216 | 276 | 299 | 54 | 272 | 280 | 57 |
+| Medallions on that disc | 18,434 | 55 | 46 | 25 | 48 | 49 | 27 |
+| Rug on that disc | 10,226 | 52 | 53 | 28 | 57 | 58 | 36 |
+| Planks on that disc | 674 | 45 | 43 | 23 | 44 | 45 | 25 |
+| Bricks on that disc | 1,083 | 50 | 50 | 28 | 55 | 50 | 27 |
+| Bevelled bricks on that disc | 4,897 | 54 | 58 | 29 | 61 | 52 | 29 |
+| Cobblestone on that disc | 5,143 | 99 | 108 | 31 | 98 | 104 | 39 |
+| Cobblestone on the band | 3,229 | 142 | 135 | 55 | 144 | 132 | 44 |
+| Rug on that disc with a rounded rim, 8 thick | 10,681 | 1,854 | 1,809 | 465 | 62 | 63 | 39 |
+| Cube, 120 by 84 by 48 | 4 | 7.8 | 5.8 | 4.6 | 7.8 | 5.8 | 4.7 |
+| Cobblestone on that cube, its sides too | 9,402 | 101 | 117 | 49 | 121 | 130 | 46 |
+| Bevelled bricks on that cube | 4,495 | 32 | 34 | 31 | 32 | 36 | 29 |
+
+The rows from the stepping stones down were timed again after the cube and
+the two patterns of bricks and cobblestone were added, as the least of 27
+builds, on a desktop busier than before. Their figures are comparable with
+one another and less so with the rows above them.
 
 Measured builds gain the most, because the measurement was most of their
 time and every layer of it is independent. A let-go sphere of radius 80
 went from over half a second to under a tenth. Stepping stones gain as
 much, because nearly all their time is the fitting of each stone by
 itself. Dragged forms that were already quick gain little: a solid sphere
-is laid out in a few milliseconds either way.
+is laid out in a few milliseconds either way. A patterned floor gains a
+half, and no more, because most of what is left is the search for the
+disc's outline. Cobblestone gains the most of the patterns, since each of
+its tiles looks through the stones near it, and bricks the least, a brick
+being found by arithmetic.
 
-Two rows hardly change. A long arch spends nine tenths of its time in the
+Three rows hardly change. Bevelled bricks on a cube spend over half of
+their time finding the cube's sides and the cells of each (see
+[what stays on one thread](#what-stays-on-one-thread)). A long arch spends nine tenths of its time in the
 search for its outline, which stays on one thread (see
 [what stays on one thread](#what-stays-on-one-thread)). A lifted tube or
 band spends a third or more of its dragged time building columns under
@@ -333,8 +350,8 @@ Each of these is work whose items do not depend on one another.
 | The circles of a turned form | circles | `fit_lathe` in [core/src/fit_lathe.rs](../core/src/fit_lathe.rs) |
 | Scoring a sphere's layouts | choices of cuts | `fit_round_on` in [core/src/fit_round.rs](../core/src/fit_round.rs) |
 | Stepping stones | stones | `lay_stones` in [core/src/pattern.rs](../core/src/pattern.rs) |
-| The tiles of masonry, rugs and medallions | tiles | `drawn` in `pattern.rs` |
-| The bevelled tops of masonry | cells | `lay_mosaic` in `pattern.rs` |
+| The tiles of bricks, cobblestone, rugs and medallions | tiles | `drawn` in `pattern.rs` |
+| The bevelled tops of bricks | cells | `lay_tiles` in `pattern.rs` |
 
 Two of these needed their work put in a different order first. A turned
 form used to fit each circle when a ring first asked for it, part way
@@ -372,10 +389,12 @@ the ranges fall:
 
 A build is given its number of threads where it starts (`build_with` in
 [core/src/spec.rs](../core/src/spec.rs)), and that number is handed down to
-each fitter. Tests use this to build twenty forms on one thread and on two,
+each fitter. Tests use this to build thirty forms on one thread and on two,
 three and seven, and require the same bricks, colours and figures to the
-last bit. The forms in the table above, and six more, were also built by
-the code as it was before, and all 48 builds were identical.
+last bit. The forms in the table above and others, 71 in all with every
+pattern on a disc, a band, a rounded disc and a solid and a hollow cube,
+were also built by the code with everything on one thread, measured and
+unmeasured, and all 142 builds were identical.
 
 ### When threads are not started
 
@@ -395,9 +414,10 @@ of its items make half a millisecond, from a measurement of one item:
 | Circles of a turned form | 1.6 µs times the radius squared | radii whose squares come to 300 |
 | Scoring a sphere's layouts | 25 to 40 µs | 16 scorings |
 | Stepping stones | 1.0 to 1.4 ms for a stone 10 across, by area | 1 stone from 6 across, 4 of the smallest |
-| Tiles of masonry | 4 µs | 128 tiles |
+| Tiles of cobblestone | 3 to 5 µs | 128 tiles |
+| Tiles of bricks | 0.3 µs | 1,600 tiles |
 | Tiles of a rug or medallions | 0.4 µs | 1,280 tiles |
-| Bevelled tops | 2.5 µs a cell | 200 cells |
+| Bevelled tops of bricks | 0.2 to 0.4 µs a cell | 1,600 cells |
 
 The two cell counts are set above half a millisecond's worth because a
 form with less surface for its size than a sphere costs less a cell.
@@ -426,6 +446,7 @@ place, and a build is the same bricks as on a desktop.
 | Checking, refitting and laying stones | 1.3 ms for 200 stones, and about 1 ms more for each stone fitted again | Each stone is checked against every stone laid before it. |
 | Taking longer ramps, and joining cubes into boxes | 9 ms and 4 ms of a thin hollow sphere's 55 | Both take the largest piece first and go by what is already taken. |
 | The boards of planks | 0.03 ms | Each board starts where the last one ended. |
+| Finding the flat faces and the sides a pattern is laid on (`pattern_flat_faces` and `pattern_side_faces` in `spec.rs`) | 20 to 30 ms for a cube 120 by 84 by 48, less the tiles | The faces are found from the finished bricks and laid one after another onto one list of them. The tiles drawn on each face are shared out, which took cobblestone on that cube from 120 ms to under 50. |
 
 ## The editor
 
