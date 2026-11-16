@@ -69,6 +69,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Pyramid | a base and a height: solid, or a hollow tent |
 | Cube | a box with a length along each axis: a block, a floor, a wall, or a hollow room |
 | Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, daisies, daffodils, a mixed bed, a birch, a willow, a Scots pine, a date palm, a cypress, a yucca, reeds, grass with ponds |
+| Furniture | a bookcase that rebuilds itself at any size: shelves and uprights follow from its height and width, and its shelves are filled with books from a seed |
 | Maze | a maze to walk through, in rings or in squares, grown from a seed: one way in, a room in the middle, walls plain, of brick, stone or planks, or of hedge |
 
 Curves are built as a flat band or as a round tube. Every form can be
@@ -151,7 +152,7 @@ colours, saved forms, the camera and every key.
 | [docs/web-page.md](docs/web-page.md) | The optional browser page and how it works |
 | [docs/development.md](docs/development.md) | Building, running, testing, inspecting a fit |
 | [docs/mcp.md](docs/mcp.md) | Letting Claude drive the editor: setting up, the tools, security |
-| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns and the plants |
+| [docs/future-work.md](docs/future-work.md) | Planned additions: more for Claude to do, and what remains for joined forms, the patterns, the plants and the furniture |
 
 ## Layout
 
