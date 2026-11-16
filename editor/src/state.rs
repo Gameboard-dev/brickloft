@@ -330,6 +330,11 @@ pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
 /// This is what the panel.s slider starts at.
 pub const GIZMO: f64 = 0.25;
 
+/// A plane whose normal is this near square to the line of sight (as the
+/// cosine of the angle between them) is seen too nearly edge on to drag in:
+/// see `State::drag_alone`.
+const EDGE_ON: f64 = 0.3;
+
 /// How far from a dragged dot others go with it, in reaches of an added point.
 const FOLLOW_REACH: f64 = 3.0;
 
@@ -1321,6 +1326,15 @@ impl State {
             (Handle::Point(_) | Handle::Move | Handle::Pull(_), Lock::Axis(a)) => [DVec3::X, DVec3::Y, DVec3::Z][a],
             _ => view,
         };
+        // A plane seen nearly edge on is no good to drag in: the cursor's
+        // ray runs almost along it, and a pixel of mouse travel is many
+        // cells along the plane, so a dot kept to X = somewhere and seen
+        // from the side shot off into the distance. Seen flatter than about
+        // 17 degrees, the dot is dragged in the plane facing the eye
+        // instead, which moves it as far as the cursor moves, and the kept
+        // axis is put back afterwards (below), so it still does not leave
+        // its plane.
+        let normal = if view.dot(normal).abs() < EDGE_ON { view } else { normal };
         let facing = dir.dot(normal);
         if facing.abs() < 1e-6 {
             return; // looking along the plane: the cursor does not pick a point on it
@@ -1849,6 +1863,22 @@ mod tests {
         assert_eq!((other.spec.grid, other.paint.colours.clone()), ([0.0, 0.0, 0.6, 0.8], vec![[9, 8, 7]]));
         assert!(other.undo());
         assert_eq!(other.forms(), before);
+    }
+
+    #[test]
+    fn a_dot_dragged_in_a_plane_seen_edge_on_moves_no_further_than_the_cursor() {
+        let mut state = State::new(); // an arch across x, standing along z
+        state.lock = Lock::Axis(0); // its dots move in y and z
+        let at = state.dots().iter().find(|(h, _)| *h == Handle::Point(0)).unwrap().1;
+        let before = state.spec.points[0];
+        // looked at along y, from 50 away and a cell to one side: the plane
+        // x = the dot's own is seen edge on. The cursor a hair to the side of
+        // the dot met that plane 117 cells beyond it.
+        let origin = at + DVec3::new(1.0, -50.0, 0.0);
+        state.drag_alone(Handle::Point(0), origin, DVec3::new(-0.006, 1.0, 0.1).normalize(), DVec3::Y);
+        let moved = state.spec.points[0] - before;
+        assert_eq!(moved.x, 0.0, "the dot left its plane");
+        assert!(moved.y.abs() <= 1.0 && (moved.z - 5.0).abs() <= 1.0, "the dot moved by {moved:?}");
     }
 
     #[test]

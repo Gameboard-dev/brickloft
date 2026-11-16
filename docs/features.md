@@ -95,9 +95,6 @@ about the middle of its points. The low side is kept and the high side
 becomes its image. An arch with one foot higher than the other gets two
 feet alike. A point added on either side appears on both.
 
-**Tidy symmetric bricks** is a lighter option for a form that is already
-symmetric: it only makes sure the bricks on the two sides are mirror images.
-
 ## The workspace
 
 Several forms can be worked on together.

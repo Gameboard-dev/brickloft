@@ -1396,9 +1396,8 @@ directions. Each stretch is also solved from both ends, and if the two
 answers differ, it is cut at its middle and each half is solved again.
 Midpoints are rounded to the nearer lattice point on either side.
 
-As a last guarantee, the option **Tidy symmetric bricks** (and any mirrored
-form) checks, along each axis, whether the form is its own mirror image
-about the middle of its bricks. Where it is, the bricks on the low side are
+As a last guarantee, a mirrored form is checked, along each axis, for
+whether it is its own mirror image about the middle of its bricks. Where it is, the bricks on the low side are
 kept and the high side is replaced with their mirror images (`symmetrise`
 in `spec.rs`). Tests build rings, arches and spheres and check that the
 bricks are mirror images.

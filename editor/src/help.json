@@ -1,6 +1,7 @@
 {
   "add_remove_point": "Adds or removes one of the dots this form is drawn through. To pull a form out of shape at one place, Shift + click on it: that adds an orange point, and Shift + right-click takes it off.",
   "add_to_this_grid": "Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.",
+  "arch_askew": "This arch runs at an angle to the brick grid: its feet differ along both X and Y. No flat outline can be fitted to it, so it is fitted cell by cell and comes out stepped. For a smooth arch, keep its feet in line along X or Y (Dots move: Keep Y), and turn its grid with a ring to aim it.",
   "arch_kind": "The shape of the arch between its two feet.",
   "arrows_and_rings": "How large the arrows and rings that move and turn a grid are drawn, as a share of the size of what is on the grid.",
   "bezier_pull": "How strongly this point draws the curve towards itself. 1 is neutral.",
@@ -61,7 +62,6 @@
   "stretch_circle": "Stretches the form along this axis: 2 makes it twice as long that way, 0.5 half as long. Across the circle's plane it sets how deep a round tube is.",
   "stripe_width": "How wide each stripe is, in microbricks.",
   "thickness": "How thick the band, the tube or the wall is, in microbricks.",
-  "tidy_symmetric_bricks": "Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.",
   "tube_protruded": "Flat bands side by side, each standing proud of the next.",
   "tube_rounded": "A pipe: the edges chamfered round with sloped pieces.",
   "tube_section": "How a round tube's section is made. Rounded is a pipe with chamfered edges. Protruded is flat bands of different widths side by side: smooth along the curve and stepped across it.",

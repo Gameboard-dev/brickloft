@@ -258,6 +258,11 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         let is_curve = state.form <= BEZIER;
         match state.form {
             ARCH if arch_feet => {
+                // said where it applies: the cause is not to be guessed from the bricks
+                let (a, b) = (s.points[0], s.points[s.points.len() - 1]);
+                if a.x != b.x && a.y != b.y {
+                    ui.colored_label(Color32::from_rgb(255, 200, 90), help("arch_askew"));
+                }
                 helped(ui, help("arch_kind"), |ui| {
                     ComboBox::from_label("Arch").selected_text(ARCHES[state.arch].0).show_ui(ui, |ui| {
                         for (i, (name, _)) in ARCHES.iter().enumerate() {
@@ -425,7 +430,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             hint(ui, help("mirror"));
         });
-        helped(ui, help("tidy_symmetric_bricks"), |ui| ui.checkbox(&mut s.symmetric, "Tidy symmetric bricks"));
+        // (There was a second tickbox here, to make the bricks of a form that
+        // was already symmetric mirror images of each other. It did nothing
+        // that could be seen on most forms and was not understood, and a
+        // mirrored form has its bricks made mirror images in any case.)
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
