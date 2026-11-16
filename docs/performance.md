@@ -37,7 +37,7 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
-| Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms) | 27,600 | 0% |
+| Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms), and 4 ms (2.4 ms) for one more touch | 27,600 | 0% |
 | Lawn, 128 by 88, ponds at two levels and a stream | 24 ms (8 ms) | 20,900 | 0% |
 | Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
 | Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
@@ -357,6 +357,38 @@ samples, and nothing as heavy is left for a card to do. What a build
 spends now is spread over the ground's table, the joining of soil into
 boxes and the blades, none of which is more than a few milliseconds.
 
+A build from nothing grows with the lawn's area, and a touch of the
+brush changes a few tiles of it. The last build of a lawn is kept, so
+the next works out the heights the touch reaches and lays the tiles
+whose ground changed ([algorithm.md](algorithm.md), section 7.10, What
+is kept from one build to the next). The table gives one more touch, 20
+in range, on a lawn that already has 24, from the test
+`where_a_touch_on_a_lawn_goes` in
+[core/src/grass/tests.rs](../core/src/grass/tests.rs). Times are on 16
+threads, with one thread in brackets.
+
+| Lawn | Bricks | Tiles laid, of all | From nothing | With the last build kept |
+|---|---|---|---|---|
+| 180 by 120 | 28,000 | 9 of 24 | 6 ms (15 ms) | 2.4 ms (4 ms) |
+| 300 by 240 | 86,000 | 9 of 80 | 10 to 14 ms (56 ms) | 2.5 to 3.3 ms (5 to 6 ms) |
+| 600 by 480 | 335,000 | 6 of 320 | 38 ms (207 ms) | 4 to 6 ms (5 to 8 ms) |
+| 600 by 480, 120 touches | 342,000 | 6 of 320 | 44 to 55 ms (303 ms) | 4 to 8 ms (9 to 13 ms) |
+| 300 by 240, two pond levels | 86,000 | 9 of 80 | 17 ms (58 ms) | 3.6 to 4.2 ms (5 to 6 ms) |
+| 600 by 480, two pond levels | 335,000 | 6 of 320 | 52 ms (218 ms) | 7 to 9 ms (9 to 11 ms) |
+
+A touch no longer costs by the number of touches already made: its cells
+start from the heights kept. Three parts of a kept touch still grow with
+the lawn. Comparing the tiles took 1.3 to 2.8 ms for the 320 tiles of
+the largest lawn. Putting every tile's bricks end to end in one list is
+1.5 ms for its 335,000 bricks, and handing that list to the caller is a
+second copy of about the same. With two pond levels the flood is made
+again at each touch, 4 to 6 ms on the largest lawn. Laying the six
+tiles the touch reaches is 1 to 4 ms.
+
+The lawns were measured while other programs were building on the same
+machine, so each figure is the least of three runs of five, and the
+ranges are what those runs disagreed by.
+
 ### Stretched ramps
 
 When the cell-by-cell fitter looks for longer ramps
@@ -593,6 +625,98 @@ place, and a build is the same bricks as on a desktop.
 | The boards of planks | 0.03 ms | Each board starts where the last one ended. |
 | Finding the flat faces and the sides a pattern is laid on (`pattern_flat_faces` and `pattern_side_faces` in `spec.rs`) | 20 to 30 ms for a cube 120 by 84 by 48, less the tiles | The faces are found from the finished bricks and laid one after another onto one list of them. The tiles drawn on each face are shared out, which took cobblestone on that cube from 120 ms to under 50. |
 
+## Meshes
+
+A mesh made by another program is built by the Imported form
+([algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs)).
+The first two tables are the times of the trial that chose how. They
+were taken with
+`cargo run --release -p brickloft-editor --example mesh_trial` on a
+Ryzen 7 5800X3D (16 threads) while other builds were using every core,
+so each is an upper bound and the speed-ups are lower than a quiet
+machine would give.
+
+The route that asks a distance function everywhere (guided) against the
+route that reads the triangles (scanned), which lay the same bricks but
+for a few pieces:
+
+| Mesh | Size | Guided, 1 thread | Guided, 16 | Scanned, 1 thread | Scanned, 16 |
+|---|---|---|---|---|---|
+| Box turned 20 degrees | 96 | 4,989 ms | 737 ms | 297 ms | 118 ms |
+| Gem | 77 | 941 ms | 138 ms | 212 ms | 51 ms |
+| House | 56 | 3,912 ms | 728 ms | 161 ms | 53 ms |
+| Sphere, 9,024 triangles | 96 | 164,675 ms | 14,694 ms | 2,555 ms | 584 ms |
+| Torus | 128 | 107,442 ms | 19,154 ms | 3,825 ms | 1,077 ms |
+| Lumpy ball | 96 | 82,827 ms | 8,793 ms | 3,377 ms | 1,157 ms |
+
+A mesh of 499,848 triangles fitted 200 microbricks across is 44,161
+bricks. Its hierarchy is built in 1.1 seconds on one thread, once for a
+file. Each part of the fit after that:
+
+| Part | 1 thread | 16 threads | Shared out |
+|---|---|---|---|
+| Triangles laid into cells | 292 ms | 510 ms | yes, then sorted on one |
+| Samples of the surface's cells | 5,373 ms | 1,306 ms | yes |
+| Runs of cells inside | 706 ms | 1,073 ms | yes |
+| Stretched pieces found | 8,857 ms | 2,281 ms | yes |
+| Stretched pieces laid | 1,629 ms | 3,091 ms | no |
+| Boxes joined | 48 ms | 81 ms | no |
+| All | 16.9 s | 8.4 s | |
+
+The parts that came out slower on 16 threads than on one were measured
+while the machine was full, and are not evidence that threads cost
+anything there. The laying of the stretched pieces is the largest part
+on one thread whatever the machine is doing: it sorts every piece found
+and takes them in order, each by what is already taken.
+
+The process's peak memory for that fit was 132 to 139 MB. The mesh and
+its hierarchy are 46 MB of it, shared by every thread and never copied.
+The rest is the list of which triangles are in which cell, the pieces
+found, and six bytes for each of the 8.6 million cells in the box, which
+is the only part that grows with the volume: one for the piece in the
+cell, four for the place of its samples in the list of sampled cells,
+and one for whether a stretched piece has taken it.
+
+The Imported form as it is built into the editor, measured with
+`cargo run --release -p brickloft-editor --example mesh_measure`, each
+row in a process of its own so that the most memory it held could be
+read from the system. The processor was at 60 to 100% from other builds
+throughout, so the times are upper bounds, and the short fits, which
+lost their turn on the processor more than once, show times on 16
+threads above their times on one. Processor use is the time on one
+thread over 16 times the time on 16: the share of all the threads' time
+that went into the fit.
+
+| Mesh | Triangles | Size | Fitter | Bricks | 1 thread | 16 threads | Processor use | Peak memory |
+|---|---|---|---|---|---|---|---|---|
+| House | 32 | 56 | Blocks | 21 | 58 ms | 524 ms | | 7 MB |
+| | | | Smoothed | 10 | 327 ms | 555 ms | | 11 MB |
+| Sphere | 9,024 | 96 | Blocks | 3,431 | 1,062 ms | 302 ms | 22% | 18 MB |
+| | | | Smoothed | 7,642 | 3,780 ms | 2,085 ms | 11% | 34 MB |
+| Torus | 9,216 | 128 | Blocks | 2,848 | 564 ms | 91 ms | 39% | 15 MB |
+| | | | Smoothed | 10,287 | 2,143 ms | 492 ms | 27% | 30 MB |
+| Lumpy ball | 16,128 | 96 | Blocks | 3,677 | 803 ms | 109 ms | 46% | 17 MB |
+| | | | Smoothed | 10,388 | 1,957 ms | 476 ms | 26% | 24 MB |
+| Figure | 124,136 | 100 | Blocks | 1,355 | 652 ms | 144 ms | 28% | 41 MB |
+| | | | Smoothed | 4,462 | 2,510 ms | 579 ms | 27% | 41 MB |
+| | | | Smoothed, 12 colours | 5,249 | 1,282 ms | 255 ms | 31% | 41 MB |
+| | | 200 | Smoothed, 12 colours | 19,361 | 4,802 ms | 979 ms | 31% | 61 MB |
+| Lumpy ball | 499,848 | 200 | Smoothed | 44,161 | 9,311 ms | 2,315 ms | 25% | 140 MB |
+
+The two rows of the figure at 100 with and without colours were run
+minutes apart and differ by more in what else the machine was doing
+than in the work: colouring was 1% of the fit where its parts were
+timed. A quarter to a third of the threads' time is used. The rest is
+the laying of the stretched pieces, which is on one thread (696 ms of
+the last row's 2,315), and threads waiting for their turn on a
+processor that other work held.
+
+Opening the figure's file, which is 2.4 MB, reading it, indexing its
+124,136 triangles, fitting it 80 long and drawing it took 0.76 seconds
+from the request to the answer, through the editor's MCP connection.
+The mesh and its index are kept in hand afterwards, so a change of size
+or of brick size fits it again without reading the file.
+
 ## The editor
 
 A dragged form is not measured. While the mouse button is down, forms that
@@ -732,8 +856,29 @@ so that a touch changes few of them. A form has one tile for every
 | Filling them | 1.0 to 1.5 ms | 1.3 to 5.1 ms |
 | The shadow map | 1.6 to 2.0 ms | 1.6 to 1.9 ms |
 
-The larger lawn's touch is 25 to 35 ms, so a stroke on it draws every
-other frame.
+The larger lawn's touch was 25 to 35 ms, so a stroke on it drew every
+other frame. That was with every touch building the lawn from nothing.
+With the last build kept ([a lawn](#a-lawn)), the first three steps
+were measured again without a window, by the test
+`timing_a_touch_on_lawns_of_three_sizes` in
+[editor/src/state.rs](../editor/src/state.rs), which makes a touch and
+takes it back in turn. Its building includes what the editor does with
+a build besides asking for it.
+
+| Step | 28,000 bricks | 86,000 bricks | 335,000 bricks |
+|---|---|---|---|
+| Building, from nothing | 4.4 ms | 11.3 ms | 36 ms |
+| Building, the last build kept | 2.4 ms | 3.5 ms | 8.8 ms |
+| Bricks with their colours | 0.35 ms | 1.0 ms | 4.0 ms |
+| Finding the tiles that changed | 0.5 ms | 1.5 ms | 8.0 ms |
+| Those three, before and after | 5.3 and 3.3 ms | 14 and 6 ms | 48 and 21 ms |
+
+The lawn of 86,000 bricks is back within a frame for these three steps.
+On the lawn of 335,000 the build is now the smaller part: colouring
+every brick and comparing every brick with the one drawn before take 12
+ms between them, and both go through the whole lawn at every touch.
+Filling the buffers and the shadow map were not measured again, since
+neither changed.
 
 Shadows are redrawn when the bricks change and at most thirty times a
 second while something is being dragged. Each redrawing draws every
@@ -808,15 +953,15 @@ A tree takes up to a second at its usual size on one thread, which is
 what the browser has, and four times as long at twice the size, since its
 time grows with its surface.
 
-A lawn's time grows with its area. One 300 cells by 240 takes 16 to 22
-ms to build on sixteen threads and a touch on it 25 to 35 ms in all, so
-a stroke on it draws every other frame, and a lawn four times that area
-would take about a tenth of a second a touch. Every touch works out the
-whole ground again and lays every tile again, though it changes the
-ground within its range only and the bricks of a few tiles. Keeping the
-ground and the unchanged tiles from one build to the next would make a
-touch cost the same on a lawn of any size
-([future-work.md](future-work.md), More plants).
+A lawn's first build grows with its area: 38 ms on sixteen threads for
+one 600 cells by 480, and 207 ms on one. A touch after that is built
+from what was kept of the build before, 4 to 6 ms on that lawn
+([a lawn](#a-lawn)). What still grows with the lawn at every touch is in
+the editor: every brick is given its colour again and compared with the
+brick drawn before, 12 ms on a lawn of 335,000 bricks, so a touch on it
+is about 21 ms before the graphics card is given anything
+([a touch of the brush on a lawn](#a-touch-of-the-brush-on-a-lawn),
+[future-work.md](future-work.md), More plants).
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at

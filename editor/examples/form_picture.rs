@@ -12,6 +12,12 @@
 //! first sees it and not in this example's own colours. `palette:maze`
 //! paints a maze in the colours its walls' texture starts in. Extra `key=value`
 //! arguments override the file's settings, as with the `inspect` example.
+//!
+//! A form of a mesh (`form = imported`) is drawn from the mesh its `import`
+//! line names in the editor's imports folder, in the mesh's own colours.
+//! `mesh=PATH` opens a mesh file as the editor does (copying it into that
+//! folder) and draws it, whatever form the spec file says: the spec file
+//! may then be an empty one, and `radius=48 grain=1` and the like set it up.
 
 use brickloft_core::report::parse_spec;
 use brickloft_core::DVec3;
@@ -31,10 +37,17 @@ fn main() {
     };
     let numbers: Vec<f64> = args[2..].iter().filter_map(|a| a.parse().ok()).collect();
     let (turn, tilt) = (numbers.first().copied().unwrap_or(35.0).to_radians(), numbers.get(1).copied().unwrap_or(35.0).to_radians());
-    let overrides: Vec<String> = args[2..].iter().filter(|a| a.contains('=')).map(|a| a.replacen('=', " = ", 1)).collect();
+    // (a mesh file to open: taken in first, so that the spec can name it)
+    let mesh: Option<String> = args[2..].iter().find_map(|a| a.strip_prefix("mesh=")).map(|path| {
+        let (name, up) = brickloft_editor::import::adopt(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let up = brickloft_core::mesh::form::UPS.iter().find(|u| u.0 == up).map_or("y", |u| u.1);
+        format!("form = imported\nfill = true\npoints = 0.5,0.5,0.5\nimport = {name},{up}")
+    });
+    let overrides: Vec<String> = mesh.into_iter().chain(args[2..].iter().filter(|a| a.contains('=') && !a.starts_with("mesh=")).map(|a| a.replacen('=', " = ", 1))).collect();
     let text = std::fs::read_to_string(from).unwrap_or_else(|e| panic!("could not read {from}: {e}"));
     // overrides go in a second [spec] section at the end, where a later line wins
-    let spec = parse_spec(&format!("{text}\n[spec]\n{}\n", overrides.join("\n"))).unwrap_or_else(|e| panic!("{from}: {e}"));
+    let mut spec = parse_spec(&format!("{text}\n[spec]\n{}\n", overrides.join("\n"))).unwrap_or_else(|e| panic!("{from}: {e}"));
+    brickloft_editor::import::attach(&mut spec);
     let built = brickloft_core::spec::build(&spec).unwrap_or_else(|e| panic!("not built: {e}"));
     let corner = |pick: fn(i32, i32) -> i32, far: bool| {
         DVec3::from_array([0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + if far { b.ext[k] } else { 0 }).reduce(pick).unwrap_or(0) as f64))
@@ -61,6 +74,8 @@ fn main() {
         let set = &sets[parts.next().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0).min(sets.len() - 1)];
         Some(set.iter().map(|c| c.map(f64::from)).collect())
     });
+    // (a mesh's own colours, where it has them)
+    let own = own.or_else(|| brickloft_editor::import::paint_of(&spec).map(|paint| paint.colours.iter().map(|c| c.map(f64::from)).collect()));
     // a pond's water last and seen through, as the editor draws it (ice more solid)
     let pond = spec.form == brickloft_core::spec::Form::Tree && spec.tree.kind == brickloft_core::tree::Kind::Grass;
     let water = |n: usize| pond && built.shades.get(n) == Some(&brickloft_core::tree::WATER);

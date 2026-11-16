@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, MAZE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, IMPORTED, MAZE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -15,7 +15,7 @@ use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 /// reads it is one the program's prefab writer already brings in; YAML
 /// would be one more dependency for the same list of names and sentences.
 /// https://docs.rs/serde_json
-fn help(name: &str) -> &'static str {
+pub(crate) fn help(name: &str) -> &'static str {
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
     static TEXTS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
@@ -53,13 +53,13 @@ fn for_name(text: &'static str, name: &str) -> &'static str {
 /// panel to say that there was anything to read, so each control has a mark
 /// beside it as well.
 /// https://docs.rs/egui/latest/egui/struct.Response.html#method.on_hover_text
-fn hint(ui: &mut Ui, text: &str) {
+pub(crate) fn hint(ui: &mut Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new("?").weak()).sense(egui::Sense::hover())).on_hover_text(text);
 }
 
 /// A control with its explanation: said when the pointer rests on the
 /// control, and on the "?" set after it (see [`hint`]).
-fn helped(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui) -> egui::Response) -> egui::Response {
+pub(crate) fn helped(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui) -> egui::Response) -> egui::Response {
     ui.horizontal(|ui| {
         let response = add(ui).on_hover_text(text);
         hint(ui, text);
@@ -274,7 +274,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if state.form != before {
             // a tree's colours are for a tree's parts: they go when it does (and a maze's with the maze)
             // (and a bookcase's for its wood and its books)
-            if matches!(before, TREE | FURNITURE | MAZE) && state.paint.mode == Mode::Pattern {
+            // (and a mesh's for the mesh)
+            if matches!(before, TREE | FURNITURE | MAZE | IMPORTED) && state.paint.mode == Mode::Pattern {
                 state.paint = crate::paint::Paint::default();
             }
             state.preset();
@@ -320,6 +321,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         if state.form == MAZE {
             maze(ui, state, largest);
+        }
+        if state.form == IMPORTED {
+            crate::import::panel::show(ui, state, largest);
         }
         let unblended = state.unblended();
         let s = &mut state.spec;
@@ -467,7 +471,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
             }
             // a tree is neither filled nor hollow, and has no wall; a maze is all wall; nor is furniture, whose boards have a thickness of their own
-            TREE | FURNITURE | MAZE => {}
+            // (a mesh's filling and its wall are with its other settings: see `import::panel`)
+            TREE | FURNITURE | MAZE | IMPORTED => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -486,7 +491,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
-        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE) {
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE | IMPORTED) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve || state.form == CUBE {
@@ -552,7 +557,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         // (not a tree, which is no one's mirror image, nor a maze, which would then have two ways through; they can still be flipped)
         // (nor furniture: a bookcase's carcass is its own mirror image already, and its books are not meant to be)
-        if !matches!(state.form, TREE | FURNITURE | MAZE) {
+        // (nor a mesh: it is fitted from its triangles, and half of it mirrored would be another mesh)
+        if !matches!(state.form, TREE | FURNITURE | MAZE | IMPORTED) {
             ui.horizontal(|ui| {
                 ui.label("Mirror").on_hover_text(help("mirror"));
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
@@ -1678,7 +1684,8 @@ mod tests {
     fn every_explanation_asked_for_is_written_and_every_one_written_is_used() {
         let written: BTreeMap<String, String> = serde_json::from_str(include_str!("help.json")).expect("help.json is not a list of names and sentences");
         // the names this file asks for: whatever follows `help("`, up to the next quote
-        let asked: BTreeSet<&str> = include_str!("panel.rs").split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
+        // (in this file and in the one that lays out a mesh's settings, which uses the same explanations)
+        let asked: BTreeSet<&str> = concat!(include_str!("panel.rs"), include_str!("import/panel.rs")).split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
         assert!(asked.len() > 50, "only {} names were found: the search for them is broken", asked.len());
         for name in &asked {
             assert!(written.get(*name).is_some_and(|text| !text.trim().is_empty()), "help.json has no explanation named {name}");

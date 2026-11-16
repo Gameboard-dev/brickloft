@@ -1,5 +1,6 @@
 use super::*;
 use crate::spec::{build, build_with, Form, Spec};
+use std::sync::Arc;
 use crate::tree::{ground, Kind, Sculpt};
 
 /// Grass through `points`, reaching `spread` to each side, as a spec.
@@ -378,4 +379,258 @@ fn a_lawn_knows_which_part_is_where_and_how_far_off_it_is() {
         let above = DVec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z + 5.0);
         assert!(lawn.part(above).is_none() && lawn.distance(above) > 0.0 && lawn.distance(above) <= 5.0 + 1e-9, "{name}");
     }
+}
+
+/// A lawn `long` by `wide` with `touches` touches of the brush spread over it, each 10 to 25 in range.
+fn sized(long: f64, wide: f64, touches: usize) -> Spec {
+    let mut seed = 7u64;
+    let mut next = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) % 1000) as f64 / 1000.0
+    };
+    let spread = wide / 2.0;
+    let half = long / 2.0 - spread;
+    let pulls = (0..touches).map(|_| (DVec3::new((next() - 0.5) * (long - 20.0), (next() - 0.5) * (wide - 20.0), 2.0), DVec3::new(10.0 + next() * 15.0, 0.0, next() * 12.0 - 4.0))).collect();
+    Spec { pulls, ..along(&[(-half, 0.0), (0.0, 0.0), (half, 0.0)], spread, false) }
+}
+
+/// A spec's lawn laid with `lawn` holding what is kept of it, and from nothing.
+fn laid_from(lawn: &mut kept::Lawn, spec: &Spec, threads: Threads) -> Arc<Model> {
+    let (lay, _) = crate::spec::tree_lay(spec, spec.points[0]).unwrap();
+    Model::laid(lawn, &spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius, &lay, spec.max_ext, threads)
+}
+
+fn fresh_of(spec: &Spec, threads: Threads) -> Arc<Model> {
+    let (lay, _) = crate::spec::tree_lay(spec, spec.points[0]).unwrap();
+    Model::fresh(&spec.tree, spec.points[0], spec.rise.unwrap(), spec.radius, &lay, spec.max_ext, threads)
+}
+
+/// What a touch costs on lawns of three sizes, built from nothing and from what was kept of the build before: run by name with `--release -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn where_a_touch_on_a_lawn_goes() {
+    use std::time::Instant;
+    for (name, long, wide, touches) in [("180 by 120", 180.0, 120.0, 24), ("300 by 240", 300.0, 240.0, 24), ("600 by 480", 600.0, 480.0, 24), ("600 by 480, 120 touches", 600.0, 480.0, 120)] {
+        for levels in [1, 2] {
+            let spec = Spec { tube: levels == 2, ..sized(long, wide, touches) }.snapped();
+            // one more touch, 20 in range, and the same lawn without it, turn about: each build is one touch's worth of change
+            let mut touched = spec.clone();
+            touched.pulls.push((DVec3::new(long / 4.0 + 0.5, wide / 5.0 + 0.5, 0.5), DVec3::new(20.0, 0.0, 7.0)));
+            for threads in [Threads::available(), Threads::ONE] {
+                let whole = (0..5).map(|_| { let at = Instant::now(); std::hint::black_box(fresh_of(&touched, threads)); at.elapsed() }).min().unwrap();
+                let ground = (0..5).map(|_| { let (lay, _) = crate::spec::tree_lay(&touched, touched.points[0]).unwrap(); let at = Instant::now(); std::hint::black_box(Ground::new(&touched.tree, touched.points[0], touched.radius, &lay, threads)); at.elapsed() }).min().unwrap();
+                let mut lawn = kept::Lawn::default();
+                laid_from(&mut lawn, &spec, threads);
+                let all = lawn.laid;
+                let mut laid = 0;
+                let kept = (0..10).map(|n| { let at = Instant::now(); let built = laid_from(&mut lawn, if n % 2 == 0 { &touched } else { &spec }, threads); let took = at.elapsed(); laid = lawn.laid; std::hint::black_box(built); took }).min().unwrap();
+                // and through the whole of a build, as the editor asks for it
+                build_with(&spec, true, threads).unwrap();
+                let built = (0..10).map(|n| { let at = Instant::now(); std::hint::black_box(build_with(if n % 2 == 0 { &touched } else { &spec }, true, threads).unwrap().bricks.len()); at.elapsed() }).min().unwrap();
+                println!("{name}, {levels} level(s), {} thread(s): from nothing {whole:?} (its ground {ground:?}); a touch with the last build kept {kept:?}, laying {laid} of {all} tiles; as a whole build {built:?}", threads.count());
+            }
+        }
+    }
+}
+
+/// A number that stands for a build's bricks and their parts, in order.
+fn print_of(built: &crate::spec::Built) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    let mut take = |v: i64| { h = (h ^ v as u64).wrapping_mul(0x100000001b3); };
+    for (b, s) in built.bricks.iter().zip(&built.shades) {
+        take(b.mask as i64);
+        b.min.iter().chain(&b.ext).for_each(|v| take(*v as i64));
+        take(*s as i64);
+    }
+    take(built.solid.to_bits() as i64);
+    h
+}
+
+/// Every sort of lawn the tests have, for comparing one way of building with another.
+fn every_lawn() -> Vec<(String, Spec)> {
+    let mut all: Vec<(String, Spec)> = lawns().into_iter().map(|(name, spec)| (name.to_string(), spec)).collect();
+    all.push(("two hollows".into(), two_hollows()));
+    all.push(("tall".into(), Spec { rise: Some(40.0), depth: 6, ..sized(120.0, 90.0, 12) }));
+    all.push(("large, two levels".into(), Spec { tube: true, depth: 8, tree: Tree { seed: 5, count: 2, ..Tree::of(Kind::Grass) }, ..sized(300.0, 240.0, 40) }));
+    all.push(("closed".into(), Spec { depth: 5, pulls: vec![(DVec3::new(0.5, 0.5, 0.5), DVec3::new(22.0, 0.0, -10.0))], ..along(&[(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)], 4.0, true) }));
+    all
+}
+
+#[test]
+#[ignore = "prints, checks nothing"]
+fn prints_of_every_lawn() {
+    for (name, spec) in every_lawn() {
+        println!("PRINT {name}: {:#x}", print_of(&build(&spec).unwrap()));
+    }
+}
+
+/// Whether two grounds are the same in every number of every cell.
+fn same_ground(a: &Ground, b: &Ground) -> bool {
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<u64>>();
+    (a.lo, a.n, a.watered) == (b.lo, b.n, b.watered) && bits(&a.high) == bits(&b.high) && a.top == b.top && a.level == b.level && a.skin == b.skin && a.flags == b.flags && a.stone.iter().map(|x| x.to_bits()).eq(b.stone.iter().map(|x| x.to_bits()))
+}
+
+/// A lawn's touches as they might come and go: one at a time (or, of many, a few at a time after the first six), then one taken out of the middle, one changed where it stands, one moved, two made in the other order, a new one put in among the others, all gone, and all back.
+fn comings_and_goings(all: &[(DVec3, DVec3)]) -> Vec<Vec<(DVec3, DVec3)>> {
+    let mut steps: Vec<Vec<(DVec3, DVec3)>> = vec![Vec::new()];
+    let mut n = 0;
+    while n < all.len() {
+        n = (n + if n < 6 { 1 } else { 7 }).min(all.len());
+        steps.push(all[..n].to_vec());
+    }
+    if all.len() >= 2 {
+        let middle = all.len() / 2;
+        let mut less = all.to_vec();
+        less.remove(middle);
+        steps.push(less.clone());
+        let mut changed = all.to_vec();
+        changed[middle].1.z -= 5.0;
+        steps.push(changed.clone());
+        changed[middle].1.x += 6.0;
+        steps.push(changed.clone());
+        changed[0].0 += DVec3::new(9.0, -4.0, 0.0);
+        steps.push(changed.clone());
+        changed.swap(0, middle);
+        steps.push(changed.clone());
+        // (flattened, among the others)
+        changed.insert(1, (all[0].0 + DVec3::new(3.0, 2.0, 0.0), DVec3::new(14.0, 1.0, 2.0)));
+        steps.push(changed);
+        steps.push(less);
+    }
+    steps.push(Vec::new());
+    steps.push(all.to_vec());
+    steps
+}
+
+#[test]
+fn a_lawn_built_touch_by_touch_from_what_was_kept_is_the_lawn_built_whole() {
+    for (name, spec) in every_lawn() {
+        let spec = spec.snapped();
+        let mut lawn = kept::Lawn::default();
+        let mut reused = 0;
+        let step = |lawn: &mut kept::Lawn, now: &Spec, what: &str, k: usize| {
+            let threads = [Threads::ONE, Threads::forced(3), Threads::available()][k % 3];
+            let (from_kept, whole) = (laid_from(lawn, now, threads), fresh_of(now, Threads::ONE));
+            assert!(from_kept.bricks == whole.bricks, "{name}, {what} {k}: other bricks from what was kept ({} and {})", from_kept.bricks.len(), whole.bricks.len());
+            assert!(from_kept.shades == whole.shades && from_kept.volume.to_bits() == whole.volume.to_bits() && from_kept.bounds() == whole.bounds(), "{name}, {what} {k}: other parts, volume or box");
+            assert!(same_ground(&from_kept.ground, &whole.ground), "{name}, {what} {k}: another ground");
+            lawn.laid
+        };
+        let count = (laid_from(&mut kept::Lawn::default(), &spec, Threads::ONE).ground.n[0] / TILE as usize + 2) * (fresh_of(&spec, Threads::ONE).ground.n[1] / TILE as usize + 2);
+        let steps = comings_and_goings(&spec.pulls).len();
+        for (k, pulls) in comings_and_goings(&spec.pulls).into_iter().enumerate() {
+            reused += (step(&mut lawn, &Spec { pulls, ..spec.clone() }, "touches", k) * 2 < count) as usize;
+        }
+        // its settings: thicker, leaning, taller, more reeds and none, shorter bricks, and back to what it was; a touch after each
+        let settings = [
+            Spec { tree: Tree { fullness: 90, ..spec.tree }, ..spec.clone() },
+            Spec { tree: Tree { bend: 80, ..spec.tree }, ..spec.clone() },
+            Spec { rise: Some(spec.rise.unwrap() + 3.0), ..spec.clone() },
+            Spec { depth: 11, ..spec.clone() },
+            Spec { depth: 1, ..spec.clone() },
+            Spec { max_ext: 6, ..spec.clone() },
+            spec.clone(),
+        ];
+        for (k, now) in settings.iter().enumerate() {
+            step(&mut lawn, now, "settings", k);
+            let mut touched = now.clone();
+            touched.pulls.push((spec.points[0] + DVec3::new(7.0, 3.0, 0.0), DVec3::new(9.0, 0.0, -6.0)));
+            step(&mut lawn, &touched, "a touch after settings", k);
+        }
+        // (and what was kept was used: most steps laid fewer than half the tiles)
+        // (but for the tall grass, 40 high on a lawn 120 by 90: a blade there reaches 35 cells, so a tile is laid from most of the lawn and a touch anywhere reaches most tiles)
+        assert!(reused * 3 >= steps || name == "tall", "{name}: {reused} steps of {steps} laid fewer than half of {count} tiles");
+    }
+}
+
+#[test]
+fn a_touch_lays_the_tiles_it_reaches_and_works_out_the_ground_it_reaches() {
+    for levels in [1, 2] {
+        let spec = Spec { tube: levels == 2, depth: 6, ..sized(300.0, 240.0, 24) }.snapped();
+        let mut lawn = kept::Lawn::default();
+        let first = laid_from(&mut lawn, &spec, Threads::available());
+        let all = lawn.laid;
+        assert!(all >= 80 && all == lawn.tiles.len(), "{all} tiles laid of {}", lawn.tiles.len());
+        // the same again: the lawn that was built, and nothing laid
+        let again = laid_from(&mut lawn, &spec, Threads::available());
+        assert!(Arc::ptr_eq(&first, &again) && lawn.laid == 0);
+        drop((first, again));
+        // a touch 14 in range, on dry ground: the tiles within its range and a blade's reach of it, nine at the most
+        let mut touched = spec.clone();
+        touched.pulls.push((DVec3::new(-100.5, 60.5, 0.5), DVec3::new(14.0, 0.0, 6.0)));
+        laid_from(&mut lawn, &touched, Threads::available());
+        assert!((1..=9).contains(&lawn.laid), "{levels} level(s): a touch laid {} of {all} tiles", lawn.laid);
+        // taken away again: the same few
+        laid_from(&mut lawn, &spec, Threads::available());
+        assert!((1..=9).contains(&lawn.laid), "{levels} level(s): undoing a touch laid {} of {all} tiles", lawn.laid);
+        // thicker grass: every tile that has grass, from the ground as it was
+        laid_from(&mut lawn, &Spec { tree: Tree { fullness: 80, ..spec.tree }, ..spec.clone() }, Threads::available());
+        assert_eq!(lawn.laid, all);
+    }
+}
+
+/// A tile is kept under the reeds over it as well as its ground: a reed
+/// may come to fill other heights of the same cells, by a change to a
+/// reed that it gives way to, far from the tile. That is rare enough that
+/// no lawn here does it, so the reeds kept with a tile are changed by
+/// hand, as if they had been other reeds, and the tile must be laid again.
+#[test]
+fn a_tile_kept_is_laid_again_when_the_reeds_over_it_are_others() {
+    let spec = Spec { depth: 11, ..two_hollows() }.snapped();
+    let mut lawn = kept::Lawn::default();
+    laid_from(&mut lawn, &spec, Threads::ONE);
+    let (at, were) = lawn.tiles.iter().find(|(_, tile)| !tile.stems.is_empty()).map(|(at, tile)| (*at, tile.stems.clone())).expect("no tile has a reed over it");
+    lawn.tiles.get_mut(&at).unwrap().stems[0].1[0].1 += 1;
+    // (a touch far from that tile, so that the lawn is built again and that tile's ground is as it was)
+    let far = DVec3::new(if at[0] < 0 { 50.5 } else { -50.5 }, if at[1] < 0 { 30.5 } else { -30.5 }, 0.5);
+    let mut touched = spec.clone();
+    touched.pulls.push((far, DVec3::new(5.0, 0.0, 1.0)));
+    let built = laid_from(&mut lawn, &touched, Threads::ONE);
+    assert!(lawn.tiles[&at].stems == were, "the tile at {at:?} was kept, though it was laid from other reeds");
+    assert!(built.bricks == fresh_of(&touched, Threads::ONE).bricks);
+}
+
+/// Every lawn the tests have is the bricks it was before anything was kept between builds: the numbers are those of the lawns as `main` built them at 63b2fd6, when each build was from nothing and a tile was laid from the whole ground.
+#[test]
+fn the_lawns_are_the_bricks_they_were() {
+    let were = [("sculpted", 0xd5a905604c89faedu64), ("two levels", 0xc8a6b3131470261a), ("rough", 0xd7e6a86f7bd9ad03), ("two hollows", 0x3832e3a0a7b80296), ("tall", 0x50ed6b8d59974b81), ("large, two levels", 0x626a00a14131a756), ("closed", 0x4e4f45365858131e)];
+    for ((name, spec), (_, was)) in every_lawn().into_iter().zip(were) {
+        assert_eq!(print_of(&build(&spec).unwrap()), was, "{name}");
+    }
+}
+
+#[test]
+fn what_is_kept_of_lawns_is_bounded_and_safe_to_build_from_on_several_threads_at_once() {
+    // more lawns than are kept, each built, touched and built again, on six threads at once, two of them the same lawn: each build is the lawn built whole
+    let lawns: Vec<Spec> = (0..6).map(|n| Spec { tube: n % 2 == 0, depth: 4, tree: Tree { seed: 40 + (n as u64).min(4), ..Tree::of(Kind::Grass) }, ..sized(150.0, 100.0, 10) }.snapped()).collect();
+    std::thread::scope(|scope| {
+        for spec in &lawns {
+            scope.spawn(move || {
+                for (k, pulls) in comings_and_goings(&spec.pulls).into_iter().enumerate() {
+                    let now = Spec { pulls, ..spec.clone() };
+                    let (built, whole) = (build(&now).unwrap(), fresh_of(&now, Threads::ONE));
+                    assert!(built.bricks == whole.bricks && built.shades == whole.shades && built.solid.to_bits() == whole.volume.to_bits(), "step {k} of the lawn with seed {}", spec.tree.seed);
+                    let (lawns, bytes) = kept::held();
+                    assert!(lawns <= kept::MOST_LAWNS && bytes <= kept::MOST_BYTES, "{lawns} lawns kept, {bytes} bytes");
+                }
+            });
+        }
+    });
+    // (something is kept, and a lawn this size is a few million bytes of it)
+    let (count, bytes) = kept::held();
+    assert!(count >= 1 && bytes > 100_000, "{count} lawns kept, {bytes} bytes");
+}
+
+/// Allowing for a machine busy with other things: a touch from what was kept is some tenth of a build from nothing, and is asked to be under half.
+#[test]
+fn a_touch_on_a_large_lawn_is_quicker_from_what_was_kept() {
+    use std::time::Instant;
+    let spec = sized(300.0, 240.0, 24).snapped();
+    let mut touched = spec.clone();
+    touched.pulls.push((DVec3::new(60.5, -40.5, 0.5), DVec3::new(18.0, 0.0, 7.0)));
+    let whole = (0..4).map(|_| { let at = Instant::now(); std::hint::black_box(fresh_of(&touched, Threads::ONE)); at.elapsed() }).min().unwrap();
+    let mut lawn = kept::Lawn::default();
+    laid_from(&mut lawn, &spec, Threads::ONE);
+    let kept = (0..8).map(|n| { let at = Instant::now(); std::hint::black_box(laid_from(&mut lawn, if n % 2 == 0 { &touched } else { &spec }, Threads::ONE)); at.elapsed() }).min().unwrap();
+    assert!(kept * 2 < whole, "a touch took {kept:?} from what was kept and {whole:?} from nothing");
 }

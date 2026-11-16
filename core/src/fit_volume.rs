@@ -177,7 +177,7 @@ fn cell_bits(f: &(impl Fn(DVec3) -> f64 + Sync), cell: DVec3) -> (u64, u8) {
 /// stretch of that array (it is eight short stretches in each of eight
 /// layers), and the standard library can only lend a thread a whole stretch.
 /// The two totals are whole numbers of samples, the same in any grouping.
-fn classify(
+pub(crate) fn classify(
     f: &(impl Fn(DVec3) -> f64 + Sync),
     min: [i32; 3],
     n: [usize; 3],

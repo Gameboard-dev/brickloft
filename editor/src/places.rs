@@ -8,6 +8,7 @@
 //! | Files | Folder |
 //! |---|---|
 //! | saved forms | `Documents/brickloft/forms/` |
+//! | mesh files that have been opened | `Documents/brickloft/imports/` |
 //! | screenshots, and recordings of the window | `Pictures/brickloft/` |
 //! | reports, and the prefab a copy puts on the clipboard | `brickloft/` in the system's temporary folder |
 //!
@@ -38,6 +39,14 @@ fn home() -> Result<PathBuf, String> {
 /// Where saved forms are kept. Not made until something is saved: see `store`.
 pub fn forms() -> Result<PathBuf, String> {
     Ok(home()?.join("Documents").join(OURS).join("forms"))
+}
+
+/// Where the mesh files that have been opened are kept, each under a name
+/// made from its content (see `import`). Not made until one is opened.
+/// Beside the saved forms, which name them: the two are backed up or moved
+/// to another computer together.
+pub fn imports() -> Result<PathBuf, String> {
+    Ok(home()?.join("Documents").join(OURS).join("imports"))
 }
 
 /// Where saved forms were kept while the program was called omegga-arcs,
