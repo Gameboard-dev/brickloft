@@ -34,6 +34,7 @@ fn form_name(form: Form) -> String {
         Form::Tree => "tree".into(),
         Form::Furniture => "furniture".into(),
         Form::Maze => "maze".into(),
+        Form::Program => "program".into(),
     }
 }
 
@@ -118,6 +119,8 @@ pub fn spec_text(spec: &Spec) -> String {
     let m = &spec.maze;
     line("maze", format!("{},{},{},{},{},{},{},{},{}", crate::maze::KINDS[m.kind as usize].1, m.rings, m.divisions, m.grow, m.seed, m.entrance, m.floor, m.solution as u8, m.hedge as u8));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
+    // a rule program: which, the size of its grid, microbricks to a cell, the seed, the finish, the step limit, and how many turns it has run or `end` (see `rewrite::form::Program::text`). A save from before there were rule programs has no such line.
+    line("program", spec.program.text());
     s
 }
 
@@ -184,6 +187,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("tree" | "plant", _) => Form::Tree,
                     ("furniture", _) => Form::Furniture,
                     ("maze", _) => Form::Maze,
+                    ("program", _) => Form::Program,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -454,6 +458,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 spec.maze = maze.clamped();
             }
+            "program" => spec.program = crate::rewrite::form::Program::read(value).map_err(|fault| bad(&fault.to_string()))?,
             "stones" => {
                 spec.stones = if value == "none" {
                     None
@@ -1273,7 +1278,9 @@ mosaic = {values}
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false, bloom: crate::tree::Bloom { flower: crate::tree::Flower::Gerbera, tilt: 35, turn: 250, stem: true, fallen: true } },
                 furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
+                program: crate::rewrite::form::Program { name: "My castle-2".into(), imported: true, size: [7, 128, 1], cell: 20, seed: 18446744073709551615, finish: crate::rewrite::Finish::Plain, limit: 123456, stop: Some(4321) },
             },
+            Spec { form: Form::Program, points: vec![at(2.0, -3.0, 0.0)], program: crate::rewrite::form::Program { seed: 6, stop: None, ..crate::rewrite::form::Program::of("ModernHouse", false) }, ..Spec::default() },
             Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, hang: 80, lights: 0, shine: true, bloom: Default::default() }, ..Spec::default() },
             Spec { form: Form::Tree, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, rise: Some(24.0), tree: crate::tree::Tree { seed: 4, fullness: 80, bend: 15, extras: true, bloom: crate::tree::Bloom { flower: crate::tree::Flower::WaterLily, tilt: 90, turn: 359, stem: false, fallen: true }, ..crate::tree::Tree::of(crate::tree::Kind::Flower) }, ..Spec::default() },
             Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35, ..crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase) }, ..Spec::default() },
@@ -1304,6 +1311,14 @@ furniture = bookcase,7,3,4,17,40,5,0,1,35").unwrap().furniture;
         assert!(parse_spec("furniture = chair,1,2,0,11,34,3,1,1,85,gothic").is_err() && parse_spec("furniture = chair,1,2,0,11,34,3,1,1,85,modern,1,2,3,1,1,9").is_err());
         // nor has one from before a form could be built as hedge
         assert!(!parse_spec("form = arch round").unwrap().hedge && parse_spec("hedge = true").unwrap().hedge && parse_spec("hedge = 1").is_err());
+        // a save from before there were rule programs has no line for one; a name alone is the program as it starts; numbers out of range are brought within it; and what is no plain name, a path most of all, is refused
+        assert_eq!(parse_spec("form = sphere").unwrap().program, crate::rewrite::form::Program::default());
+        assert_eq!(parse_spec("form = program\nprogram = SeaVilla").unwrap().program, crate::rewrite::form::Program::of("SeaVilla", false));
+        let wild = parse_spec("program = imported:Castle,0,9999,-4,99,3,plain,99999999,88888888").unwrap().program;
+        assert_eq!((wild.size, wild.cell, wild.limit, wild.stop), ([1, crate::rewrite::form::MOST_SIDE, 1], crate::rewrite::bricks::MOST_SCALE, crate::rewrite::form::MOST_LIMIT, Some(crate::rewrite::form::MOST_LIMIT)));
+        for bad in ["program = ../secrets", "program = C:/Users/me/x.xml", "program = imported:a/b", "program = ", "program = Escher,8,8,8,4,1,rounded", "program = Escher,8,8,8,4,-1", "program = Escher,8,8,8,4,1,plain,5,end,more"] {
+            assert!(parse_spec(bad).is_err(), "{bad} was read");
+        }
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

@@ -807,6 +807,8 @@ pub struct Machine {
     root: usize,
     origin: bool,
     ip: Ip,
+    /// for each node, the line of the program it was written on: for saying what a run is doing
+    lines: Vec<usize>,
 }
 
 /// What loading a program needs to hand down through its nodes.
@@ -818,6 +820,7 @@ struct Loader<'a> {
     limits: &'a Limits,
     file: &'a str,
     root_flat: bool,
+    lines: Vec<usize>,
 }
 
 impl Loader<'_> {
@@ -825,6 +828,7 @@ impl Loader<'_> {
         within(Thing::Nodes, self.nodes.len() as u64 + 1, self.limits.nodes, self.file, line)?;
         self.nodes.push(Some(node));
         self.parents.push(None);
+        self.lines.push(line);
         Ok(self.nodes.len() - 1)
     }
 
@@ -997,7 +1001,7 @@ impl Machine {
         let grid = Grid::load(&root, size, file, limits)?;
         let flat = size[2] == 1;
         let all = symmetry(flat, root.get("symmetry"), &vec![true; if flat { 8 } else { 48 }], file, root.line)?;
-        let mut loader = Loader { nodes: Vec::new(), parents: Vec::new(), grids: vec![grid], resources, limits, file, root_flat: flat };
+        let mut loader = Loader { nodes: Vec::new(), parents: Vec::new(), grids: vec![grid], resources, limits, file, root_flat: flat, lines: Vec::new() };
         let mut top = loader.node(&root, &all, 0, 1)?;
         if !matches!(loader.nodes[top], Some(Node::Branch(_))) {
             // a program that is one node runs as a markov node holding it: over and over until it has nothing to do
@@ -1005,7 +1009,7 @@ impl Machine {
         }
         let origin = flag(&root, "origin", file)?;
         let ip = Ip { changes: Vec::new(), first: vec![0], counter: 0, random: Random::new(0), current: None, grid: 0, limits: *limits, file: file.to_string() };
-        let mut machine = Machine { nodes: loader.nodes, parents: loader.parents, grids: loader.grids, root: top, origin, ip };
+        let mut machine = Machine { nodes: loader.nodes, parents: loader.parents, grids: loader.grids, root: top, origin, ip, lines: loader.lines };
         machine.start(0);
         Ok(machine)
     }
@@ -1082,6 +1086,65 @@ impl Machine {
         }
         let grid = &self.grids[self.ip.grid];
         View { size: grid.size, cells: &grid.state, letters: &grid.characters }
+    }
+
+    /// Every letter any of the program's grids has, each once: the
+    /// letters of the grid made last first, since that is the grid a
+    /// finished run is seen in, then those of the grids before it. A
+    /// form's colours are numbered by this list, so that a cell keeps its
+    /// colour when a `map` or `wfc` node moves the run to another grid
+    /// with other letters.
+    pub fn letters(&self) -> Vec<char> {
+        let mut all: Vec<char> = Vec::new();
+        for grid in self.grids.iter().rev() {
+            for letter in &grid.characters {
+                if !all.contains(letter) {
+                    all.push(*letter);
+                }
+            }
+        }
+        all
+    }
+
+    /// The size of the grid made last, which is the one a run ends in.
+    pub fn last_size(&self) -> [usize; 3] {
+        self.grids.last().map_or([0; 3], |grid| grid.size)
+    }
+
+    /// What runs next turn: the node's name and the line it is written on. None once the program is done.
+    pub fn doing(&self) -> Option<(&'static str, usize)> {
+        let mut id = self.ip.current?;
+        // (down from the branch whose turn it is to the node it will ask, which may be a branch that has yet to be given the turn)
+        for _ in 0..self.nodes.len() {
+            let Some(Node::Branch(branch)) = &self.nodes[id] else { break };
+            match &branch.kind {
+                BranchKind::Wfc(_) if branch.n < 0 => return Some(("wfc", self.lines[id])),
+                BranchKind::Map(_) if branch.n < 0 => return Some(("map", self.lines[id])),
+                _ => {}
+            }
+            let at = if matches!(branch.kind, BranchKind::Markov) { 0 } else { branch.n.max(0) as usize };
+            match branch.nodes.get(at) {
+                Some(child) => id = *child,
+                None => break,
+            }
+        }
+        let name = match &self.nodes[id] {
+            Some(Node::Rule(rule)) => match rule.kind {
+                RuleKind::One => "one",
+                RuleKind::All => "all",
+                RuleKind::Prl => "prl",
+            },
+            Some(Node::Path(_)) => "path",
+            Some(Node::Convolution(_)) => "convolution",
+            Some(Node::Branch(branch)) => match branch.kind {
+                BranchKind::Sequence => "sequence",
+                BranchKind::Markov => "markov",
+                BranchKind::Map(_) => "map",
+                BranchKind::Wfc(_) => "wfc",
+            },
+            None => return None,
+        };
+        Some((name, self.lines[id]))
     }
 
     fn reset(&mut self, id: usize) {

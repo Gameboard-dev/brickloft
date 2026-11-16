@@ -5,7 +5,7 @@
 use super::fault::{Expected, Thing};
 use super::*;
 
-const NONE: Resources = Resources { roots: Vec::new(), bundled: &[] };
+const NONE: Resources = Resources { roots: Vec::new(), bundled: &[], seen: None };
 
 fn load(text: &str, size: [usize; 3]) -> Result<Machine, Fault> {
     Machine::load("test.xml", text.as_bytes(), size, &NONE, &Limits::USUAL)
@@ -23,14 +23,14 @@ fn run(text: &str, size: [usize; 3], seed: u64) -> String {
 /// Files held in memory, for programs that refer to others. (Leaked: a test's few bytes, to give them the lifetime compiled-in files have.)
 fn bundled(files: Vec<(&'static str, Vec<u8>)>) -> Resources {
     let table: Vec<(&'static str, &'static [u8])> = files.into_iter().map(|(name, bytes)| (name, &*Box::leak(bytes.into_boxed_slice()))).collect();
-    Resources { roots: Vec::new(), bundled: Box::leak(table.into_boxed_slice()) }
+    Resources { roots: Vec::new(), bundled: Box::leak(table.into_boxed_slice()), seen: None }
 }
 
 /// The programs and tiles copied from the original, beside this crate.
 fn upstream() -> (std::path::PathBuf, Resources) {
     let home = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("models/markov");
     let home = if home.is_dir() { home } else { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/models/markov") };
-    (home.clone(), Resources { roots: vec![home], bundled: &[] })
+    (home.clone(), Resources { roots: vec![home], bundled: &[], seen: None })
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn every_fault_is_provoked_and_says_what_to_do() {
     assert_eq!(fault, Fault::StepLimit { steps: 500 });
     said(&fault, &["Stopped early", "500 steps", "What it had made is shown"]);
     assert!(machine.running() && machine.view().cells.iter().any(|v| *v == 1));
-    said(&Fault::TimeLimit { steps: 9000, seconds: 30 }, &["Stopped early", "30 seconds", "9000 steps"]);
+    said(&Fault::TimeLimit { steps: 9000, seconds: 30 }, &["given up after 30 seconds", "9000 steps", "Press Play"]);
 }
 
 #[test]
@@ -365,10 +365,199 @@ fn a_link_out_of_the_folder_and_a_file_too_large_are_refused() {
     let folder = std::env::temp_dir().join(format!("brickloft-rewrite-test-{}", std::process::id()));
     std::fs::create_dir_all(folder.join("tilesets")).unwrap();
     std::fs::write(folder.join("tilesets/Big.xml"), vec![b' '; 3000]).unwrap();
-    let resources = Resources { roots: vec![folder.clone()], bundled: &[] };
+    let resources = Resources { roots: vec![folder.clone()], bundled: &[], seen: None };
     assert!(matches!(resources.read(&["tilesets", "Big.xml"], 2000), Err(Fault::TooLarge { thing: Thing::File, figure: 3000, limit: 2000, .. })));
     assert_eq!(resources.read(&["tilesets", "Big.xml"], 4000).map(|(name, bytes)| (name, bytes.len())), Ok(("tilesets/Big.xml".to_string(), 3000)));
     assert_eq!(resources.read(&["tilesets", "None.xml"], 4000), Err(Fault::NoResource { name: "tilesets/None.xml".into() }));
     assert_eq!(resources.read(&["..", "x"], 4000), Err(Fault::Outside { name: "../x".into() }));
     let _ = std::fs::remove_dir_all(folder);
+}
+
+/// Not a test: how each program that comes with the editor runs, seed by
+/// seed. What `form::Entry::least` and `cell` were set from, and where
+/// the figures in docs/algorithm.md come from. Run by name with
+/// `--release -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn how_the_bundled_programs_run() {
+    use std::time::Instant;
+    for entry in &form::BUNDLED {
+        let program = form::Program::of(entry.name, false);
+        let (file, text, resources) = form::source(&program).unwrap();
+        let began = Instant::now();
+        let mut machine = Machine::load(&file, &text, program.size.map(|s| s as usize), &resources, &Limits::USUAL).unwrap_or_else(|fault| panic!("{}: {fault}", entry.name));
+        println!("{}: loaded in {:.0} ms, {} letters, last grid {:?}", entry.name, began.elapsed().as_secs_f64() * 1e3, machine.letters().len(), machine.last_size());
+        let mut drawn = false;
+        for seed in 1..=30u64 {
+            machine.start(seed);
+            let (began, mut slowest, mut slowest_at) = (Instant::now(), 0.0f64, 0);
+            let ended = loop {
+                if machine.steps() >= 50_000 {
+                    break Err(Fault::StepLimit { steps: machine.steps() });
+                }
+                let at = Instant::now();
+                let more = machine.step();
+                let took = at.elapsed().as_secs_f64() * 1e3;
+                if took > slowest {
+                    (slowest, slowest_at) = (took, machine.steps());
+                }
+                match more {
+                    Ok(true) => {}
+                    Ok(false) => break Ok(()),
+                    Err(fault) => break Err(fault),
+                }
+            };
+            let (steps, took) = (machine.steps(), began.elapsed().as_secs_f64() * 1e3);
+            let view = machine.view();
+            let filled = view.cells.iter().filter(|v| **v != 0).count() * 1000 / view.cells.len().max(1);
+            print!("  seed {seed}: {steps} turns in {took:.0} ms (slowest turn {slowest:.0} ms, turn {slowest_at}), {filled} in a thousand filled");
+            match ended {
+                Err(fault) => println!(": {fault}"),
+                Ok(()) if !drawn => {
+                    drawn = true;
+                    let made = [Finish::Plain, Finish::Wedged].map(|finish| {
+                        let at = Instant::now();
+                        let made = bricks(&view, entry.cell, finish, 80, &Limits::USUAL).unwrap();
+                        (made.bricks.len(), made.wedges, at.elapsed().as_secs_f64() * 1e3)
+                    });
+                    println!(": {} bricks plain in {:.1} ms, {} with wedges ({} sloped) in {:.1} ms; {} microbricks across", made[0].0, made[0].2, made[1].0, made[1].1, made[1].2, view.size.iter().max().unwrap() * entry.cell as usize);
+                }
+                Ok(()) => println!(),
+            }
+        }
+    }
+}
+
+#[test]
+fn the_list_of_bundled_files_is_the_folder() {
+    fn files(folder: &std::path::Path, under: &str, into: &mut Vec<String>) {
+        for entry in std::fs::read_dir(folder).unwrap().map(|entry| entry.unwrap()) {
+            let name = format!("{under}{}", entry.file_name().to_string_lossy());
+            if entry.path().is_dir() {
+                files(&entry.path(), &format!("{name}/"), into);
+            } else {
+                into.push(name);
+            }
+        }
+    }
+    let (home, _) = upstream();
+    let (mut resources, mut programs) = (Vec::new(), Vec::new());
+    files(&home.join("resources"), "", &mut resources);
+    files(&home.join("models"), "", &mut programs);
+    resources.sort();
+    programs.sort();
+    assert_eq!(bundled::RESOURCES.iter().map(|(name, _)| name.to_string()).collect::<Vec<_>>(), resources, "core/src/rewrite/bundled.rs does not list the files of core/models/markov/resources");
+    assert_eq!(bundled::PROGRAMS.iter().map(|(name, _)| format!("{name}.xml")).collect::<Vec<_>>(), programs, "core/src/rewrite/bundled.rs does not list the files of core/models/markov/models");
+    // and every program on the list is one of them, loads from what is compiled in alone, and has no more letters than a form has colours
+    for entry in &form::BUNDLED {
+        let colours = form::colours(&form::Program::of(entry.name, false)).unwrap_or_else(|fault| panic!("{}: {fault}", entry.name));
+        assert!(colours.len() >= 2 && colours.len() <= form::MOST_COLOURS, "{}: {} colours", entry.name, colours.len());
+    }
+}
+
+/// A small block of flats: quick to run, with a wfc node and rules after it.
+fn flats(seed: u64, stop: Option<u32>) -> form::Program {
+    form::Program { size: [6, 6, 6], seed, stop, ..form::Program::of("Apartemazements", false) }
+}
+
+#[test]
+fn a_run_remembered_is_the_run_worked_out() {
+    // a run taken a few turns at a time, as the editor takes it, and stopped part way
+    let mut grower = form::Grower::new(&flats(3, None)).unwrap();
+    for turns in [1, 1, 7, 2, 30, 4] {
+        assert!(grower.advance(turns).unwrap(), "the run ended within {} turns", grower.turns());
+    }
+    let (stepped, turns) = (grower.outcome(), grower.turns());
+    assert_eq!(turns, 45);
+    // the same settings worked out from nothing are the same grid, and the same bricks
+    let paused = flats(3, Some(turns));
+    form::forget_all();
+    let worked = form::grown(&paused).unwrap();
+    assert_eq!(*worked, stepped);
+    assert!(worked.running && worked.doing.is_some());
+    let spec = crate::spec::Spec { form: crate::spec::Form::Program, points: vec![crate::DVec3::new(0.5, 0.5, 0.5)], program: paused.clone(), ..crate::spec::Spec::default() };
+    let from_nothing = crate::spec::build(&spec).unwrap();
+    // remembered, as the editor's run leaves it, the build is the same again
+    form::remember(&paused, Ok(std::sync::Arc::new(stepped.clone())));
+    assert_eq!(form::known(&paused).unwrap().unwrap().cells, stepped.cells);
+    let remembered = crate::spec::build(&spec).unwrap();
+    assert!(!from_nothing.bricks.is_empty() && from_nothing.bricks == remembered.bricks && from_nothing.shades == remembered.shades);
+    // run on to its end, it is what the form run to its end from nothing is; and a stop past the end is the end
+    grower.advance(u32::MAX).unwrap();
+    let ended = grower.outcome();
+    form::forget_all();
+    let whole = form::grown(&flats(3, None)).unwrap();
+    assert_eq!(*whole, ended);
+    assert!(!whole.running && whole.doing.is_none() && whole.early.is_none() && whole.size == [30, 30, 30]);
+    assert_eq!(form::grown(&flats(3, Some(ended.turns + 500))).unwrap().cells, ended.cells);
+    // another seed is another building, and turn 0 is an empty grid
+    assert_ne!(form::grown(&flats(4, None)).unwrap().cells, ended.cells);
+    assert!(form::grown(&flats(3, Some(0))).unwrap().cells.iter().all(|value| *value == 0));
+}
+
+#[test]
+fn a_program_form_stands_on_its_point_and_its_plan_is_drawn_at_the_size_of_the_building() {
+    use crate::spec::{build, Form, Spec};
+    let spec = |stop, cell, finish| Spec { form: Form::Program, points: vec![crate::DVec3::new(10.5, -3.5, 7.5)], program: form::Program { cell, finish, ..flats(3, stop) }, ..Spec::default() };
+    let bounds = |built: &crate::spec::Built| [0, 1, 2].map(|k| (built.bricks.iter().map(|b| b.min[k]).min().unwrap(), built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
+    let whole = build(&spec(None, 3, Finish::Wedged)).unwrap();
+    // thirty cells of three microbricks: ninety across at the most, about the point each way and standing on its floor
+    let high = bounds(&whole);
+    assert!(high[0].0 >= 10 - 45 && high[0].1 <= 10 + 45 && high[1].0 >= -4 - 45 && high[1].1 <= -4 + 45 && high[2].0 == 7 && high[2].1 <= 7 + 90, "{high:?}");
+    assert!(high[0].1 - high[0].0 > 60 && high[2].1 - high[2].0 > 30, "{high:?}");
+    // every brick has the number of one of the form's colours, and the colours are the palette's
+    let colours = form::colours(&spec(None, 3, Finish::Wedged).program).unwrap();
+    assert!(whole.shades.len() == whole.bricks.len() && whole.shades.iter().all(|shade| (*shade as usize) < colours.len()));
+    assert!(colours.contains(&('E', [0x00, 0x87, 0x51])));
+    // wedges are sloped pieces the plain finish does not have, and the plain finish is cubes alone
+    let plain = build(&spec(None, 3, Finish::Plain)).unwrap();
+    assert!(plain.bricks.iter().all(|b| b.mask == crate::shapes::CUBE) && whole.bricks.iter().any(|b| b.mask != crate::shapes::CUBE));
+    // turned, it is the same bricks turned
+    let turned = build(&Spec { turned: 1, ..spec(None, 3, Finish::Plain) }).unwrap();
+    assert!(turned.bricks.len() == plain.bricks.len() && turned.bricks != plain.bricks);
+    // two turns in, the grid is still the plan of six cells a side: drawn five times the size, in the room the building will take
+    let plan = build(&spec(Some(2), 3, Finish::Plain)).unwrap();
+    let low = bounds(&plan);
+    assert!(!plan.bricks.is_empty() && plan.bricks.iter().all(|b| b.ext.iter().all(|side| side % 15 == 0)), "{:?}", plan.bricks.first());
+    assert!(low[0].0 >= 10 - 45 && low[0].1 <= 10 + 45 && low[2].0 >= 7 && low[2].1 <= 7 + 90, "{low:?}");
+}
+
+#[test]
+fn a_seed_that_cannot_be_finished_is_passed_over_for_the_next() {
+    // ModernHouse's first four seeds leave its wfc node no arrangement: seed 1 comes to what seed 5 does, and says which were passed
+    form::forget_all();
+    let house = |seed| form::Program { seed, ..form::Program::of("ModernHouse", false) };
+    let from_one = form::grown(&house(1)).unwrap();
+    assert_eq!((from_one.seed, from_one.passed.iter().map(|(seed, _)| *seed).collect::<Vec<_>>()), (5, vec![1, 2, 3, 4]));
+    assert!(from_one.passed.iter().all(|(_, fault)| matches!(fault, Fault::Contradiction { .. })));
+    let from_five = form::grown(&house(5)).unwrap();
+    assert!(from_five.passed.is_empty() && from_five.cells == from_one.cells && !from_five.running && from_five.cells.iter().any(|v| *v != 0));
+    // a stop part way is a stop part way through the seed that is run
+    let part = form::grown(&form::Program { stop: Some(300), ..house(1) }).unwrap();
+    assert_eq!((part.seed, part.turns, part.running), (5, 300, true));
+    // SeaVilla's third seed fails in the program's own way, which is told by its turns
+    let villa = form::grown(&form::Program { seed: 3, ..form::Program::of("SeaVilla", false) }).unwrap();
+    assert_eq!((villa.seed, villa.passed.len()), (4, 1));
+    assert_eq!(villa.passed[0], (3, Fault::Overrun { turns: 6000, most: 6000 }));
+    assert!(villa.turns < 2000 && !villa.running);
+}
+
+#[test]
+fn a_run_that_reaches_its_step_limit_keeps_what_it_made_and_a_missing_program_says_so() {
+    use crate::spec::{build, Form, Spec};
+    let limited = form::Program { limit: 60, ..flats(3, None) };
+    let outcome = form::grown(&limited).unwrap();
+    assert_eq!((outcome.turns, outcome.running, outcome.early.clone()), (60, false, Some(Fault::StepLimit { steps: 60 })));
+    let built = build(&Spec { form: Form::Program, points: vec![crate::DVec3::ZERO], program: limited, ..Spec::default() }).unwrap();
+    assert!(!built.bricks.is_empty());
+    // no such program among those that come with the editor; none brought in, with nothing there; and no name that is a path
+    let fails = |program: form::Program| build(&Spec { form: Form::Program, points: vec![crate::DVec3::ZERO], program, ..Spec::default() }).unwrap_err();
+    assert!(fails(form::Program::of("Nonesuch", false)).contains("no program called \"Nonesuch\""));
+    assert!(fails(form::Program::of("Castle", true)).contains("Import its .xml file again"));
+    assert!(fails(form::Program::of("../Castle", true)).contains("cannot be a program's name"));
+    // (one of the original's that is in the folder and not on the list is not to be had by its name either)
+    assert!(fails(form::Program::of("Hills", false)).contains("no program called"));
+    // a grid too large is refused with the figure and the limit
+    let huge = fails(form::Program { size: [128, 128, 128], ..form::Program::of("Apartemazements", false) });
+    assert!(huge.contains("cells") && huge.contains("the most allowed is") && huge.contains("make the size smaller"), "{huge}");
 }

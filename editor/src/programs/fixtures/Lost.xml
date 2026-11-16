@@ -1,0 +1,6 @@
+<sequence values="BW">
+  <prl in="B" out="W"/>
+  <wfc values="BW" tileset="Nowhere">
+    <rule in="W" out="Empty"/>
+  </wfc>
+</sequence>

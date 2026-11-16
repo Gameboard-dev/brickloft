@@ -10,27 +10,13 @@
 //!
 //! The programs and their tiles are read from `core/models/markov`, found
 //! from this crate's own folder.
-//!
-//! Until the form is in the editor, the interpreter is not part of the
-//! core's library: it is brought in here by path, so that trying it
-//! touches no file another branch is working on. The two `mod`s below
-//! stand in for the core's own, which the interpreter names as `crate::`.
 
 use brickloft_core::DVec3;
 
-mod shapes {
-    pub use brickloft_core::shapes::*;
-}
-mod pattern {
-    pub use brickloft_core::pattern::*;
-}
-#[allow(dead_code, unused_imports)]
-#[path = "../../core/src/rewrite.rs"]
-mod rewrite;
 #[path = "support/canvas.rs"]
 mod canvas;
 use canvas::Canvas;
-use rewrite::{Finish, Limits, Machine, Resources};
+use brickloft_core::rewrite::{self, Finish, Limits, Machine, Resources};
 
 /// Each program, the size it is run at (the original's `models.xml` gives these) and microbricks to a cell.
 const PROGRAMS: [(&str, [usize; 3]); 7] = [("Apartemazements", [8, 8, 8]), ("CarmaTower", [12, 12, 18]), ("ModernHouse", [9, 9, 4]), ("SeaVilla", [10, 10, 4]), ("PillarsOfEternity", [9, 9, 9]), ("Escher", [8, 8, 8]), ("StrangeDungeon", [29, 29, 29])];
@@ -84,7 +70,7 @@ fn main() {
     };
     std::fs::create_dir_all(&folder).expect("could not make the folder");
     let home = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/models/markov");
-    let resources = Resources { roots: vec![home.clone()], bundled: &[] };
+    let resources = Resources { roots: vec![home.clone()], bundled: &[], seen: None };
     let limits = Limits::USUAL;
     let palette = rewrite::palette("palette.xml", &std::fs::read(home.join("resources/palette.xml")).expect("no palette"), &limits).unwrap_or_else(|e| panic!("{e}"));
     for (name, size) in PROGRAMS.iter().filter(|(name, _)| args.len() < 2 || args[1..].iter().any(|a| a == name)) {

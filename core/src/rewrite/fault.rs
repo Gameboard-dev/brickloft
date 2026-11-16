@@ -99,8 +99,18 @@ pub enum Fault {
     Contradiction { file: String, line: usize, tries: usize, at_start: bool },
     /// A run that used all the steps it was allowed. What it made is kept.
     StepLimit { steps: usize },
-    /// A run stopped for the time it had taken. What it made is kept.
+    /// A run given up for the time it had taken, where it was holding the window. Nothing of it is kept.
     TimeLimit { steps: usize, seconds: u64 },
+    /// A program a form names that is neither one that comes with the editor nor, if `imported`, one brought in from outside.
+    NoProgram { name: String, imported: bool },
+    /// A name for a program that is not a plain name.
+    BadName { name: String },
+    /// A file to bring a program in from that is not an .xml file.
+    NotXml { file: String },
+    /// A run still going long after a run of its program that works has ended: the program's own way of failing.
+    Overrun { turns: usize, most: usize },
+    /// No seed of several tried one after another gave a whole result. `why` is how the last of them failed.
+    NoSeed { from: u64, tries: u64, why: Box<Fault> },
 }
 
 impl Thing {
@@ -178,7 +188,13 @@ impl fmt::Display for Fault {
             Fault::Contradiction { file, line, at_start: true, .. } => write!(f, "The wfc node{} cannot be satisfied at this size: what the program fixed beforehand leaves some cell no tile. Try another size.", place(file, *line)),
             Fault::Contradiction { file, line, tries, at_start: false } => write!(f, "The wfc node{} found no arrangement of its tiles in {tries} tries. Try another seed or another size.", place(file, *line)),
             Fault::StepLimit { steps } => write!(f, "Stopped early: the program was still running after {steps} steps, which is the most allowed. What it had made is shown. Raise the step limit to let it go on, or make the size smaller."),
-            Fault::TimeLimit { steps, seconds } => write!(f, "Stopped early: the program had run for {seconds} seconds ({steps} steps). What it had made is shown. Make the size smaller, or start it again to let it go on."),
+            Fault::TimeLimit { steps, seconds } => write!(f, "The program was given up after {seconds} seconds ({steps} steps), so as not to hold the window any longer. Press Play to run it behind the window for as long as it takes, or make the size smaller."),
+            Fault::NoProgram { name, imported: false } => write!(f, "There is no program called \"{name}\" among those that come with the editor. Choose one from the Program list."),
+            Fault::NoProgram { name, imported: true } => write!(f, "The program \"{name}\" was brought in from a file on another computer, or has since been removed from this one, so there is nothing to run. Import its .xml file again, or choose another program."),
+            Fault::BadName { name } => write!(f, "\"{name}\" cannot be a program's name. A name is letters, digits, spaces and _ - only, at most 60 of them. If it is a file's name, rename the file and import it again."),
+            Fault::NotXml { file } => write!(f, "\"{file}\" is not a rule program: a program is a file whose name ends in .xml. Give the path of the program's .xml file."),
+            Fault::Overrun { turns, most } => write!(f, "The program was still running after {turns} turns, where a run of it that works has ended within {most}: it has failed in the way its own rules provide for. Try another seed."),
+            Fault::NoSeed { from, tries, why } => write!(f, "None of the {tries} seeds from {from} could be finished at this size. The last failed so: {why} Try another size."),
         }
     }
 }

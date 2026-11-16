@@ -1,0 +1,5 @@
+<models>
+  <model name="Other" size="60"/>
+  <model name="MyFlats" size="5" d="3"/>
+  <model name="Flat" size="24"/>
+</models>

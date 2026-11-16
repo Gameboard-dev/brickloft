@@ -71,6 +71,13 @@ enum Notch {
 
 pub fn bricks(view: &View, scale: i32, finish: Finish, longest: i32, limits: &Limits) -> Result<Bricks, Fault> {
     within(Thing::Scale, scale.max(0) as u64, MOST_SCALE as u64, "", 0)?;
+    bricks_at(view, scale, finish, longest, limits)
+}
+
+/// [`bricks`], at any scale: for a grid drawn larger than its cells are
+/// asked to be, as the plan of a building is before the building is made
+/// (see `form::built`), which is as large as the building and no larger.
+pub fn bricks_at(view: &View, scale: i32, finish: Finish, longest: i32, limits: &Limits) -> Result<Bricks, Fault> {
     let scale = scale.max(1);
     let [mx, my, mz] = view.size.map(|s| s as i64);
     let value = |x: i64, y: i64, z: i64| if x < 0 || y < 0 || z < 0 || x >= mx || y >= my || z >= mz { 0 } else { view.cells[(x + y * mx + z * mx * my) as usize] };

@@ -17,6 +17,7 @@
 //! - [`spec`] ties them together: a [`spec::Spec`] in, bricks out
 //! - [`par`] shares a build's work out over the processor's cores
 //! - [`orient`] maps each brick to a game asset, orientation and size
+//! - [`rewrite`] runs a rule program (MarkovJunior's language) a turn at a time and writes its grid as bricks
 //! - [`report`] writes a form and its fit out as text, to be read back or inspected
 //! - [`surface`] measures a build's outside against the form's: steps and slopes
 
@@ -36,6 +37,7 @@ pub mod orient;
 pub mod par;
 pub mod pattern;
 pub mod report;
+pub mod rewrite;
 pub mod sdf;
 pub mod shapes;
 pub mod spec;

@@ -53,6 +53,11 @@ pub enum Form {
     /// 1 point, its middle: the furniture `furniture` describes, filling
     /// the box a `Cube` of the same `radius` and `stretch` would fill
     Furniture,
+    /// 1 point, the middle of its floor: the rule program `program`
+    /// names, run as far as it says, each cell of its grid so many
+    /// microbricks (see [`crate::rewrite`]). Built by its own code and
+    /// not fitted: `radius`, `thick` and the rest are not its settings.
+    Program,
     /// 1 point, the middle of its floor: the maze `maze` describes,
     /// `radius` to the middle of its outside wall, with walls `thick`
     /// through and `rise` tall
@@ -183,6 +188,8 @@ pub struct Spec {
     pub furniture: crate::furniture::Furniture,
     /// Which maze a `Form::Maze` is (see [`crate::maze`]). Other forms take no notice of it.
     pub maze: crate::maze::Maze,
+    /// Which rule program a `Form::Program` is, and how far it has run (see [`crate::rewrite::form`]). Other forms take no notice of it.
+    pub program: crate::rewrite::form::Program,
 }
 
 impl Default for Spec {
@@ -220,6 +227,7 @@ impl Default for Spec {
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
             furniture: crate::furniture::Furniture::of(crate::furniture::Kind::Bookcase),
             maze: crate::maze::Maze::default(),
+            program: crate::rewrite::form::Program::default(),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -401,6 +409,12 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     }
     if spec.points.iter().any(|p| !p.is_finite()) {
         return Err("a point is not a number".into());
+    }
+    // A rule program is its grid written as bricks, with nothing fitted
+    // and nothing measured: built here, before any of what follows is
+    // asked of it, since none of it is (see `crate::rewrite::form`).
+    if spec.form == Form::Program {
+        return crate::rewrite::form::built(spec);
     }
     let lo = spec.points.iter().fold(DVec3::MAX, |a, p| a.min(*p));
     let hi = spec.points.iter().fold(DVec3::MIN, |a, p| a.max(*p));
@@ -1429,6 +1443,8 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
         Form::Cube => cube::cube(spec, need(1)?[0], threads),
         // (its box is a cube's, so that its dots and sizes are a cube's too; it has no curve to draw)
         Form::Furniture => Ok((Solid::Furniture(Box::new(crate::furniture::Model::new(&spec.furniture, cube::sides(spec, need(1)?[0]), spec.max_ext, spec.wedges)?)), Vec::new())),
+        // (built before it comes to this: see `build_upright`)
+        Form::Program => Err("a rule program is not a solid to fit".into()),
         Form::Maze => {
             // (a rug is not wrapped along walls, and a hedge takes no pattern: see `maze::walls`)
             let walls = crate::maze::walls::Walls::new(&spec.maze, need(1)?[0], spec.radius, spec.thick, spec.rise, &spec.tree, spec.mosaic.is_some())?;

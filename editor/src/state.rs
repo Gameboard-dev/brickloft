@@ -12,7 +12,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 11] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze"];
+pub const FORMS: [&str; 12] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Furniture", "Maze", "Rule program"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -32,6 +32,11 @@ pub const TREE: usize = 8;
 // place does.)
 pub const FURNITURE: usize = 9;
 pub const MAZE: usize = 10;
+// (Last, as the newest. A rule program is a building grown by rewrite
+// rules: see `brickloft_core::rewrite`, and `grow` for how one is watched.)
+pub const PROGRAM: usize = 11;
+
+pub mod grow;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -176,6 +181,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Tree => TREE,
         Form::Furniture => FURNITURE,
         Form::Maze => MAZE,
+        Form::Program => PROGRAM,
     }
 }
 
@@ -187,7 +193,7 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
-        CIRCLE | PYRAMID | TREE | MAZE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        CIRCLE | PYRAMID | TREE | MAZE | PROGRAM => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         // Standing on the floor too. Its point is its middle, as a
@@ -398,6 +404,8 @@ pub struct State {
     redone: Vec<Snapshot>,
     /// the workspace as last noted by [`State::record`]
     noted: Snapshot,
+    /// a rule program being watched as it runs, and its controls (see [`grow`])
+    pub grow: grow::Grow,
 }
 
 /// Everything in the workspace that an edit can change: each form and how it
@@ -595,7 +603,19 @@ impl State {
             undone: Vec::new(),
             redone: Vec::new(),
             noted: Vec::new(),
+            grow: grow::Grow::default(),
         };
+        // Where rule programs brought in from outside are kept: told to
+        // the core once, the first time there is an editor, and the list
+        // of them read. (Once, so that a test may keep them elsewhere
+        // than in the folder of whoever runs it.)
+        #[cfg(not(target_arch = "wasm32"))]
+        if brickloft_core::rewrite::form::library().is_none() {
+            if let Ok(folder) = crate::places::programs() {
+                brickloft_core::rewrite::form::set_library(folder);
+            }
+        }
+        state.grow.imported = crate::programs::imported();
         // The editor's starting point balances fit against brick count: a
         // brick must bring the fit a quarter of a microbrick closer to be
         // used, and the brick size is chosen to keep within a budget. The
@@ -832,6 +852,10 @@ impl State {
     /// step that can be undone. Called once a frame while nothing is being
     /// dragged, so that a whole drag is one step and not one per pixel.
     pub fn record(&mut self) {
+        // (nor while a rule program is being watched: its run is one step, however many turns it shows on the way)
+        if self.growing() {
+            return;
+        }
         let now = self.snapshot();
         if now == self.noted {
             return;
@@ -876,6 +900,10 @@ impl State {
         self.others = forms
             .map(|(spec, paint, place)| {
                 let (built, bounds) = again(&spec).unwrap_or_else(|| {
+                    // (a rule program not yet run is not run here, holding the window for as long as it takes: it stands empty until `grow_others` has run it)
+                    if cfg!(not(target_arch = "wasm32")) && spec.form == Form::Program && brickloft_core::rewrite::form::known(&spec.program).is_none() {
+                        return (Built::default(), None);
+                    }
                     let built = build(&spec).unwrap_or_default();
                     let bounds = bounds_of(&built);
                     (built, bounds)
@@ -1148,7 +1176,8 @@ impl State {
         // A tree has nothing to tune: it fits no better a cell to one
         // side, and each try would be a second's building. Nor has a maze.
         // (Nor has furniture, which is exact wherever it stands.)
-        if matches!(self.form, TREE | FURNITURE | MAZE) {
+        // (Nor a rule program, which is not fitted to anything.)
+        if matches!(self.form, TREE | FURNITURE | MAZE | PROGRAM) {
             return all;
         }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
@@ -1409,6 +1438,10 @@ impl State {
                 self.usual_furniture(kind);
             }
             MAZE => self.usual_maze(),
+            PROGRAM => {
+                let (name, imported) = (s.program.name.clone(), s.program.imported);
+                self.usual_program(&name, imported);
+            }
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
@@ -1537,6 +1570,7 @@ impl State {
             TREE => Form::Tree,
             FURNITURE => Form::Furniture,
             MAZE => Form::Maze,
+            PROGRAM => Form::Program,
             _ => Form::Revolve,
         };
         if self.form == CUBE {
@@ -2434,7 +2468,7 @@ impl State {
         // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
         // (nor a maze, whose walls are where its cells are)
         // (nor furniture, which is boards: there is no curve in it to pull)
-        !matches!(self.form, MAZE | FURNITURE) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
+        !matches!(self.form, MAZE | FURNITURE | PROGRAM) && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -2641,6 +2675,8 @@ mod tests {
     #[test]
     fn every_preset_builds() {
         let mut state = State::new();
+        // (a rule program shown finished: watched, it starts from an empty grid, which is no bricks yet)
+        state.grow.watch = false;
         for form in 0..FORMS.len() {
             state.form = form;
             state.preset();

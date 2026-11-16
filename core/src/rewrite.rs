@@ -49,21 +49,14 @@
 //! the folders it is allowed and nowhere else ([`Resources`]); and a run
 //! is a number of turns the caller asks for, so it can always be stopped.
 
-// (Each part is named by its path while the interpreter is on trial and brought into an example
-// and a test by path, where a module's parts are looked for beside the file that names it.)
-#[path = "rewrite/bricks.rs"]
 pub mod bricks;
-#[path = "rewrite/fault.rs"]
+pub mod bundled;
 pub mod fault;
-#[path = "rewrite/nodes.rs"]
+pub mod form;
 pub mod nodes;
-#[path = "rewrite/rule.rs"]
 pub mod rule;
-#[path = "rewrite/vox.rs"]
 pub mod vox;
-#[path = "rewrite/wfc.rs"]
 pub mod wfc;
-#[path = "rewrite/xml.rs"]
 pub mod xml;
 
 pub use bricks::{bricks, Bricks, Finish};
@@ -88,6 +81,13 @@ use std::path::PathBuf;
 pub struct Resources {
     pub roots: Vec<PathBuf>,
     pub bundled: &'static [(&'static str, &'static [u8])],
+    /// Where to note each file read from a root, as the name it was asked
+    /// for by and the place it was found: how the editor learns which
+    /// files a program brought in from outside needs copied with it. A
+    /// list the reader fills, and not a second pass over the program for
+    /// the names it gives, which would be the loader written twice and
+    /// free to disagree with itself.
+    pub seen: Option<std::sync::Arc<std::sync::Mutex<Vec<(String, PathBuf)>>>>,
 }
 
 impl Resources {
@@ -115,7 +115,11 @@ impl Resources {
                 }
                 let size = std::fs::metadata(&real).map_err(unreadable)?.len();
                 fault::within(fault::Thing::File, size, limit, &name, 0)?;
-                return Ok((name.clone(), std::fs::read(&real).map_err(unreadable)?));
+                let bytes = std::fs::read(&real).map_err(unreadable)?;
+                if let Some(seen) = &self.seen {
+                    seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((name.clone(), real));
+                }
+                return Ok((name.clone(), bytes));
             }
         }
         match self.bundled.iter().find(|(known, _)| *known == name) {
@@ -140,5 +144,4 @@ pub fn palette(file: &str, bytes: &[u8], limits: &Limits) -> Result<Vec<(char, [
 }
 
 #[cfg(test)]
-#[path = "rewrite/tests.rs"]
 mod tests;

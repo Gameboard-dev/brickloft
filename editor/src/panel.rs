@@ -1,9 +1,11 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, MAZE, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, FURNITURE, MAZE, PROGRAM, PYRAMID, REVOLVE, SPHERE, SPLINE, TREE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
+
+mod program;
 
 /// What a control is for, by the name it has in `help.json`.
 ///
@@ -274,7 +276,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if state.form != before {
             // a tree's colours are for a tree's parts: they go when it does (and a maze's with the maze)
             // (and a bookcase's for its wood and its books)
-            if matches!(before, TREE | FURNITURE | MAZE) && state.paint.mode == Mode::Pattern {
+            // (and a rule program's for its program's letters)
+            if matches!(before, TREE | FURNITURE | MAZE | PROGRAM) && state.paint.mode == Mode::Pattern {
                 state.paint = crate::paint::Paint::default();
             }
             state.preset();
@@ -289,6 +292,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if let Some(problem) = &state.problem {
             ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
         }
+        // (and a rule program stopped early, whose bricks are built and stand: see `state::grow`)
+        program::caution(ui, state);
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
             ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=brickloft_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(help("sliders_go_up_to"));
@@ -304,7 +309,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // limit met. The sliders are logarithmic, since a slider that reaches
         // 1000 in even steps cannot be set to 3.
         let largest = state.max_size;
-        texture(ui, state, largest);
+        // (not for a rule program, which has no face of its own to lay a pattern on: its cells are the program's)
+        if state.form != PROGRAM {
+            texture(ui, state, largest);
+        }
         ui.separator();
         workspace(ui, state);
         ui.separator();
@@ -320,6 +328,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         if state.form == MAZE {
             maze(ui, state, largest);
+        }
+        if state.form == PROGRAM {
+            program::show(ui, state);
         }
         let unblended = state.unblended();
         let s = &mut state.spec;
@@ -467,7 +478,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
             }
             // a tree is neither filled nor hollow, and has no wall; a maze is all wall; nor is furniture, whose boards have a thickness of their own
-            TREE | FURNITURE | MAZE => {}
+            // (nor is a rule program, which is its grid's cells)
+            TREE | FURNITURE | MAZE | PROGRAM => {}
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -486,7 +498,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             _ => "Thickness",
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube, nor any tree)
-        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE) {
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) && !matches!(state.form, TREE | FURNITURE | PROGRAM) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve || state.form == CUBE {
@@ -552,7 +564,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         // (not a tree, which is no one's mirror image, nor a maze, which would then have two ways through; they can still be flipped)
         // (nor furniture: a bookcase's carcass is its own mirror image already, and its books are not meant to be)
-        if !matches!(state.form, TREE | FURNITURE | MAZE) {
+        // (nor a rule program, whose bricks are its grid's and are neither mirrored nor flipped: it can still be turned)
+        if !matches!(state.form, TREE | FURNITURE | MAZE | PROGRAM) {
             ui.horizontal(|ui| {
                 ui.label("Mirror").on_hover_text(help("mirror"));
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
@@ -565,6 +578,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         // was already symmetric mirror images of each other. It did nothing
         // that could be seen on most forms and was not understood, and a
         // mirrored form has its bricks made mirror images in any case.)
+        if state.form != PROGRAM {
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -572,6 +586,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             }
             hint(ui, help("flip"));
         });
+        }
 
         // (There were Add point and Remove point buttons here, for the dots a
         // form is drawn through. Alt + click and Alt + right-click on the
@@ -603,6 +618,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         ui.separator();
         let s = &mut state.spec;
+        // (a rule program's bricks are its cells at the size asked: there is no fit to make finer or coarser)
+        if state.form != PROGRAM {
         ui.label("Detail");
         let size_name = |g: i32| if g == 0 { "Automatic".to_string() } else { format!("{g} microbrick{}", if g == 1 { "" } else { "s" }) };
         helped(ui, help("brick_size"), |ui| {
@@ -621,6 +638,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             helped(ui, help("simplify"), |ui| ui.add(Slider::new(&mut s.simplify, 0.0..=1.5).text("Simplify")));
         }
         helped(ui, help("ramps_and_corners"), |ui| ui.checkbox(&mut s.wedges, "Use ramps and corner pieces"));
+        }
 
         ui.separator();
         let built = &state.built;
@@ -643,6 +661,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if let Some(problem) = &state.problem {
             ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Not built: {problem}"));
         }
+        program::caution(ui, state);
         // (a form slow to build is built behind the window: what is on screen is a moment old)
         if state.fitting() {
             ui.label("Fitting the change...");
@@ -1672,13 +1691,52 @@ mod tests {
         }
     }
 
+    #[test]
+    #[allow(deprecated)]
+    fn the_panel_draws_every_rule_program_at_rest_and_running_without_panicking() {
+        // as above, for each program on the list: shown finished, then at its first turn with a run asked for, then for a program that is not there
+        for entry in &brickloft_core::rewrite::form::BUNDLED {
+            let mut state = State::new();
+            state.grow.watch = false;
+            state.form = PROGRAM;
+            state.preset();
+            state.usual_program(entry.name, false);
+            let context = egui::Context::default();
+            for frame in 0..6 {
+                if frame == 3 {
+                    state.grow_restart();
+                }
+                if frame == 5 {
+                    state.spec.program = brickloft_core::rewrite::form::Program::of("Not here", true);
+                }
+                state.grow_frame(frame as f64 * 16.0);
+                state.refresh(|| 0.0);
+                let _ = context.run(egui::RawInput::default(), |context| {
+                    egui::SidePanel::left("panel").show(context, |ui| {
+                        show(ui, &mut state);
+                    });
+                });
+                let _ = state.painted();
+                if frame == 2 {
+                    // every colour number its bricks have is one of its colours: a colour to a letter
+                    assert!(state.problem.is_none() && !state.built.bricks.is_empty(), "{}: {:?}", entry.name, state.problem);
+                    assert!(state.built.shades.iter().all(|shade| (*shade as usize) < state.paint.colours.len()), "{}", entry.name);
+                }
+            }
+            assert!(state.problem.as_deref().is_some_and(|why| why.contains("\"Not here\"")), "{}: {:?}", entry.name, state.problem);
+        }
+        // a form has as many colours as a program may have letters with a colour of their own
+        assert_eq!(crate::paint::MOST_COLOURS, brickloft_core::rewrite::form::MOST_COLOURS);
+    }
+
     use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn every_explanation_asked_for_is_written_and_every_one_written_is_used() {
         let written: BTreeMap<String, String> = serde_json::from_str(include_str!("help.json")).expect("help.json is not a list of names and sentences");
         // the names this file asks for: whatever follows `help("`, up to the next quote
-        let asked: BTreeSet<&str> = include_str!("panel.rs").split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
+        // (the panel's parts kept in files of their own are read with it)
+        let asked: BTreeSet<&str> = concat!(include_str!("panel.rs"), include_str!("panel/program.rs")).split("help(\"").skip(1).filter_map(|rest| rest.split('"').next()).filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
         assert!(asked.len() > 50, "only {} names were found: the search for them is broken", asked.len());
         for name in &asked {
             assert!(written.get(*name).is_some_and(|text| !text.trim().is_empty()), "help.json has no explanation named {name}");

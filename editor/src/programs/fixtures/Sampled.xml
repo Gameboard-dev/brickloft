@@ -1,0 +1,4 @@
+<sequence values="BW">
+  <one in="B" out="W" steps="1"/>
+  <convchain sample="Maze" on="B" black="B" white="W" n="3"/>
+</sequence>
