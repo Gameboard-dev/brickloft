@@ -50,6 +50,10 @@ pub enum Form {
     /// 1 point, the foot of its trunk: the tree `tree` describes, `rise`
     /// tall and reaching `radius` to each side
     Tree,
+    /// 1 point, the middle of its floor: the maze `maze` describes,
+    /// `radius` to the middle of its outside wall, with walls `thick`
+    /// through and `rise` tall
+    Maze,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -158,6 +162,8 @@ pub struct Spec {
     pub blend: Option<f64>,
     /// Which tree a `Form::Tree` is (see [`crate::tree`]). Other forms take no notice of it.
     pub tree: crate::tree::Tree,
+    /// Which maze a `Form::Maze` is (see [`crate::maze`]). Other forms take no notice of it.
+    pub maze: crate::maze::Maze,
 }
 
 impl Default for Spec {
@@ -191,6 +197,7 @@ impl Default for Spec {
             mosaic: None,
             blend: None,
             tree: crate::tree::Tree::of(crate::tree::Kind::Pine),
+            maze: crate::maze::Maze::default(),
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -396,6 +403,13 @@ fn build_upright(spec: &Spec, measured: bool, threads: Threads) -> Result<Built,
     if spec.mosaic.is_some() {
         return build_at(spec, 1, measured, threads);
     }
+    // And a maze. Its walls are a few cells thick and its corridors are
+    // sized to be walked down, so at a coarser size the walls are another
+    // thickness and the corridors another width: a different maze. Fewer
+    // bricks come from fewer rings.
+    if spec.form == Form::Maze {
+        return build_at(spec, 1, measured, threads);
+    }
     // So is a tree, for the same reason: its boughs, twigs and leaflets
     // are a cell or two thick, and at a coarser size they are gone and
     // what is left is a trunk in a cloud. A tree is tens of thousands of
@@ -472,7 +486,7 @@ impl Spec {
             _ if self.fill => f64::INFINITY,
             _ => self.thick / 2.0,
         };
-        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree) && !self.tube;
+        let flat = !matches!(self.form, Form::Sphere | Form::Torus | Form::Revolve | Form::Pyramid | Form::Tree | Form::Maze) && !self.tube;
         GRAINS
             .iter()
             .rev()
@@ -843,7 +857,10 @@ fn build_at(spec: &Spec, grain: i32, measured: bool, threads: Threads) -> Result
         Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g, threads),
     };
-    if grain == 1 {
+    // (not a maze, which wraps its pattern along its own walls: left to
+    // these, the outside of a grid maze was taken for the side of a box and
+    // patterned over, in colour numbers the maze keeps for other things)
+    if grain == 1 && coarse.form != Form::Maze {
         pattern_flat_faces(&coarse, &mut built, threads);
         pattern_side_faces(&coarse, &mut built, threads);
     }
@@ -972,6 +989,9 @@ pub enum Solid {
         max: [i32; 2],
         field: Field,
     },
+    /// A maze, which is several outlines and colours at once and is built
+    /// by its own code (see [`crate::maze::walls`]).
+    Maze(Box<crate::maze::walls::Walls>),
 }
 
 /// The two axes a flat form's outline is drawn in, given the one it lies across.
@@ -990,6 +1010,7 @@ impl Solid {
             | Solid::Pyramid { field, .. }
             | Solid::Lathe { field, .. }
             | Solid::Pipe { field, .. } => field.eval(p),
+            Solid::Maze(walls) => walls.distance(p),
             Solid::Flat {
                 region,
                 axis,
@@ -1056,6 +1077,7 @@ impl Probe {
             | Solid::Round { .. }
             | Solid::Pyramid { .. }
             | Solid::Lathe { .. }
+            | Solid::Maze(_)
             | Solid::Pipe { .. } => None,
         }
     }
@@ -1318,6 +1340,13 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
         Form::Cube => cube::cube(spec, need(1)?[0], threads),
+        Form::Maze => {
+            // (a rug is not wrapped along walls, and a hedge takes no pattern: see `maze::walls`)
+            let walls = crate::maze::walls::Walls::new(&spec.maze, need(1)?[0], spec.radius, spec.thick, spec.rise, &spec.tree, spec.mosaic.is_some())?;
+            let (lo, hi) = walls.bounds();
+            check_size(&[(hi.x - lo.x) as i64, (hi.y - lo.y) as i64, (hi.z - lo.z) as i64])?;
+            Ok((Solid::Maze(Box::new(walls)), Vec::new()))
+        }
         Form::Tree => {
             let foot = need(1)?[0];
             let (usual, _) = crate::tree::Tree::usual_size(spec.tree.kind);
@@ -2705,6 +2734,10 @@ fn turned(spec: &Spec, solid: &Solid, g: f64, short_sides: bool, threads: Thread
 
 fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -> Built {
     match solid {
+        Solid::Maze(walls) => {
+            let (bricks, shades, solid, error) = walls.built(spec.mosaic.as_ref(), spec.wedges, spec.max_ext, threads);
+            Built { bricks, solid, error, path, grain: 1, unmeasured: false, shades }
+        }
         Solid::Volume { field, min, max } => {
             let opts = fit_volume::Opts {
                 max_ext: spec.max_ext,

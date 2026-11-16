@@ -12,7 +12,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 9] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant"];
+pub const FORMS: [&str; 10] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant", "Maze"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -26,6 +26,7 @@ pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
 pub const CUBE: usize = 7;
 pub const TREE: usize = 8;
+pub const MAZE: usize = 9;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -168,6 +169,7 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Pyramid => PYRAMID,
         Form::Cube => CUBE,
         Form::Tree => TREE,
+        Form::Maze => MAZE,
     }
 }
 
@@ -178,7 +180,7 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
-        CIRCLE | PYRAMID | TREE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        CIRCLE | PYRAMID | TREE | MAZE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
@@ -613,7 +615,7 @@ impl State {
     /// microbricks allow). Returns whether it is. By whole cells, so that a
     /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE | MAZE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -936,8 +938,8 @@ impl State {
     fn tunable(&self, only: Option<Handle>) -> Vec<Tune> {
         let mut all = Vec::new();
         // A tree has nothing to tune: it fits no better a cell to one
-        // side, and each try would be a second's building.
-        if self.form == TREE {
+        // side, and each try would be a second's building. Nor has a maze.
+        if matches!(self.form, TREE | MAZE) {
             return all;
         }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
@@ -1190,6 +1192,7 @@ impl State {
                 let kind = s.tree.kind;
                 self.usual_tree(kind);
             }
+            MAZE => self.usual_maze(),
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
@@ -1212,6 +1215,25 @@ impl State {
         self.spec.stretch = DVec3::ONE;
         self.lay_tree();
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+    }
+
+    /// Make the form a maze as one starts out: its usual size, plain
+    /// walls, and a maze's own colours. The seed is kept, as a tree's is.
+    ///
+    /// The colours come with it because a maze is told its parts by
+    /// colour: the strip that marks the way through is one of them.
+    pub fn usual_maze(&mut self) {
+        use brickloft_core::maze::{Maze, USUAL_HEIGHT, USUAL_SIZE};
+        let s = &mut self.spec;
+        s.maze = Maze { seed: s.maze.seed, ..Maze::default() };
+        (s.radius, s.thick, s.rise) = (USUAL_SIZE.0, USUAL_SIZE.1, Some(USUAL_HEIGHT));
+        (s.stones, s.mosaic, s.stretch) = (None, None, DVec3::ONE);
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::maze_palettes("none")[0].clone(), ..Paint::default() };
+    }
+
+    /// How tall a maze's walls stand, and how thick the floor under them is.
+    pub fn maze_height(&self) -> (f64, f64) {
+        (brickloft_core::maze::walls::height_of(&self.spec.maze, self.spec.rise), self.spec.maze.clamped().floor as f64)
     }
 
     /// A tree's height.
@@ -1243,6 +1265,7 @@ impl State {
             PYRAMID => Form::Pyramid,
             CUBE => Form::Cube,
             TREE => Form::Tree,
+            MAZE => Form::Maze,
             _ => Form::Revolve,
         };
         if self.form == CUBE {
@@ -1465,6 +1488,14 @@ impl State {
                 let (foot, across) = self.tree_middle();
                 all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
                 all.push((Handle::Radius, foot + across * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
+            }
+            // a maze: one dot over its middle at the top of its walls, for
+            // their height, and one on its rim, half way up, for its size
+            MAZE if !p.is_empty() => {
+                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                let (height, floor) = self.maze_height();
+                all.push((Handle::Rise, foot + DVec3::Z * (floor + height)));
+                all.push((Handle::Radius, foot + DVec3::X * self.spec.radius + DVec3::Z * (floor + (height / 2.0).round())));
             }
             _ => {}
         }
@@ -1931,6 +1962,10 @@ impl State {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
+            Handle::Rise if self.form == MAZE => {
+                let height = (hit.z - self.spec.points[0].z.floor() - self.maze_height().1).round();
+                self.spec.rise = Some(height.clamp(1.0, HANDLE_LIMIT));
+            }
             Handle::Rise if self.form == TREE => {
                 let height = snap(hit.z - self.spec.points[0].z.floor()).round();
                 self.spec.rise = Some(height.clamp(brickloft_core::tree::Tree::least_height(self.spec.tree.kind), HANDLE_LIMIT));
@@ -1953,7 +1988,8 @@ impl State {
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
         // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
-        self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind)
+        // (nor a maze, whose walls are where its cells are)
+        self.form != MAZE && (self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind))
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -2434,6 +2470,54 @@ mod tests {
         state.turn(2, false);
         state.turn(2, true);
         assert_eq!(state.spec.turned, brickloft_core::shapes::UPRIGHT);
+    }
+
+    #[test]
+    fn a_maze_starts_at_its_usual_size_with_dots_for_its_radius_and_wall_height() {
+        use brickloft_core::maze::{Maze, USUAL_HEIGHT, USUAL_SIZE};
+        let mut state = State::new();
+        state.spec.maze.seed = 5;
+        state.form = MAZE;
+        state.preset();
+        assert_eq!((state.spec.radius, state.spec.thick, state.spec.rise), (USUAL_SIZE.0, USUAL_SIZE.1, Some(USUAL_HEIGHT)));
+        assert_eq!(state.spec.maze, Maze { seed: 5, ..Maze::default() }, "the seed is not kept, or the rest is not as a maze starts");
+        assert_eq!((state.paint.mode, &state.paint.colours), (crate::paint::Mode::Pattern, &crate::paint::maze_palettes("none")[0]));
+        assert_eq!(state.full_spec().form, Form::Maze);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // a dot at its middle, one over it at the top of the walls and one on the rim, half way up
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Rise, Handle::Radius]);
+        let (top, rim) = (dots[1].1, dots[2].1);
+        assert_eq!((top.x, top.y, top.z), (0.5, 0.5, USUAL_HEIGHT));
+        assert_eq!((rim.x, rim.y, rim.z), (0.5 + USUAL_SIZE.0, 0.5, USUAL_HEIGHT / 2.0));
+        let high = |state: &State| state.built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        let far = |state: &State| state.built.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap();
+        assert_eq!((high(&state), far(&state)), (USUAL_HEIGHT as i32, (USUAL_SIZE.0 + USUAL_SIZE.1 / 2.0) as i32), "the dots are not where the bricks end");
+        // the top dot dragged down ten cells lowers the walls by ten, and the bricks follow
+        let eye = DVec3::new(0.5, -400.0, top.z);
+        state.drag(Handle::Rise, eye, (top - DVec3::Z * 10.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(USUAL_HEIGHT - 10.0));
+        // with a floor under them the walls are as tall as they were, and the dot is at their top
+        state.spec.maze.floor = 2;
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert_eq!((high(&state), state.handles()[1].1.z), (USUAL_HEIGHT as i32 - 8, USUAL_HEIGHT - 8.0));
+        let top = state.handles()[1].1;
+        state.drag(Handle::Rise, DVec3::new(0.5, -400.0, top.z), (top + DVec3::Z * 3.0 - DVec3::new(0.5, -400.0, top.z)).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(USUAL_HEIGHT - 7.0));
+        // the rim dot dragged out thirty cells makes the maze thirty larger: wider corridors, the same rings
+        let eye = DVec3::new(rim.x, -400.0, rim.z);
+        state.drag(Handle::Radius, eye, (rim + DVec3::X * 30.0 - eye).normalize(), DVec3::Y);
+        assert_eq!((state.spec.radius, state.spec.maze.rings), (USUAL_SIZE.0 + 30.0, Maze::default().rings));
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        assert_eq!(far(&state), (USUAL_SIZE.0 + 30.0 + USUAL_SIZE.1 / 2.0) as i32);
+        // dragged in until its corridors are too narrow, it is not built and says why; the last maze stands
+        let bricks = state.built.bricks.len();
+        state.spec.radius = 30.0;
+        state.refresh(|| 0.0);
+        assert!(state.problem.as_deref().is_some_and(|why| why.contains("corridors")), "{:?}", state.problem);
+        assert_eq!(state.built.bricks.len(), bricks);
+        // no points are added to a maze, and nothing about it is searched for
+        assert!(!state.can_pull() && state.tunable(None).is_empty());
     }
 
     #[test]

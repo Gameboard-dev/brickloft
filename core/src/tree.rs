@@ -502,6 +502,22 @@ impl Model {
     /// stand of reeds or a patch of grass (see [`Lay`]). Other kinds take
     /// no notice of the line.
     pub fn laid(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay) -> Model {
+        Model::laid_all(tree, base, height, spread, std::slice::from_ref(lay))
+    }
+
+    /// [`Model::laid`], for a hedge or reeds along several lines at once,
+    /// as one plant: the walls of a maze (see [`crate::maze`]). The parts
+    /// grown along every line are one solid, so where two lines meet the
+    /// hedges run into each other, and no brick is laid twice. The plants
+    /// the kind counts are shared among the lines by their length, one to
+    /// a line at the least. Other kinds grow along the first line only.
+    ///
+    /// This is the one way a maze reaches into this file. A hedge for
+    /// each wall, each built on its own, would have been bricks laid
+    /// twice over wherever two walls meet.
+    pub fn laid_all(tree: &Tree, base: DVec3, height: f64, spread: f64, lays: &[Lay]) -> Model {
+        let none = Lay::default();
+        let lay = lays.first().unwrap_or(&none);
         let tree = tree.clamped();
         let (height, spread) = (height.max(Tree::least_height(tree.kind)), spread.max(LEAST_SPREAD));
         // each kind has numbers of its own from one seed
@@ -529,15 +545,20 @@ impl Model {
             Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK),
             Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH),
             Kind::Hedge | Kind::Reeds => {
-                // grown straight, then laid along its line (see [`Grown::lay_along`])
-                let run = Run::new(lay);
-                let half = run.long() / 2.0;
-                if tree.kind == Kind::Hedge {
-                    hedge(&mut grown, &tree, height, spread, half, lay.closed && lay.run.len() > 2);
-                } else {
-                    reeds(&mut grown, &tree, height, spread, half);
+                // grown straight, then laid along its line (see [`Grown::lay_along`]); each line's after the last's
+                let runs: Vec<Run> = lays.iter().map(Run::new).collect();
+                let all: f64 = runs.iter().map(|run| run.long()).sum();
+                for (lay, run) in lays.iter().zip(&runs) {
+                    let (parts, limbs) = (grown.parts.len(), grown.limbs.len());
+                    let half = run.long() / 2.0;
+                    let share = if lays.len() > 1 { Tree { count: ((tree.count as f64 * run.long() / all.max(1e-9)).round() as i32).max(1), ..tree } } else { tree };
+                    if tree.kind == Kind::Hedge {
+                        hedge(&mut grown, &share, height, spread, half, lay.closed && lay.run.len() > 2);
+                    } else {
+                        reeds(&mut grown, &share, height, spread, half);
+                    }
+                    grown.lay_along(parts, limbs, run, half);
                 }
-                grown.lay_along(0, 0, &run, half);
             }
             Kind::Grass => grass(&mut grown, &tree, height, spread, lay),
             Kind::Peony => peony(&mut grown, &tree, height, spread),

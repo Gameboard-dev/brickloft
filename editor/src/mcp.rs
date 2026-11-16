@@ -789,6 +789,20 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                     spec.stretch.x = brickloft_core::tree::HEDGE_LENGTH;
                 }
             }
+            let maze = spec.form == brickloft_core::spec::Form::Maze;
+            if maze {
+                // (and a maze given no size is the size the editor starts one at: at a form's usual radius its corridors are too narrow to build)
+                use brickloft_core::maze::{USUAL_HEIGHT, USUAL_SIZE};
+                if !settings.contains_key("radius") {
+                    spec.radius = USUAL_SIZE.0;
+                }
+                if !settings.contains_key("thick") {
+                    spec.thick = USUAL_SIZE.1;
+                }
+                if !settings.contains_key("rise") {
+                    spec.rise = Some(USUAL_HEIGHT);
+                }
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
                 let (points, weights) = crate::state::usual_points(crate::state::form_index(spec.form), spec.radius);
@@ -804,9 +818,13 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
             let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1));
+            // (a maze's colours go by what its walls are)
+            let walls = maze.then(|| crate::paint::maze_palettes(crate::paint::maze_texture(&spec))[0].clone());
             state.add_form(spec);
             if let Some(paint) = paint {
                 state.paint = paint;
+            } else if let Some(colours) = walls {
+                state.paint = Paint { mode: Mode::Pattern, colours, ..Paint::default() };
             } else if let Some(style) = own {
                 state.paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(style).to_vec(), ..Paint::default() };
             }
@@ -818,10 +836,15 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let at = index(&forms)?;
             let (spec, paint, place) = &mut forms[at];
             let was = spec.form;
+            let walls_were = crate::paint::maze_texture(spec);
             *spec = changed(spec, settings)?;
             brickloft_core::spec::build(spec)?;
+            let maze = spec.form == brickloft_core::spec::Form::Maze;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
+            } else if maze && (was != spec.form || walls_were != crate::paint::maze_texture(spec)) {
+                // (a form made into a maze, or a maze given other walls, comes in those walls' colours)
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::maze_palettes(crate::paint::maze_texture(spec))[0].clone(), ..Paint::default() };
             } else if spec.form == brickloft_core::spec::Form::Tree && was != spec.form {
                 // (a form made into a tree comes in the tree's colours, as one added does)
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
@@ -1134,6 +1157,50 @@ mod tests {
             let said = apply(&mut state, "add_form", &json!({ "settings": { "form": form } }), || 0.0);
             assert!(said.is_ok(), "{form}: {said:?}");
             assert!(!state.built.bricks.is_empty(), "{form} was added with no bricks");
+        }
+    }
+
+    #[test]
+    fn a_maze_is_added_and_changed_and_a_hostile_one_refused() {
+        use brickloft_core::maze::{Kind, Maze, USUAL_HEIGHT, USUAL_SIZE};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        // by its form alone: the size the editor starts one at, plain walls, a maze's three colours
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "maze" } }), || 0.0).unwrap());
+        assert_eq!((state.spec.form, state.spec.maze), (brickloft_core::spec::Form::Maze, Maze::default()));
+        assert_eq!((state.spec.radius, state.spec.thick, state.spec.rise), (USUAL_SIZE.0, USUAL_SIZE.1, Some(USUAL_HEIGHT)));
+        assert_eq!((state.paint.mode, &state.paint.colours), (Mode::Pattern, &crate::paint::maze_palettes("none")[0]));
+        assert_eq!(added["forms"][0]["settings"]["maze"], "theta,6,4,0,1,270,0,0,0");
+        assert!(added["forms"][0]["bricks"].as_u64().unwrap() > 300, "{}", added["forms"][0]);
+        let plain = state.built.bricks.len();
+        // changed: more rings, a floor and the way through, which is painted the third colour
+        let changed = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "maze": "theta,8,6,2,9,90,2,1,0", "radius": 160 } }), || 0.0).unwrap());
+        assert_eq!(state.forms()[0].0.maze, Maze { kind: Kind::Theta, rings: 8, divisions: 6, grow: 2, seed: 9, entrance: 90, floor: 2, solution: true, hedge: false });
+        assert!(changed["forms"][0]["bricks"].as_u64().unwrap() as usize > plain);
+        let way = crate::paint::WAY;
+        assert!(state.painted().iter().filter(|b| b.1 == Some(way)).count() > 10, "the way through is not in its colour");
+        // brick walls come in brick colours with the way through last; and a hedge in a hedge's
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "mosaic": ["bricks", 2, 0, 0, 1, 1, 50, 0, 0, 0] } }), || 0.0).unwrap();
+        let bricks = &crate::paint::maze_palettes("bricks")[0];
+        assert_eq!((&state.forms()[0].1.colours, bricks.len(), bricks[7]), (bricks, 8, way));
+        assert!(state.painted().iter().filter(|b| b.1 == Some(way)).count() > 10 && state.painted().iter().filter(|b| b.1 == Some(bricks[1])).count() > 100);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "maze": "grid,4,4,0,2,0,0,0,1", "radius": 70, "thick": 6, "rise": 14 } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].1.colours, crate::paint::maze_palettes("hedge")[0]);
+        assert!(state.forms()[0].0.maze.hedge && state.built.bricks.len() > 3000, "{} bricks of hedge", state.built.bricks.len());
+        // colours given are kept
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "maze": "grid,4" }, "colour": { "mode": "pattern", "colours": ["#101010", "#f0f0f0", "#ff0000"] } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].1.colours, vec![[16, 16, 16], [240, 240, 240], [255, 0, 0]]);
+        // what is no maze is refused; numbers out of range are brought within it; and one too large or too narrow is refused with the workspace as it was
+        for bad in [json!("hexagons"), json!("theta,minus one"), json!("theta,1,2,3,4,5,6,7,8,9"), json!(""), json!("theta\nradius = 900")] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "maze": bad } }), || 0.0).is_err(), "{bad} was accepted");
+        }
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "maze": "theta,-7,9999,-2,3,725,99,5,0", "radius": 60, "thick": 2 } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.maze, Maze { kind: Kind::Theta, rings: 2, divisions: 64, grow: 0, seed: 3, entrance: 5, floor: 8, solution: true, hedge: false });
+        let before = state.forms();
+        for (hostile, why) in [(json!({ "maze": "theta,40,64,1", "radius": 1000, "thick": 2 }), "too large"), (json!({ "maze": "theta,40", "radius": 100 }), "corridors"), (json!({ "maze": "theta,10,4,0,1,0,0,0,1", "radius": 600, "thick": 30, "rise": 200 }), "hedge"), (json!({ "radius": 1e9 }), "too large")] {
+            let refused = apply(&mut state, "update_form", &json!({ "index": 0, "settings": hostile }), || 0.0).unwrap_err();
+            assert!(refused.contains(why), "{hostile}: {refused}");
+            assert_eq!(state.forms(), before);
         }
     }
 
