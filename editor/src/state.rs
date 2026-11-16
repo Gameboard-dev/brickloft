@@ -122,6 +122,8 @@ pub struct Item {
     pub bounds: Option<Bounds>,
     /// whether it is picked, with the form being edited, to be copied
     pub picked: bool,
+    /// whether it was moved into other forms on purpose (see `State::merge`)
+    pub joined: bool,
 }
 
 impl Item {
@@ -292,6 +294,15 @@ pub struct State {
     /// whether Ctrl is held during a drag: a point added to a circle then
     /// moves straight out of the circle's plane instead of within it
     pub lift: bool,
+    /// Whether Shift is held during a drag. A form moved then goes where
+    /// it is dragged, into other forms if that is where, and is not set
+    /// down clear of them: the two are to be one build.
+    pub merge: bool,
+    /// Whether the form being edited was moved into other forms on
+    /// purpose. A joined form is not pushed clear of the others when one
+    /// of them is reshaped, and gives up to them the room they share (see
+    /// `painted`). Moving it without Shift sets it clear again.
+    pub joined: bool,
     /// how much of a dragged dot's movement the dots near it share, 0 to 1
     pub follow: f64,
     /// a ring being dragged: the angle round it where it was taken hold of,
@@ -440,6 +451,8 @@ impl State {
             built_from: None,
             busy: false,
             lift: false,
+            merge: false,
+            joined: false,
             follow: 0.5,
             spin_from: None,
             undone: Vec::new(),
@@ -466,7 +479,7 @@ impl State {
 
     /// The form being edited, as an item to set aside.
     fn as_item(&self) -> Item {
-        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false }
+        Item { spec: self.full_spec(), paint: self.paint.clone(), place: self.place, built: self.built.clone(), bounds: self.bounds, picked: false, joined: self.joined }
     }
 
     /// Make `item` the form being edited, with the bricks it already has.
@@ -474,6 +487,7 @@ impl State {
         self.load_spec(item.spec);
         self.paint = item.paint;
         self.place = item.place;
+        self.joined = item.joined;
         self.built = item.built;
         self.bounds = item.bounds;
         self.problem = None;
@@ -587,10 +601,11 @@ impl State {
     /// does not touch are settled first, so that a form pushed aside goes
     /// round them and not into them.
     fn push_others(&mut self) {
-        if self.others.is_empty() {
+        // (a form joined to others on purpose pushes none of them, and none of them is pushed out of it)
+        if self.others.is_empty() || self.joined {
             return;
         }
-        let shares: Vec<bool> = self.others.iter().map(|o| self.in_my_way(&o.spec)).collect();
+        let shares: Vec<bool> = self.others.iter().map(|o| !o.joined && self.in_my_way(&o.spec)).collect();
         let mut settled = vec![Standing::new(&self.built.bricks, self.place)];
         let touched: Vec<bool> = self.others.iter().zip(&shares).map(|(o, shares)| *shares && settled[0].meets(cells_of(&o.built.bricks), o.place)).collect();
         for ((other, _), _) in self.others.iter().zip(&touched).zip(&shares).filter(|((_, t), shares)| !**t && **shares) {
@@ -692,7 +707,7 @@ impl State {
         self.others = forms
             .map(|(spec, paint, place)| {
                 let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false }
+                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false, joined: false }
             })
             .collect();
         self.load_spec(spec);
@@ -728,16 +743,53 @@ impl State {
     }
 
     /// Every brick in the workspace, with its colour and its form.
+    ///
+    /// Forms joined on purpose (see `merge`) overlap, and the game refuses
+    /// a brick whose box overlaps another's. So a joined form gives up the
+    /// room it shares: with every form on its grid that is not joined, and
+    /// with the joined ones before it in the list. A brick of its that
+    /// shares no room is kept whole. A whole (unsloped) brick that shares
+    /// some is cut down to the cells that share none, as rows of cells.
+    /// A sloped brick that shares any is left out, since a slope cannot be
+    /// cut down to cells: there the join has a notch a cell or two deep.
+    ///
+    /// Making the two forms one solid and fitting that afresh would leave
+    /// no notch (it is in docs/future-work.md as blending forms). It is a
+    /// different build, though, with different bricks everywhere near the
+    /// join, and it would make every form on a grid one form to edit.
     pub fn painted(&self) -> Vec<Painted> {
         let mut all = Vec::new();
-        let forms = std::iter::once((&self.built, &self.paint, self.bounds, self.place)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place)));
-        for (form, (built, paint, bounds, place)) in forms.enumerate() {
+        let forms: Vec<(&Built, &Paint, Option<Bounds>, [i32; 3], bool, &Spec)> = std::iter::once((&self.built, &self.paint, self.bounds, self.place, self.joined, &self.spec)).chain(self.others.iter().map(|i| (&i.built, &i.paint, i.bounds, i.place, i.joined, &i.spec))).collect();
+        let same_grid = |a: &Spec, b: &Spec| a.on_grid == b.on_grid || (!on_own_grid(a) && !on_own_grid(b));
+        for (form, (built, paint, bounds, place, joined, spec)) in forms.iter().copied().enumerate() {
             let Some((lo, hi)) = bounds else { continue };
-            if paint.mode == crate::paint::Mode::Pattern && built.shades.len() == built.bricks.len() {
-                all.extend(built.bricks.iter().zip(&built.shades).map(|(b, shade)| (*b, paint.shade(*shade), form, place)));
-                continue;
+            let patterned = paint.mode == crate::paint::Mode::Pattern && built.shades.len() == built.bricks.len();
+            let colour_of = |n: usize, brick: &CellBrick| if patterned { paint.shade(built.shades[n]) } else { paint.colour(brick, lo, hi) };
+            // the forms this one gives room up to
+            let before: Vec<Standing> = if joined { forms.iter().enumerate().filter(|(n, other)| *n != form && same_grid(spec, other.5) && (!other.4 || *n < form)).map(|(_, other)| Standing::new(&other.0.bricks, other.3)).collect() } else { Vec::new() };
+            let shared = |cells: &[CellBrick]| before.iter().any(|other| other.meets(cells_of(cells), place));
+            for (n, brick) in built.bricks.iter().enumerate() {
+                let colour = colour_of(n, brick);
+                if before.is_empty() || !shared(std::slice::from_ref(brick)) {
+                    all.push((*brick, colour, form, place));
+                } else if brick.mask == 0xff {
+                    // the cells of it that share no room, joined along x into rows
+                    for z in 0..brick.ext[2] {
+                        for y in 0..brick.ext[1] {
+                            let mut run: Option<CellBrick> = None;
+                            for x in 0..brick.ext[0] {
+                                let cell = CellBrick { mask: 0xff, min: [brick.min[0] + x, brick.min[1] + y, brick.min[2] + z], ext: [1, 1, 1] };
+                                if shared(std::slice::from_ref(&cell)) {
+                                    all.extend(run.take().map(|row| (row, colour, form, place)));
+                                } else {
+                                    run = Some(run.map_or(cell, |row| CellBrick { ext: [row.ext[0] + 1, 1, 1], ..row }));
+                                }
+                            }
+                            all.extend(run.map(|row| (row, colour, form, place)));
+                        }
+                    }
+                }
             }
-            all.extend(built.bricks.iter().map(|b| (*b, paint.colour(b, lo, hi), form, place)));
         }
         all
     }
@@ -1296,11 +1348,12 @@ impl State {
     /// Move the form being edited by so many units, short of any other form
     /// in the way; `held` is the point of it the drag has hold of.
     fn move_by(&mut self, by: [i32; 3], held: DVec3) {
-        // not into another form: onto it or beside it
-        let Some(by) = self.clear_of_others(by) else { return };
+        // not into another form: onto it or beside it, unless Shift says into it
+        let Some(by) = (if self.merge { Some(by) } else { self.clear_of_others(by) }) else { return };
         if by == [0; 3] {
             return;
         }
+        self.joined = self.merge;
         let limit = (HANDLE_LIMIT * 2.0) as i32;
         self.place = [0, 1, 2].map(|k| (self.place[k] + by[k]).clamp(-limit, limit));
         self.scene += 1;
@@ -2022,6 +2075,47 @@ mod tests {
         state.spec.flip = [true, false, false];
         state.refresh(|| 0.0);
         assert_eq!(state.built.shades, before);
+    }
+
+    #[test]
+    fn a_form_moved_with_shift_goes_into_another_and_gives_up_the_room_they_share() {
+        let ball = |radius: f64| Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius, ..Spec::default() };
+        let mut state = State::new();
+        state.load_spec(ball(8.0));
+        state.refresh(|| 0.0);
+        state.add_form(ball(6.0));
+        state.refresh(|| 0.0);
+        // (the form being edited is the smaller ball, set down clear of the larger)
+        let apart = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        let overlap = |state: &State| Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place);
+        let boxes_meet = |all: &[Painted]| all.iter().enumerate().any(|(n, a)| all[n + 1..].iter().any(|b| a.2 != b.2 && (0..3).all(|k| 2 * a.0.min[k] + a.3[k] < 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k] && 2 * b.0.min[k] + b.3[k] < 2 * (a.0.min[k] + a.0.ext[k]) + a.3[k])));
+        // without Shift it stops against the other
+        state.move_by(apart, DVec3::ZERO);
+        assert!(!overlap(&state) && !state.joined);
+        let whole = state.painted().iter().filter(|b| b.2 == 0).count();
+        // with Shift it goes all the way in, most of the way to the other's middle
+        state.merge = true;
+        let most = [0, 1, 2].map(|k| (state.others[0].place[k] - state.place[k]) * 2 / 3);
+        state.move_by(most, DVec3::ZERO);
+        assert!(overlap(&state) && state.joined, "it did not go in");
+        // no brick's box overlaps a brick of the other form, the other form is whole, and the joined one has lost bricks but not all
+        let all = state.painted();
+        assert!(!boxes_meet(&all), "two forms' bricks share room");
+        assert_eq!(all.iter().filter(|b| b.2 == 1).count(), state.others[0].built.bricks.len());
+        let left: i32 = all.iter().filter(|b| b.2 == 0).map(|b| b.0.ext.iter().product::<i32>()).sum();
+        let had: i32 = state.built.bricks.iter().map(|b| b.ext.iter().product::<i32>()).sum();
+        assert!(left > had / 4 && left < had, "{left} of {had} cells left, from {whole} bricks");
+        // reshaping the other form does not push the joined one out of it
+        state.activate(0);
+        state.spec.radius = 9.0;
+        state.refresh(|| 0.0);
+        assert!(state.others[0].joined && Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place), "the joined form was pushed out");
+        // moved without Shift, it is set clear again
+        state.activate(0);
+        state.merge = false;
+        state.move_by([2, 0, 0], DVec3::ZERO);
+        assert!(!overlap(&state) && !state.joined);
+        assert!(!boxes_meet(&state.painted()));
     }
 
     #[test]

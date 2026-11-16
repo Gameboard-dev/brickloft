@@ -295,6 +295,7 @@ pub fn run_form(form: usize, claude: bool) {
                 }
                 Event::MouseMotion { position, modifiers, handled, .. } if dragging.is_some() => {
                     state.lift = modifiers.ctrl || modifiers.command;
+                    state.merge = modifiers.shift;
                     let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
                     state.drag(dragging.unwrap(), d(origin), d(dir), d(camera.view_direction()));
                     *handled = true;
