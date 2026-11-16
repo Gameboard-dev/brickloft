@@ -139,7 +139,7 @@ impl Walls {
                 return Err(format!("the maze is too much hedge to build: {:.0} microbricks of wall, {thick} thick and {height} tall, is {:.0} cubic microbricks of hedge, and the limit is {MOST_HEDGE}; {fewer}, or its walls thinner or lower", long, long * thick * height));
             }
             // (every wall its own line, from the maze's middle as a plant's line is from its foot)
-            let lays: Vec<Lay> = lines.iter().map(|(line, closed)| Lay { run: line.iter().map(|p| (*p - layout.centre()).extend(0.0)).collect(), closed: *closed, mounds: Vec::new() }).collect();
+            let lays: Vec<Lay> = lines.iter().map(|(line, closed)| Lay { run: line.iter().map(|p| (*p - layout.centre()).extend(0.0)).collect(), closed: *closed, ..Lay::default() }).collect();
             // as many plants as a hedge may be, shared among the walls by their length
             let grown = Tree { kind: crate::tree::Kind::Hedge, count: Tree::count_range(crate::tree::Kind::Hedge).1, ..*tree };
             Some(Arc::new(Model::laid_all(&grown, foot, height, thick / 2.0, &lays)))
@@ -287,7 +287,7 @@ impl Walls {
                 let (lo, hi) = hedge.bounds();
                 let (min, max) = ((lo - 1.0).floor().to_array().map(|v| v as i32), (hi + 1.0).ceil().to_array().map(|v| v as i32));
                 let fit = crate::fit_volume::fit_volume(&|p| hedge.eval(p), min, max, &crate::fit_volume::Opts { max_ext, wedges, stretch: true, threads });
-                let (grown, colours) = hedge.colour(fit.bricks, max_ext);
+                let (grown, colours) = hedge.colour(fit.bricks, max_ext, threads);
                 bricks.extend(grown);
                 // (a hedge has nothing of the last number, which is the strip's)
                 shades.extend(colours.into_iter().map(|shade| if shade == SOLUTION { WALL } else { shade }));

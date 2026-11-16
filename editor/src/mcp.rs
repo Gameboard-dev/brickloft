@@ -531,8 +531,8 @@ fn changed(spec: &Spec, changes: &Map<String, Value>) -> Result<Spec, String> {
         text += &format!("{key} = {value}\n");
     }
     let spec = parse_spec(&text)?;
-    if spec.points.len() > MAX_POINTS || spec.pulls.len() > crate::state::PULLS {
-        return Err(format!("a form takes at most {MAX_POINTS} points and {} added points", crate::state::PULLS));
+    if spec.points.len() > MAX_POINTS || spec.pulls.len() > crate::state::most_pulls(&spec) {
+        return Err(format!("a form takes at most {MAX_POINTS} points and {} added points", crate::state::most_pulls(&spec)));
     }
     Ok(spec)
 }
@@ -875,8 +875,8 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let hold = three(arguments.get("at"), "at", brickloft_core::spec::MAX_SPAN)?;
             let by = three(arguments.get("pulled_by"), "pulled_by", brickloft_core::spec::MAX_SPAN)?;
             let spec = &mut forms[at].0;
-            if spec.pulls.len() >= crate::state::PULLS {
-                return Err(format!("a form takes at most {} added points", crate::state::PULLS));
+            if spec.pulls.len() >= crate::state::most_pulls(spec) {
+                return Err(format!("a form takes at most {} added points", crate::state::most_pulls(spec)));
             }
             spec.pulls.push((DVec3::from_array(hold), DVec3::from_array(by)));
             if let Some(reach) = arguments.get("reach").filter(|r| !r.is_null()) {
@@ -1230,7 +1230,7 @@ mod tests {
         assert_eq!(small["forms"][1]["colour"]["mode"], "pattern");
         assert_eq!(small["forms"][1]["box_in_grid"]["size"][2].as_f64().map(|v| v <= 37.0 && v > 28.0), Some(true), "{}", small["forms"][1]["box_in_grid"]);
         // what is not a tree is refused, and what is out of range is brought within it
-        for bad in [json!("birch"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6"), json!(""), json!("pine\nradius = 900")] {
+        for bad in [json!("bamboo"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6"), json!(""), json!("pine\nradius = 900")] {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": bad } }), || 0.0).is_err(), "{bad} was accepted");
         }
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": "pine,1,5000,-3,999,7", "radius": 12, "rise": 30 } }), || 0.0).unwrap();

@@ -2748,7 +2748,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64, threads: Threads) -
             let fit = fit_volume(&|p| field.eval(p), *min, *max, &opts);
             // a tree's bricks each have the colour of the part they are of
             let (bricks, shades) = match field {
-                Field::Tree(tree) => tree.colour(fit.bricks, spec.max_ext),
+                Field::Tree(tree) => tree.colour(fit.bricks, spec.max_ext, threads),
                 _ => (fit.bricks, Vec::new()),
             };
             Built {
@@ -2948,7 +2948,8 @@ fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), 
     } else {
         let through: Vec<DVec3> = spec.points.iter().map(|p| level(*p)).collect();
         let closed = spec.closed && through.len() > 2;
-        catmull_rom(&through, closed)?
+        // (`protrude`, which a plant has no other use for: straight from point to point, with a corner at each)
+        if spec.protrude { through } else { catmull_rom(&through, closed)? }
     };
     let closed = spec.closed && spec.points.len() > 2;
     let grass = spec.tree.kind == Kind::Grass;
@@ -2957,13 +2958,31 @@ fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), 
         path = pulled(&path, closed, &flat, spec.pull_reach);
     }
     let mounds = if grass { grass_touches(spec, foot) } else { Vec::new() };
-    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, mounds };
+    // (grass: water stands `count` below it, 0 for none; and `depth`, which a plant has no other use for, is how thickly reeds stand round it: one more than so many tenths, since a depth is 1 at least)
+    let water = (grass && spec.tree.count > 0).then(|| -(spec.tree.count as f64));
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, sharp: spec.protrude && spec.points.len() >= 2, water, reeds: ((spec.depth - 1).clamp(0, 10) as f64) / 10.0, mounds };
     Ok((lay, path))
 }
 
 /// The touches on a patch of grass's ground, as its added points have them.
 fn grass_touches(spec: &Spec, foot: DVec3) -> Vec<crate::tree::Sculpt> {
     spec.pulls.iter().map(|(at, by)| crate::tree::Sculpt { at: *at - foot, range: if by.x > 0.0 { by.x } else { spec.pull_reach }, flatten: by.y != 0.0, amount: by.z }).collect()
+}
+
+/// The plant a spec describes, as the solid its bricks were fitted to:
+/// for whoever needs to know which part of it a brick is (see
+/// `tree::Model::shade`). `None` for a spec that is no plant, or one
+/// built at a brick size other than 1, whose bricks are not where this
+/// solid is.
+pub fn plant(spec: &Spec) -> Option<std::sync::Arc<crate::tree::Model>> {
+    let spec = spec.snapped();
+    if spec.form != Form::Tree || spec.grain > 1 {
+        return None;
+    }
+    let foot = *spec.points.first()?;
+    let (lay, _) = tree_lay(&spec, foot).ok()?;
+    let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
+    Some(std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spec.radius, &lay)))
 }
 
 /// How high the ground of a patch of grass is at a place, over the floor
