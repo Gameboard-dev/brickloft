@@ -946,8 +946,8 @@ fn palm(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         // The angle from upright it leaves the crown at, and how much
         // further it has turned over by its tip: a young frond stands and
         // arches a little, an old one leaves level and hangs.
-        let leaves_at = 0.12 + 1.5 * age.powf(0.85) + g.between(-0.07, 0.07);
-        let arch = (0.75 + 1.05 * age) * g.between(0.85, 1.15);
+        let leaves_at = 0.12 + 1.32 * age.powf(0.85) + g.between(-0.07, 0.07);
+        let arch = (0.75 + 0.95 * age) * g.between(0.85, 1.15);
         let length = longest * (0.5 + 0.5 * (age * 3.0).min(1.0)) * g.between(0.9, 1.06);
         let steps = ((length / 3.0).ceil() as usize).max(4);
         let from = heart + out * slim * 0.5 - DVec3::Z * (age * slim * 1.6) + DVec3::Z * slim * 0.8;
@@ -992,11 +992,11 @@ fn palm(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     g.cone(heart, heart + (DVec3::Z + towards * 0.08) * longest * 0.42, 1.3, 0.7, LEAF_LIGHT);
     if tree.extras {
         // coconuts, in a cluster under the crown round the trunk
-        let nut = (slim * 0.85).max(1.9);
-        let nuts = 5 + (g.unit() * 4.0) as usize;
+        let nut = (slim * 1.0).max(2.2);
+        let nuts = 6 + (g.unit() * 4.0) as usize;
         for k in 0..nuts {
             let way = k as f64 * GOLDEN_ANGLE;
-            let at = heart + DVec3::new(way.cos(), way.sin(), 0.0) * (slim + nut * 0.7) - DVec3::Z * (slim * 1.2 + nut * 0.9 * (k % 3) as f64);
+            let at = heart + DVec3::new(way.cos(), way.sin(), 0.0) * (slim + nut * 0.9) - DVec3::Z * (slim * 1.6 + nut * 1.1 * (k % 3) as f64);
             g.blob(at, DVec3::splat(nut), EXTRA, false);
         }
     }
