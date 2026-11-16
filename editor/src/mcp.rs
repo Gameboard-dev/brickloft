@@ -1228,22 +1228,22 @@ mod tests {
         // in the palm's colours, as the pattern has them, and told so
         assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("palm")));
         assert_eq!(added["forms"][0]["colour"]["mode"], "pattern");
-        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0");
+        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0,100,0,0,0,1");
         // every brick is painted the colour of its part: trunk and leaves both
         let painted = state.painted();
         let of = |n: usize| painted.iter().filter(|b| b.2 == 0 && b.1 == Some(crate::paint::palette("palm")[n])).count();
         assert!(of(0) > 100 && of(1) > 1000, "{} of trunk, {} of leaves", of(0), of(1));
         // a size and a list of settings are taken as given, and a form changed into a tree comes in the tree's colours
         let small = said(apply(&mut state, "update_form", &json!({ "index": 1, "settings": { "form": "tree", "tree": ["oak", 7, 80, 3, 20, 0], "radius": 20, "rise": 36, "points": [[0.5, 0.5, 0.5]] } }), || 0.0).unwrap());
-        assert_eq!(small["forms"][1]["settings"]["tree"], "oak,7,80,3,20,0");
+        assert_eq!(small["forms"][1]["settings"]["tree"], "oak,7,80,3,20,0,100,0,0,0,1");
         assert_eq!(small["forms"][1]["colour"]["mode"], "pattern");
         assert_eq!(small["forms"][1]["box_in_grid"]["size"][2].as_f64().map(|v| v <= 37.0 && v > 28.0), Some(true), "{}", small["forms"][1]["box_in_grid"]);
         // what is not a tree is refused, and what is out of range is brought within it
-        for bad in [json!("bamboo"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6"), json!(""), json!("pine\nradius = 900")] {
+        for bad in [json!("bamboo"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6,7,8,9,10,11"), json!(""), json!("pine\nradius = 900")] {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": bad } }), || 0.0).is_err(), "{bad} was accepted");
         }
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": "pine,1,5000,-3,999,7", "radius": 12, "rise": 30 } }), || 0.0).unwrap();
-        assert_eq!(state.forms()[0].0.tree, Tree { kind: Kind::Pine, seed: 1, fullness: 100, count: 4, bend: 100, extras: true });
+        assert_eq!(state.forms()[0].0.tree, Tree { fullness: 100, count: 4, bend: 100, extras: true, baubles: 50, tinsel: true, lights: 1, ..Tree::of(Kind::Pine) });
         // a tree too large to build is refused, and the workspace is as it was
         let before = state.forms();
         assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "radius": 990, "rise": 990 } }), || 0.0).is_err());

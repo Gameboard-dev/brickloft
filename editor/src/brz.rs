@@ -73,6 +73,10 @@ pub fn prefab(bricks: &[Painted], forms: &[Placed]) -> Result<World, String> {
         let grid = brdb::Entity { frozen: true, location: (at[0], at[1], at[2]).into(), rotation: brdb::Quat4f { x, y, z, w }, ..Default::default() };
         world.add_brick_grid(grid, on_grid);
     }
+    // (A brick with a light on it names a kind of component, which the file must declare. Only those used: the writer's own note is that its whole catalogue can make the game refuse the file.)
+    if world.bricks.iter().any(|b| !b.components.is_empty()) {
+        world.register_used_components();
+    }
     world.make_prefab();
     Ok(world)
 }
@@ -89,7 +93,35 @@ enum Stuff {
     Water,
     /// the same water frozen: a player stands on it
     Ice,
+    /// a bauble, tinsel or the star of a dressed pine: the game's metal
+    Metal,
+    /// a light or a candle's flame on a dressed pine: it glows, and has a light on it
+    Lamp,
+    /// the same with no light on it, for a tree whose lights are not to shine in the game
+    Glow,
 }
+
+/// The light on a lamp of a dressed pine: a point light of a warm white,
+/// weak and short, since there may be forty of them on a tree and the
+/// game draws each. The fields are those the writer's own example of a
+/// point light gives (`brdb`, `examples/write_fixtures.rs`), and the
+/// component is the one its catalogue calls `Component_PointLight`. Its
+/// defaults are a brightness of 20 and a radius of 150.
+/// https://docs.rs/brdb
+fn lamp_light() -> brdb::assets::LiteralComponent {
+    use brdb::schema::as_brdb::AsBrdbValue;
+    brdb::assets::LiteralComponent::new("Component_PointLight").with_data([
+        ("bMatchBrickShape", Box::new(false) as Box<dyn AsBrdbValue>),
+        ("bEnabled", Box::new(true)),
+        ("Brightness", Box::new(LAMP_BRIGHTNESS)),
+        ("Radius", Box::new(LAMP_RADIUS)),
+        ("Color", Box::new(brdb::SavedBrickColor { r: 255, g: 196, b: 120, a: 255 })),
+        ("bUseBrickColor", Box::new(false)),
+        ("bCastShadows", Box::new(false)),
+    ])
+}
+const LAMP_BRIGHTNESS: f32 = 25.0;
+const LAMP_RADIUS: f32 = 120.0;
 
 /// What each brick of a patch of grass is: its blades are walked through
 /// (unless the form says they are solid) and its water is water.
@@ -122,7 +154,12 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
     // it is walked through (`tube`, which a plant has no other use for).
     // A pond is frozen if the grass says so (`fill`, likewise).
     let (grass, soft, frozen) = (kind == Kind::Grass, if kind == Kind::Grass { !spec.tree.extras } else { spec.tube }, spec.fill);
-    if !as_grown || !(grass || soft) {
+    // (a pine with anything hung on it: its decorations are metal and its lights lit)
+    let dressed = kind == Kind::Pine && (spec.tree.extras || spec.tree.baubles > 0 || spec.tree.tinsel || spec.tree.lights > 0);
+    let shine = spec.tree.shine;
+    // (how many lights have been written: never more than the bound, though a bulb cut in two by a bough is two bricks)
+    let lit = std::sync::atomic::AtomicUsize::new(0);
+    if !as_grown || !(grass || soft || dressed) {
         return Box::new(|_| Stuff::Solid);
     }
     let Some(plant) = brickloft_core::spec::plant(spec) else { return Box::new(|_| Stuff::Solid) };
@@ -142,6 +179,11 @@ fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::sh
             (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
             (Kind::Grass, _) => Stuff::Solid,
             (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
+            // A dressed pine's decorations, by the part and not the colour. They are solid whether or not its needles are walked through: a bauble is a thing to bump into.
+            (Kind::Pine, tree::STAR | tree::EXTRA | tree::BAUBLE_GOLD | tree::BAUBLE_PALE | tree::TINSEL) => Stuff::Metal,
+            (Kind::Pine, tree::FLAME) => if shine && lit.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < tree::MOST_LIGHTS { Stuff::Lamp } else { Stuff::Glow },
+            (Kind::Pine, tree::WAX) => Stuff::Solid,
+            _ if !soft => Stuff::Solid,
             // (and the bands on a cherry's bark)
             (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm | Kind::Cherry, tree::STAR) => Stuff::Solid,
             _ => Stuff::Blade,
@@ -162,7 +204,7 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
         // the game numbers orientations as direction * 4 + rotation
         let direction = [Direction::XPositive, Direction::XNegative, Direction::YPositive, Direction::YNegative, Direction::ZPositive, Direction::ZNegative][placed.orientation as usize / 4];
         let rotation = [Rotation::Deg0, Rotation::Deg90, Rotation::Deg180, Rotation::Deg270][placed.orientation as usize % 4];
-        Ok(Brick {
+        let brick = Brick {
             asset: BrickType::Procedural { asset: BString::str(asset(placed.kind)), size: BrickSize { x, y, z } },
             // a brick's centre in units: its cells', and where its form stands
             position: (placed.pos[0] + place[0], placed.pos[1] + place[1], placed.pos[2] + place[2]).into(),
@@ -174,7 +216,7 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
             // nothing at all, pointing included, so that what lies in a
             // pond can be reached through it.
             collision: match stuff {
-                Stuff::Solid | Stuff::Ice => Collision::default(),
+                Stuff::Solid | Stuff::Ice | Stuff::Metal | Stuff::Lamp | Stuff::Glow => Collision::default(),
                 Stuff::Blade => Collision { player: false, weapon: false, physics: false, ..Collision::default() },
                 Stuff::Water => Collision { player: false, weapon: false, physics: false, interact: false, ..Collision::default() },
             },
@@ -188,14 +230,23 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
             // source says.
             // Ice is the same glass at 3: by the reading that makes water's
             // 6 a transparency of 0.6, half as see-through.
-            material: if matches!(stuff, Stuff::Water | Stuff::Ice) { brdb::assets::materials::GLASS } else { brdb::assets::materials::PLASTIC },
+            // A dressed pine's baubles, tinsel and star are the game's metallic material, and its lights the glowing one.
+            material: match stuff {
+                Stuff::Water | Stuff::Ice => brdb::assets::materials::GLASS,
+                Stuff::Metal => brdb::assets::materials::METALLIC,
+                Stuff::Lamp | Stuff::Glow => brdb::assets::materials::GLOW,
+                _ => brdb::assets::materials::PLASTIC,
+            },
             material_intensity: match stuff {
                 Stuff::Water => WATER_INTENSITY,
                 Stuff::Ice => ICE_INTENSITY,
+                // (as bright as a glowing brick goes)
+                Stuff::Lamp | Stuff::Glow => 10,
                 _ => 5,
             },
             ..Default::default()
-        })
+        };
+        Ok(if stuff == Stuff::Lamp { brick.with_component(lamp_light()) } else { brick })
     }
 }
 
@@ -398,6 +449,33 @@ mod tests {
         let ice: Vec<&Brick> = frozen.bricks.iter().zip(&dug.shades).filter(|(_, s)| **s == brickloft_core::tree::WATER).map(|(b, _)| b).collect();
         assert_eq!(ice.len(), water.len());
         assert!(ice.iter().all(|b| b.collision.player && b.collision.physics && b.collision.weapon && b.material == brdb::assets::materials::GLASS && b.material_intensity == 3));
+
+        {
+        // A dressed pine: its baubles, tinsel and star are metal, each of its lights glows and carries a light, and unticked they glow without one. Read back out of the file.
+        let pine = Spec { form: Form::Tree, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 20.0, rise: Some(70.0), tree: Tree { extras: true, baubles: 60, tinsel: true, lights: 1, ..Tree::of(Kind::Pine) }, ..Spec::default() };
+        let tree = build(&pine).unwrap();
+        let bricks: Vec<Painted> = tree.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+        let world = prefab(&bricks, &[(pine.clone(), Paint::default(), [0; 3])]).unwrap();
+        let of = |shade: u8| -> Vec<&Brick> { world.bricks.iter().zip(&tree.shades).filter(|(_, s)| **s == shade).map(|(b, _)| b).collect() };
+        for shade in [brickloft_core::tree::STAR, brickloft_core::tree::EXTRA, brickloft_core::tree::BAUBLE_GOLD, brickloft_core::tree::TINSEL] {
+            // (All but a few in a hundred. What a sloped brick is, is asked at its middle here and where it is deepest in the tree when it is coloured, and at the edge of a part the two may differ.)
+            let metal = of(shade).iter().filter(|b| b.material == brdb::assets::materials::METALLIC && b.components.is_empty() && b.collision.player).count();
+            assert!(of(shade).len() > 3 && metal * 100 >= of(shade).len() * 94, "part {shade}: {} bricks, {metal} of them metal", of(shade).len());
+        }
+        let lamps = of(brickloft_core::tree::FLAME);
+        assert!((3..=brickloft_core::tree::MOST_LIGHTS).contains(&lamps.len()) && lamps.iter().all(|b| b.material == brdb::assets::materials::GLOW && b.components.len() == 1), "{} lamps", lamps.len());
+        assert!(of(LEAF).iter().all(|b| b.material == brdb::assets::materials::PLASTIC && b.components.is_empty()));
+        let archive = Brz::read_slice(&world.to_brz_vec().unwrap()).unwrap().into_reader();
+        let mut lights = Vec::new();
+        for chunk in archive.brick_chunk_index(1).unwrap() {
+            if chunk.num_components > 0 {
+                lights.extend(archive.component_chunk_soa(1, chunk.index).unwrap().1.into_iter().map(|c| c.to_string()));
+            }
+        }
+        assert!(lights.len() >= lamps.len() && lights.len() <= brickloft_core::tree::MOST_LIGHTS && lights.iter().all(|c| c.contains("PointLight") && c.contains("Brightness: 25f32")), "{} lights in the file for {} lamps: {:?}", lights.len(), lamps.len(), lights.first());
+        let dark = prefab(&bricks, &[(Spec { tree: Tree { shine: false, ..pine.tree }, ..pine.clone() }, Paint::default(), [0; 3])]).unwrap();
+        assert!(dark.bricks.iter().all(|b| b.components.is_empty()) && dark.bricks.iter().filter(|b| b.material == brdb::assets::materials::GLOW).count() >= lamps.len());
+        }
 
         // Two levels: a stream's water is water like a pond's, and ice with it when frozen.
         let touch = |x: f64, range: f64, amount: f64| (DVec3::new(x + 0.5, 0.5, 0.5), DVec3::new(range, 0.0, amount));

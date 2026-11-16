@@ -497,6 +497,22 @@ more settings mean something different for each kind.
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
+A pine is dressed as a Christmas tree with **Star**, **Baubles** (how
+many, 0 for none), **Tinsel** (a garland wound round it) and **Lights**
+(none, a string of lights, or candles on the ends of its boughs; 40 at
+most). In the game the star, baubles and tinsel are the metallic
+material and each light is a glowing brick with a small warm point light
+on it. **Lights shine in the game** unticked keeps the glowing bricks
+without the lights, which cost the game something to draw. The editor's
+view shows metal and lights as plain coloured bricks. A pine saved with
+the old **A star and baubles** ticked opens with all of them on.
+
+Every tree (pine, palm, date palm, oak, beech, birch, willow, Scots pine,
+cypress, cherry) also has **Trunk width**, from 50% to 200% of what is
+usual for its kind and height. The limbs are thicker or thinner with the
+trunk. Bushes and flowers do not have it: their stems are already the
+thinnest bricks can show.
+
 A flower's **Spread** is half the width of its head, cup or bloom, and a
 clump is as many flowers as you ask for, each its own height.
 

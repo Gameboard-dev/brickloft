@@ -174,7 +174,7 @@ along a hedge, a hydrangea's heads, the flowers in a clump, a stand's
 stems), how bent (0 to 100: a pine's droop, a
 palm's lean, an oak's gnarl, a hedge's looseness, how open a peony or a
 tulip is, a sunflower's nod, how far petunias trail, reeds' sway) and 1 or 0 for its extras (a star and baubles, coconuts,
-an oak or beech bare, berries on a boxwood or hedge, plumes on reeds). A
+an oak or beech bare, berries on a boxwood or hedge, plumes on reeds). A seventh number is a tree's trunk width, 50 to 200 as a percentage of the usual, 100 if not given. A pine takes four more for its decorations: baubles (0 to 100), tinsel (1 or 0), lights (0 for none, 1 for a string, 2 for candles) and whether the lights shine in the game (1 or 0). Its `extras` is the star. A
 hedge, reeds or grass given two or more `points` lies along the curve
 through them, closed into a ring with `closed`. `move_point` moves one of
 them. With one point it is straight along x, `stretch` `[n, 1, 1]` times
