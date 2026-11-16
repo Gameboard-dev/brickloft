@@ -2059,7 +2059,7 @@ mod tests {
     #[test]
     fn a_mosaic_is_coloured_as_its_pattern_has_it() {
         let mut state = State::new();
-        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 2, border: 1, seed: 3, mortar: true, stagger: -1, upright: false }), ..Spec::default() };
+        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, size: 2, bevel: 2, border: 1, seed: 3, mortar: true, stagger: -1, upright: false, uneven: 0 }), ..Spec::default() };
         state.form = CIRCLE;
         state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::MOSAIC.to_vec(), axis: 2, width: 2 };
         state.refresh(|| 0.0);

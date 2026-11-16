@@ -86,8 +86,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("budget", spec.budget.to_string());
     line("max_ext", spec.max_ext.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
-    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for bricks whether there is mortar (1 or 0), the stagger and whether the courses are upright (1 or 0)
-    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{}", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8)));
+    // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven the stones are
+    line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{}", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven)));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -240,16 +240,31 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     None
                 } else {
                     let parts: Vec<&str> = value.split(',').map(str::trim).collect();
-                    // (five values, or eight: the last three came later, and a file from before them means mortar, every course moved by its own amount, and level courses)
-                    let ([style, size, bevel, border, seed], more) = (match parts.get(..5) { Some([a, b, c, d, e]) => [*a, *b, *c, *d, *e], _ => return Err(bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` after it or not, or `none`")) }, &parts[5.min(parts.len())..]);
-                    let (mortar, stagger, upright) = match more {
-                        [] => (true, -1, false),
-                        [mortar, stagger, upright] => (whole(mortar)? != 0, (whole(stagger)?.clamp(-1, 100)) as i32, whole(upright)? != 0),
-                        _ => return Err(bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` after it or not, or `none`")),
+                    // (five values, or eight, or nine: the later ones came later, and a file from before them means mortar, every course moved by its own amount, level courses, and bricks all alike)
+                    let wrong = || bad("expected `style,size,bevel,border,seed`, with `,mortar,stagger,upright` and then `,uneven` after it or not, or `none`");
+                    let ([style, size, bevel, border, seed], more) = (match parts.get(..5) { Some([a, b, c, d, e]) => [*a, *b, *c, *d, *e], _ => return Err(wrong()) }, &parts[5.min(parts.len())..]);
+                    let (mortar, stagger, upright, uneven) = match more {
+                        [] => (true, -1, false, None),
+                        [mortar, stagger, upright] => (whole(mortar)? != 0, (whole(stagger)?.clamp(-1, 100)) as i32, whole(upright)? != 0, None),
+                        [mortar, stagger, upright, uneven] => (whole(mortar)? != 0, (whole(stagger)?.clamp(-1, 100)) as i32, whole(upright)? != 0, Some((whole(uneven)?.clamp(0, 100)) as i32)),
+                        _ => return Err(wrong()),
                     };
+                    // Styles that are gone: bricks and slabs are masonry
+                    // now, the one all alike and the other uneven, and a
+                    // slab's bevel was a corner cut off flat, which
+                    // masonry has no like of. A snowflake is no pattern.
+                    let (style, bevel, uneven) = match style {
+                        "bricks" => ("masonry", "0", uneven.unwrap_or(0)),
+                        "slabs" => ("masonry", "0", uneven.unwrap_or(50)),
+                        _ => (style, bevel, uneven.unwrap_or(0)),
+                    };
+                    if style == "snowflake" {
+                        spec.mosaic = None;
+                        continue;
+                    }
                     let style = crate::pattern::STYLES.iter().position(|s| s.name == style).ok_or_else(|| bad("unknown mosaic style"))?;
                     // (sizes from a file, which may be anyone's: kept to what the sliders allow)
-                    Some(crate::pattern::Mosaic { style, size: (whole(size)?.clamp(1, 16)) as i32, bevel: (whole(bevel)?.clamp(0, 8)) as i32, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, mortar, stagger, upright })
+                    Some(crate::pattern::Mosaic { style, size: (whole(size)?.clamp(1, 16)) as i32, bevel: (whole(bevel)?.clamp(0, 8)) as i32, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, mortar, stagger, upright, uneven })
                 }
             }
             "stones" => {
@@ -920,7 +935,7 @@ mod tests {
                 radius: 12.5,
                 max_ext: 40,
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
-                mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: 2, border: 2, seed: 41, mortar: true, stagger: -1, upright: false }),
+                mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: 2, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: 0 }),
             },
         ];
         for spec in specs {

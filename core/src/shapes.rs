@@ -30,7 +30,7 @@
 
 use std::sync::OnceLock;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Cube,
     Ramp,

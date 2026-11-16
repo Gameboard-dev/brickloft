@@ -116,6 +116,23 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    /// Run by hand (`cargo test -p brickloft-editor clipboard -- --ignored`):
+    /// it takes over the clipboard of whoever runs it.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn a_picture_put_on_the_clipboard_is_there_as_a_picture() {
+        // (a window's size, and a width that is no multiple of four, so that the rows are padded)
+        let (wide, tall) = (1917u32, 1003u32);
+        let pixels: Vec<[u8; 4]> = (0..wide * tall).map(|k| [(k % wide / 8) as u8, (k / wide / 4) as u8, 90, 255]).collect();
+        super::picture_on_clipboard(wide, tall, &pixels).expect("the picture was not copied");
+        let _open = clipboard_win::Clipboard::new_attempts(10).unwrap();
+        // (2 is a bitmap, 8 a bitmap with its header, 17 the same with the later header: the clipboard makes each from the others)
+        let there: Vec<u32> = [2u32, 8, 17].into_iter().filter(|format| clipboard_win::is_format_avail(*format)).collect();
+        assert!(!there.is_empty(), "no picture is on the clipboard");
+        println!("picture formats on the clipboard: {there:?}");
+    }
+
     #[test]
     fn a_bmp_holds_its_rows_from_the_bottom_blue_first_and_padded() {
         // two pixels across, two down: red, green over blue, white
