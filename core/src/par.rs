@@ -82,6 +82,11 @@ impl Threads {
         Threads { count: count.max(1), always: true }
     }
 
+    /// The most threads that will be used.
+    pub fn count(self) -> usize {
+        self.count
+    }
+
     /// How many threads `len` items are worth, if `least` of them are the
     /// fewest worth a thread of their own.
     fn worth(self, len: usize, least: usize) -> usize {

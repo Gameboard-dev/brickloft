@@ -409,14 +409,14 @@ const CELLS_A_THREAD: usize = 8_000;
 ///
 /// `seen` is `None` for a form measured once. Keeping what the form holds
 /// of every cell at its surface, to be thrown away, was a fifth of what
-/// measuring a large sphere took once the layers were shared out: a
-/// hundred thousand entries put into a map, one at a time, on one thread.
+/// measuring a sphere of radius 80 took once the layers were shared out:
+/// eighty thousand entries put into a map, one at a time, on one thread.
 ///
 /// Which brick holds each cell is worked out for each range of layers by
 /// the thread that looks at them, from the bricks that reach into those
 /// layers. It was one table of the whole box filled before any layer was
-/// looked at, on one thread, and for a large sphere that took as long
-/// again as a sixth of the layers.
+/// looked at, on one thread, and for the same sphere that was another
+/// sixth of the measuring.
 fn scan(probe: &Probe, built: &Built, keep: bool, mut seen: Option<&mut Seen>, threads: Threads) -> Result<Analysis, String> {
     if built.bricks.is_empty() {
         return Err("there are no bricks to analyse".into());

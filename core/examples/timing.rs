@@ -46,7 +46,7 @@ fn threads(runs: usize) {
         ("masonry on the band", Spec { mosaic: mosaic(3), depth: 3, ..band }),
     ];
     let all = Threads::available();
-    println!("least of {runs} builds; all threads: {all:?}");
+    println!("least of {runs} builds; all threads: {}", all.count());
     println!("{:<38} {:>8}  {:>22}  {:>22}", "", "", "let go (measured)", "dragged (unmeasured)");
     println!("{:<38} {:>8}  {:>10} {:>11}  {:>10} {:>11}", "form", "bricks", "one thread", "all threads", "one thread", "all threads");
     for (name, spec) in &forms {
