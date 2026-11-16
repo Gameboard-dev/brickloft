@@ -207,6 +207,55 @@ impl Stroke {
         }
         g
     }
+
+    /// The path as a band of rectangular section: `half_thick` to each side
+    /// across the path and across `axis`, and `half_deep` to each side the
+    /// third way, which is along `axis` wherever the path is level. The
+    /// rectangle stands square to the path, so a band that climbs keeps its
+    /// thickness, as a tube does.
+    ///
+    /// The other choice was to keep the rectangle upright and slide it
+    /// along the axis with the path, which is what moving a flat band's
+    /// bricks up and down gives. Measured square to itself such a band is
+    /// thinner the steeper it climbs, by nearly half at one and a half
+    /// cells up per cell along, and what is left of a band two cells deep
+    /// there is too thin to lay out.
+    pub fn rail(&self, p: DVec3, axis: usize, half_thick: f64, half_deep: f64) -> f64 {
+        let hit = self.pd.query(p);
+        if hit.seg == usize::MAX {
+            return f64::INFINITY;
+        }
+        let (a, e) = self.pd.segs[hit.seg];
+        let (across, upward) = rail_frame((e - a).normalize_or_zero(), axis);
+        let off = p - (a + (e - a) * hit.t);
+        let mut g = (off.dot(across).abs() - half_thick).max(off.dot(upward).abs() - half_deep);
+        if let Some(caps) = &self.caps {
+            // (as in `eval`)
+            const AT_END: f64 = 1e-9;
+            if hit.seg == 0 && hit.t <= AT_END {
+                g = g.max((p - caps[0].0).dot(caps[0].1));
+            } else if hit.seg + 1 == self.pd.segments() && hit.t >= 1.0 - AT_END {
+                g = g.max((p - caps[1].0).dot(caps[1].1));
+            }
+        }
+        g
+    }
+}
+
+/// The two directions across a band that runs along `way` and lay flat
+/// across `axis`: the one in the plane it lay in, and the one square to
+/// both that and the path. A path running straight along the axis has no
+/// first direction of its own, and is given one of the plane's.
+pub fn rail_frame(way: DVec3, axis: usize) -> (DVec3, DVec3) {
+    let mut normal = DVec3::ZERO;
+    normal[axis.min(2)] = 1.0;
+    let mut across = way.cross(normal);
+    if across.length_squared() < 1e-12 {
+        across = DVec3::ZERO;
+        across[(axis.min(2) + 1) % 3] = 1.0;
+    }
+    let across = across.normalize();
+    (across, across.cross(way).normalize_or_zero())
 }
 
 /// The inside of a closed polygon in the plane.
@@ -331,36 +380,14 @@ pub enum Field {
     /// `inner` made its own mirror image along `axis` about `plane`: its
     /// low side, and that side again on the high side
     Mirror { inner: Box<Field>, axis: usize, plane: f64 },
-    /// A band that lay flat across `axis`, from `w0` to `w0 + depth` along
-    /// it and with the outline `region` seen along it, raised to follow
-    /// `path`: over each point of the outline, by as much as the nearest
-    /// part of the path is off `plane` (see [`lift_at`]). `steep` is the
-    /// most the path climbs for each cell it goes.
-    Ribbon { region: Region, axis: usize, w0: f64, depth: f64, path: Vec<DVec3>, plane: f64, steep: f64 },
+    /// A band along a path that has left the plane across `axis` it lay
+    /// in: `stroke` is the path, and the band reaches `half_thick` to each
+    /// side of it in that plane and `half_deep` to each side square to
+    /// both (see [`Stroke::rail`]).
+    Rail { stroke: Stroke, axis: usize, half_thick: f64, half_deep: f64 },
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
-}
-
-/// How far along `axis` a path is from `plane`, at the part of it nearest
-/// the point (u, v) as seen along that axis. Between two of the path's
-/// points the answer runs evenly from one's to the other's, so it has no
-/// jumps along the path.
-pub fn lift_at(path: &[DVec3], axis: usize, plane: f64, u: f64, v: f64) -> f64 {
-    let (ua, va) = [(1, 2), (0, 2), (0, 1)][axis.min(2)];
-    let at = DVec2::new(u, v);
-    let flat = |p: DVec3| DVec2::new(p[ua], p[va]);
-    let mut best = (f64::INFINITY, 0.0);
-    for pair in path.windows(2) {
-        let (a, b) = (flat(pair[0]), flat(pair[1]));
-        let along = b - a;
-        let t = if along.length_squared() > 1e-18 { ((at - a).dot(along) / along.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-        let off = (a + along * t).distance_squared(at);
-        if off < best.0 {
-            best = (off, pair[0][axis] + (pair[1][axis] - pair[0][axis]) * t - plane);
-        }
-    }
-    best.1
 }
 
 impl Field {
@@ -416,13 +443,7 @@ impl Field {
                 fill.eval(DVec2::new(p[ua], p[va])).max(lo - p[*axis]).max(p[*axis] - hi)
             }
             Field::Either(a, b) => a.eval(p).min(b.eval(p)),
-            Field::Ribbon { region, axis, w0, depth, path, plane, steep } => {
-                let (ua, va) = [(1, 2), (0, 2), (0, 1)][(*axis).min(2)];
-                let middle = w0 + depth / 2.0 + lift_at(path, *axis, *plane, p[ua], p[va]);
-                // straight along the axis, made no more than the true distance
-                let slab = ((p[*axis] - middle).abs() - depth / 2.0) / (1.0 + steep * steep).sqrt();
-                region.eval(DVec2::new(p[ua], p[va])).max(slab)
-            }
+            Field::Rail { stroke, axis, half_thick, half_deep } => stroke.rail(p, *axis, *half_thick, *half_deep),
             Field::Warp { inner, pulls, reach, scale } => {
                 // Where this point was before the pulls moved it. A pull
                 // moves a point x to x + by * w(x), with w falling from 1 at

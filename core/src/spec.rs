@@ -1310,11 +1310,50 @@ fn curve(
 /// at a slant. They can, near enough: the tube's top and its under side are
 /// each a surface over the ground, and a surface is sloped bricks.
 fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, plane: f64, radius: f64) -> Vec<CellBrick> {
-    use std::collections::HashSet;
-    let (ua, va) = plane_axes(axis);
     if laid.is_empty() {
         return Vec::new();
     }
+    // the flat pipe's section: as tall as it was laid, its chamfer the
+    // regular octagon's (see `chamfer_of` where the pipe is laid out)
+    let count = (2.0 * radius).round() as i32;
+    let chamfer = ((count as f64 * (1.0 - std::f64::consts::FRAC_1_SQRT_2)).round() as i32).min((count - 1) / 2) as f64;
+    let half_tall = (laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap() - laid.iter().map(|b| b.min[axis]).min().unwrap()) as f64 / 2.0;
+    lifted(spec, laid, path, axis, plane, &Section::Pipe { radius, chamfer, half_tall })
+}
+
+/// A flat band whose curve has been pulled out of the plane it lay in, built
+/// as a lifted tube is (see `lifted_tube`): the bricks `laid` of the flat
+/// band wherever the curve is still in the plane, and columns between the
+/// band's under side and its top wherever it has left it. `run_on` is how
+/// far the flat band runs on past each end of an open curve.
+///
+/// It was first built from the flat band's own bricks, each moved to the
+/// height of the curve where it stood, with a sloped brick on top and the
+/// one that answers it underneath (`fit_ribbon::fit_ribbon`, since taken
+/// out). That kept the outline the flat fitter had found, and failed in
+/// two ways. A long three-cornered brick of the outline cannot be bent, so
+/// where the curve climbed along one it was moved whole and stood out of
+/// the band as a slab. And where the curve climbed more than a cell per
+/// cell, a cell's corners were further apart than the band is deep and the
+/// cell became a plain block: a staircase. Of a ring two cells deep with a
+/// point pulled seven and a half cells up, a quarter of the outside was
+/// stepped faces. Columns give up the fitted outline where the band is
+/// lifted, for whole cells with their notches filled, and gain a top and an
+/// under side that meet edge to edge and can be laid on their sides.
+fn lifted_band(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, plane: f64, run_on: f64) -> Vec<CellBrick> {
+    if laid.is_empty() {
+        return Vec::new();
+    }
+    let half_deep = (laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap() - laid.iter().map(|b| b.min[axis]).min().unwrap()) as f64 / 2.0;
+    lifted(spec, laid, path, axis, plane, &Section::Band { across: axis, half_thick: spec.thick / 2.0, half_deep, run_on })
+}
+
+/// What `lifted_tube` and `lifted_band` share: the flat form's bricks kept
+/// where the curve is in its plane, columns of `section` where it is not.
+fn lifted(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, plane: f64, section: &Section) -> Vec<CellBrick> {
+    use std::collections::HashSet;
+    let (ua, va) = plane_axes(axis);
+    let radius = section.reach();
     // the middle of the flat pipe along the axis, which its curve runs through
     let centre = (laid.iter().map(|b| b.min[axis]).min().unwrap() + laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap()) as f64 / 2.0;
     // the curve where the bricks are: the pipe's middle may be half a cell off the plane
@@ -1327,12 +1366,6 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
         })
         .collect();
     let closed = path.len() > 2 && path[0].distance(path[path.len() - 1]) < 1e-6;
-    // the flat pipe's section: as tall as it was laid, its chamfer the
-    // regular octagon's (see `chamfer_of` where the pipe is laid out)
-    let count = (2.0 * radius).round() as i32;
-    let chamfer = ((count as f64 * (1.0 - std::f64::consts::FRAC_1_SQRT_2)).round() as i32).min((count - 1) / 2) as f64;
-    let half_tall = (laid.iter().map(|b| b.min[axis] + b.ext[axis]).max().unwrap() - laid.iter().map(|b| b.min[axis]).min().unwrap()) as f64 / 2.0;
-    let section = Section { radius, chamfer, half_tall };
     let ground = |b: &CellBrick| {
         let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
         (0..wv).flat_map(move |j| (0..wu).map(move |i| (u + i, v + j)))
@@ -1416,7 +1449,9 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
             cells.dedup();
             cells
         };
-        let (pieces, blocks) = tube_columns(&curve, closed, lying, &section, &cells, &within, spec.max_ext);
+        // a band standing upright has the flat band's own outline (see `tube_columns`)
+        let plan: &[CellBrick] = if lying == axis && matches!(section, Section::Band { .. }) { laid } else { &[] };
+        let (pieces, blocks) = tube_columns(&curve, closed, lying, section, &cells, plan, &within, spec.max_ext);
         bricks.extend(crate::fit_ribbon::in_rows(pieces, spec.max_ext));
         whole.extend(blocks);
     }
@@ -1492,12 +1527,61 @@ fn lifted_tube(spec: &Spec, laid: &[CellBrick], path: &[DVec3], axis: usize, pla
     bricks
 }
 
-/// The eight-sided section of a pipe: half its width, how far its chamfer
-/// reaches in from each side, and half its height.
-struct Section {
-    radius: f64,
-    chamfer: f64,
-    half_tall: f64,
+/// What a lifted form is across its curve.
+enum Section {
+    /// The eight-sided section of a pipe: half its width, how far its
+    /// chamfer reaches in from each side, and half its height.
+    Pipe { radius: f64, chamfer: f64, half_tall: f64 },
+    /// A band's rectangle, standing square to the curve: `half_thick` to
+    /// each side in the plane across `across` that the band lay in, and
+    /// `half_deep` to each side the other way (see `sdf::Stroke::rail`).
+    /// Past each end of an open curve it runs `run_on` further.
+    Band { across: usize, half_thick: f64, half_deep: f64, run_on: f64 },
+}
+
+impl Section {
+    /// How far from its curve the section reaches, at most.
+    fn reach(&self) -> f64 {
+        match *self {
+            Section::Pipe { radius, .. } => radius,
+            Section::Band { half_thick, half_deep, .. } => half_thick.hypot(half_deep),
+        }
+    }
+}
+
+/// A band's columns along the axis `lying`, over the point (u, v) of the
+/// plane across it, from the part of the curve nearest that point as seen
+/// along the axis: `at` on the curve, running `way`. Returns how far outside
+/// the band's walls the point is (negative inside them), the middle of the
+/// band along the axis there, half its length along the axis, and half its
+/// length square to its faces.
+///
+/// A rectangle has two pairs of faces. The pair that faces more nearly
+/// along the columns is their top and their under side; the other pair is
+/// the walls the columns stop at. Standing upright the band's faces in its
+/// plane are always walls, exactly upright, and its top and under side are
+/// the two faces across the axis. Lying down it depends on which way the
+/// curve runs: across the columns, the band's two faces in its plane are
+/// top and under side and the other two are walls.
+///
+/// The walls are taken to run straight along the columns, which they do
+/// only when the curve runs square to them. Otherwise the rectangle is
+/// built as the slanted four-sided figure with the same top, under side
+/// and width through its middle. The alternative, taking each column from
+/// where it enters the true rectangle to where it leaves, ends the top and
+/// the under side in an edge where they meet, and a solid thinner than it
+/// climbs across a cell is a plain block (see `fit_ribbon::Ground::lay`).
+fn band_over(across: usize, half_thick: f64, half_deep: f64, lying: usize, at: DVec3, way: DVec3, u: f64, v: f64) -> (f64, f64, f64, f64) {
+    let (ub, vb) = plane_axes(lying);
+    let (side, upward) = crate::sdf::rail_frame(way, across);
+    let (roof, half_roof, wall, half_wall) = if upward[lying].abs() >= side[lying].abs() { (upward, half_deep, side, half_thick) } else { (side, half_thick, upward, half_deep) };
+    let mut off = DVec3::ZERO;
+    (off[ub], off[vb]) = (u, v);
+    let off = off - at;
+    // (a pair of faces is never taken as top and under side when it faces less than 45 degrees off square to the columns, unless the curve runs along them)
+    let facing = roof[lying].abs().max(1e-3) * roof[lying].signum();
+    let middle = -off.dot(roof) / facing;
+    (((off.dot(wall) + middle * wall[lying]).abs() - half_wall), middle, half_roof / facing.abs(), half_roof)
 }
 
 /// Where two stretches of a tube built along different axes meet: a lattice
@@ -1696,10 +1780,17 @@ fn stretches(curve: &[DVec3], axis: usize, radius: f64) -> Vec<Stretch> {
 /// cell square: the sides came out as tall slivers standing proud of one
 /// another. On a tube 11 across, pulled up 25, a fifteenth of the outside
 /// was stepped faces that way.
-fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, cells: &[(i32, i32)], wanted: &dyn Fn((i32, i32), f64) -> bool, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
+///
+/// `plan` is the bricks of a flat band whose ground this is, if the columns
+/// stand along the axis the band lay flat across (and nothing otherwise).
+/// Seen along that axis a lifted band has the outline it had flat, which
+/// those bricks fit with long three-cornered bricks as whole cells cannot.
+/// So the ground is then theirs: a cell for each cell of a block, and half
+/// a box for each three-cornered brick (see `LONG_RISE`).
+fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, cells: &[(i32, i32)], plan: &[CellBrick], wanted: &dyn Fn((i32, i32), f64) -> bool, max_ext: i32) -> (Vec<CellBrick>, Vec<[i32; 3]>) {
     use std::collections::HashSet;
     let (ua, va) = plane_axes(axis);
-    let Section { radius, chamfer, half_tall } = *section;
+    let radius = section.reach();
     // How far along the curve each of its points is, measured over the
     // ground. A curve pulled about can pass over the same ground twice, at
     // two heights: a loop seen from above. The tube is then two tubes
@@ -1732,10 +1823,12 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     // the part of the curve nearest a point of the ground, within reach of
     // `about` along it if that is given: how far off, how high, how steep,
     // and how far along; and the lowest and highest the curve is anywhere
-    // over the tube's width of the point
+    // over the tube's width of the point; and where that part of the curve
+    // is and which way it runs
     let near_about = |u: f64, v: f64, about: Option<f64>| {
         let at = DVec2::new(u, v);
         let mut best = (f64::INFINITY, 0.0, 0.0, 0.0);
+        let mut place = (DVec3::ZERO, DVec3::ZERO);
         let mut heights = (f64::INFINITY, f64::NEG_INFINITY);
         for (i, pair) in curve.windows(2).enumerate() {
             if about.is_some_and(|s| apart(s, (along_at[i] + along_at[i + 1]) / 2.0) > same_pass) {
@@ -1754,9 +1847,10 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
             if off < best.0 {
                 let rise = pair[1][axis] - pair[0][axis];
                 best = (off, pair[0][axis] + rise * t, if length > 1e-9 { rise / length } else { 0.0 }, along_at[i] + length * t);
+                place = (pair[0] + (pair[1] - pair[0]) * t, (pair[1] - pair[0]).normalize_or_zero());
             }
         }
-        (best.0, best.1, best.2, best.3, heights)
+        (best.0, best.1, best.2, best.3, heights, place)
     };
     // each pass of the curve within the tube's wall of a point of the
     // ground, as how far along the curve it comes nearest
@@ -1771,6 +1865,20 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
             let off = (a + along * t).distance(at);
             if off >= radius {
                 continue;
+            }
+            // A band is not as wide every way as it reaches at most: the
+            // point has to be within its walls, and short of its end if
+            // this is the end of an open curve.
+            if let Section::Band { across, half_thick, half_deep, run_on } = *section {
+                let (place, way) = (pair[0] + (pair[1] - pair[0]) * t, (pair[1] - pair[0]).normalize_or_zero());
+                let (outside, middle, _, _) = band_over(across, half_thick, half_deep, axis, place, way, u, v);
+                let mut from = DVec3::ZERO;
+                (from[ua], from[va], from[axis]) = (u, v, middle);
+                let past = (from - place).dot(way);
+                let ended = !closed && ((i == 0 && t <= 0.0 && -past > run_on) || (i + 2 == curve.len() && t >= 1.0 && past > run_on));
+                if outside >= 0.0 || ended {
+                    continue;
+                }
             }
             let here = along_at[i] + length * t;
             match found.iter_mut().find(|f| apart(f.0, here) <= same_pass) {
@@ -1792,9 +1900,18 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     // tube as tall as the climb is steep, a blade far above and below the
     // curve: so the tube is never taken further than its own half height
     // past the lowest and highest the curve is over that ground.
+    //
+    // A band has no chamfer, and its top is not level across it when it
+    // lies on its side: see `band_over`. It is held to the same limit.
     let span = |u: f64, v: f64, about: f64| {
-        let (off, lift, slope, _, (lowest, highest)) = near_about(u, v, Some(about));
-        let tall = (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt();
+        let (off, lift, slope, _, (lowest, highest), (place, way)) = near_about(u, v, Some(about));
+        let (lift, tall, half_tall) = match *section {
+            Section::Pipe { radius, chamfer, half_tall } => (lift, (half_tall - (off - (radius - chamfer)).clamp(0.0, chamfer)) * (1.0 + slope * slope).sqrt(), half_tall),
+            Section::Band { across, half_thick, half_deep, .. } => {
+                let (_, middle, half_long, half_roof) = band_over(across, half_thick, half_deep, axis, place, way, u, v);
+                (middle, half_long, half_roof)
+            }
+        };
         let (lowest, highest) = if lowest <= highest { (lowest.min(lift), highest.max(lift)) } else { (lift, lift) };
         ((lift - tall).max(lowest - half_tall), (lift + tall).min(highest + half_tall))
     };
@@ -1803,7 +1920,49 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     // meet are the tube running through itself: the lower one is built and
     // the other left out there, since no cell can be in two bricks.
     let mut over: std::collections::HashMap<(i32, i32), Vec<f64>> = std::collections::HashMap::new();
-    for &(u, v) in cells {
+    // A flat band's own bricks, where they are given. `open` is then the
+    // ground left to the rule above: under the three-cornered bricks that
+    // are not kept. `long` is the ones that are, by their three corners
+    // (the square one first) and the pass of the curve they belong to.
+    let lifted: HashSet<(i32, i32)> = if plan.is_empty() { HashSet::new() } else { cells.iter().copied().collect() };
+    let mut open: HashSet<(i32, i32)> = HashSet::new();
+    let mut long: Vec<([(i32, i32); 3], f64)> = Vec::new();
+    for b in plan {
+        let (u, v, wu, wv) = (b.min[ua], b.min[va], b.ext[ua], b.ext[va]);
+        let under = (0..wv).flat_map(move |j| (0..wu).map(move |i| (u + i, v + j)));
+        // the pass of the curve a point of the ground is nearest, and whether its columns are wanted here
+        let pass = |c: (i32, i32)| {
+            let about = near_about(c.0 as f64 + 0.5, c.1 as f64 + 0.5, None).3;
+            Some(about).filter(|a| wanted(c, length_at(*a)))
+        };
+        if b.mask == CUBE {
+            for c in under.filter(|c| lifted.contains(c)) {
+                if let Some(about) = pass(c) {
+                    over.insert(c, vec![about]);
+                }
+            }
+            continue;
+        }
+        // the corners of its box it stands on, numbered as a brick's are
+        let foot: Vec<usize> = (0..4usize).filter(|k| b.mask >> ((k & 1) << ua | (k >> 1) << va) & 1 == 1).collect();
+        let upright = crate::shapes::shape_info(b.mask).is_some_and(|i| i.kind == crate::shapes::Kind::Ramp && i.axis as usize == axis) && foot.len() == 3;
+        let about = pass((u + wu / 2, v + wv / 2)).filter(|_| upright && under.clone().all(|c| lifted.contains(&c) && pass(c).is_some()));
+        let corner = |k: usize| (u + (k as i32 & 1) * wu, v + (k as i32 >> 1) * wv);
+        let kept = about.filter(|about| {
+            let tops = foot.iter().map(|k| span(corner(*k).0 as f64, corner(*k).1 as f64, *about).1);
+            let (low, high) = tops.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(t), hi.max(t)));
+            high - low <= LONG_RISE
+        });
+        match kept {
+            Some(about) => {
+                let square = 3 - (0..4).find(|k| !foot.contains(k)).unwrap();
+                let ends: Vec<usize> = foot.iter().copied().filter(|k| *k != square).collect();
+                long.push(([corner(square), corner(ends[0]), corner(ends[1])], about));
+            }
+            None => open.extend(under.filter(|c| lifted.contains(c))),
+        }
+    }
+    for &(u, v) in cells.iter().filter(|c| plan.is_empty() || open.contains(c)) {
         let (mid_u, mid_v) = (u as f64 + 0.5, v as f64 + 0.5);
         let mut found: Vec<(f64, f64, f64)> = passes(mid_u, mid_v)
             .into_iter()
@@ -1863,7 +2022,7 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
     let mut notches: Vec<(i32, i32)> = cells.iter().flat_map(|&(u, v)| [(u + 1, v), (u - 1, v), (u, v + 1), (u, v - 1)]).filter(|c| !inside.contains(c)).collect();
     notches.sort();
     notches.dedup();
-    for (u, v) in notches {
+    for (u, v) in notches.into_iter().filter(|c| plan.is_empty() || open.contains(c)) {
         for (sx, sy) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
             if !(inside.contains(&(u + sx, v)) && inside.contains(&(u, v + sy)) && !inside.contains(&(u - sx, v)) && !inside.contains(&(u, v - sy))) {
                 continue;
@@ -1885,12 +2044,26 @@ fn tube_columns(curve: &[DVec3], closed: bool, axis: usize, section: &Section, c
             break;
         }
     }
+    for (plan, about) in long {
+        let corners = plan.map(|p| corner(&mut ground, p, about));
+        ground.halves.push(corners);
+    }
     ground.lay(axis, max_ext)
 }
 
+/// How far the top of a lifted band may climb from one corner of a
+/// three-cornered brick of its flat outline to another, in cells, for the
+/// brick to be kept as half a box with one sloped brick on top and one
+/// underneath. One brick cannot follow a top that bends along it, and
+/// cannot be sloped both on top and underneath when the band climbs along
+/// its long side (see `fit_ribbon::cap_of`), so a brick the band climbs
+/// further over is given up for whole cells with their notches filled.
+const LONG_RISE: f64 = 1.5;
+
 /// A flat band whose curve has been pulled out of the plane it lay in, at
-/// `plane` along `axis`: the band as it would be flat, raised to follow the
-/// curve (see `fit_ribbon`). `None` if it cannot be laid out that way.
+/// `plane` along `axis`: the flat band's bricks where the curve is still in
+/// the plane, and columns where it has left it (see `lifted_band`). `None`
+/// if the band is not a flat outline to begin with.
 fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) -> Result<Option<(Solid, Vec<DVec3>)>, String> {
     let level: Vec<DVec3> = path
         .iter()
@@ -1900,31 +2073,51 @@ fn raised(spec: &Spec, path: &[DVec3], closed: bool, axis: usize, plane: f64) ->
             q
         })
         .collect();
+    let (shift, run_on) = band_shift(spec, &level, closed, axis);
     let (flat, _) = planar(spec, level, closed, axis)?;
-    let Solid::Flat { region, w0, depth, min, max, .. } = &flat else { return Ok(None) };
-    let (region, w0, depth, lo, hi) = (region.clone(), *w0, *depth, *min, *max);
-    let bricks = fit(spec, &flat, Vec::new(), 1.0).bricks;
-    let lift = |u: f64, v: f64| crate::sdf::lift_at(path, axis, plane, u, v);
-    let bricks = crate::fit_ribbon::fit_ribbon(&crate::fit_ribbon::Ribbon { flat: &bricks, axis, lift: &lift, max_ext: spec.max_ext });
-    // how steeply the curve climbs, for each cell it goes across the plane
+    let Solid::Flat { w0, depth, .. } = &flat else { return Ok(None) };
+    let (w0, depth) = (*w0, *depth);
+    let laid = fit(spec, &flat, Vec::new(), 1.0).bricks;
+    // the curve where the flat band was laid: half a cell aside if the band was (see `planar`)
     let (ua, va) = plane_axes(axis);
-    let steep = path
-        .windows(2)
+    let aside: Vec<DVec3> = path
+        .iter()
         .map(|p| {
-            let across = (p[1][ua] - p[0][ua]).hypot(p[1][va] - p[0][va]);
-            if across > 1e-9 { (p[1][axis] - p[0][axis]).abs() / across } else { 0.0 }
+            let mut q = *p;
+            (q[ua], q[va]) = (p[ua] + shift, p[va] + shift);
+            q
         })
-        .fold(0.0, f64::max)
-        .min(8.0);
-    let (low, high) = path.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[axis] - plane), b.max(p[axis] - plane)));
-    let field = Field::Ribbon { region, axis, w0: w0 as f64, depth: depth as f64, path: path.to_vec(), plane, steep };
-    let (mut from, mut to) = (DVec3::ZERO, DVec3::ZERO);
-    (from[ua], from[va], from[axis]) = (lo[0] as f64, lo[1] as f64, w0 as f64 + low);
-    (to[ua], to[va], to[axis]) = (hi[0] as f64, hi[1] as f64, (w0 + depth) as f64 + high);
-    let (solid, path) = volume(field.clone(), from, to, path.to_vec())?;
+        .collect();
+    let bricks = lifted_band(spec, &laid, &aside, axis, plane, run_on);
+    // What it is measured against: the band along the curve through the
+    // middle of the flat band's depth, which is half a cell off the curve's
+    // own plane when the depth is even.
+    let through: Vec<DVec3> = aside
+        .iter()
+        .map(|p| {
+            let mut q = *p;
+            q[axis] += w0 as f64 + depth as f64 / 2.0 - plane;
+            q
+        })
+        .collect();
+    let (half_thick, half_deep) = (spec.thick / 2.0, depth as f64 / 2.0);
+    let reach = half_thick.hypot(half_deep);
+    let field = Field::Rail { stroke: Stroke::new(&through, reach, closed, Some(run_on)), axis, half_thick, half_deep };
+    let lo = through.iter().fold(DVec3::MAX, |a, p| a.min(*p)) - reach - 1.0;
+    let hi = through.iter().fold(DVec3::MIN, |a, p| a.max(*p)) + reach + 1.0;
+    let (solid, path) = volume(field.clone(), lo, hi, path.to_vec())?;
     let Solid::Volume { min, max, .. } = solid else { unreachable!() };
     // laid out whole and measured afterwards, as a pyramid is
-    Ok(Some((Solid::Pyramid { bricks, field, min, max }, path)))
+    Ok(Some((Solid::Pyramid { bricks: Some(bricks).filter(|b| !b.is_empty() && spec.wedges), field, min, max }, path)))
+}
+
+/// How far a flat band along `path` is moved aside along both axes of its
+/// plane to land on the lattice, and how far it then runs on past each end
+/// of an open path (see `planar`, which explains both).
+fn band_shift(spec: &Spec, path: &[DVec3], closed: bool, axis: usize) -> (f64, f64) {
+    let (ua, _) = plane_axes(axis);
+    let shifted = !spec.fill && off_lattice(path, closed, ua, (spec.thick.round() as i32).max(1));
+    if shifted { (-0.5, 0.0) } else { (0.0, 0.5) }
 }
 
 /// Whether a band `width` cells wide along `path` would have its edges half
@@ -1961,8 +2154,7 @@ fn planar(
     // two (see `off_lattice`): a ring of radius 38.5 about a cell's centre
     // runs along lattice lines, and it is then the odd widths that need the
     // half cell.
-    let shifted = !spec.fill && off_lattice(&path, closed, ua, (spec.thick.round() as i32).max(1));
-    let (shift, extend) = if shifted { (-0.5, 0.0) } else { (0.0, 0.5) };
+    let (shift, extend) = band_shift(spec, &path, closed, axis);
     let flat: Vec<DVec3> = path
         .iter()
         .map(|p| DVec3::new(p[ua] + shift, p[va] + shift, 0.0))
@@ -3219,9 +3411,56 @@ mod tests {
         let (band_steps, tube_steps) = (stepped(&lifted, &leaning), stepped(&tube, &as_tube));
         // (the tube keeps its pipe where it was not lifted: see `patched`)
         assert!(band_steps < 0.12 && tube_steps < 0.12, "the band is {band_steps} steps, a tube {tube_steps}");
-        // seen along its axis it is the flat ring still: the same cells of the plane
+        // Seen along its axis it is the flat ring still: the same cells of
+        // the plane, but for a few under the three-cornered bricks of the
+        // outline it climbs too steeply over to keep (see `LONG_RISE`).
         let plan = |b: &Built| -> HashSet<[i32; 2]> { b.bricks.iter().flat_map(|k| (0..k.ext[0]).flat_map(move |x| (0..k.ext[2]).map(move |z| [k.min[0] + x, k.min[2] + z]))).collect() };
-        assert_eq!(plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+        let (now, flat) = (plan(&leaning), plan(&build(&Spec { thick: 3.0, ..ring }).unwrap()));
+        let changed = now.symmetric_difference(&flat).count();
+        assert!(changed * 50 <= flat.len(), "{changed} of the plan's {} cells are not the flat ring's", flat.len());
+    }
+
+    #[test]
+    fn a_band_pulled_up_steeply_is_sloped_not_stepped() {
+        // (the forms of two saved reports: small rings two deep, one point
+        // pulled seven and a half cells up and another three and a half)
+        let pulls = vec![(DVec3::new(-0.2841371226364836, -7.461477813377575, 0.5), DVec3::new(0.0, 0.0, 7.5)), (DVec3::new(2.0607225761290264, 8.346282243225843, 0.5), DVec3::new(0.0, 0.0, 3.5))];
+        let ring = Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 8.0, depth: 2, pulls, pull_reach: 8.0, simplify: 0.25, ..Spec::default() };
+        // Built from the flat band's bricks moved up and down, 23.9% of the
+        // thin one's outside was stepped faces and 16.3% of the thick one's.
+        for (thick, most) in [(2.0, 0.15), (3.5, 0.12)] {
+            let spec = Spec { thick, ..ring.clone() };
+            let built = build(&spec).unwrap();
+            let probe = Probe::new(&spec, built.grain).unwrap();
+            let survey = crate::surface::survey(&probe, &built).unwrap();
+            assert!(survey.stepped / survey.area < most, "thick {thick}: {} stepped", survey.stepped / survey.area);
+            // it went up by the pull
+            assert!(built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() >= 8);
+            // No point is in two bricks, and no brick stands out of the
+            // band: a long brick of the outline moved whole stood a cell
+            // and a half clear of it.
+            let mut held_by: std::collections::HashMap<[i32; 3], Vec<usize>> = std::collections::HashMap::new();
+            for (n, b) in built.bricks.iter().enumerate() {
+                for k in 0..b.ext[0] * b.ext[1] * b.ext[2] {
+                    held_by.entry([b.min[0] + k % b.ext[0], b.min[1] + k / b.ext[0] % b.ext[1], b.min[2] + k / (b.ext[0] * b.ext[1])]).or_default().push(n);
+                }
+            }
+            for (cell, bricks) in &held_by {
+                for k in 0..64 {
+                    let p = [cell[0] as f64 + ((k % 4) as f64 + 0.37) / 4.0, cell[1] as f64 + ((k / 4 % 4) as f64 + 0.41) / 4.0, cell[2] as f64 + ((k / 16) as f64 + 0.43) / 4.0];
+                    let held = bricks
+                        .iter()
+                        .filter(|n| {
+                            let b = &built.bricks[**n];
+                            let u = [0, 1, 2].map(|i| (p[i] - b.min[i] as f64) / b.ext[i] as f64);
+                            crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+                        })
+                        .count();
+                    assert!(held <= 1, "thick {thick}: {held} bricks hold {p:?}");
+                    assert!(held == 0 || probe.distance(DVec3::from_array(p)) < 1.25, "thick {thick}: a brick holds {p:?}, {} outside the band", probe.distance(DVec3::from_array(p)));
+                }
+            }
+        }
     }
 
     #[test]
