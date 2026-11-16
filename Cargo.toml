@@ -6,6 +6,12 @@ members = ["core", "editor"]
 # The editor is a default member so that `cargo test` covers its logic too.
 # Its renderer is compiled once (about 50 s) and cached after that.
 default-members = ["core", "editor"]
+# The generator (docs/generate.md) is a workspace of its own with its own
+# lock file, and is named here only so that cargo does not take it for a
+# member that was forgotten. Nothing built or tested from this folder reads
+# it: its four hundred dependencies, two of them git repositories, are
+# resolved and compiled only by `cargo build` run inside generate/.
+exclude = ["generate"]
 
 [workspace.package]
 version = "0.3.0"
