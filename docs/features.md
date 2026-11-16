@@ -179,6 +179,7 @@ Each form has its own colouring: one colour, or up to four as a **blend**,
 | **Simplify** | how much closer a sloped brick must bring a flat outline to be worth a brick. 0 is the closest fit; higher is fewer bricks. |
 | **Brick size** | fits the form with bricks a multiple of this size. **Automatic** picks the finest size within the **Brick budget**. |
 | **Longest brick** | the longest edge one brick may have, 80 by default. |
+| **Sliders go up to** | how far every size slider reaches (radius, height, thickness, depth, reach of added points), 1000 microbricks by default. Lower it for a finer slider. |
 | **Use ramps and corner pieces** | off builds with cubes alone. |
 
 The panel shows the brick count by kind, the brick size chosen, the

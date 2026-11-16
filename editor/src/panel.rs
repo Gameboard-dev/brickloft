@@ -178,12 +178,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
-            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=400.0).speed(1.0)).on_hover_text("How far the size sliders reach, in microbricks. Large forms take longer to fit.");
+            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=arcs_core::spec::MAX_SPAN).speed(1.0)).on_hover_text("How far every size slider reaches, in microbricks: radius, height, thickness, depth and the reach of added points. Lower it for a finer slider. Large forms take longer to fit.");
         });
         ui.horizontal(|ui| {
             ui.label("Longest brick");
             ui.add(egui::DragValue::new(&mut state.spec.max_ext).range(1..=4000).speed(1.0)).on_hover_text("The longest edge a single brick may have, in microbricks. 80 is what the game was seen to accept when this was first tried; the game's own limit is said to be 800 studs, which is 4000 microbricks. Raise it and paste to find out: a form then needs fewer, longer bricks.");
         });
+        // One limit for every slider that sets a size. Each had its own (a
+        // depth to 64 beside a radius to 60), so the limit shown was not the
+        // limit met. The sliders are logarithmic, since a slider that reaches
+        // 1000 in even steps cannot be set to 3.
         let largest = state.max_size;
         ui.separator();
         workspace(ui, state);
@@ -249,8 +253,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     ui.selectable_value(&mut state.cut, Cut::Segment, "Segment");
                 });
                 if state.cut == Cut::Segment {
-                    ui.add(Slider::new(&mut state.segment.0, -40.0..=40.0).step_by(0.5).text("from height"));
-                    ui.add(Slider::new(&mut state.segment.1, -40.0..=40.0).step_by(0.5).text("to height"));
+                    ui.add(Slider::new(&mut state.segment.0, -largest..=largest).step_by(0.5).text("from height"));
+                    ui.add(Slider::new(&mut state.segment.1, -largest..=largest).step_by(0.5).text("to height"));
                 }
             }
             _ => {}
@@ -261,7 +265,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name));
             }
             let mut height = s.rise.unwrap_or(s.radius);
-            ui.add(Slider::new(&mut height, 1.0..=largest.max(80.0)).step_by(1.0).text("Height"));
+            ui.add(Slider::new(&mut height, 1.0..=largest).logarithmic(true).step_by(1.0).text("Height"));
             // left alone it is as tall as it is wide to one side
             if height != s.rise.unwrap_or(s.radius) {
                 s.rise = Some(height);
@@ -275,7 +279,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 PYRAMID => "Half its base",
                 _ => "Radius",
             };
-            ui.add(Slider::new(&mut s.radius, 0.5..=largest).step_by(0.5).clamping(egui::SliderClamping::Never).text(name));
+            ui.add(Slider::new(&mut s.radius, 0.5..=largest).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(name));
         }
 
         ui.separator();
@@ -308,13 +312,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any)
         if !(state.form == PYRAMID && s.fill) {
-            ui.add(Slider::new(&mut s.thick, 0.5..=16.0).step_by(0.5).text(wall));
+            ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall));
         }
         if is_curve && !s.tube {
-            ui.add(Slider::new(&mut s.depth, 1..=64).text("Depth"));
+            ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth"));
         }
         if !s.pulls.is_empty() {
-            ui.add(Slider::new(&mut s.pull_reach, 1.0..=40.0).step_by(0.5).text("Reach of added points")).on_hover_text("How far from each added point the form goes with it: along a curve to either side, or all round on a sphere or pyramid.");
+            ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")).on_hover_text("How far from each added point the form goes with it: along a curve to either side, or all round on a sphere or pyramid.");
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
             }

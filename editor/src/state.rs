@@ -214,10 +214,10 @@ pub struct State {
     pub panel_right: f32,
     /// whether the rulers are drawn
     pub show_ruler: bool,
-    /// How far the sliders for a form's size go. Their reach was fixed at
-    /// 60, which is as far as most forms are wanted and keeps the slider
-    /// fine enough to set small ones; how large a form is worth building
-    /// depends on the machine and the form, so the user says.
+    /// How far every slider for a size goes: as far as the core will build
+    /// (`arcs_core::spec::MAX_SPAN`) unless the user lowers it. It began at
+    /// 60 to keep an even slider fine enough for small forms; the sliders
+    /// are logarithmic now, which does that at any reach.
     pub max_size: f64,
     /// the box of cells the bricks occupy, low corner and high, for the rulers
     pub bounds: Option<Bounds>,
@@ -364,7 +364,7 @@ impl State {
             open_adds: false,
             panel_right: 0.0,
             show_ruler: true,
-            max_size: 60.0,
+            max_size: arcs_core::spec::MAX_SPAN,
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
