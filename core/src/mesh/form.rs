@@ -258,6 +258,51 @@ impl Stood {
         super::trial::measure(&|p| self.distance(p + low), self.stand().cells().map(|v| v as usize), &local, threads)
     }
 
+    /// The share of the mesh's surface that a build of it leaves bare:
+    /// with no brick in the cell a point of the surface is in, nor in any
+    /// of the 26 round that cell. Four points to a triangle, each standing
+    /// for a quarter of its area.
+    ///
+    /// The volume where bricks and mesh disagree says little about a thin
+    /// part: a sheet half a cell thick is a small volume whether it is
+    /// built or missing. This says whether it is there.
+    pub fn bare(&self, laid: &Laid) -> f64 {
+        let stand = self.stand();
+        let n = stand.cells().map(|v| v as usize);
+        let mut held = vec![0u64; (n[0] * n[1] * n[2]).div_ceil(64)];
+        for b in &laid.bricks {
+            for i in 0..(b.ext[0] * b.ext[1] * b.ext[2]) as usize {
+                let (ex, ey) = (b.ext[0] as usize, b.ext[1] as usize);
+                let at = [(b.min[0] - self.low[0]) as usize + i % ex, (b.min[1] - self.low[1]) as usize + i / ex % ey, (b.min[2] - self.low[2]) as usize + i / (ex * ey)];
+                let cell = at[0] + n[0] * (at[1] + n[1] * at[2]);
+                held[cell / 64] |= 1 << (cell % 64);
+            }
+        }
+        let near = |p: DVec3| {
+            let at = p.floor().to_array().map(|v| v as i64);
+            (0..27).any(|round| {
+                let to = [at[0] + round % 3 - 1, at[1] + round / 3 % 3 - 1, at[2] + round / 9 - 1];
+                (0..3).all(|k| to[k] >= 0 && to[k] < n[k] as i64) && {
+                    let cell = to[0] as usize + n[0] * (to[1] as usize + n[1] * to[2] as usize);
+                    held[cell / 64] >> (cell % 64) & 1 == 1
+                }
+            })
+        };
+        let (mut all, mut bare) = (0.0, 0.0);
+        for tri in 0..self.mesh.triangles() {
+            let ([a, b, c], _) = self.mesh.triangle(tri);
+            let area = (b - a).cross(c - a).length();
+            for share in [[1.0, 1.0, 1.0], [4.0, 1.0, 1.0], [1.0, 4.0, 1.0], [1.0, 1.0, 4.0]] {
+                let p = (a * share[0] + b * share[1] + c * share[2]) / (share[0] + share[1] + share[2]);
+                all += area;
+                if !near(stand.from_mesh(p)) {
+                    bare += area;
+                }
+            }
+        }
+        bare / all.max(1e-300)
+    }
+
     /// The colours its bricks are numbered by (see [`Laid::shades`]).
     pub fn palette(&self) -> Vec<[u8; 3]> {
         self.mesh.palette(self.colours)
@@ -272,7 +317,7 @@ impl Stood {
         let max_ext = max_ext.max(1) as usize;
         let smooth = wedges && self.fitter == Fitter::Smoothed;
         let found = scan(&stand, n, smooth, threads);
-        let (mut shape, mut sampled, mut facing, mut nearest, mut stages) = (found.shape, found.sampled, found.facing, found.nearest, found.stages);
+        let (mut shape, mut sampled, mut facing, mut nearest, kept, mut stages) = (found.shape, found.sampled, found.facing, found.nearest, found.kept, found.stages);
         let (mut solid, mut error) = (found.solid as i64, found.error as i64);
         let mut lap = super::trial::clock();
         if smooth {
@@ -289,7 +334,19 @@ impl Stood {
             crossed[cell / 64] |= 1 << (cell % 64);
         }
         if self.loose > 0 {
-            let gone = loose(&shape, &crossed, n, self.loose as usize);
+            let part = |i: usize| shape[i] != 0 || crossed[i / 64] >> (i % 64) & 1 == 1;
+            let mut gone = loose(&part, n, self.loose as usize, None);
+            // And the pieces that hang on the rest by a neck (see `necked`): what is left once the loose pieces are out,
+            // less its outermost layer of cells, falls into the body and whatever the necks held.
+            let mut left = vec![0u64; shape.len().div_ceil(64)];
+            for i in (0..shape.len()).filter(|i| part(*i)) {
+                left[i / 64] |= 1 << (i % 64);
+            }
+            for &(first, last) in &gone {
+                (first..last).for_each(|i| left[i / 64] &= !(1 << (i % 64)));
+            }
+            gone.extend(necked(&left, n, self.loose as usize));
+            gone.sort_unstable();
             if !gone.is_empty() {
                 // what was dropped is no part of the form any more: neither its volume nor what was wrong with it
                 let mut keep = vec![true; sampled.len()];
@@ -321,7 +378,7 @@ impl Stood {
         let mut bricks = Vec::new();
         if smooth {
             let surface = |k: usize, _: DVec3| facing[k];
-            let (stretched, saved, sought, laid) = guided(&surface, &mut shape, &sampled, n, max_ext, (price.max(0.0) * per_cell as f64).round().min(1e6) as u32, threads);
+            let (stretched, saved, sought, laid) = guided(&surface, &mut shape, &sampled, n, max_ext, (price.max(0.0) * per_cell as f64).round().min(1e6) as u32, &kept, threads);
             error -= saved;
             bricks = stretched;
             stages.push(("stretched pieces found", sought));
@@ -377,8 +434,13 @@ const ANY: u8 = 255;
 /// are often several shells each, and a scrap that touches the body by one
 /// triangle is one mesh with it; what the eye sees as a floating piece is
 /// bricks that touch no others.
-fn loose(shape: &[u8], crossed: &[u64], n: [usize; 3], under: usize) -> Vec<(usize, usize)> {
-    let part = |i: usize| shape[i] != 0 || crossed[i / 64] >> (i % 64) & 1 == 1;
+///
+/// `part` says which cells are occupied. With `cores` given, the pieces are
+/// what is left of pieces with a layer taken off them (see [`necked`]):
+/// the piece of the most cells is then never among those returned, nor is
+/// one of fewer cells than the first number, and each is judged as longer
+/// than it is by the second, which is the layer put back.
+fn loose(part: &dyn Fn(usize) -> bool, n: [usize; 3], under: usize, cores: Option<(u64, u32)>) -> Vec<(usize, usize)> {
     // every run: its row, and where it begins and ends along x
     let mut runs: Vec<(u32, u32, u32)> = Vec::new();
     let mut first_of_row = Vec::with_capacity(n[1] * n[2] + 1);
@@ -428,13 +490,75 @@ fn loose(shape: &[u8], crossed: &[u64], n: [usize; 3], under: usize) -> Vec<(usi
         let (lo, hi) = ([from, row % n[1] as u32, row / n[1] as u32], [to, row % n[1] as u32 + 1, row / n[1] as u32 + 1]);
         boxes[r] = ([0, 1, 2].map(|k| boxes[r].0[k].min(lo[k])), [0, 1, 2].map(|k| boxes[r].1[k].max(hi[k])));
     }
+    // (how many cells each piece is, for the one that is spared)
+    let mut cells = vec![0u64; runs.len()];
+    for i in 0..runs.len() {
+        cells[parent[i] as usize] += (runs[i].2 - runs[i].1) as u64;
+    }
+    let largest = (0..runs.len()).max_by_key(|i| (cells[*i], std::cmp::Reverse(*i))).filter(|_| cores.is_some());
+    let (least, more) = cores.unwrap_or((0, 0));
     (0..runs.len())
         .filter(|i| {
-            let (lo, hi) = boxes[parent[*i] as usize];
-            (0..3).map(|k| hi[k] - lo[k]).max().unwrap_or(0) < under as u32
+            let piece = parent[*i] as usize;
+            let (lo, hi) = boxes[piece];
+            let sides = [0, 1, 2].map(|k| hi[k] - lo[k]);
+            // (a piece with its layer off is a lump only if it is still two cells through every way: see `necked`)
+            Some(piece) != largest && cells[piece] >= least && (cores.is_none() || sides.iter().all(|side| *side >= 2)) && sides.iter().max().unwrap_or(&0) + more < under as u32
         })
         .map(|i| (runs[i].0 as usize * n[0] + runs[i].1 as usize, runs[i].0 as usize * n[0] + runs[i].2 as usize))
         .collect()
+}
+
+/// The cells, as runs along x, of the pieces smaller than `under` that are
+/// joined to the rest of the build only by a neck two cells through or
+/// less. `left` has a bit for each occupied cell.
+///
+/// A model made from one picture has scraps of ground and stray lumps
+/// that are not loose: each hangs on the model by a thread. With the
+/// outermost layer of cells taken off everything, a neck of two cells or
+/// fewer is gone, and what it joined falls apart into the body, which is
+/// the piece of the most cells, and the rest. Each of the rest that is
+/// smaller than `under` is dropped, with the layer that was taken off it
+/// (the cells within two steps of it that are in no piece themselves).
+/// A part that is thin all along, a chair's leg or a sheet, is no piece
+/// by this rule: with its outer layer off there is nothing left of it to
+/// be one, and it stays with whatever it is joined to.
+///
+/// This is opening, in the words of mathematical morphology (Serra, Image
+/// Analysis and Mathematical Morphology, 1982), done one layer deep. A
+/// deeper cut would part thicker necks, and a snowman's head from its
+/// body.
+fn necked(left: &[u64], n: [usize; 3], under: usize) -> Vec<(usize, usize)> {
+    let strides = [1, n[0], n[0] * n[1]];
+    let has = |i: usize| left[i / 64] >> (i % 64) & 1 == 1;
+    let at = |i: usize| [i % n[0], i / n[0] % n[1], i / (n[0] * n[1])];
+    let beside = move |i: usize| {
+        let p = at(i);
+        (0..6).filter_map(move |face| {
+            let k = face / 2;
+            if face % 2 == 0 { (p[k] > 0).then(|| i - strides[k]) } else { (p[k] + 1 < n[k]).then(|| i + strides[k]) }
+        })
+    };
+    let core = |i: usize| has(i) && beside(i).filter(|b| has(*b)).count() == 6;
+    // (A piece is at least 27 cells with its layer off and two through every way: a lump, and not the cells left of a
+    // sheet where it happens to lie three thick, which dropped with two steps round each made a sieve of a bowl. And it is as long as it was
+    // with its layer on, so that a scrap that is loose and too large to drop is not dropped here as a small one.)
+    let pieces = loose(&core, n, under, Some((27, 2)));
+    // the layer taken off each: two steps out through cells that are in no piece's core
+    let mut gone: std::collections::BTreeSet<usize> = pieces.iter().flat_map(|(first, last)| *first..*last).collect();
+    let mut edge: Vec<usize> = gone.iter().copied().collect();
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for cell in edge {
+            for other in beside(cell).filter(|b| has(*b) && !core(*b)) {
+                if gone.insert(other) {
+                    next.push(other);
+                }
+            }
+        }
+        edge = next;
+    }
+    gone.into_iter().map(|cell| (cell, cell + 1)).collect()
 }
 
 /// Empty the cells further inside than a wall `thick` cells through, and
@@ -808,6 +932,57 @@ mod tests {
         assert!(fourteen.error <= all.error && fourteen.error >= 0.0);
         // and with everything dropped there is nothing
         assert!(scattered(200).bricks.is_empty());
+    }
+
+    #[test]
+    fn a_hole_is_closed_by_a_skin_as_close_as_the_rest_of_the_surface() {
+        // a ball with a cap and a patch gone, the holes 28 and 12 cells wide at this size
+        let ball = stood(made::holed_ball(24), 24.0, Import::default(), None);
+        let (one, many) = (ball.built(true, 80, 0.0, Threads::ONE), ball.built(true, 80, 0.0, Threads::forced(5)));
+        assert_eq!(one.bricks, many.bricks);
+        no_two_share_a_cell(&many.bricks);
+        // against the mesh asked at every sample, which is the slow way and has no shortcuts to go wrong at a hole
+        let measured = ball.measured(&many, Threads::forced(4));
+        assert!(measured.wrong < 0.03 * measured.solid, "{} of {} wrong", measured.wrong, measured.solid);
+        // and what it says of its own fit is what it measures as, skin and all
+        // (to within the skin's own cells, whose samples are read off their corners and not each asked for)
+        assert!((many.error - measured.wrong).abs() < 0.015 * measured.solid && (many.solid - measured.solid).abs() < 0.015 * measured.solid, "said {} of {}, measured {} of {}", many.error, many.solid, measured.wrong, measured.solid);
+        // the skin is laid in sloped pieces like any surface: over the top hole there is more than cubes
+        let top = many.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap();
+        assert!(many.bricks.iter().any(|b| b.mask != CUBE && b.min[2] + b.ext[2] >= top - 1));
+    }
+
+    #[test]
+    fn a_sheet_thinner_than_a_cell_is_built_a_cell_thick_and_whole() {
+        // a bowl and a leaning plate, each a third of a cell through at this size
+        for fitter in [Fitter::Smoothed, Fitter::Blocks] {
+            let sheets = stood(made::thin(0.3), 58.5, Import { fitter, ..Import::default() }, None);
+            let laid = sheets.built(true, 80, 0.0, Threads::forced(4));
+            assert_eq!(laid.bricks, sheets.built(true, 80, 0.0, Threads::ONE).bricks);
+            no_two_share_a_cell(&laid.bricks);
+            assert!(sheets.bare(&laid) < 0.01, "{:.1}% of the sheets has no brick near it", 100.0 * sheets.bare(&laid));
+        }
+        // the sharp edge of something thick is no sheet: a roof's eaves stay ramps, and the house is still exact
+        let house = stood(made::house(), 28.0, Import::default(), None).built(true, 80, 0.0, Threads::ONE);
+        assert!(house.error.abs() < 1e-9 && house.bricks.len() <= 12);
+    }
+
+    #[test]
+    fn a_lump_hanging_by_a_thread_is_dropped_with_the_loose_pieces_and_one_on_a_thick_neck_is_not() {
+        let built = |neck: f64, loose| stood(made::tethered(neck), 30.0, Import { loose, ..Import::default() }, None).built(true, 80, 0.0, Threads::forced(3));
+        let reach = |laid: &Laid| laid.bricks.iter().map(|b| b.min[0] + b.ext[0]).max().unwrap() - laid.bricks.iter().map(|b| b.min[0]).min().unwrap();
+        // kept whole when nothing is asked to be dropped; the lump goes when pieces under 20 are, and the ball (40) stays
+        let (whole, cut) = (built(1.6, 0), built(1.6, 20));
+        assert!(reach(&whole) >= 58 && reach(&cut) <= 50 && reach(&cut) >= 40, "{} long whole and {} cut", reach(&whole), reach(&cut));
+        no_two_share_a_cell(&cut.bricks);
+        assert_eq!(cut.bricks, built(1.6, 20).bricks);
+        // a neck five cells thick is no thread: the lump is part of the thing
+        assert!(reach(&built(5.0, 20)) >= 58);
+        // and a thing thin all along is not cut off from itself: the bowl and the plate, each one cell thick as built, both stay
+        let sheets = |loose| stood(made::thin(0.3), 58.5, Import { loose, ..Import::default() }, None).built(true, 80, 0.0, Threads::forced(3));
+        // (but for crumbs at their edges, which are loose and small)
+        let (all, kept) = (sheets(0), sheets(20));
+        assert!(reach(&kept) == reach(&all) && kept.bricks.len() * 20 > all.bricks.len() * 19, "{} bricks {} long, and {} bricks {} long with pieces dropped", all.bricks.len(), reach(&all), kept.bricks.len(), reach(&kept));
     }
 
     #[test]

@@ -423,8 +423,9 @@ fn a_file_is_taken_in_under_a_name_from_its_content_and_found_again_by_that_name
     let parts = made::house().parts(56.0);
     let path = from.join("My House (final).GLB");
     std::fs::write(&path, glb(&parts)).unwrap();
-    let (name, up) = adopt_into(&kept, &path).unwrap();
-    assert_eq!((Import::named(&name), up, name.ends_with(".glb")), (Ok(()), Up::Y, true));
+    let (name, up, _) = adopt_into(&kept, &path).unwrap();
+    // (z is up in it, whatever a .glb is said to be: the house stands on a flat floor that is low along z)
+    assert_eq!((Import::named(&name), up, name.ends_with(".glb")), (Ok(()), Up::Z, true));
     assert_eq!(std::fs::read(kept.join(&name)).unwrap(), glb(&parts));
     assert_eq!(name, name_of(&glb(&parts), Kind::Glb));
     // found again from the folder alone, with the file it came from gone; the same mesh, and the same one in hand each time
@@ -441,7 +442,7 @@ fn a_file_is_taken_in_under_a_name_from_its_content_and_found_again_by_that_name
     // a different file is a different name, and a PLY file's up is z
     let other = from.join("ball.ply");
     std::fs::write(&other, ply(&ball(), true)).unwrap();
-    let (second, up) = adopt_into(&kept, &other).unwrap();
+    let (second, up, _) = adopt_into(&kept, &other).unwrap();
     assert!(second != name && second.ends_with(".ply") && up == Up::Z);
 
     // what is not there, and what is no name of the folder's: nothing outside it is ever looked at
@@ -473,7 +474,7 @@ fn a_form_is_given_its_mesh_from_the_folder_and_built_once_for_all_who_ask() {
     let from = scratch("attach");
     let path = from.join("gem.obj");
     std::fs::write(&path, obj(&made::gem().parts(48.0))).unwrap();
-    let (name, up) = adopt(&path).unwrap();
+    let (name, up, _) = adopt(&path).unwrap();
     let mut spec = Spec { form: Form::Imported, points: vec![brickloft_core::DVec3::new(0.5, 0.5, 0.5)], radius: 24.0, fill: true, import: Import { name: name.clone(), up, ..Import::default() }, ..Spec::default() };
     assert!(brickloft_core::spec::build(&spec).unwrap_err().contains("is not in the imports folder"));
     attach(&mut spec);
@@ -612,7 +613,7 @@ fn a_program_driving_the_editor_names_a_mesh_in_the_folder_and_can_name_nothing_
     let from = scratch("mcp");
     let path = from.join("lumpy.ply");
     std::fs::write(&path, ply(&made::rainbow_ball(12).parts(20.0), true)).unwrap();
-    let (name, _) = adopt(&path).unwrap();
+    let (name, _, _) = adopt(&path).unwrap();
     let outside = from.join("0123456789abcdef.glb");
     std::fs::write(&outside, glb(&ball())).unwrap();
     let mut state = State::new();
@@ -642,4 +643,21 @@ fn a_program_driving_the_editor_names_a_mesh_in_the_folder_and_can_name_nothing_
     assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "import": outside_text } }), || 0.0).is_err());
     assert_eq!(state.spec.import, was);
     let _ = std::fs::remove_dir_all(&from);
+}
+
+#[test]
+fn which_way_is_up_is_told_from_a_mesh_a_network_made_and_else_from_what_it_stands_on() {
+    // the figure as such a program writes it: within a box one unit across, coloured by its points, z up, in a .glb
+    let made = made::figure(32).parts(1.0);
+    assert!(looks_reconstructed(&made) && up_of(&made, Kind::Glb) == Up::Z && up_of(&made, Kind::Obj) == Up::Z);
+    // the same at the size a modelling program would save it, or with no colours, is not taken for one
+    assert!(!looks_reconstructed(&made::figure(32).parts(102.0)) && !looks_reconstructed(&Parts { colours: Vec::new(), ..made.clone() }));
+    // a house standing on its floor: up is the axis its flat underside is low along, whichever that is in the file
+    let house = made::house().parts(56.0);
+    assert_eq!((guess_up(&house), up_of(&house, Kind::Glb)), (Some(Up::Z), Up::Z));
+    let lying = Parts { positions: house.positions.iter().map(|p| [p[0], p[2], -p[1]]).collect(), ..house.clone() };
+    assert_eq!(guess_up(&lying), Some(Up::Y));
+    // a ball stands on nothing, and goes by its file's kind
+    let ball = made::sphere(12).parts(10.0);
+    assert_eq!((guess_up(&ball), up_of(&ball, Kind::Glb), up_of(&ball, Kind::Ply)), (None, Up::Y, Up::Z));
 }

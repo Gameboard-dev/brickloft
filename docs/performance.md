@@ -679,6 +679,15 @@ the laying of the stretched pieces, which is on one thread (696 ms of
 the last row's 2,315), and threads waiting for their turn on a
 processor that other work held.
 
+A mesh with holes takes longer: its runs of empty cells are tried at
+five places each, and the skin over each hole is worked out at every
+corner of its cells. The ball with two wide holes, 96 across, went from
+2.0 to 7.7 seconds on one thread (1.6 on 16) when its holes began to be
+closed properly. Real meshes from a reconstruction network have a few
+hundred open edges and small holes, and five of them fitted 60 long took
+0.9 to 4.0 seconds on one thread and 0.2 to 1.5 on 16, with 20 to 45 MB
+at their peak, the processor being at 90 to 100% from other work.
+
 Opening the figure's file, which is 2.4 MB, reading it, indexing its
 124,136 triangles, fitting it 80 long and drawing it took 0.76 seconds
 from the request to the answer, through the editor's MCP connection.

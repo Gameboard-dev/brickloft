@@ -4430,6 +4430,109 @@ alone, so a save opens after the original file has moved, and a form can
 never name a file outside that folder: a name of that shape has nothing
 in it that a path could be made of.
 
+#### Holes, thin sheets and pieces on a thread
+
+The three shortcuts of the scanned route hold for a closed mesh. A mesh
+made by a network from a picture is rarely closed: of 29 such meshes
+(made by TripoSR, run by Lux3D on the author's machine) every one had
+open edges, between 120 and 776 of them. Four kinds of mesh were made by
+rule to stand for what such meshes have (`core/src/mesh/made.rs`): a ball
+with two holes 53 and 25 cells wide, the figure from the chest up with
+nothing underneath, a bowl and a plate a third of a cell thick, and a
+ball with a lump hanging off it by a rod. Overlapping shells (three balls
+run together, and the house) were already built correctly, since the
+winding number counts a point inside two shells as inside.
+
+**Holes.** At the rim of a hole the winding number is not a whole
+number. It runs smoothly from its value on one side of the surface to
+its value on the other, and the solid is taken to be wherever it is over
+one half. That draws a skin across the hole, flat if the rim lies in a
+plane. The skin passes through cells no triangle touches, so a run of
+such cells can be part inside and part outside, and settling the run by
+one number painted the whole of it one or the other. The mesh now knows
+its open edges (an edge only one triangle has), and a mesh with any is
+scanned with two changes. A run of untouched cells is tried at its two
+ends and three places between. If those are all near one whole number
+it is settled as before. If not, the winding number is worked out at the
+corners of each of its cells: a cell with all eight corners inside is
+full, and a cell with some in and some out is a cell of the skin, with
+its 64 samples read off its corners and a piece fitted to them as to any
+cell of the surface. Stretched pieces are then laid along the skin like
+any other face. A cell that holds a triangle of a rim has the number
+worked out at each of its samples, since near a rim it changes within
+the cell by more than the triangles crossed account for.
+
+**Thin sheets.** A cell takes the unit piece that agrees with most of
+its samples, and for a sheet a third of a cell thick that piece is
+nothing. So a cell left empty, or with only a tetrahedron in it, is
+looked at again along the axis the surface most nearly faces. If the
+line through the cell's middle goes into the solid and comes out again
+within a cell's thickness, through faces that are nearly opposite, and
+the middle of the two crossings is in this cell, the cell is filled with
+a cube, and no stretched piece is laid over it afterwards. Each column
+of cells across the sheet has one such cell. Two things were tried first
+and are in the code's comments: judging the sheet straight in from the
+nearest point of the surface left holes in a curved sheet, and filling
+every such cell whatever piece it held made a sheet over half a cell
+thick, which ramps fit well, rougher than before. The faces must be
+within 18 degrees of opposite, so that the eave of a roof, whose two
+faces meet at 27 degrees, stays a ramp.
+
+**Pieces on a thread.** Loose pieces were already dropped by size. A
+scrap that hangs on the model by a thread is not loose. With the
+outermost layer of cells taken off everything, a neck two cells through
+or less is gone, and what it joined falls apart into the body, which is
+the piece of the most cells, and lumps. A lump smaller than the size
+set is dropped with its layer. A part that is thin all along, such as a
+chair's leg, has nothing left with its layer off and so is no lump: it
+stays with what it is joined to. A mesh that looks made by a network
+starts with pieces under 12 microbricks dropped.
+
+<img src="images/mesh/holes-before.png" width="340" alt="A ball with a wide hole in its top, before: the hole is closed by a flat lid with a ragged edge, and a second hole in its side by streaks"> <img src="images/mesh/holes-after.png" width="340" alt="The same ball after: both holes are closed by a smooth skin of sloped pieces">
+
+<img src="images/mesh/sheets-before.png" width="340" alt="A bowl and a plate a third of a cell thick, before: the bowl is scattered crumbs and the plate four strips"> <img src="images/mesh/sheets-after.png" width="340" alt="The same after: the bowl and the plate are whole, one cell thick, in steps">
+
+| Mesh | Size | | Bricks | Discrepancy | Bare surface | Steps per surface cell | ms, 1 thread | Peak memory |
+|---|---|---|---|---|---|---|---|---|
+| Ball with two holes | 96 | before | 7,616 | 10.00% | 0.00% | 0.086 | 2,012 | 31 MB |
+| | | after | 7,511 | 0.71% | 0.00% | 0.074 | 7,740 | 33 MB |
+| The same, in blocks | 96 | before | 3,954 | 10.81% | 0.04% | 0.438 | 463 | 19 MB |
+| | | after | 3,409 | 1.53% | 0.00% | 0.435 | 8,457 | 18 MB |
+| Figure from the chest up | 100 | before | 2,567 | 2.51% | 0.00% | 0.116 | 743 | 21 MB |
+| | | after | 2,589 | 2.41% | 0.00% | 0.108 | 3,533 | 21 MB |
+| Sheets 0.6 thick | 117 | before | 5,114 | 40.77% | 0.00% | 0.248 | 1,101 | 14 MB |
+| | | after | 5,640 | 44.15% | 0.00% | 0.282 | 717 | 15 MB |
+| Sheets 0.3 thick | 117 | before | 1,466 | 87.73% | 16.43% | 0.164 | 1,098 | 13 MB |
+| | | after | 4,201 | 182.65% | 0.00% | 0.631 | 848 | 15 MB |
+| Three balls run together | 77 | before and after | 3,269 | 1.70% | 0.00% | 0.075 | 708 | 15 MB |
+| Figure, closed | 100 | before and after | 4,462 | 1.81% | 0.00% | 0.078 | 1,792 | 29 MB |
+
+Discrepancy is measured against the solid the winding number defines,
+asked for at every sample with no shortcut. Bare surface is the share of
+the mesh's surface with no brick in the cell a point of it is in or in
+the 26 cells round that one. It is what shows a thin part left out: the
+sheets a third of a cell thick had a sixth of their surface bare and are
+now whole, at the price of a volume three times their own, which is why
+their discrepancy rises. A mesh with holes takes three to four times as
+long as it did, because its runs are tried at five places and its skins
+at every corner; a closed mesh takes the same time and gives the same
+bricks as before. The times were taken with the processor at 90 to 100%
+from other work.
+
+**Which way is up.** A file's kind says little about which way is up:
+the program that makes most of the meshes opened here writes z up in
+its `.glb` files, against the glTF text. So it is guessed when a file is
+opened ([`editor/src/import.rs`](../editor/src/import.rs)). A mesh that
+is coloured by its points and lies within 0.6 of the origin every way,
+at least half a unit long, is taken to be made by a network, and z is
+up: all 29 of the files above are told so. Any other mesh is looked at
+for a flat underside: the axis along which the most of its surface lies
+within a two-hundredth of its height of its lowest point. Tried on the
+same 29 files with nothing else to go by, that put 17 the right way up,
+7 on their sides and gave no answer for 5, so it is the second guess
+and not the first. The setting stays in the panel for when both are
+wrong.
+
 #### What it does not do
 
 - A plane that is not on the lattice is not moved onto it. The house at
@@ -4440,10 +4543,13 @@ in it that a path could be made of.
 - A ridge or a hip where two slopes meet is left to unit pieces. The
   hip and inner-corner bricks of section 2 are not offered.
 - A curved surface gets no layout of its own.
-- A hole in the mesh is closed by the winding number where it falls to
-  one half. The scanned route settles a run of untouched cells by one
-  number, so the skin over a hole wider than a cell is stepped. The runs
-  that cross such a skin are still to be found and their cells sampled.
+- A sheet with one side only (a flag drawn as a single layer of
+  triangles) is not built: nothing is inside it. A closed sheet thinner
+  than a cell is built a cell thick, in cubes.
+- A piece that hangs on the model by a neck more than two cells through
+  stays, whatever it is, and so does a thread that is thin all along.
+- The skin drawn over a hole takes its colour from the nearest triangle,
+  since it has none of its own.
 - The winding number uses the arctangent, which not every system's
   library computes alike to the last digit. A sample would be decided
   differently only where the number is within that digit of one half.

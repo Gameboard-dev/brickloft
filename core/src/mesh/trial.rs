@@ -107,16 +107,16 @@ pub fn fit(stand: &Stand, route: Route, max_ext: i32, threads: Threads) -> Fitte
         return Fitted { bricks: fit.bricks, solid: fit.solid, error: fit.error, stages: vec![("fitted", lap())] };
     }
     let n = max.map(|v| v as usize);
-    let (mut shape, sampled, solid, mut error, facing, mut stages) = if route == Route::Scan {
+    let (mut shape, sampled, solid, mut error, facing, kept, mut stages) = if route == Route::Scan {
         let found = super::scan::scan(stand, n, true, threads);
-        (found.shape, found.sampled, found.solid, found.error, Some(found.facing), found.stages)
+        (found.shape, found.sampled, found.solid, found.error, Some(found.facing), found.kept, found.stages)
     } else {
         let (shape, sampled, solid, error) = classify(&f, [0; 3], n, &opts);
-        (shape, sampled, solid, error, None, vec![("unit pieces", lap())])
+        (shape, sampled, solid, error, None, Vec::new(), vec![("unit pieces", lap())])
     };
     error = (error as i64 + drop_spikes(&mut shape, &sampled, n)) as u64;
     let surface = |k: usize, middle: DVec3| facing.as_ref().map_or_else(|| stand.surface(middle), |facing| facing[k]);
-    let (mut bricks, saved, found, laid) = guided(&surface, &mut shape, &sampled, n, max_ext.max(1) as usize, 0, threads);
+    let (mut bricks, saved, found, laid) = guided(&surface, &mut shape, &sampled, n, max_ext.max(1) as usize, 0, &kept, threads);
     stages.push(("stretched pieces found", found));
     stages.push(("stretched pieces laid", laid));
     lap();
@@ -259,7 +259,12 @@ struct Cand {
 /// pieces it replaces. Above 0 it may be further by `price` for each brick
 /// it saves, which is one for each cell of the surface it covers but the
 /// first.
-pub(super) fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3], max_ext: usize, price: u32, threads: Threads) -> (Vec<CellBrick>, i64, f64, f64) {
+///
+/// No piece is laid over a cell of `kept`: those were filled to keep a
+/// thin sheet whole (see `scan`), and a piece that agreed with more of
+/// their samples would be one that left the sheet out again.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), shape: &mut [u8], sampled: &[(usize, u64)], n: [usize; 3], max_ext: usize, price: u32, kept: &[usize], threads: Threads) -> (Vec<CellBrick>, i64, f64, f64) {
     let mut lap = clock();
     let strides = [1, n[0], n[0] * n[1]];
     let mut unit = [0u64; 256];
@@ -352,6 +357,9 @@ pub(super) fn guided(surface: &(dyn Fn(usize, DVec3) -> (DVec3, DVec3) + Sync), 
     }
     cands.sort_by_key(|c| (std::cmp::Reverse(worth[&layout(c)]), layout(c), std::cmp::Reverse(c.gain), c.start, c.mask));
     let mut taken = vec![false; shape.len()];
+    for &cell in kept {
+        taken[cell] = true;
+    }
     let (mut bricks, mut saved) = (Vec::new(), 0i64);
     for c in &cands {
         let ext = c.ext.map(|v| v as usize);

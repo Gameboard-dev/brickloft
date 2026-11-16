@@ -110,6 +110,12 @@ pub struct Mesh {
     pub id: u64,
     /// how many triangles were turned over to face the way their neighbours do
     pub turned: usize,
+    /// for each triangle, in the hierarchy's order, whether one of its
+    /// edges is no other triangle's: it is at the rim of a hole, or of the
+    /// whole mesh if the mesh is a sheet
+    open: Vec<bool>,
+    /// how many such edges there are in all: 0 for a mesh that is closed
+    pub open_edges: usize,
 }
 
 impl std::fmt::Debug for Mesh {
@@ -246,7 +252,7 @@ impl Mesh {
         if corners.is_empty() {
             return Err(MeshError::Empty);
         }
-        let turned = oriented(&points, &mut corners);
+        let (turned, open, open_edges) = oriented(&points, &mut corners);
         let corner_points = |t: &[u32; 3]| t.map(|v| points[v as usize]);
         // the triangles in the hierarchy's order: sorted into it by their middles
         let middles: Vec<[f32; 3]> = corners.iter().map(|t| { let c = corner_points(t); [0, 1, 2].map(|k| (c[0][k] + c[1][k] + c[2][k]) / 3.0) }).collect();
@@ -256,6 +262,7 @@ impl Mesh {
         build(&mut nodes, &mut order, 0, &middles, &tri_points);
         let tris: Vec<[[f32; 3]; 3]> = order.iter().map(|&t| tri_points[t as usize]).collect();
         let corners: Vec<[u32; 3]> = order.iter().map(|&t| corners[t as usize]).collect();
+        let open: Vec<bool> = order.iter().map(|&t| open[t as usize]).collect();
         // (no picture, no list: a mesh painted by its points alone keeps nothing for each triangle)
         let image_of: Vec<u16> = if images.is_empty() || image_of.is_empty() || uvs.is_empty() { Vec::new() } else { order.iter().map(|&t| image_of[kept[t as usize]]).collect() };
         let (uvs, images) = if image_of.is_empty() { (Vec::new(), Vec::new()) } else { (uvs, images) };
@@ -268,11 +275,16 @@ impl Mesh {
         uvs.iter().flatten().for_each(|v| mix(&v.to_le_bytes()));
         image_of.iter().for_each(|v| mix(&v.to_le_bytes()));
         images.iter().for_each(|i| mix(&i.rgb));
-        Ok(Mesh { tris, corners, colours, uvs, images, image_of, nodes, half: (hi - lo) / longest / 2.0, id, turned })
+        Ok(Mesh { tris, corners, colours, uvs, images, image_of, nodes, half: (hi - lo) / longest / 2.0, id, turned, open, open_edges })
     }
 
     pub fn triangles(&self) -> usize {
         self.tris.len()
+    }
+
+    /// Whether triangle `tri` is at the rim of a hole (see [`Mesh::open_edges`]).
+    pub fn open(&self, tri: usize) -> bool {
+        self.open[tri]
     }
 
     /// How much memory the mesh and its hierarchy take, in bytes.
@@ -510,7 +522,9 @@ fn build(nodes: &mut Vec<Node>, order: &mut [u32], first: u32, middles: &[[f32; 
 }
 
 /// Turn triangles over so that each faces the way its neighbours do, and
-/// each shell faces outwards. Returns how many were turned.
+/// each shell faces outwards. Returns how many were turned, which
+/// triangles have an edge that no other triangle shares, and how many such
+/// edges there are.
 ///
 /// Two triangles are neighbours if they share an edge that no third
 /// triangle has. Points at the same place are one point for this, since a
@@ -524,7 +538,7 @@ fn build(nodes: &mut Vec<Node>, order: &mut [u32], first: u32, middles: &[[f32; 
 /// A shell that is meant as a hollow inside another faces inwards on
 /// purpose, and is turned out with the rest, so the hollow is filled. A
 /// build from bricks has its inside filled or not by a setting of its own.
-fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
+fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> (usize, Vec<bool>, usize) {
     use std::collections::HashMap;
     // each point's first twin, by its exact place
     let mut first: HashMap<[u32; 3], u32> = HashMap::with_capacity(points.len());
@@ -547,9 +561,15 @@ fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
             *slot = (other, disagree);
         }
     };
+    let (mut open, mut open_edges) = (vec![false; corners.len()], 0);
     let mut i = 0;
     while i < edges.len() {
         let run = edges[i..].iter().take_while(|e| (e.0, e.1) == (edges[i].0, edges[i].1)).count();
+        // an edge of one triangle only is the rim of a hole
+        if run == 1 {
+            open[edges[i].2 as usize] = true;
+            open_edges += 1;
+        }
         if run == 2 && edges[i].2 != edges[i + 1].2 {
             let disagree = edges[i].3 == edges[i + 1].3;
             put(edges[i].2, edges[i + 1].2, disagree);
@@ -593,7 +613,7 @@ fn oriented(points: &[[f32; 3]], corners: &mut [[u32; 3]]) -> usize {
             }
         }
     }
-    turned
+    (turned, open, open_edges)
 }
 
 #[cfg(test)]
@@ -636,6 +656,24 @@ mod tests {
             assert!((mesh.winding_exact(DVec3::ZERO) - 1.0).abs() < 1e-6 && mesh.winding_exact(DVec3::splat(0.6)).abs() < 1e-6);
             assert!((mesh.winding(DVec3::ZERO) - 1.0).abs() < 0.02 && mesh.winding(DVec3::splat(0.6)).abs() < 0.02);
         }
+    }
+
+    #[test]
+    fn the_rim_of_a_hole_is_known_and_a_closed_mesh_has_none() {
+        for closed in [made::sphere(12), made::house(), made::torus(8), made::snowman()] {
+            assert_eq!((closed.open_edges, (0..closed.triangles()).filter(|t| closed.open(*t)).count()), (0, 0), "{closed:?}");
+        }
+        // one triangle taken out of a ball: three edges are left with one triangle each, and three triangles have one
+        let (points, mut triangles) = made::sphere_parts(12);
+        triangles.remove(40);
+        let holed = Mesh::new(&points, &triangles, &[]).unwrap();
+        assert_eq!((holed.open_edges, (0..holed.triangles()).filter(|t| holed.open(*t)).count()), (3, 3));
+        // a file that writes each point again for every triangle that uses it is still one closed skin: points at one place are one point
+        let apart: Vec<[f32; 3]> = made::sphere_parts(12).1.iter().flatten().map(|v| points[*v as usize]).collect();
+        let each: Vec<[u32; 3]> = (0..apart.len() as u32 / 3).map(|t| [3 * t, 3 * t + 1, 3 * t + 2]).collect();
+        assert_eq!(Mesh::new(&apart, &each, &[]).unwrap().open_edges, 0);
+        // a sheet is all rim round its edge
+        assert!(made::bust(24).open_edges > 20 && made::holed_ball(12).open_edges > 10);
     }
 
     #[test]

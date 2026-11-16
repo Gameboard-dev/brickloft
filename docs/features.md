@@ -886,10 +886,10 @@ missing. Opening the same file there again brings the form back.
 | Setting | What it does | What it costs |
 |---|---|---|
 | **Size (longest side)** | The length of the model's longest side in microbricks. The light blue dot sets it by dragging, and Ctrl + scroll changes it too. The model stays standing on its foot. | Twice the size is about four times the bricks and the time, and eight times the memory. The bricks follow the surface more closely, since they are the same size on a larger model. |
-| **Up in the file** | Which of the file's axes points up: Y for glTF and most OBJ files, Z for most PLY files. | Changing it reads the file again. |
+| **Up in the file** | Which of the file's axes points up. It is guessed when the file is opened: Z for a mesh that looks made by a network from a picture, else the axis the mesh has a flat underside along, else Y for `.glb` and `.obj` files and Z for `.ply`. | Changing it reads the file again. |
 | **Bricks** | **Smoothed** lays ramps and corner pieces in the model's faces, stretched to the whole-number slope nearest each face. **Blocks** uses cubes alone. | On the figure 100 tall, Smoothed is 4,462 bricks at 1.8% discrepancy and Blocks is 1,355 at 4.2% with four times the area of steps. Blocks is two to four times as fast. |
 | **Fill the inside** | Ticked, the inside is brick, in boxes as large as **Longest brick** allows. Unticked, it is empty behind a wall of the **Shell thickness**. | The inside costs few bricks either way. |
-| **Drop loose pieces under** | Leaves out every piece of the build that touches no other piece and is smaller than this, for the scraps that float round a model made from a photograph. | A scrap that touches the body by one brick stays. |
+| **Drop loose pieces under** | Leaves out every piece of the build smaller than this that touches no other piece, or that hangs on the rest by a neck two microbricks through or less: the scraps that float round a model made from a photograph. Such a model starts at 12, any other at 0. | The largest piece always stays, and so does a part that is thin all along, such as a chair's leg. A lump on a thicker neck stays too. |
 | **Colours** | How many colours the model's own are reduced to, up to 32. 0 leaves them out. | More colours are more bricks, since a brick is one colour: the figure is 3,264 bricks in 4 colours and 3,940 in 32. |
 | **Simplify** | What a brick is worth in microbricks of disagreement. Above 0, a stretched piece may stand further from the model for each brick it saves. | At 0.25 the figure is 3,247 bricks in place of 4,462, at 3.1% discrepancy in place of 1.8%. |
 
@@ -902,6 +902,11 @@ the budget, which takes several times as long as naming a size.
 The model's colours are listed under **Colour**, where each can be
 changed, and choosing another colouring there (one colour, a blend,
 stripes) paints the model that way in place of its own colours.
+
+A mesh need not be closed. A hole in it is covered by a smooth skin, and
+a model with no underside is closed off across its open edge. A closed
+sheet thinner than a microbrick, such as a cloak or a leaf, is built one
+microbrick thick. A sheet with one side only is not built.
 
 A model can be moved, turned by quarter turns, flipped, put on a grid of
 its own and joined to other forms. It cannot be mirrored and takes no

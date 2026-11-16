@@ -39,7 +39,7 @@ fn main() {
     let (turn, tilt) = (numbers.first().copied().unwrap_or(35.0).to_radians(), numbers.get(1).copied().unwrap_or(35.0).to_radians());
     // (a mesh file to open: taken in first, so that the spec can name it)
     let mesh: Option<String> = args[2..].iter().find_map(|a| a.strip_prefix("mesh=")).map(|path| {
-        let (name, up) = brickloft_editor::import::adopt(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let (name, up, _) = brickloft_editor::import::adopt(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let up = brickloft_core::mesh::form::UPS.iter().find(|u| u.0 == up).map_or("y", |u| u.1);
         format!("form = imported\nfill = true\npoints = 0.5,0.5,0.5\nimport = {name},{up}")
     });
