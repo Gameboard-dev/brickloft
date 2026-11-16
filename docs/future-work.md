@@ -1,8 +1,10 @@
 # Future work
 
-What is planned and not yet built: more for Claude to do, and what
-remains for joined forms, the patterns, the plants and the furniture. None of it changes
-how forms are fitted today (see [algorithm.md](algorithm.md)).
+What is planned and not yet built: more for Claude to do, what remains
+for joined forms, the patterns, the plants and the furniture, and a plan
+for forms made by other programs (MarkovJunior models, and meshes
+generated from a prompt). None of it changes how forms are fitted today
+(see [algorithm.md](algorithm.md)).
 
 ## More for Claude to do through MCP
 
@@ -228,3 +230,246 @@ Code under a licence the project cannot take was not ported and is not to
 be. That rules out the GPL generators (Veloren's `tree.rs`,
 friggog/tree-gen, Blender's Sapling add-on and Arbaro) and proctree.js,
 which carries no licence.
+
+## Forms made by other programs
+
+Two requests share one piece of work. A MarkovJunior model produces a grid
+of coloured cells, and a text-to-3D model produces a triangle mesh. Neither
+is one of the editor's forms, so each needs a way in, and both then need
+fitting with bricks. The plan below is not built. It was written on
+2026-11-16 from each project's public page and licence file, read that day.
+
+### What the two need in common
+
+A new form, **Imported**, holds what another program made: a grid of
+cells, or a mesh. It has a size in microbricks, a seed where the source has
+one, and the usual place, grid, colours and quarter turns. Its bricks come
+from one of two fitters, chosen in the panel.
+
+- **Blocks.** Each cell of a grid becomes a cube of a whole number of
+  microbricks, and cubes of one colour are joined into the largest boxes
+  ([`pattern::joined`](../core/src/pattern.rs) does this today for the
+  tiles of a pattern). The result is exact and has no sloped brick. It
+  suits a model whose cells are meant to be seen as cells, such as a
+  dungeon or a pixel picture.
+- **Smoothed.** The grid or mesh is turned into a distance function and
+  given to the fitters every other form uses, so a staircase of cells that
+  stands for a roof becomes ramps and a round tower becomes wedges
+  ([algorithm.md](algorithm.md), sections 4 and 5). A grid's distance
+  function is read from its cells, smoothed over one cell. A mesh's is its
+  distance to the nearest triangle, signed by the winding number, which
+  still gives an inside and an outside when the mesh has holes or
+  overlapping shells, as generated meshes often have.
+
+The second fitter is where Zhou, Chen and Xu's method applies
+([doi:10.1111/cgf.13603](https://doi.org/10.1111/cgf.13603)). Their
+abstract says the system keeps an architectural model's visual features,
+which it names as repeating components, shape details and planarity, and
+maps them to brick types, after deforming the mesh so that it agrees with
+the positions bricks can take. Its brick library is 11 cuboid, 13 sloping
+and 5 circular bricks. The full text could not be opened when this was
+written, so the three ideas below are taken from the abstract and are to be
+checked against the paper before any is built.
+
+- **Planes snapped to the grid.** A large flat face a fraction of a cell
+  off the grid is fitted as a ragged surface. Finding the mesh's large
+  planes and moving each to the nearest grid plane first makes a wall one
+  layer of boxes. This is the paper's deformation step, and it matters
+  only for meshes: a MarkovJunior grid is on the grid already.
+- **Repeats fitted once.** A model built from tiles repeats the same block
+  of cells many times. Fitting each distinct block once and copying its
+  bricks gives every window the same bricks and costs one fit, where
+  fitting the whole grid would cost one for each copy and could lay two
+  identical windows differently.
+- **Features kept at least two cells thick.** A railing or a mullion
+  thinner than a brick is lost by any fitter. Thickening it to the least a
+  brick can show keeps it, at the cost of exactness there.
+
+Brickadia's wedges stretch to any whole-number slope, which the paper's 13
+fixed sloping bricks do not, so the existing fitters are kept and the paper
+supplies the three steps before them. Its layout search for bricks that
+hold together is not needed: a brick in the game does not fall.
+
+A form has eight colour numbers today
+([`MOST_COLOURS`](../editor/src/paint.rs)). MarkovJunior's palette has 16
+and more, and a mesh's texture has thousands. An Imported form therefore
+carries its own list of colours, reduced to 32 at most by grouping the
+nearest together, and each brick takes the colour of the cell or the
+triangle nearest its middle. A sloped brick is one colour, as everywhere.
+
+### MarkovJunior
+
+[MarkovJunior](https://github.com/mxgmn/MarkovJunior) is a language of
+rewrite rules, read from an XML file, and an interpreter for it in C#. It
+is under the MIT licence, so it can be called, and it could be ported. Its
+models make mazes, dungeons, rivers and, in
+[Apartemazements](https://github.com/mxgmn/MarkovJunior/blob/main/models/Apartemazements.xml),
+buildings in three dimensions.
+
+The interpreter takes no arguments. It reads `models.xml` from the folder
+it is started in, runs every model listed there, deletes whatever is in
+`output/` and writes each result as `output/<name>_<seed>.png` for a flat
+model or `output/<name>_<seed>.vox` (the MagicaVoxel format) for one in
+three dimensions. A model may also read files from `resources/`, as
+Apartemazements reads its tiles. These facts shape the first stage.
+
+**Stage 1: call the program.** The panel gains, for an Imported form, a
+box for the path of a model's XML file, a size, a seed and the folder
+where MarkovJunior is installed. To run a model the editor:
+
+1. makes a folder of its own under the system's temporary folder
+   (see [`places.rs`](../editor/src/places.rs)), because the program
+   empties `output/` wherever it runs and would overwrite the player's own
+   `models.xml`;
+2. copies the model's file into `models/` there, writes a `models.xml`
+   naming that one model with the size, the dimension and the seed, and
+   copies `resources/` from the installed folder once, keeping the copy
+   for later runs;
+3. starts the installed program with that folder as its working folder,
+   as a program and a list of arguments and never through a shell, with a
+   limit on how long it may run and a Cancel button that stops it;
+4. reads the one file that appears in `output/`. A `.vox` file is read by
+   a reader written for it, which is small: the format is a list of sizes
+   and of cells, each a position and a palette number in one byte apiece,
+   so no grid is more than 256 cells along a side. A `.png` is read with
+   the `png` crate the editor already builds, the model having been run
+   with `pixelsize` 1 so that one pixel is one cell.
+
+What comes back is treated as data from a stranger: sizes and counts are
+checked against limits before anything is allocated, and a file that does
+not parse is reported and dropped. The seed is passed in `models.xml`, so a
+saved form names the model's file, its size and its seed and is run again
+when opened. If the program or the file is missing the form opens empty
+with a message, as a form with a problem does today.
+
+A flat model becomes a floor or a wall a chosen number of microbricks
+deep. One in three dimensions becomes a solid.
+
+Not in stage 1: the browser page, which cannot start a program; and
+animation, which the interpreter can save as a row of pictures.
+
+**Stage 2: read the language in Rust.** Calling the program needs .NET on
+the player's computer and a second or more to start each time. An
+interpreter in `core/` would run in the browser page, give the same grid
+from the same seed on every computer, and let a size slider rebuild as it
+is dragged. The language's nodes are few (one, all, prl, markov, sequence,
+then path, map, convolution, convchain and wfc), and the first five run
+most of the flat models. It would be written from the language's
+description and checked against the C# program's output for each model
+shipped with it, seed for seed. The original is MIT, so its structure may
+be followed with credit. Other ports exist, one of them in Rust, whose
+licence has not been checked; none is to be copied without that.
+
+Stage 2 is only worth its cost if stage 1 is used. It is the larger piece:
+the XML reader alone is a new dependency or a few hundred lines.
+
+### A form from a prompt
+
+**Cube cannot be used as asked.** The licence file in
+[Roblox/cube](https://github.com/Roblox/cube/blob/main/LICENSE) is titled
+"CUBE3D RESEARCH-ONLY RAIL-MS LICENSE", covers "Cube3d-v0.1 and related
+inference code", and allows academic or research use only. Making builds
+to play with in Brickadia is not research, so wiring Cube into Brickloft
+would put every player who used it outside the licence. Two things are
+unclear and would need Roblox's answer: the model card for the current
+weights, `cube3d-v0.5`, says only "openrail", and the licence file names
+the older version. Until Roblox says otherwise the research-only text is
+the one to go by. Cube would also be a poor fit on other grounds: it asks
+for a graphics card with 16 GB of memory, or 24 GB for its fast mode, and
+its meshes have no colour.
+
+The alternatives, best first. Only the facts marked as read were checked
+on the projects' own pages; the others are to be confirmed before any is
+relied on.
+
+| Rank | Model | Licence | Input | Output | Needs | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | [TRELLIS](https://github.com/microsoft/TRELLIS) (Microsoft) | MIT for models and most code (read); two submodules have licences of their own, not yet read | text, or a picture | a textured mesh | an NVIDIA card with 16 GB; tested on Linux only | the best licence with the best result, for the few who can run it |
+| 2 | [Shap-E](https://github.com/openai/shap-e) (OpenAI) | MIT for the code (read); the weights' licence is to be confirmed | text, or a picture | a coloured mesh | far less than the others; to be measured | the one most players could run; coarser shapes |
+| 3 | TripoSR, Stable Fast 3D | to be confirmed | a picture only | a textured mesh | a mid-range card | needs a second model to turn the prompt into a picture first |
+| 4 | Hunyuan3D-2 (Tencent) | its community licence excludes the European Union, the United Kingdom and South Korea (as copies of it read; the original was not opened) | text, or a picture | a textured mesh | 16 GB or more | not usable where the licence does not reach |
+| 5 | Cube (Roblox) | research only (read) | text | a mesh without colour | 16 to 24 GB | not usable |
+
+The bridge is the same whichever model is chosen, so the plan does not
+depend on the ranking.
+
+**The bridge.** These models are Python programs with gigabytes of
+weights. Brickloft does not bundle Python, a model or its weights, and
+does not download them: the player installs a model and accepts its
+licence. What Brickloft ships is, for each model it supports, one short
+adapter script in a file of its own under `bridges/<model>/`, and the Rust
+code that starts it. The adapter is the only code in the project not in
+Rust, which the project's rule against other languages would have to allow
+for this one purpose.
+
+1. **Settings.** The panel's Imported form has a "Generative prompt" box,
+   a list of the models set up, and for each the path of its Python and of
+   its weights, kept with the editor's other settings.
+2. **Asking whether it can run.** Before anything is offered the editor
+   starts the adapter with `--check`. The adapter answers in one line of
+   JSON: whether its libraries load, which device it would use, how much
+   memory that device has, and whether the weights are where they should
+   be. The panel shows the answer in plain words, such as "TRELLIS needs
+   16 GB of graphics memory and this computer has 8", and offers Generate
+   only when the check passes.
+3. **Generating.** The editor starts the adapter as a program and a list
+   of arguments, the prompt being one of them, with the folder to write
+   into. A prompt is at most 500 characters and is never made part of a
+   command line that a shell reads. The adapter prints a line of progress
+   now and then, which the panel shows as plain text, cut to a fixed
+   length. Cancel stops the process. Generation takes from seconds to
+   minutes, so it runs beside the editor and never holds the window.
+4. **Reading the mesh.** The adapter writes one Wavefront OBJ file with a
+   colour for each vertex. The editor reads it with a reader of its own,
+   refusing more than a set number of vertices and triangles, any number
+   that is not finite, and any index out of range. The mesh is scaled to
+   the size asked for and fitted as described above.
+5. **Keeping it.** A generated mesh cannot be made again from its prompt,
+   since the models are not repeatable across computers. The mesh is
+   therefore saved beside the form in the editor's own folder, and a save
+   names it. A form whose mesh is missing opens empty with a message.
+
+Nothing leaves the computer: the prompt goes to a local process and the
+editor makes no request to any service.
+
+### Order of work
+
+| Step | What it gives | Depends on |
+|---|---|---|
+| 1 | The Imported form, the `.vox` and picture readers, the Blocks fitter, its own colours | nothing; any MagicaVoxel file can be opened |
+| 2 | Calling MarkovJunior (stage 1 above) | step 1 |
+| 3 | The Smoothed fitter for grids, with repeats fitted once | step 1 |
+| 4 | The OBJ reader, a mesh's distance function, the Smoothed fitter for meshes | step 3 |
+| 5 | The bridge and one adapter, for the model chosen | step 4, and a decision |
+| 6 | Planes snapped to the grid, thin features kept | step 4, and a reading of the paper |
+| 7 | MarkovJunior read in Rust (stage 2) | step 2 having been used |
+
+Steps 1 and 2 are the least work for something that can be used. Step 5 is
+the one that cannot be tested on every computer: whoever builds it needs a
+card that can run the model.
+
+### What is to be decided first
+
+- Whether an adapter script in Python may live in the repository.
+- Which model to support first: TRELLIS for its results, or Shap-E because
+  more computers can run it. Which graphics card the player's own computer
+  has settles much of this.
+- Whether Brickloft may start a program the player has installed at all.
+  It starts none today except the file manager.
+- Whether to ask Roblox about Cube's licence, or to leave Cube out.
+
+### What could go wrong
+
+- **A grid made for cells may not want smoothing.** A staircase in a
+  MarkovJunior model may be meant as a staircase. Blocks stays the usual
+  fitter for grids, and Smoothed is chosen by the player.
+- **Brick counts.** A grid 100 cells a side at 4 microbricks a cell is 64
+  million cells before joining. The limits a form already has apply, and
+  the size offered is held to what they allow.
+- **Generated meshes are rough.** They have thin sheets, floating pieces
+  and no flat faces. The winding number handles the first two; a mesh may
+  still fit badly, and the panel should show the mesh beside its bricks so
+  the player can judge.
+- **Licences change.** Each adapter records the licence it was written
+  against, and the check in step 2 of the bridge says which licence the
+  player is accepting.
