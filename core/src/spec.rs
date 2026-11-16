@@ -3408,6 +3408,49 @@ mod tests {
     }
 
     #[test]
+    fn a_band_pulled_up_steeply_is_sloped_not_stepped() {
+        // (the forms of two saved reports: small rings two deep, one point
+        // pulled seven and a half cells up and another three and a half)
+        let pulls = vec![(DVec3::new(-0.2841371226364836, -7.461477813377575, 0.5), DVec3::new(0.0, 0.0, 7.5)), (DVec3::new(2.0607225761290264, 8.346282243225843, 0.5), DVec3::new(0.0, 0.0, 3.5))];
+        let ring = Spec { form: Form::Circle, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 8.0, depth: 2, pulls, pull_reach: 8.0, simplify: 0.25, ..Spec::default() };
+        // Built from the flat band's bricks moved up and down, 23.9% of the
+        // thin one's outside was stepped faces and 16.3% of the thick one's.
+        for (thick, most) in [(2.0, 0.15), (3.5, 0.12)] {
+            let spec = Spec { thick, ..ring.clone() };
+            let built = build(&spec).unwrap();
+            let probe = Probe::new(&spec, built.grain).unwrap();
+            let survey = crate::surface::survey(&probe, &built).unwrap();
+            assert!(survey.stepped / survey.area < most, "thick {thick}: {} stepped", survey.stepped / survey.area);
+            // it went up by the pull
+            assert!(built.bricks.iter().map(|b| b.min[2] + b.ext[2]).max().unwrap() >= 8);
+            // No point is in two bricks, and no brick stands out of the
+            // band: a long brick of the outline moved whole stood a cell
+            // and a half clear of it.
+            let mut held_by: std::collections::HashMap<[i32; 3], Vec<usize>> = std::collections::HashMap::new();
+            for (n, b) in built.bricks.iter().enumerate() {
+                for k in 0..b.ext[0] * b.ext[1] * b.ext[2] {
+                    held_by.entry([b.min[0] + k % b.ext[0], b.min[1] + k / b.ext[0] % b.ext[1], b.min[2] + k / (b.ext[0] * b.ext[1])]).or_default().push(n);
+                }
+            }
+            for (cell, bricks) in &held_by {
+                for k in 0..64 {
+                    let p = [cell[0] as f64 + ((k % 4) as f64 + 0.37) / 4.0, cell[1] as f64 + ((k / 4 % 4) as f64 + 0.41) / 4.0, cell[2] as f64 + ((k / 16) as f64 + 0.43) / 4.0];
+                    let held = bricks
+                        .iter()
+                        .filter(|n| {
+                            let b = &built.bricks[**n];
+                            let u = [0, 1, 2].map(|i| (p[i] - b.min[i] as f64) / b.ext[i] as f64);
+                            crate::shapes::inside_shape(shape_info(b.mask).unwrap(), u[0], u[1], u[2])
+                        })
+                        .count();
+                    assert!(held <= 1, "thick {thick}: {held} bricks hold {p:?}");
+                    assert!(held == 0 || probe.distance(DVec3::from_array(p)) < 1.25, "thick {thick}: a brick holds {p:?}, {} outside the band", probe.distance(DVec3::from_array(p)));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_thick_tube_pulled_up_steeply_keeps_its_sides_smooth() {
         // (the form of a saved report: a ring 11 thick, one side pulled up 25)
         let ring = Spec { form: Form::Circle, points: vec![at(0.5, 0.5, 0.5)], radius: 44.0, thick: 11.0, tube: true, simplify: 0.25, ..Spec::default() };
