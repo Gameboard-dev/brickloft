@@ -675,7 +675,6 @@ fn workspace(ui: &mut Ui, state: &mut State) {
     });
 }
 
-/// How the form being edited is coloured.
 /// How the form's faces are laid: one texture in place of plain brick, or
 /// none. The patterns of `brickloft_core::pattern`, under the name a
 /// player looks for them by. (Not Materials, as it was called for a day:
@@ -984,6 +983,7 @@ fn brush(ui: &mut Ui, brush: &mut crate::state::Brush, touched: &mut Option<usiz
     }
 }
 
+/// How the form being edited is coloured.
 fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
     let paint = &mut state.paint;
