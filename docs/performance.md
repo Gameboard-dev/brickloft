@@ -41,6 +41,8 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Lawn, 128 by 88, ponds at two levels and a stream | 24 ms (8 ms) | 20,900 | 0% |
 | Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
 | Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
+| Dining table, sofa, cupboard, chandelier | under 0.01 ms each | 8 to 46 | 0% |
+| Potted plant, 26 wide, 46 tall | about 90 ms (a window box of four plants takes about 1.2 s) | about 1,300 | fitted, as a plant is |
 | Maze of 6 rings, radius 120, plain walls | 0.18 s (40 ms) | 1,122 | 3.4% |
 | The same with brick walls | 0.25 s (75 ms) | 25,045 | 3.4% |
 | The same with hedge walls 6 thick | 2.5 s (1.0 s) | 54,903 | 8.0% |

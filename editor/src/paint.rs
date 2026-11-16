@@ -294,6 +294,104 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [246, 244, 236], [232, 228, 214], [200, 180, 60]],
             &[[104, 146, 70], [72, 128, 76], [52, 104, 64], [116, 160, 96], [90, 130, 70], [240, 130, 30], [206, 50, 30], [50, 34, 26]],
         ],
+        // A style of furniture's colours are for what its pieces are made
+        // of, in the order of `brickloft_core::furniture`'s numbers: the
+        // wood, a second wood or the paint of its doors, metal, upholstery,
+        // a second cloth for loose cushions, the light of a lamp, pale
+        // linen (a shade, a mattress, a candle), and a top of another
+        // stuff. One set does for every kind, so that a room of one style
+        // is in one set of colours.
+        // pale oak with white fronts and grey cloth; walnut with teal; white with black
+        "modern furniture" => &[
+            &[[206, 178, 136], [232, 230, 224], [60, 62, 66], [120, 128, 134], [222, 196, 92], [255, 232, 160], [240, 238, 230], [224, 222, 216]],
+            &[[112, 76, 52], [96, 66, 46], [196, 160, 84], [44, 104, 110], [226, 220, 206], [255, 232, 160], [238, 232, 218], [58, 58, 62]],
+            &[[238, 236, 232], [226, 224, 220], [34, 34, 38], [52, 54, 60], [200, 60, 50], [255, 232, 160], [244, 242, 238], [40, 40, 44]],
+        ],
+        // pine with cream paint and sage cloth; painted blue; sage paint with oak
+        "farmhouse furniture" => &[
+            &[[196, 152, 98], [236, 228, 206], [70, 62, 56], [150, 170, 150], [228, 214, 180], [255, 232, 160], [244, 238, 222], [170, 126, 78]],
+            &[[176, 134, 88], [120, 150, 170], [60, 56, 54], [200, 180, 150], [236, 230, 214], [255, 232, 160], [244, 238, 222], [150, 110, 72]],
+            &[[170, 130, 84], [150, 166, 140], [196, 160, 84], [214, 190, 150], [176, 84, 70], [255, 232, 160], [244, 238, 222], [140, 104, 68]],
+        ],
+        // mahogany with green; walnut with burgundy; ivory paint with gilt and pale blue
+        "classical furniture" => &[
+            &[[110, 54, 38], [96, 46, 32], [200, 164, 84], [40, 84, 60], [200, 170, 100], [255, 232, 160], [240, 232, 210], [120, 60, 42]],
+            &[[92, 62, 44], [78, 52, 38], [204, 170, 90], [120, 34, 44], [214, 196, 150], [255, 232, 160], [240, 232, 210], [100, 70, 50]],
+            &[[232, 224, 204], [240, 234, 218], [206, 170, 88], [150, 170, 196], [226, 200, 150], [255, 232, 160], [244, 240, 228], [214, 204, 180]],
+        ],
+        // weathered oak; oak with barn red; grey driftwood
+        "rustic furniture" => &[
+            &[[136, 104, 74], [118, 90, 64], [58, 54, 52], [150, 110, 80], [190, 170, 140], [255, 232, 160], [232, 224, 204], [156, 122, 88]],
+            &[[128, 96, 68], [140, 52, 44], [50, 48, 46], [96, 110, 90], [214, 200, 170], [255, 232, 160], [232, 224, 204], [150, 116, 84]],
+            &[[150, 144, 134], [128, 122, 112], [60, 58, 56], [110, 120, 130], [220, 214, 200], [255, 232, 160], [232, 228, 216], [168, 162, 150]],
+        ],
+        // black steel with oak and leather; raw steel with walnut; steel with concrete
+        "industrial furniture" => &[
+            &[[150, 110, 70], [126, 92, 60], [38, 38, 42], [90, 70, 56], [176, 160, 140], [255, 232, 160], [226, 220, 206], [176, 132, 84]],
+            &[[104, 74, 52], [88, 62, 44], [110, 114, 120], [60, 62, 66], [196, 120, 60], [255, 232, 160], [226, 220, 206], [120, 86, 60]],
+            &[[140, 120, 100], [120, 104, 88], [44, 44, 48], [70, 80, 90], [200, 196, 188], [255, 232, 160], [226, 222, 212], [176, 176, 172]],
+        ],
+        // A plant in a pot's colours, in the order of its own numbers
+        // (`brickloft_core::furniture`'s `pots`): the pot, its rim or the
+        // band of its glaze, the soil, stems, two greens, and two colours
+        // of flower. On a trellis the second is the lattice.
+        // white glaze with a dark band and pink flowers; a dark planter with white flowers
+        "modern pots" => &[
+            &[[236, 234, 228], [60, 62, 66], [70, 52, 40], [110, 84, 56], [78, 140, 70], [52, 104, 56], [236, 130, 170], [250, 214, 90]],
+            &[[52, 54, 58], [110, 114, 120], [66, 50, 38], [108, 84, 58], [92, 146, 84], [60, 108, 64], [246, 244, 236], [240, 200, 70]],
+        ],
+        // terracotta with red flowers; cream enamel with a blue band and yellow flowers
+        "farmhouse pots" => &[
+            &[[190, 104, 70], [170, 88, 58], [72, 54, 40], [112, 86, 58], [86, 146, 66], [56, 110, 54], [224, 60, 70], [250, 210, 80]],
+            &[[232, 224, 200], [120, 150, 170], [72, 54, 40], [112, 86, 58], [90, 150, 72], [58, 112, 58], [250, 220, 70], [244, 244, 236]],
+        ],
+        // terracotta with white flowers; blue and white glaze with crimson flowers
+        "classical pots" => &[
+            &[[184, 100, 68], [160, 84, 56], [66, 50, 38], [104, 80, 56], [70, 128, 66], [44, 94, 52], [246, 240, 230], [236, 150, 180]],
+            &[[236, 236, 232], [44, 74, 140], [66, 50, 38], [104, 80, 56], [76, 134, 70], [48, 98, 54], [200, 60, 90], [250, 214, 90]],
+        ],
+        // a weathered wooden planter with orange flowers; stone with mauve flowers
+        "rustic pots" => &[
+            &[[136, 104, 74], [104, 78, 56], [70, 54, 42], [110, 86, 60], [96, 140, 70], [64, 104, 54], [240, 170, 60], [200, 70, 60]],
+            &[[150, 146, 138], [120, 116, 108], [70, 54, 42], [110, 86, 60], [90, 138, 72], [60, 102, 56], [190, 120, 200], [250, 220, 90]],
+        ],
+        // dark steel with pale flowers; concrete with orange flowers
+        "industrial pots" => &[
+            &[[56, 58, 62], [110, 114, 120], [62, 48, 38], [104, 82, 58], [84, 134, 80], [54, 98, 60], [240, 236, 220], [230, 180, 60]],
+            &[[168, 168, 164], [60, 62, 66], [62, 48, 38], [104, 82, 58], [92, 142, 76], [60, 104, 56], [236, 90, 60], [250, 214, 90]],
+        ],
+        // A picture's colours: its frame, the liner inside a moulded
+        // frame, its mount, and then the picture's own, which each
+        // subject numbers its own way (`brickloft_core::furniture`'s
+        // `pictures`). A sunset: eight bands of sky from its top down to
+        // the horizon, the sun, its glow, water dark and light, and the
+        // far hills. A landscape: four bands of sky, cloud, four ranges of
+        // hills from the furthest, the firs and their trunks, water, snow.
+        // An abstract: its lines, six hues and the pale ground. A portrait:
+        // two of background, four skins and their four shades, five colours
+        // of hair, the white of an eye, a pupil, a mouth, four colours of
+        // clothes, a collar, glasses, a blush and a hat.
+        // a warm sunset in a dark frame with a gilt liner; a cool dawn in a pale one
+        "sunset painting" => &[
+            &[[70, 48, 36], [200, 164, 84], [236, 228, 206], [44, 36, 84], [84, 48, 110], [140, 60, 112], [196, 78, 96], [232, 110, 76], [244, 150, 70], [250, 190, 90], [252, 224, 140], [255, 244, 200], [255, 214, 120], [60, 50, 90], [150, 90, 100], [30, 24, 40]],
+            &[[230, 228, 222], [180, 184, 190], [244, 244, 240], [40, 60, 110], [60, 90, 140], [90, 124, 170], [130, 160, 196], [176, 190, 212], [214, 206, 214], [240, 214, 204], [250, 226, 200], [255, 250, 230], [252, 234, 206], [50, 80, 120], [150, 180, 206], [36, 48, 70]],
+        ],
+        // summer; autumn; winter
+        "landscape painting" => &[
+            &[[96, 66, 44], [204, 170, 90], [238, 232, 214], [90, 150, 214], [126, 176, 226], [166, 202, 236], [204, 226, 244], [250, 250, 248], [140, 170, 180], [110, 160, 120], [80, 140, 80], [56, 112, 60], [34, 84, 50], [84, 60, 40], [80, 140, 200], [244, 246, 250]],
+            &[[60, 44, 36], [190, 150, 80], [236, 228, 210], [120, 150, 190], [150, 174, 204], [186, 198, 214], [220, 220, 220], [246, 242, 236], [150, 150, 160], [176, 140, 90], [190, 110, 50], [150, 80, 40], [200, 70, 40], [70, 50, 36], [90, 120, 160], [240, 240, 244]],
+            &[[230, 230, 228], [150, 160, 170], [250, 250, 250], [150, 170, 200], [176, 192, 214], [204, 214, 228], [228, 232, 238], [250, 250, 252], [190, 200, 214], [214, 222, 232], [232, 236, 242], [246, 248, 250], [50, 80, 70], [70, 56, 46], [150, 180, 204], [255, 255, 255]],
+        ],
+        // warm hues on cream in a black frame; cool hues in a white one
+        "abstract painting" => &[
+            &[[30, 30, 34], [60, 60, 66], [244, 242, 236], [36, 34, 40], [200, 60, 50], [236, 130, 50], [244, 190, 70], [150, 60, 80], [90, 50, 90], [250, 230, 170], [240, 236, 226]],
+            &[[240, 240, 238], [200, 200, 204], [250, 250, 250], [30, 36, 50], [40, 90, 160], [60, 150, 190], [120, 200, 200], [60, 70, 130], [90, 60, 140], [220, 236, 230], [244, 244, 240]],
+        ],
+        // on slate blue in a wooden frame; on rose in a pale one
+        "portrait" => &[
+            &[[84, 58, 40], [204, 170, 90], [238, 232, 214], [120, 150, 170], [96, 124, 146], [250, 222, 196], [230, 184, 150], [190, 134, 96], [122, 80, 56], [232, 196, 170], [206, 156, 124], [160, 106, 74], [96, 60, 42], [34, 28, 26], [96, 62, 40], [226, 190, 110], [178, 74, 40], [190, 190, 194], [250, 250, 248], [40, 36, 40], [176, 60, 66], [60, 90, 150], [160, 60, 70], [70, 120, 90], [230, 226, 216], [246, 244, 238], [30, 30, 34], [240, 170, 160], [60, 60, 70]],
+            &[[236, 232, 224], [206, 170, 88], [250, 248, 240], [214, 170, 170], [196, 146, 150], [250, 222, 196], [230, 184, 150], [190, 134, 96], [122, 80, 56], [232, 196, 170], [206, 156, 124], [160, 106, 74], [96, 60, 42], [34, 28, 26], [96, 62, 40], [226, 190, 110], [178, 74, 40], [190, 190, 194], [250, 250, 248], [40, 36, 40], [176, 60, 66], [60, 90, 150], [160, 60, 70], [70, 120, 90], [230, 226, 216], [246, 244, 238], [30, 30, 34], [240, 170, 160], [60, 60, 70]],
+        ],
         // A bookcase's colours are for its parts, in the order of
         // `brickloft_core::furniture`'s numbers: the wood of the carcass,
         // a second tone of it for the back panel, and six the books and
@@ -414,6 +512,20 @@ pub fn flower_set(flower: brickloft_core::tree::Flower) -> usize {
 /// order [`palettes`] has them.
 pub fn furniture_palette_names(kind: &str) -> &'static [&'static str] {
     match kind {
+        "modern pots" => &["White glaze and pink", "Dark planter and white"],
+        "farmhouse pots" => &["Terracotta and red", "Cream enamel and yellow"],
+        "classical pots" => &["Terracotta and white", "Blue and white glaze"],
+        "rustic pots" => &["Weathered wood and orange", "Stone and mauve"],
+        "industrial pots" => &["Dark steel and cream", "Concrete and orange"],
+        "sunset painting" => &["Warm sunset", "Cool dawn"],
+        "landscape painting" => &["Summer", "Autumn", "Winter"],
+        "abstract painting" => &["Warm hues", "Cool hues"],
+        "portrait" => &["On slate blue", "On rose"],
+        "modern furniture" => &["Pale oak, white and grey", "Walnut and teal", "White and black"],
+        "farmhouse furniture" => &["Pine and cream", "Painted blue", "Sage and oak"],
+        "classical furniture" => &["Mahogany and green", "Walnut and burgundy", "Ivory and gilt"],
+        "rustic furniture" => &["Weathered oak", "Barn red", "Grey driftwood"],
+        "industrial furniture" => &["Black steel and oak", "Raw steel and walnut", "Steel and concrete"],
         _ => &["Oak with mixed spines", "Dark walnut with leather", "White with pastels", "Black with brights"],
     }
 }

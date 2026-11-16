@@ -847,7 +847,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.record();
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
-            let own = spec.hedged().then_some("hedge").or(spec.stones.map(|_| "stepping stones")).or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1)).or(furniture.map(|kind| brickloft_core::furniture::KINDS[kind as usize].1));
+            let own = spec.hedged().then_some("hedge").or(spec.stones.map(|_| "stepping stones")).or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1)).or(furniture.map(|_| spec.furniture.colours()));
             // (a maze's colours go by what its walls are)
             let walls = maze.then(|| crate::paint::maze_palettes(crate::paint::maze_texture(&spec))[0].clone());
             state.add_form(spec);
@@ -884,7 +884,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
             } else if spec.form == brickloft_core::spec::Form::Furniture && was != spec.form {
                 // (and one made into furniture in the furniture's: its wood, and its books')
-                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::furniture::KINDS[spec.furniture.kind as usize].1).to_vec(), ..Paint::default() };
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(spec.furniture.colours()).to_vec(), ..Paint::default() };
             }
             if let Some(to) = arguments.get("place") {
                 *place = placed(to)?;
@@ -1561,14 +1561,14 @@ mod tests {
         let books = |state: &State| state.built.shades.iter().filter(|s| **s >= brickloft_core::furniture::FIRST_BOOK).count();
         // named alone, it is the bookcase the editor starts: its usual size, on the floor, in its own colours
         let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture" } }), || 0.0).unwrap());
-        assert_eq!((added["forms"][0]["settings"]["form"].as_str(), added["forms"][0]["settings"]["furniture"].as_str()), (Some("furniture"), Some("bookcase,1,2,0,11,34,3,1,1,85")));
+        assert_eq!((added["forms"][0]["settings"]["form"].as_str(), added["forms"][0]["settings"]["furniture"].as_str()), (Some("furniture"), Some("bookcase,1,2,0,11,34,3,1,1,85,classical,0,0,0,0,1")));
         assert_eq!((state.spec.form, state.spec.furniture, state.others.len()), (brickloft_core::spec::Form::Furniture, Furniture::of(Kind::Bookcase), 1));
         assert_eq!(low_high(&state), ([-18, -5, 0], [18, 5, 60]));
         assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("bookcase")));
         assert!(state.built.error == 0.0 && state.built.shades.len() == state.built.bricks.len() && books(&state) > 40);
         // resized as a cube is, by half a side and a stretch, and its settings given as a list: 80 by 8 by 48, bare
         let wide = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": ["bookcase", 7, 1, 4, 9, 0, 0, 0, 0, 0], "radius": 4, "stretch": [10, 1, 6], "points": [[0, 0, 24]] } }), || 0.0).unwrap());
-        assert_eq!(wide["forms"][0]["settings"]["furniture"], "bookcase,7,1,4,9,0,0,0,0,0");
+        assert_eq!(wide["forms"][0]["settings"]["furniture"], "bookcase,7,1,4,9,0,0,0,0,0,classical,0,0,0,0,1");
         assert_eq!(low_high(&state), ([-40, -4, 0], [40, 4, 48]));
         // two sides, a top, a bottom and four shelves, each one brick
         assert_eq!((state.built.bricks.len(), books(&state), state.built.error), (8, 0, 0.0));
@@ -1587,7 +1587,7 @@ mod tests {
         assert_eq!(state.forms()[0].0.furniture, Furniture { seed: 3, board: 4, ..Furniture::of(Kind::Bookcase) });
         // what is out of range is brought within it, and what is no furniture is refused, leaving the workspace as it was
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "bookcase,1,99,999,1,2,99,5,5,500" } }), || 0.0).unwrap();
-        assert_eq!(state.forms()[0].0.furniture, Furniture { kind: Kind::Bookcase, seed: 1, board: 8, shelves: 60, spacing: 3, bay: 4, plinth: 20, back: true, moulding: true, books: 100 });
+        assert_eq!(state.forms()[0].0.furniture, Furniture { kind: Kind::Bookcase, seed: 1, board: 8, shelves: 60, spacing: 3, bay: 4, plinth: 20, back: true, moulding: true, books: 100, ..brickloft_core::furniture::Furniture::of(brickloft_core::furniture::Kind::Bookcase) });
         let now = state.forms();
         for bad in [json!({ "furniture": "wardrobe" }), json!({ "furniture": "bookcase,-1" }), json!({ "furniture": "bookcase,1,thick" }), json!({ "furniture": "bookcase,1,2,0,11,34,3,1,1,85,6" }), json!({ "furniture": "bookcase", "radius": 1000 }), json!({ "furniture": "bookcase,1,1,0,3,4,0,1,0,100", "radius": 500, "stretch": [2, 0.05, 2] })] {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": bad }), || 0.0).is_err(), "{bad} was taken");
@@ -1599,5 +1599,45 @@ mod tests {
         assert_eq!((spec.form, paint.mode, paint.colours.as_slice()), (brickloft_core::spec::Form::Furniture, Mode::Pattern, crate::paint::palette("bookcase")));
         apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture", "furniture": "bookcase,2" }, "colour": { "mode": "pattern", "colours": ["#ffffff", "#dddddd", "#ff0000", "#00ff00", "#0000ff"] } }), || 0.0).unwrap();
         assert_eq!(state.paint.colours.len(), 5);
+    }
+
+    #[test]
+    fn every_kind_of_furniture_is_added_by_its_name_and_restyled_by_its_settings() {
+        use brickloft_core::furniture::{Furniture, Style, KINDS};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        for (kind, name) in KINDS {
+            // named alone, it is the kind as the editor starts it: its usual size, on the floor, in its style's own colours
+            let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture", "furniture": name } }), || 0.0).unwrap_or_else(|e| panic!("{name}: {e}")));
+            let [w, d, h] = Furniture::usual_size(kind).map(|v| v as i32);
+            assert_eq!((state.spec.form, state.spec.furniture), (brickloft_core::spec::Form::Furniture, Furniture::of(kind)), "{name}");
+            let b = &state.built.bricks;
+            let (low, high) = ([0, 1, 2].map(|k| b.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| b.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
+            // (on the floor, or for what hangs with its top where its box's is)
+            assert!((low[2] == 0 || high[2] == h) && (0..3).all(|k| high[k] - low[k] <= [w, d, h][k]) && high[2] - low[2] >= h / 2, "{name}: from {low:?} to {high:?}");
+            assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette(state.spec.furniture.colours())), "{name}");
+            assert!(state.built.shades.len() == state.built.bricks.len() && added["forms"][0]["settings"]["furniture"].as_str().unwrap().starts_with(name), "{name}");
+            // its style, its seed and its own settings are the values after the bookcase's ten, and are read back as they were sent
+            let sent = json!([name, 5, 2, 0, 11, 34, 3, 1, 1, 40, "rustic", 2, 3, 1, 1, 0]);
+            let before = (state.built.bricks.clone(), state.built.shades.clone());
+            let changed = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": sent } }), || 0.0).unwrap_or_else(|e| panic!("{name}: {e}")));
+            assert_eq!(state.forms()[0].0.furniture, Furniture { seed: 5, books: 40, style: Style::Rustic, count: 2, choice: 3, second: 1, extra: true, shine: false, ..Furniture::of(kind) }, "{name}");
+            assert_eq!(changed["forms"][0]["settings"]["furniture"], format!("{name},5,2,0,11,34,3,1,1,40,rustic,2,3,1,1,0"), "{name}");
+            assert!((state.built.bricks.clone(), state.built.shades.clone()) != before, "{name}: the same piece after its style and seed were changed");
+            apply(&mut state, "remove_form", &json!({ "index": 0 }), || 0.0).unwrap();
+        }
+        // a style that is none, a kind that is none and a value too many are refused, and leave the workspace as it was
+        apply(&mut state, "add_form", &json!({ "settings": { "form": "furniture", "furniture": "sofa,3,2,0,11,34,3,1,1,85,random" } }), || 0.0).unwrap();
+        assert_eq!(state.spec.furniture.style, Style::Random);
+        assert_eq!(state.paint.colours.as_slice(), crate::paint::palette(state.spec.furniture.colours()));
+        let now = state.forms();
+        for bad in ["sofa,3,2,0,11,34,3,1,1,85,baroque", "hammock", "sofa,3,2,0,11,34,3,1,1,85,modern,1,1,1,1,1,1", "sofa,3,2,0,11,34,3,1,1,85,modern,many"] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": bad } }), || 0.0).is_err(), "{bad} was taken");
+            assert_eq!(state.forms(), now, "{bad} changed the workspace");
+        }
+        // what is out of range is brought within it
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "furniture": "sofa,3,2,0,11,34,3,1,1,85,modern,999,-4,77" } }), || 0.0).unwrap();
+        let f = state.forms()[0].0.furniture;
+        assert_eq!((f.count, f.choice, f.second), (12, 0, 12));
     }
 }
