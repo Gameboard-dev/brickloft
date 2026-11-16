@@ -176,7 +176,7 @@ section 10 counts.
 
 ### The inner corner
 
-<img src="images/inner-corner.png" width="160" alt="The inner corner in its box"> <img src="images/hip.png" width="160" alt="The hip that is taken out of the box to leave it">
+<img src="images/inner-corner.png" width="160" alt="The inner corner in its box">
 
 The inner corner is the one shape that is not the convex hull of its
 corners. It is a box with a hip taken out of it: a valley where two slopes
