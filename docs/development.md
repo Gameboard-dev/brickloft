@@ -132,6 +132,8 @@ editor/src/
   brz.rs          the prefab file, and the clipboard
   mesh.rs         a triangle mesh for each brick shape
   material.rs     the bricks' shader, with edge lines
+  mcp.rs          the listener Claude drives the editor through (see mcp.md)
+  mcp_tools.json  the tools it offers: names, descriptions and schemas
   paint.rs        colouring a form
   ruler.rs        the rulers
   store.rs        saved forms

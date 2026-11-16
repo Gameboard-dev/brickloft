@@ -193,7 +193,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             let text = text.clone();
             egui::Area::new(egui::Id::new("toast")).anchor(egui::Align2::CENTER_TOP, [0.0, 16.0]).interactable(false).show(ui.ctx(), |ui| {
                 ui.set_opacity((1.0 - (age - SHOWN) / FADE).clamp(0.0, 1.0) as f32);
-                egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(text));
+                egui::Frame::popup(ui.style()).show(ui, |ui| ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend)));
             });
         }
     }
@@ -212,8 +212,27 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         // a setting of the view, not of any one form: above everything that changes with the form
         helped(ui, help("arrows_and_rings"), |ui| {
-            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.05).text("Arrows and rings"))
+            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.01).text("Arrows and rings"))
         });
+        ui.horizontal(|ui| {
+            ui.label("Show");
+            ui.checkbox(&mut state.show_ruler, "Rulers");
+            ui.checkbox(&mut state.show_rings, "Rings");
+            ui.checkbox(&mut state.show_arrows, "Arrows");
+            hint(ui, help("show_parts"));
+        });
+        // a web page cannot listen for connections: see `mcp`
+        if cfg!(not(target_arch = "wasm32")) {
+            helped(ui, help("claude_on"), |ui| ui.checkbox(&mut state.claude_on, "Let Claude drive the editor"));
+            if !state.claude_note.is_empty() {
+                ui.label(state.claude_note.as_str());
+            }
+            if state.claude_on {
+                // the command that tells Claude Code where the editor is, to copy
+                let mut command = format!("claude mcp add --transport http arcs {}", crate::CLAUDE_ADDRESS);
+                helped(ui, help("claude_command"), |ui| ui.add(egui::TextEdit::singleline(&mut command).desired_width(190.0)));
+            }
+        }
         ui.separator();
 
         let before = state.form;
@@ -460,7 +479,6 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             })
             .response
         });
-        helped(ui, help("show_rulers"), |ui| ui.checkbox(&mut state.show_ruler, "Show rulers (lengths in microbricks)"));
         helped(ui, help("floor_below_form"), |ui| ui.add(Slider::new(&mut state.floor_gap, 0.0..=40.0).step_by(1.0).text("Floor below form")));
         helped(ui, help("snap_half_microbricks"), |ui| ui.checkbox(&mut state.fine_snap, "Snap dots to half microbricks"));
         asked.best = helped(ui, help("snap_best_fit"), |ui| ui.button("Snap to best fit nearby"))

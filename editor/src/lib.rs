@@ -10,6 +10,8 @@ pub mod brz;
 pub mod camera;
 pub mod icon;
 pub mod material;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod mcp;
 pub mod mesh;
 pub mod paint;
 pub mod panel;
@@ -21,6 +23,10 @@ pub mod state;
 pub mod store;
 
 use arcs_core::shapes::all_masks;
+
+/// Where the editor listens for Claude: `mcp::address()`, said here as well
+/// so that the panel, which the browser build has too, can show it.
+pub const CLAUDE_ADDRESS: &str = "http://127.0.0.1:7878/mcp";
 use arcs_core::DVec3;
 use state::{Handle, State};
 use three_d::*;
@@ -88,11 +94,13 @@ fn d(p: Vec3) -> DVec3 {
 }
 
 pub fn run() {
-    run_form(0);
+    run_form(0, false);
 }
 
 /// Open the editor on one of `state::FORMS`, by its place in that list.
-pub fn run_form(form: usize) {
+/// `claude` opens it already listening for Claude (see `mcp`), which is
+/// otherwise switched on in the panel.
+pub fn run_form(form: usize, claude: bool) {
     let window = match open_window() {
         Ok(window) => window,
         Err(e) => panic!("arcs editor: could not open a WebGL2 window: {e}. A browser with WebGL2 (or a desktop with OpenGL 3.3) is needed."),
@@ -175,6 +183,13 @@ pub fn run_form(form: usize) {
     let mut shown_gap = f64::NAN;
 
     let mut state = State::new();
+    state.claude_on = claude;
+    // the leg of a flight the camera is on: where it set out from and
+    // which way it was looking, and how long ago in seconds
+    let mut leg: Option<(Vec3, Vec3, f64)> = None;
+    // the listener Claude reaches the editor through, while the player has it switched on
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut claude: Option<mcp::Server> = None;
     if form < state::FORMS.len() {
         state.form = form;
         state.preset();
@@ -226,7 +241,7 @@ pub fn run_form(form: usize) {
                         *handled = dragging.is_some();
                     }
                     // then the arrows, which move the form along one axis
-                    if dragging.is_none() && state.gizmo().is_some() {
+                    if dragging.is_none() && state.show_arrows && state.gizmo().is_some() {
                         if let Ok(Some(hit)) = pick(&context, &camera, *position, arrows.iter().map(|a| &a.geometry), Cull::Back) {
                             let axis = hit.geometry_id as usize;
                             let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
@@ -237,7 +252,7 @@ pub fn run_form(form: usize) {
                         }
                     }
                     // then the rings: dragging one round turns the form's grid about its axis
-                    if dragging.is_none() && !*handled && state.rings().is_some() {
+                    if dragging.is_none() && !*handled && state.show_rings && state.rings().is_some() {
                         if let Ok(Some(hit)) = pick(&context, &camera, *position, rings.iter().map(|r| &r.geometry), Cull::None) {
                             let axis = hit.geometry_id as usize;
                             let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
@@ -367,9 +382,56 @@ pub fn run_form(form: usize) {
         if dragging.is_none() && !gui.context().input(|i| i.pointer.any_down()) && !state.searching() {
             state.record();
         }
+        // Claude's changes are made here, between the player's own and the
+        // fitting, so that they are fitted and drawn in this same frame.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if state.claude_on && claude.is_none() {
+                match mcp::Server::start() {
+                    Ok(server) => {
+                        claude = Some(server);
+                        state.claude_note = format!("Listening at {}", mcp::address());
+                    }
+                    Err(why) => {
+                        state.claude_on = false;
+                        state.claude_note = format!("Not switched on: {why}");
+                    }
+                }
+            } else if !state.claude_on && claude.is_some() {
+                claude = None;
+                state.claude_note.clear();
+            }
+            if let Some(server) = &mut claude {
+                // said over the view each time, so that a change the player
+                // did not make is never unexplained
+                if let Some(last) = server.serve(&mut state, now_ms).last() {
+                    state.toast = Some((format!("Claude: {}", last.replace('_', " ")), None));
+                }
+            }
+        }
         if let Some(speed) = controls.update(&mut camera, &mut frame.events, frame.elapsed_time, typing) {
             state.toast = Some((format!("Camera speed: {speed:.0} microbricks a second"), None));
         }
+        // A flight the camera has been sent on (see `mcp`), a leg at a time.
+        // It sets out and arrives gently: its place along the leg follows
+        // the smoothstep curve, which starts and ends with no speed.
+        // https://en.wikipedia.org/wiki/Smoothstep
+        if let Some(next) = state.flight.front().copied() {
+            let (from, facing, flown) = leg.get_or_insert((camera.position(), camera.view_direction(), 0.0));
+            *flown += frame.elapsed_time / 1000.0;
+            let share = if next.seconds > 0.0 { (*flown / next.seconds).min(1.0) } else { 1.0 };
+            let eased = (share * share * (3.0 - 2.0 * share)) as f32;
+            let to = v(DVec3::from_array(next.to));
+            let towards = v(DVec3::from_array(next.look_at)) - to;
+            // (arriving on top of what it is to look at, it keeps looking the way it was)
+            let towards = if towards.magnitude() > 1e-4 { towards.normalize() } else { *facing };
+            controls.place(&mut camera, *from + (to - *from) * eased, *facing + (towards - *facing) * eased);
+            if share >= 1.0 {
+                state.flight.pop_front();
+                leg = None;
+            }
+        }
+        state.camera_at = (d(camera.position()).to_array(), d(camera.view_direction()).to_array());
         if asked.best {
             state.snap_best(None);
         }
@@ -489,7 +551,7 @@ pub fn run_form(form: usize) {
         screen.clear(ClearState::color_and_depth(0.17, 0.19, 0.23, 1.0, 1.0));
         screen.render(&camera, &ground, &lights);
         screen.render(&camera, brick_meshes.iter().filter(|m| m.geometry.instance_count() > 0), &lights);
-        if let Some((middle, wide)) = state.rings() {
+        if let Some((middle, wide)) = state.rings().filter(|_| state.show_rings) {
             // the ring's mesh lies about z, one wide: turned to face its axis and grown to clear the form
             let faces = [Mat4::from_angle_y(degrees(90.0)), Mat4::from_angle_x(degrees(90.0)), Mat4::identity()];
             for (ring, face) in rings.iter_mut().zip(faces) {
@@ -497,7 +559,7 @@ pub fn run_form(form: usize) {
             }
             screen.render(&camera, &rings, &lights);
         }
-        if let Some((middle, reach)) = state.gizmo() {
+        if let Some((middle, reach)) = state.gizmo().filter(|_| state.show_arrows) {
             // the arrow's mesh lies along x, one long: turned to its axis and stretched to its length
             let turns = [Mat4::identity(), Mat4::from_angle_z(degrees(90.0)), Mat4::from_angle_y(degrees(-90.0))];
             for ((arrow, turn), length) in arrows.iter_mut().zip(turns).zip(reach) {
@@ -525,6 +587,12 @@ pub fn run_form(form: usize) {
         #[cfg(not(target_arch = "wasm32"))]
         if shot == Some(true) {
             state.toast = Some((send::save_screenshot(frame.viewport.width, frame.viewport.height, &screen.read_color()), None));
+        }
+        // and to Claude, if it has asked to see the window: once the camera
+        // has got to where it was sent, not from somewhere on the way
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(server) = claude.as_mut().filter(|server| server.wants_picture() && state.flight.is_empty()) {
+            server.give_picture(frame.viewport.width, frame.viewport.height, &screen.read_color());
         }
         #[cfg(target_arch = "wasm32")]
         let _ = shot;

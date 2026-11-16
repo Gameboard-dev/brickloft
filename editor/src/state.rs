@@ -92,6 +92,16 @@ enum Tune {
     Rise,
 }
 
+/// One leg of a flight of the camera: where it ends up, what it is looking
+/// at when it gets there, and how long it takes over it. No time at all is
+/// a jump.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Leg {
+    pub to: [f64; 3],
+    pub look_at: [f64; 3],
+    pub seconds: f64,
+}
+
 /// The cells a build occupies: its low corner and its high one.
 pub type Bounds = ([i32; 3], [i32; 3]);
 
@@ -122,7 +132,7 @@ impl Item {
 }
 
 /// Where a form is in the menu.
-fn form_index(form: Form) -> usize {
+pub(crate) fn form_index(form: Form) -> usize {
     match form {
         // an arc through three points is an arch with three
         Form::Arch(_) | Form::Arc => ARCH,
@@ -132,6 +142,22 @@ fn form_index(form: Form) -> usize {
         Form::Sphere => SPHERE,
         Form::Revolve => REVOLVE,
         Form::Pyramid => PYRAMID,
+    }
+}
+
+/// The points a form of kind `form` (one of `ARCH` to `PYRAMID`) starts
+/// from, and a Bezier curve's weights: where the editor sets one down, and
+/// what a form added from outside gets if it is given none of its own.
+pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
+    match form {
+        ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
+        // on the floor
+        CIRCLE | PYRAMID => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
+        BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
+        // resting on the floor
+        SPHERE => (vec![cell(0.0, 0.0, radius.ceil())], Vec::new()),
+        _ => (vec![cell(0.0, 0.0, 10.0), cell(5.0, 0.0, 8.0), cell(8.0, 0.0, 0.0)], Vec::new()),
     }
 }
 
@@ -195,6 +221,18 @@ pub struct State {
     /// a saved form the player has asked to delete, as its folder and its
     /// name: asked about over the view, and deleted only on a yes
     pub deleting: Option<(String, String)>,
+    /// Whether Claude may drive the editor (see `mcp`): off until the player
+    /// switches it on, and off again each time the program starts.
+    pub claude_on: bool,
+    /// where the editor is listening for Claude, or why it is not
+    pub claude_note: String,
+    /// where the camera is and which way it looks (a direction of length
+    /// one), in microbricks of the world: kept current by the frame loop,
+    /// which owns the camera, for whoever asks from outside it
+    pub camera_at: ([f64; 3], [f64; 3]),
+    /// The legs of a flight the camera has been sent on, flown by the frame
+    /// loop one after another.
+    pub flight: std::collections::VecDeque<Leg>,
     /// something done, said for a few seconds over the view: the words, and
     /// when they were first shown (by the panel's clock, once it has shown them)
     pub toast: Option<(String, Option<f64>)>,
@@ -214,6 +252,11 @@ pub struct State {
     pub panel_right: f32,
     /// whether the rulers are drawn
     pub show_ruler: bool,
+    /// whether the arrows that move a grid, and the rings that turn it,
+    /// are drawn and can be taken hold of: each on its own, since either
+    /// can be in the way of the form it stands in the middle of
+    pub show_arrows: bool,
+    pub show_rings: bool,
     /// How far every slider for a size goes: as far as the core will build
     /// (`arcs_core::spec::MAX_SPAN`) unless the user lowers it. It began at
     /// 60 to keep an even slider fine enough for small forms; the sliders
@@ -328,7 +371,7 @@ pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
 /// How long the arrows and how wide the rings are, as a share of the way
 /// from the middle of a grid's forms to their furthest side.
 /// This is what the panel.s slider starts at.
-pub const GIZMO: f64 = 0.25;
+pub const GIZMO: f64 = 0.12;
 
 /// A plane whose normal is this near square to the line of sight (as the
 /// cosine of the angle between them) is seen too nearly edge on to drag in:
@@ -367,6 +410,10 @@ impl State {
             report_note: String::new(),
             alert: None,
             deleting: None,
+            claude_on: false,
+            claude_note: String::new(),
+            camera_at: ([0.0; 3], [1.0, 0.0, 0.0]),
+            flight: std::collections::VecDeque::new(),
             toast: None,
             paint: Paint::default(),
             others: Vec::new(),
@@ -374,6 +421,8 @@ impl State {
             open_adds: false,
             panel_right: 0.0,
             show_ruler: true,
+            show_arrows: true,
+            show_rings: true,
             max_size: arcs_core::spec::MAX_SPAN,
             gizmo_size: GIZMO,
             bounds: None,
@@ -875,6 +924,13 @@ impl State {
 
     /// Start the chosen form from a sensible example of itself.
     pub fn preset(&mut self) {
+        self.preset_settings();
+        let (points, weights) = usual_points(self.form, self.spec.radius);
+        (self.spec.points, self.spec.weights) = (points, weights);
+    }
+
+    /// The part of [`State::preset`] that is not the form's points.
+    fn preset_settings(&mut self) {
         let s = &mut self.spec;
         s.weights.clear();
         s.pulls.clear();
@@ -889,28 +945,15 @@ impl State {
         // up into a dome or a hollow shell.
         self.floor_gap = if matches!(self.form, SPHERE | REVOLVE) { 8.0 } else { 0.0 };
         match self.form {
-            ARCH => {
-                s.points = vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)];
-                self.lock = Lock::Axis(1); // an arch stays in its upright plane
-            }
-            CIRCLE => s.points = vec![cell(0.0, 0.0, 0.0)],
-            SPLINE => s.points = vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)],
-            BEZIER => {
-                s.points = vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)];
-                s.weights = vec![1.0, 1.0, 1.0];
-            }
-            SPHERE => {
-                s.points = vec![cell(0.0, 0.0, s.radius.ceil())];
-                s.fill = true;
-            }
+            ARCH => self.lock = Lock::Axis(1), // an arch stays in its upright plane
+            SPHERE => s.fill = true,
             PYRAMID => {
-                // on the floor; half a cell more than a whole radius, so
-                // that its base ends on the lattice about a cell's centre
-                s.points = vec![cell(0.0, 0.0, 0.0)];
+                // half a cell more than a whole radius, so that its base
+                // ends on the lattice about a cell's centre
                 s.radius = s.radius.floor() + 0.5;
                 s.fill = true;
             }
-            _ => s.points = vec![cell(0.0, 0.0, 10.0), cell(5.0, 0.0, 8.0), cell(8.0, 0.0, 0.0)],
+            _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
             self.lock = Lock::Axis(1);

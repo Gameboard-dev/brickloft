@@ -13,15 +13,7 @@ pub fn save_screenshot(width: u32, height: u32, pixels: &[[u8; 4]]) -> String {
         let folder = crate::places::screenshots()?;
         // arcs-1.png, -2, ...: the first number not yet used
         let path = (1..100_000).map(|n| folder.join(format!("arcs-{n}.png"))).find(|p| !p.exists()).ok_or("the folder is full")?;
-        // the window's own see-through value is left out: a picture of the
-        // window is solid whatever was drawn into that channel
-        let bytes: Vec<u8> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?);
-        let mut encoder = png::Encoder::new(file, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&bytes).map_err(|e| e.to_string())?;
+        std::fs::write(&path, png_of(width, height, pixels)?).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path)
     })();
     let copied = picture_on_clipboard(width, height, pixels);
@@ -31,6 +23,26 @@ pub fn save_screenshot(width: u32, height: u32, pixels: &[[u8; 4]]) -> String {
         (Err(e), Ok(())) => format!("Screenshot copied, but not saved: {e}"),
         (Err(e), Err(_)) => format!("Could not save the screenshot: {e}"),
     }
+}
+
+/// A picture, given as rows of pixels from the top, as the bytes of a PNG
+/// file.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn png_of(width: u32, height: u32, pixels: &[[u8; 4]]) -> Result<Vec<u8>, String> {
+    if pixels.len() != width as usize * height as usize || pixels.is_empty() {
+        return Err("the picture is not the size it is said to be".into());
+    }
+    // the window's own see-through value is left out: a picture of the
+    // window is solid whatever was drawn into that channel
+    let bytes: Vec<u8> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let mut file = Vec::new();
+    let mut encoder = png::Encoder::new(&mut file, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(&bytes).map_err(|e| e.to_string())?;
+    drop(writer);
+    Ok(file)
 }
 
 /// The picture as the bytes of a .bmp file, which is what the Windows

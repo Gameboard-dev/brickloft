@@ -1,60 +1,35 @@
 # Future work
 
-Two additions are planned and not yet started. Neither changes how forms
-are fitted today (see [algorithm.md](algorithm.md)).
+Two additions are planned. Neither changes how forms are fitted today (see
+[algorithm.md](algorithm.md)).
 
-## Claude drives the editor through MCP
+## More for Claude to do through MCP
 
-The [Model Context Protocol](https://modelcontextprotocol.io) (MCP) lets an
-AI assistant such as Claude call tools that a program offers. The editor
-would offer its own operations as tools, so that Claude creates forms in
-the running editor and reshapes them while the player watches.
+Claude can already drive the editor: add, change, colour, turn, measure and
+remove forms, move the camera and take screenshots, through the Model
+Context Protocol ([mcp.md](mcp.md)). Three things are still to come.
 
-The tools would take exact values where the mouse takes approximate ones:
+**Rebuilding an object from a point cloud.** Given a point cloud of a solid
+3D object, which is a list of points sampled from its surface, Claude would
+recreate the object from the editor's own forms: choosing a sphere here and
+an arch or a revolved profile there, then sizing, placing, turning and
+colouring each until the forms together match the cloud. Each change would
+appear in the editor as it is made, so the player watches the object being
+assembled and can stop or correct it at any step. A cloud has to reach
+Claude in a form it can reason about, and a large one will need thinning
+first. Judging how well the forms match the cloud needs a measure the
+editor can report, such as the share of the cloud's points lying on or near
+the bricks.
 
-- **Create and remove forms:** any of the editor's forms, on a named grid.
-- **Lengths:** spans, radii, rises, thicknesses and depths in microbricks,
-  to the half microbrick the editor already snaps to.
-- **Angles:** an arch's sweep, a dome's cut, and a grid's turn about each
-  axis in degrees.
-- **Placement and orientation:** where a form stands in its grid, where
-  the grid stands, quarter turns, flips and mirrors.
-- **Added points:** where a point is added, how far it is pulled, and its
-  reach.
-- **Colour and shading:** the colours of a form, the kind of blend, its
-  axis and its stripe width.
-- **Reading back:** each form's settings, brick count and discrepancy, so
-  that Claude can check a change and correct it.
+**Finer control of shape.** Claude sets a form's points and added points
+through its settings today. Tools that move one dot, or add a pull point at
+a place on the form's surface, would match what the mouse does and need
+less arithmetic from Claude.
 
-A further use is rebuilding an existing object. Given a point cloud of a
-solid 3D object, which is a list of points sampled from its surface, Claude
-would recreate the object from the editor's own forms: choosing a sphere
-here and an arch or a revolved profile there, then sizing, placing, turning
-and colouring each until the forms together match the cloud. Each change
-would appear in the editor as it is made, so the player watches the object
-being assembled and can stop or correct it at any step.
-
-Every change would pass through the same code as a change made by hand. It
-would therefore be refitted, drawn and added to the undo history in the
-same way, and Ctrl+Z would take back a step Claude made.
-
-Open questions:
-
-- **Transport.** MCP servers usually speak over standard input and output,
-  which a windowed program does not have to spare. The editor would more
-  likely listen on a local port, or a small separate program would relay
-  between Claude and the editor.
-- **Trust.** Tool calls arrive from outside the program. Every value has
-  to be validated and limited in size exactly as a pasted file's values
-  are, and the listener must accept connections from the same computer
-  only.
-- **Point clouds.** A cloud has to reach Claude in a form it can reason
-  about, and a large one will need thinning first. Judging how well the
-  forms match the cloud needs a measure the editor can report, such as the
-  share of the cloud's points lying on or near the bricks.
-- **Scope.** The plugin that once sent bricks to a running game server was
-  removed as needless complexity. This connection runs the other way, into
-  the editor, and the game is still reached only through copy and paste.
+**Copying to the game.** Claude cannot put the workspace on the clipboard,
+so the player still presses Ctrl+C. A tool for it would let Claude finish a
+build end to end, at the cost of a tool that writes outside the editor,
+which the present tools deliberately do not.
 
 ## Patterns by wave function collapse
 

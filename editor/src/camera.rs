@@ -73,6 +73,14 @@ impl Controls {
         self.aim(camera);
     }
 
+    /// Put the camera at `position`, looking along `towards`, the right
+    /// way up: where a flight it has been sent on has it this frame.
+    pub fn place(&mut self, camera: &mut Camera, position: Vec3, towards: Vec3) {
+        let (view, up) = facing(self.heading, self.tilt);
+        camera.set_view(position, position + view, up);
+        self.face(camera, towards);
+    }
+
     fn aim(&self, camera: &mut Camera) {
         let (view, up) = facing(self.heading, self.tilt);
         let at = camera.position();

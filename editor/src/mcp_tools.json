@@ -1,0 +1,306 @@
+{
+  "tools": [
+    {
+      "name": "get_workspace",
+      "title": "Read the workspace",
+      "description": "Every form in the editor's workspace, the one being edited first. Each has its index (its place in this list, which the other tools take), its settings as names and values, its grid's angle in degrees, its colour, where it stands in microbricks, the box its bricks fill (`box_in_grid`: low and high corners and size within its own grid; `box_in_world`: the same box's extent and centre in the world, which differs when the grid is at an angle), how many bricks it was fitted with, and its discrepancy: the volume where the bricks and the true form disagree, as a percentage of the form's volume. A form's `points` are measured from where it stands (`place`), so a point's position in its grid is the point plus `place`. Call this first, and again whenever the player may have changed something by hand.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_form",
+      "title": "Add a form",
+      "description": "Add a form to the workspace. It becomes the form being edited (index 0) and is set down beside the forms already there unless `place` is given. The camera flies to face it. Returns the workspace afresh. All lengths are in microbricks (a fifth of a stud); a point or a size may end in a half.\n\nSettings (give `form` and whichever others are not to keep their usual values; a form given no `points` is set down where the editor would start one):\n- form: one of `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`.\n- points: a list of [x, y, z]. An arch: its two feet. A circle, sphere or pyramid: its centre. A spline or bezier: the points it is drawn through or pulled towards, in order. A revolve: its profile, from the top down, as points in the plane y = the first point's, x being the distance out from the upright axis through x = 0.\n- radius: of a circle or sphere; half the width of a pyramid's base.\n- rise: an arch's height above its feet or a pyramid's height, or `natural` for the height the shape gives.\n- thick: the thickness of a band, a tube or a hollow form's wall.\n- depth: how deep a flat band is, a whole number.\n- fill: true for a solid sphere, pyramid or revolve, or to fill the area a curve encloses; false for a shell, or a band along the curve.\n- tube: true builds a curve as a round tube (a circle then becomes a torus); false as a flat band.\n- closed: true joins a spline's last point to its first.\n- plane: the axis a circle faces along, 0 (x), 1 (y) or 2 (z, lying flat).\n- stretch: [x, y, z] factors; 2 makes the form twice as long that way.\n- cut: [low, high] keeps the part of a sphere between two heights measured from its centre (a dome is [0, \"inf\"]); `none` keeps it whole.\n- weights: one number for each point of a bezier; higher draws the curve closer to that point.\n- mirror: [x, y, z] of true or false; makes the form its own mirror image along that axis.\n- flip: [x, y, z] of true or false; mirrors the finished form along that axis.\n- turned: a quarter-turn pose within the brick grid, 0 to 23 (16 is upright).\n- pulls: points added to pull the form out of shape, as text `x,y,z > dx,dy,dz; ...`: where each takes hold, then how far it moves. pull_reach: how far from each the form goes with it.\n- on_grid: the number of the grid the form is on (0 is the world's). Forms sharing a number turn and move together.\n- grid_degrees: [about x, about y, about z], the grid's angle in degrees, turned about x first, then y, then z. Any angle is allowed: the bricks stay as smooth as on a level grid. Give a form its own on_grid number before turning it, or every form on that grid is drawn at the angle of the last one set.\n- grid_at: [x, y, z], where the grid's origin stands in the world.\n- grain: brick size, 0 for automatic or 1, 2, 3, 4, 6, 8; budget: the most bricks automatic may use; simplify: 0 to 1.5, higher for fewer bricks on flat outlines; max_ext: the longest edge a brick may have.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "settings": {
+            "type": "object",
+            "description": "Names and values as described above. `form` is required.",
+            "additionalProperties": true
+          },
+          "colour": {
+            "$ref": "#/$defs/colour"
+          },
+          "place": {
+            "$ref": "#/$defs/place"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "colour": {
+            "type": "object",
+            "description": "How the form is coloured. Each brick is one colour.",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "one",
+                  "blend",
+                  "stripes",
+                  "speckle"
+                ],
+                "description": "One colour, a gradual blend from the first colour to the last, stripes of each in turn, or a speckled blend."
+              },
+              "colours": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                },
+                "description": "One to four colours as #rrggbb."
+              },
+              "runs_along": {
+                "type": "string",
+                "enum": [
+                  "x",
+                  "y",
+                  "z"
+                ],
+                "description": "The direction a blend or stripes run in."
+              },
+              "stripe_width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000,
+                "description": "How wide each stripe is, in microbricks."
+              }
+            },
+            "additionalProperties": false
+          },
+          "place": {
+            "type": "array",
+            "description": "Where the form stands within its grid, [x, y, z] in microbricks; a value may end in a half.",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update_form",
+      "title": "Change a form",
+      "description": "Change one form: any of its settings (the names and values add_form describes), its colour, or where it stands. Only what is given changes. Nothing changes if any part of the request cannot be built, and the reason is returned. Returns the workspace afresh, with the form's new brick count and discrepancy, so the effect of a change can be checked and corrected. The player can take the change back with Ctrl+Z.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          },
+          "settings": {
+            "type": "object",
+            "description": "The settings to change, as names and values.",
+            "additionalProperties": true
+          },
+          "colour": {
+            "type": "object",
+            "description": "The parts of the colouring to change.",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "one",
+                  "blend",
+                  "stripes",
+                  "speckle"
+                ]
+              },
+              "colours": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                }
+              },
+              "runs_along": {
+                "type": "string",
+                "enum": [
+                  "x",
+                  "y",
+                  "z"
+                ]
+              },
+              "stripe_width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            },
+            "additionalProperties": false
+          },
+          "place": {
+            "type": "array",
+            "description": "Where the form stands within its grid, [x, y, z] in microbricks.",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove_form",
+      "title": "Remove a form",
+      "description": "Take one form out of the workspace. The last form cannot be removed. Returns the workspace afresh: the forms after the one removed each move up one place.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "select_form",
+      "title": "Edit a form",
+      "description": "Make one form the form being edited, so that the player sees its dots, arrows and rings and its settings in the panel. It moves to index 0, and the camera flies to face it. Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "take_screenshot",
+      "title": "Take a screenshot",
+      "description": "A picture of the editor's window as the player sees it now: the 3D view of the bricks and the settings panel. Use it to look at what has been built, since a form's brick count and discrepancy do not say how it looks. Returned as a PNG image.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "max_width": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "description": "The widest the picture may be, in pixels. 1280 if not given. A wider window is shrunk by a whole number of pixels to fit."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "measure_between",
+      "title": "Measure between two forms",
+      "description": "How two forms stand relative to each other: the vector and the distance from the first one's centre to the second's, in the world, and the gap between the boxes their bricks fill along each axis (a negative gap is an overlap of that much). The gap is given in the world, and also within their grid if they share one, which is the one to use for setting forms a whole number of microbricks apart.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The first form's place in the list get_workspace gives."
+          },
+          "to": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The second form's place in that list."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_camera",
+      "title": "Read the camera",
+      "description": "Where the editor's camera is in the world, in microbricks (z is up), and which way it looks: as a direction of length one, and as a heading (degrees round the upright from +x towards +y) and a tilt (degrees up from level). Also how many legs of a flight it still has to fly.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "move_camera",
+      "title": "Move the camera",
+      "description": "Send the camera along a path: to each place in turn, turning as it goes to look at that place's `look_at` point. One place moves it there; several fly it between successive coordinates, for a tour round a build. A leg with `seconds` is flown smoothly over that long, and one without is a jump. To look at a form, take its `box_in_world` from get_workspace: look at its centre from about twice its largest size away, a little above. A screenshot asked for while the camera is flying is taken when it arrives. A new path replaces one still being flown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "number"
+                  },
+                  "description": "Where the camera goes, [x, y, z] in microbricks of the world."
+                },
+                "look_at": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "number"
+                  },
+                  "description": "The point it is looking at when it gets there."
+                },
+                "seconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30,
+                  "description": "How long the leg takes. 0 or left out: a jump."
+                }
+              },
+              "required": [
+                "position",
+                "look_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

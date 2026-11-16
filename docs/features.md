@@ -23,7 +23,13 @@ control does.
 Round the middle of the grid being edited are three **arrows** and three
 **rings**, red for x, green for y and blue for z (see [Grids](#grids)). The
 **Arrows and rings** slider at the top of the panel sets how large they are
-drawn, from 0.1 to 1 of the size of what is on the grid.
+drawn, from 0.1 to 1 of the size of what is on the grid. The **Show** boxes
+beside it switch the rulers, the rings and the arrows on and off, each on
+its own. Rings and arrows that are hidden cannot be taken hold of either.
+
+**Let Claude drive the editor**, also at the top of the panel, lets Claude
+build and change forms while you watch (see [mcp.md](mcp.md)). It is off
+until you tick it.
 
 ## Forms
 
@@ -198,7 +204,7 @@ The camera is flown.
 | Space or E, Q | rise, sink |
 | Shift + scroll | faster or slower |
 
-**Show rulers** draws the form's lengths in microbricks. **Floor below
+The rulers give the form's lengths in microbricks. **Floor below
 form** lowers the floor so a form can be looked at from underneath.
 
 ## Screenshots
