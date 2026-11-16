@@ -15,25 +15,30 @@ on a server.
 
 ## What algorithm does it use?
 
-Bricks sit on a grid, and every brick shape is a box with some of its eight
-corners kept: all eight make a cube, six make a wedge, and seven make a
-cube with one corner sliced off. arcs therefore chooses a brick by asking
-which corners of its box are inside the form being built. Neighbouring
-bricks share corners, so when the corners are right the bricks meet face to
-face without gaps or steps. The work is in placing the boxes so that their
-corners land on the form's true surface, and each kind of form has its own
-method for that. A sphere is sliced along each direction at distances
-chosen so that the corners on its surface sit on the sphere. An arch or a
-ring has its outline traced by a chain of corner points. Every corner has a
-price, so one long slope is preferred to a staircase of short steps, and
-dynamic programming finds the cheapest chain exactly without trying every
-combination. A tube is fitted as that same outline with its edges then cut
-back to a slope, which gives it an eight-sided section. Any form these
-methods do not cover is fitted cell by cell, each cell taking whichever
-brick matches it best. That result is rougher, because no cell knows what
-its neighbours hold. Whichever method was used, the finished bricks are
-compared with the true form, and the volume where they disagree is reported
-as the discrepancy.
+arcs chooses each brick by asking which corners of its box are inside the
+form being built. Bricks sit on a grid, and every brick shape is a box with
+some of its eight corners kept. A box with all eight corners is a cube, one
+with six is a wedge, and one with seven is a cube with a corner sliced off.
+Neighbouring bricks share corners, so when the corners are right the bricks
+meet face to face without gaps or steps.
+
+The boxes have to be placed so that their corners land on the form's true
+surface, and each kind of form has its own method for that. A sphere is
+sliced along each direction at distances chosen so that the corners on its
+surface sit on the sphere. An arch or a ring has its outline traced by a
+chain of corner points. Every corner has a price, so one long slope costs
+less than a staircase of short steps that fits no better. Dynamic
+programming finds the cheapest chain exactly, because it works along the
+outline and keeps only the cheapest way of reaching each point. A tube is
+fitted as the same outline with its edges then cut back to a slope, which
+gives the tube an eight-sided section.
+
+A form that none of these methods covers is fitted cell by cell, and each
+cell takes whichever brick matches it best. That result is rougher, because
+no cell knows what its neighbours hold. After any of the methods, the
+finished bricks are compared with the true form. The volume where the two
+disagree is reported as the discrepancy, so every fit can be judged by the
+same number.
 
 The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
 
