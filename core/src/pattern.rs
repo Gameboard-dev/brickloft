@@ -560,6 +560,11 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
             let far = dx.abs() + dy.abs();
             return (far < size).then(|| if far < size - 1.0 { heart } else { petal });
         }
+        if size < 5.0 {
+            let (sum, most) = (dx.abs() + dy.abs(), dx.abs().max(dy.abs()));
+            let square = size - if size < 4.0 { 1.0 } else { 2.0 };
+            return (sum < size || most < square).then(|| if most < 1.0 - size.fract() { heart } else if sum < size - 1.0 && most < square { inner } else { petal });
+        }
         let far = dx.hypot(dy);
         if far >= size {
             return None;
@@ -572,7 +577,7 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
             Some(heart)
         } else if far < size * 0.62 * (0.58 + 0.42 * round.sin().abs().powf(0.6)) {
             Some(inner)
-        } else if size >= 5.0 && edge - far < 0.7 {
+        } else if edge - far < 0.7 {
             Some(LINE)
         } else {
             Some(petal)
@@ -666,8 +671,8 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
                 Layer { reach, lobes, turned: if k % 2 == 1 { turn / 2.0 } else { 0.0 }, core, point: [vc, vr - half, vr], bulge: [rc * (turn / 2.0).cos(), rc * (turn / 2.0).sin(), rr], ground: grounds[k], lined: None, bud: None }
             })
             .collect();
-        let rose = (layers.last().map_or(1.0, |last| last.core * 0.8)).max(1.0);
-        let rose = if rose < 2.4 { rose.round() } else { rose };
+        let rose = (layers.last().map_or(1.0, |last| last.core * 0.6)).max(1.0);
+        let rose = if rose < 5.0 { rose.round() } else { rose };
         for k in 0..layers.len() {
             // what is on this layer's axis inside it: the next layer's round lobe, or the flower at the middle
             let inner = layers.get(k + 1).map_or(rose, |next| next.bulge[0].hypot(next.bulge[1]) + next.bulge[2]);
@@ -679,7 +684,7 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
                 let breadth = (layers[k].point[2] - layers[k].point[1] - 1.3).clamp(0.9, (long * 0.75).max(0.9));
                 layers[k].bud = Some(([(outer + inner) / 2.0, long, breadth], tones));
             }
-            if layers[k].reach - layers.get(k + 1).map_or(rose, |next| next.reach) >= 9.0 {
+            if layers[k].reach - layers.get(k + 1).map_or(rose, |next| next.reach) >= 11.0 {
                 layers[k].lined = Some(tones[0]);
             }
         }
@@ -702,7 +707,8 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
     let reach = (field * roll(0.7, 0.82)).min(long * 0.55).max(2.0);
     let lobes = if reach < 24.0 { 8.0 } else { [8.0, 12.0][roll(0.0, 1.999) as usize] };
     let star = roll(0.7, 0.8);
-    let medallion = figure(0.0, 0.0, reach, lobes, star, [DEEP, PALE, PETAL, DEEP], 4);
+    let grounds = [[DEEP, PALE, PETAL, DEEP], [PALE, DEEP, PETAL, PALE], [DEEP, PETAL, PALE, DEEP]][roll(0.0, 2.999) as usize];
+    let medallion = figure(0.0, 0.0, reach, lobes, star, grounds, 4);
     // what hangs from it at each end of the rug's longer way: a pointed leaf shape and two lozenges beyond it
     let hung = (reach * 0.22).round().max(3.0);
     let pendant = (long - reach >= 2.0 * hung + 8.0).then(|| {
@@ -711,10 +717,9 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
         // (its middle along the rug, the two discs' middles to the side and their size, half its length)
         [reach.floor() + hung, size - half, size, hung]
     });
-    let hangs_to = pendant.map_or(reach, |hung| hung[0] + hung[3] + 6.0);
     // the corner pieces: a quarter of such a figure about each corner of the field
-    let corner_reach = (field * roll(0.5, 0.64)).min(wide.hypot(deep) - reach - 3.0).min(long - hangs_to + 2.0).max(0.0);
-    let corner = figure(wide, deep, corner_reach, lobes, star, [SHADE, PALE, DEEP, PETAL], 3);
+    let corner_reach = (field * roll(0.6, 0.75)).min(wide.hypot(deep) - reach - 4.0).max(0.0);
+    let corner = figure(wide, deep, corner_reach, lobes, star, [if roll(0.0, 1.0) < 0.6 { SHADE } else { grounds[0] }, grounds[1], grounds[2], grounds[3]], if corner_reach < 16.0 { 1 } else if corner_reach < 34.0 { 2 } else { 3 });
 
     // The scrolls of the field.
     #[derive(Clone, Copy)]
@@ -755,7 +760,7 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
         let scroll = if size < 3.0 {
             Scroll { x, y, stem: [0.0; 5], leaves: 0.0, size: 1.5, petals: 4.0, tones }
         } else {
-            let flower = if size < 5.0 { 1.5 } else { (size * 0.4).min(4.5) };
+            let flower = if size < 5.0 { 1.5 } else if size < 9.0 { (size * 0.45).floor() + 0.5 } else { size * 0.5 };
             // the scroll it touches, if any: it branches from that one's stem, and turns the other way
             let parent = scrolls.iter().filter(|other| other.stem[3] > 0.0).map(|other| (((x - other.x).hypot(y - other.y) - other.stem[0].min(most) - size).abs(), other)).filter(|(gap, _)| *gap < 0.8).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, other)| *other);
             let (start, from, hand) = match parent {
@@ -769,7 +774,7 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
                 None => (size, roll(0.0, TAU), if roll(0.0, 1.0) < 0.5 { 1.0 } else { -1.0 }),
             };
             let end = flower + 0.9;
-            let round = ((start - end) / 2.3).clamp(0.75, 2.25) * TAU;
+            let round = ((start - end) / 2.6).clamp(0.75, 1.4) * TAU;
             Scroll { x, y, stem: [start, end, from, round, hand], leaves: (round * (start + end) / 2.0 / 4.5).round().max(1.0), size: flower, petals: [5.0, 6.0, 8.0][roll(0.0, 2.999) as usize], tones }
         };
         // (a small flower keeps a tile clear about it; a scroll touches the next)
@@ -816,8 +821,8 @@ fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> 
             if let Some(colour) = bloom(s - (at * step).round(), t, knot, 4.0, [PALE, PALE, HEART]) {
                 return colour;
             }
-            let size = main / 4.0;
-            let snap = |x: f64| if size.fract() != 0.0 && size < 2.4 { (x - 0.5).round() + 0.5 } else { x.round() };
+            let size = main / 4.0 + if main >= 10.0 { 0.5 } else { 0.0 };
+            let snap = |x: f64| if size.fract() != 0.0 { (x - 0.5).round() + 0.5 } else { x.round() };
             if s > 0.0 && main >= 6.0 {
                 let crest = (s / step).floor();
                 let sign = if crest % 2.0 == 0.0 { 1.0 } else { -1.0 };
@@ -1582,6 +1587,23 @@ mod tests {
             // one seed is one pattern, and another seed another
             assert_eq!(lay(5), lay(5), "{name}");
             assert_ne!(lay(5), lay(6), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_rug_is_drawn_in_good_time() {
+        // A rug is drawn afresh at every change of its floor or its seed,
+        // while the player drags. The bound is several times what it
+        // takes built for release; built for debugging the sums are ten
+        // times slower, and the bound says nothing, so it is not held to.
+        for (across, down, bound) in [(120, 80, 30), (250, 160, 60), (250, 250, 100)] {
+            let whole = vec![true; across * down];
+            let started = std::time::Instant::now();
+            let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5 });
+            let took = started.elapsed().as_millis();
+            println!("a rug {across} by {down}: {took} ms");
+            assert_eq!(tiles.len(), across * down);
+            assert!(cfg!(debug_assertions) || took < bound, "a rug {across} by {down} took {took} ms");
         }
     }
 
