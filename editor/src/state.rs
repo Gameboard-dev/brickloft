@@ -247,6 +247,20 @@ pub enum Handle {
     Side(usize),
 }
 
+/// A build under way on another thread: what it is of, when it began, which
+/// form it was begun for, and where its answer will come.
+struct Behind {
+    of: Spec,
+    started: f64,
+    loaded: u64,
+    answer: std::sync::mpsc::Receiver<Result<Built, String>>,
+}
+
+/// A build that took longer than this, in milliseconds, has the next one of
+/// its form made on another thread (see [`State::refresh_behind`]): three
+/// frames or so, past which a wait shows as a stutter.
+const SLOW_BUILD_MS: f64 = 50.0;
+
 pub struct State {
     pub spec: Spec,
     pub form: usize,
@@ -361,6 +375,15 @@ pub struct State {
     /// The bricks of the workspace's joined forms as last put together,
     /// with what they were put together from (see `pieces`).
     joins: std::cell::RefCell<Option<(Vec<JoinKey>, std::rc::Rc<Vec<Piece>>)>>,
+    /// Whether a form is being dragged about the view just now. Joined
+    /// forms are then drawn each with its own bricks, uncut, and are put
+    /// together when it is let go (see [`State::painted`]).
+    pub moving: bool,
+    /// a build of the form being edited under way on another thread (see [`State::refresh_behind`])
+    behind: Option<Behind>,
+    /// how many times another form has been made the one being edited: a
+    /// build begun for one form is not an answer for the next
+    loaded: u64,
     /// how much of a dragged dot's movement the dots near it share, 0 to 1
     pub follow: f64,
     /// a ring being dragged: the angle round it where it was taken hold of,
@@ -535,6 +558,9 @@ impl State {
             merge: false,
             blend_shown: (None, false),
             joins: std::cell::RefCell::new(None),
+            moving: false,
+            behind: None,
+            loaded: 0,
             follow: 0.5,
             spin_from: None,
             undone: Vec::new(),
@@ -580,6 +606,7 @@ impl State {
     /// Edit another of the workspace's forms; the one being edited takes its place.
     pub fn activate(&mut self, other: usize) {
         if other < self.others.len() {
+            self.catch_up();
             let mine = self.as_item();
             let item = std::mem::replace(&mut self.others[other], mine);
             self.take_item(item);
@@ -637,6 +664,7 @@ impl State {
             (Some(right), Some((lo, _))) => [right + 8 - 2 * lo[0], 0, 0],
             _ => [0; 3],
         };
+        self.catch_up();
         let mine = self.as_item();
         self.others.push(mine);
         self.load_spec(spec);
@@ -999,7 +1027,16 @@ impl State {
             }
         };
         // (nothing joined: every form's bricks are its own, and there is nothing to put together)
-        if forms.iter().all(|form| form.4.blend.is_none()) {
+        //
+        // Nor while a form is being dragged, unless one is cut out of
+        // another, which is nothing without its cut. Putting joined forms
+        // together is done for the whole of each, and every brick of both
+        // was then given to the graphics card again: with a tree in a lawn,
+        // a hundred thousand bricks for every step of the drag, and the
+        // tree followed the hand in jerks. The forms overlap on screen
+        // while they move, which is where they are, and are one build
+        // again the moment the drag ends.
+        if forms.iter().all(|form| form.4.blend.is_none()) || (self.moving && !forms.iter().any(|form| form.4.carve)) {
             for (form, (built, .., place, _)) in forms.iter().enumerate() {
                 all.extend(built.bricks.iter().enumerate().map(|(n, brick)| (*brick, colour_of(form, Some(n), brick), form, *place)));
             }
@@ -1035,6 +1072,8 @@ impl State {
 
     /// Take on a saved form: its spec, and the menu choices that go with it.
     pub fn load_spec(&mut self, mut spec: Spec) {
+        // (another form: a build begun for the last one is no answer for it)
+        self.loaded += 1;
         // a torus saved by an earlier version: the same thing under its new name
         if spec.form == Form::Torus {
             (spec.form, spec.tube, spec.fill) = (Form::Circle, true, false);
@@ -1450,6 +1489,103 @@ impl State {
         s
     }
 
+    /// Whether a build of the form being edited is under way on another
+    /// thread: its bricks on screen are of what it was a moment ago.
+    pub fn fitting(&self) -> bool {
+        self.behind.is_some()
+    }
+
+    /// Bring the form's bricks up to what it is now, here and at once,
+    /// whatever is being built elsewhere: before the form is set down among
+    /// the others, which are never built again and would keep stale bricks.
+    fn catch_up(&mut self) {
+        // (only if a build is under way: otherwise the form is as the last frame left it, as it always was here)
+        if self.behind.take().is_some() {
+            self.rebuild(|| 0.0);
+        }
+    }
+
+    /// [`State::refresh`] for the window: a form that is slow to build is
+    /// built on another thread, and its new bricks are shown when they are
+    /// ready. Returns whether new bricks were put in place this time.
+    ///
+    /// Built here, as every form was, a slow form stopped the window for
+    /// as long as it took: a lawn of sixty thousand bricks takes half a
+    /// second, so each touch of the brush on it was a freeze, and a stroke
+    /// of touches a run of them, several seconds together. Now the window
+    /// goes on drawing the bricks it has, and takes the new ones when the
+    /// other thread sends them. One build at a time: a change made while
+    /// one is under way waits for it, and is built next, so a run of
+    /// changes costs the builds there was time for and not one for each.
+    ///
+    /// A form quick to build is still built here and now, since for it an
+    /// answer a frame late is a lag where there was none. Which a form is
+    /// goes by how long its last build took.
+    ///
+    /// The alternative was to build a slow form in pieces and only the
+    /// pieces a change touches. That is the larger gain for a lawn and is
+    /// particular to each kind of form; this keeps the window answering for
+    /// every form, the ones not yet thought of among them.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn refresh_behind(&mut self, now_ms: impl Fn() -> f64 + Copy) -> bool {
+        let wanted = |state: &State| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, carve: false, ..state.full_spec() };
+        let mut taken = false;
+        if let Some(behind) = self.behind.take() {
+            match behind.answer.try_recv() {
+                Ok(result) => {
+                    let now = wanted(self);
+                    // Not for another form than it was begun for; nor where
+                    // the form has since been built here for what it now is.
+                    // Otherwise it is put in place even if the form has
+                    // moved on again: nearer to it than what was there.
+                    if behind.loaded == self.loaded && (behind.of == now || self.built_from.as_ref() != Some(&now)) {
+                        match result {
+                            Ok(built) => {
+                                self.bounds = bounds_of(&built);
+                                self.built = built;
+                                self.problem = None;
+                                self.push_others();
+                            }
+                            Err(e) => self.problem = Some(e),
+                        }
+                        self.build_ms = now_ms() - behind.started;
+                        self.built_from = Some(behind.of);
+                        self.scene += 1;
+                        taken = true;
+                    }
+                }
+                // still at it: nothing new, though a change of blend is still to be drawn
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.behind = Some(behind);
+                    if self.blend_shown != (self.spec.blend, self.spec.carve) {
+                        self.blend_shown = (self.spec.blend, self.spec.carve);
+                        self.scene += 1;
+                    }
+                    return false;
+                }
+                // (a build that came to grief says nothing: the form is built again below)
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+        }
+        let now = wanted(self);
+        let owed = self.built.unmeasured && !self.busy;
+        if (self.built_from.as_ref() == Some(&now) && !owed) || self.build_ms < SLOW_BUILD_MS {
+            return self.refresh(now_ms) || taken;
+        }
+        if self.blend_shown != (self.spec.blend, self.spec.carve) {
+            self.blend_shown = (self.spec.blend, self.spec.carve);
+            self.scene += 1;
+        }
+        let (answer_to, answer) = std::sync::mpsc::channel();
+        let (spec, measured) = (now.clone(), !self.busy);
+        // (if the window has gone by the time it is done, there is nobody to tell)
+        std::thread::spawn(move || {
+            let _ = answer_to.send(brickloft_core::spec::build_as(&spec, measured));
+        });
+        self.behind = Some(Behind { of: now, started: now_ms(), loaded: self.loaded, answer });
+        taken
+    }
+
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
         let rebuilt = self.rebuild(now_ms);
@@ -1544,7 +1680,9 @@ impl State {
     /// making, so while any is joined both answers change with every change
     /// to the workspace.
     pub fn drawn_from(&self) -> (DrawnFrom, Vec<DrawnFrom>) {
-        let joined = (self.spec.blend.is_some() || self.others.iter().any(|o| o.spec.blend.is_some())).then_some(self.scene);
+        // (not while a form is dragged, when joined forms are drawn each as its own: see `painted`)
+        let apart = self.moving && !self.spec.carve && !self.others.iter().any(|o| o.spec.carve);
+        let joined = (!apart && (self.spec.blend.is_some() || self.others.iter().any(|o| o.spec.blend.is_some()))).then_some(self.scene);
         let own = (Spec { grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() }, self.paint.clone(), [0; 3], false, self.built.bricks.len(), self.built.unmeasured, joined);
         let rest = self.others.iter().map(|o| (o.spec.clone(), o.paint.clone(), o.place, o.picked, o.built.bricks.len(), o.built.unmeasured, joined)).collect();
         (own, rest)
@@ -3499,6 +3637,131 @@ mod tests {
         state.refresh(|| 0.0);
         assert_eq!(state.built.bricks[0].ext, size);
         assert_eq!(state.others[0].built.bricks.as_ptr(), bricks);
+    }
+
+    #[test]
+    fn joined_forms_are_drawn_apart_while_one_is_dragged_and_together_when_it_is_let_go() {
+        let mut state = State::new();
+        state.form = CUBE;
+        state.preset();
+        state.refresh(|| 0.0);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        state.merge = true;
+        state.move_by([towards[0] * 2 / 3, towards[1] * 2 / 3, 10], DVec3::ZERO);
+        assert!(state.joined());
+        let together = state.painted();
+        assert!(together.len() > 2, "the two cubes were not cut into one build");
+        // dragged: each its own one brick, and what is drawn of the one being edited does not change as it goes
+        state.moving = true;
+        assert_eq!(state.painted().len(), 2);
+        let (own, rest) = state.drawn_from();
+        state.move_by([2, 0, 0], DVec3::ZERO);
+        assert!(state.drawn_from().0 == own && state.drawn_from().1 == rest);
+        // let go: one build again
+        state.moving = false;
+        assert!(state.painted().len() > 2 && state.drawn_from().0 != own);
+    }
+
+    #[test]
+    fn a_form_slow_to_build_is_built_on_another_thread_and_shown_when_it_is_done() {
+        let wait = |state: &mut State| {
+            for _ in 0..4000 {
+                if state.refresh_behind(|| 0.0) {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            false
+        };
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        state.refresh(|| 0.0);
+        let flat = state.built.bricks.clone();
+        // (as a lawn large enough to be slow would have it)
+        state.build_ms = 1000.0;
+        // a touch of the brush: nothing is built here, the lawn on screen is the one it was, and a build is under way
+        state.spec.pulls.push((DVec3::new(4.0, 2.0, 2.0), DVec3::new(14.0, 0.0, 8.0)));
+        assert!(!state.refresh_behind(|| 0.0) && state.fitting());
+        assert_eq!(state.built.bricks, flat);
+        // when it is done the lawn is the one a build here would have made
+        let scene = state.scene;
+        assert!(wait(&mut state) && !state.fitting() && state.scene > scene);
+        let mut here = State::new();
+        here.load_spec(state.full_spec());
+        here.refresh(|| 0.0);
+        assert!(state.built.bricks != flat && state.built.bricks == here.built.bricks);
+        assert!(!state.refresh_behind(|| 0.0) && !state.fitting(), "built twice");
+        // Another form chosen while a build is under way: the lawn is set
+        // down among the others as it now is, not as it was, and the
+        // build's answer is not taken for the new form's.
+        state.build_ms = 1000.0;
+        state.spec.pulls.push((DVec3::new(-10.0, 0.0, 2.0), DVec3::new(10.0, 0.0, 6.0)));
+        assert!(!state.refresh_behind(|| 0.0) && state.fitting());
+        let mut touched = State::new();
+        touched.load_spec(state.full_spec());
+        touched.refresh(|| 0.0);
+        state.add_cube();
+        assert_eq!(state.others[0].built.bricks, touched.built.bricks, "the lawn was left with the bricks it had before its last touch");
+        state.refresh(|| 0.0);
+        let cube = state.built.bricks.clone();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        state.refresh_behind(|| 0.0);
+        assert!(state.form == CUBE && state.built.bricks == cube);
+    }
+
+    /// Not a test: what a touch of the brush on a large lawn costs, and a tree joined into it.
+    #[test]
+    #[ignore]
+    fn timing_sculpting_a_lawn() {
+        use std::time::Instant;
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        state.spec.radius = 60.0;
+        state.refresh(|| 0.0);
+        println!("lawn: {} bricks, box {:?}", state.built.bricks.len(), state.bounds);
+        let mut seed = 7u64;
+        let mut next = || { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); ((seed >> 33) % 1000) as f64 / 1000.0 };
+        for n in 0..24 {
+            let at = DVec3::new(next() * 100.0 - 50.0, next() * 80.0 - 40.0, 2.0);
+            state.spec.pulls.push((at, DVec3::new(10.0 + next() * 15.0, 0.0, next() * 12.0 - 4.0)));
+            if n % 6 == 5 {
+                state.busy = true;
+                let t = Instant::now();
+                state.refresh(|| 0.0);
+                let dragging = t.elapsed();
+                state.busy = false;
+                let t = Instant::now();
+                let again = state.refresh(|| 0.0);
+                println!("{} touches: {} bricks; built while dragging {:?}; built again on letting go ({again}) {:?}", n + 1, state.built.bricks.len(), dragging, t.elapsed());
+            }
+        }
+        let t = Instant::now();
+        std::hint::black_box(state.painted().len());
+        println!("painted, nothing joined: {:?}", t.elapsed());
+        // an oak moved into it
+        state.add_cube();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Oak);
+        state.refresh(|| 0.0);
+        let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        state.merge = true;
+        state.move_by([towards[0], towards[1], towards[2] + 4], DVec3::ZERO);
+        println!("oak: {} bricks, joined {}", state.built.bricks.len(), state.joined());
+        for n in 0..4 {
+            let t = Instant::now();
+            state.move_by([if n % 2 == 0 { 2 } else { -2 }, 0, 0], DVec3::ZERO);
+            let moved = t.elapsed();
+            let t = Instant::now();
+            let all = state.painted().len();
+            println!("oak moved a cell: move {:?}, painted {:?} ({all} bricks)", moved, t.elapsed());
+        }
     }
 
     /// Not a test: what moving and reshaping a form beside a large lawn

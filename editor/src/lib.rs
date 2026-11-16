@@ -502,6 +502,16 @@ pub fn run_form(form: usize, claude: bool) {
         // rebuild only when the spec changed; a frame with nothing new costs nothing
         // dragging a dot or a form in the view, or anything in the panel
         state.busy = dragging.is_some() || gui.context().input(|i| i.pointer.any_down());
+        // (a form being dragged about: joined forms are drawn apart for as long, and together when it ends)
+        let moving = matches!(dragging, Some(Handle::Move | Handle::Slide(_)));
+        if state.moving != moving {
+            state.moving = moving;
+            state.scene += 1;
+        }
+        // (a form slow to build is built on another thread, where there are threads: see `State::refresh_behind`)
+        #[cfg(not(target_arch = "wasm32"))]
+        let rebuilt = state.refresh_behind(now_ms);
+        #[cfg(target_arch = "wasm32")]
         let rebuilt = state.refresh(now_ms);
         if rebuilt || first || shown_gap != state.floor_gap || shown_scene != state.scene {
             shown_gap = state.floor_gap;
