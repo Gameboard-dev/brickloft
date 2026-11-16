@@ -537,7 +537,7 @@ fn changed(spec: &Spec, changes: &Map<String, Value>) -> Result<Spec, String> {
     Ok(spec)
 }
 
-const MODES: [(Mode, &str); 5] = [(Mode::Solid, "one"), (Mode::Blend, "blend"), (Mode::Stripes, "stripes"), (Mode::Speckle, "speckle"), (Mode::Patches, "patches")];
+const MODES: [(Mode, &str); 6] = [(Mode::Solid, "one"), (Mode::Blend, "blend"), (Mode::Stripes, "stripes"), (Mode::Speckle, "speckle"), (Mode::Patches, "patches"), (Mode::Pattern, "pattern")];
 
 /// A form's colouring with `changes` made to it.
 fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
@@ -545,7 +545,7 @@ fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
     let changes = changes.as_object().ok_or("colour is an object")?;
     for (key, value) in changes {
         match key.as_str() {
-            "mode" => paint.mode = MODES.iter().find(|m| Some(m.1) == value.as_str()).ok_or("mode is one, blend, stripes, speckle or patches")?.0,
+            "mode" => paint.mode = MODES.iter().find(|m| Some(m.1) == value.as_str()).ok_or("mode is one, blend, stripes, speckle, patches or pattern")?.0,
             "colours" => {
                 let colours = value.as_array().filter(|c| (1..=4).contains(&c.len())).ok_or("colours is a list of one to four colours")?;
                 paint.colours = colours

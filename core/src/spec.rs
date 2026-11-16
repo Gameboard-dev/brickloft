@@ -129,6 +129,10 @@ pub struct Spec {
     /// between them, in place of solid brick (see [`crate::pattern`]).
     /// `None` for solid. Forms that are not flat take no notice of it.
     pub stones: Option<crate::pattern::Stones>,
+    /// A flat band or filled outline laid as a mosaic of coloured tiles
+    /// (see [`crate::pattern`]). `None` for none. If `stones` is set too,
+    /// the stones are laid.
+    pub mosaic: Option<crate::pattern::Mosaic>,
 }
 
 impl Default for Spec {
@@ -159,6 +163,7 @@ impl Default for Spec {
             pulls: Vec::new(),
             pull_reach: 8.0,
             stones: None,
+            mosaic: None,
             simplify: 0.0,
             grain: 1,
             budget: 2500,
@@ -181,6 +186,10 @@ pub struct Built {
     pub grain: i32,
     /// `solid` and `error` are still to be measured (see `build_at`)
     pub unmeasured: bool,
+    /// For a form laid as a pattern of colours (a mosaic): which of the
+    /// pattern's colours each brick is, in the order of `bricks`. Empty for
+    /// every other form, whose colouring is the editor's own affair.
+    pub shades: Vec<u8>,
 }
 
 /// The furthest apart, in cells, a form's points may be, and the largest its
@@ -418,6 +427,7 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.pulls = spec.pulls.iter().map(|(at, by)| (*at / g, *by / g)).collect();
     coarse.pull_reach /= g;
     coarse.stones = spec.stones.map(|s| crate::pattern::Stones { size: s.size / g, gap: s.gap / g, ..s });
+    coarse.mosaic = spec.mosaic.map(|m| crate::pattern::Mosaic { tile: ((m.tile as f64 / g).round() as i32).max(1), ..m });
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
     coarse.snapped()
@@ -516,11 +526,12 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
         _ => None,
     };
     let mut built = match quick {
-        Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true },
+        Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
         None => fit(&coarse, &solid, path, g),
     };
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
-    if (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
+    // (not a build laid in a pattern's colours, which name its bricks one by one)
+    if built.shades.is_empty() && (coarse.symmetric || coarse.mirror.contains(&true)) && symmetrise(&mut built.bricks, &|p| solid.distance(p)) {
         // the fitter's own figures are for the bricks as it left them
         built.unmeasured = true;
     }
@@ -2366,6 +2377,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 path,
                 grain: 1,
                 unmeasured: false,
+                shades: Vec::new(),
             }
         }
         Solid::Lathe { field, min, max, .. } => {
@@ -2377,7 +2389,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let form = Probe::of(Solid::Volume { field: field.clone(), min: *min, max: *max });
             let ways = [false, true].map(|short_sides| {
                 let bricks = turned(spec, solid, g, short_sides)?;
-                let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true };
+                let mut built = Built { bricks, solid: 0.0, error: 0.0, path: Vec::new(), grain: 1, unmeasured: true, shades: Vec::new() };
                 // The two totals only: the record a report keeps of every
                 // cell took most of the time here, and was thrown away. And
                 // what the form holds of each cell is asked once for both.
@@ -2393,7 +2405,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             }
         }
         Solid::Pyramid { bricks, field, min, max } => match bricks.clone().filter(|_| spec.wedges) {
-            Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true },
+            Some(bricks) => Built { bricks, solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() },
             None => fit(spec, &Solid::Volume { field: field.clone(), min: *min, max: *max }, path, g),
         },
         Solid::Round {
@@ -2409,6 +2421,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 path,
                 grain: 1,
                 unmeasured: true,
+                shades: Vec::new(),
             },
             None => fit(
                 spec,
@@ -2430,13 +2443,14 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             depth,
         } => {
             let mut bricks = Vec::new();
-            let fit = match &spec.stones {
+            let mut shades = Vec::new();
+            let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
+            let fit = match (&spec.stones, &spec.mosaic) {
                 // each stone its own outline, where a solid form is one
-                Some(stones) => {
-                    let opts = fit_planar::Opts { brick_cost: spec.simplify / (g * g), max_ext: spec.max_ext, wedges: spec.wedges };
-                    crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks)
-                }
-                None => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),
+                (Some(stones), _) => crate::pattern::lay_stones(&|p| region.eval(p), stones, *axis, *min, *max, *w0, *depth, &opts, &mut bricks),
+                // each colour of the mosaic its own outline
+                (None, Some(mosaic)) => crate::pattern::lay_mosaic(&|p| region.eval(p), mosaic, *axis, *min, *max, *w0, *depth, &opts, &mut bricks, &mut shades),
+                (None, None) => fit_layer(spec, region, *axis, *min, *max, *w0, *depth, g, &mut bricks),
             };
             let depth = *depth as f64;
             Built {
@@ -2446,6 +2460,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 path,
                 grain: 1,
                 unmeasured: false,
+                shades,
             }
         }
         Solid::Pipe { top, full, chamfer, rise, axis, first, layers, min, max, .. } => {
@@ -2454,7 +2469,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
             let fit = fit_planar_towards(&|x, y| full.eval(DVec2::new(x, y)), *min, *max, &opts, Some((&narrower, *chamfer)));
             let pipe = crate::fit_stack::Pipe { wall: &fit.pieces, top: &narrower, chamfer: *chamfer, rise: *rise, axis: *axis, first: *first, layers: *layers, max_ext: spec.max_ext };
             // measured against the round tube by the caller
-            Built { bricks: crate::fit_stack::pipe(&pipe), solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true }
+            Built { bricks: crate::fit_stack::pipe(&pipe), solid: 0.0, error: 0.0, path, grain: 1, unmeasured: true, shades: Vec::new() }
         }
         Solid::Stack {
             layers,
@@ -2475,6 +2490,7 @@ fn fit(spec: &Spec, solid: &Solid, path: Vec<DVec3>, g: f64) -> Built {
                 path,
                 grain: 1,
                 unmeasured: true,
+                shades: Vec::new(),
             }
         }
     }

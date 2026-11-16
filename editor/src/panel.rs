@@ -416,6 +416,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             let mut stones = s.stones.is_some();
             helped(ui, help("stones"), |ui| ui.checkbox(&mut stones, "Stepping stones"));
             if stones != s.stones.is_some() {
+                if stones {
+                    s.mosaic = None; // one pattern at a time
+                }
                 s.stones = stones.then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.0, uneven: 0.5, seed: 1 });
                 // stones are told apart by their colours: started in stone colours unless colours have been chosen
                 if stones && state.paint.mode == Mode::Solid {
@@ -433,6 +436,40 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                         laid.seed = laid.seed.wrapping_add(1);
                     }
                     hint(ui, help("stone_seed"));
+                });
+            }
+            // a mosaic of coloured tiles: see `brickloft_core::pattern`
+            let mut mosaic = s.mosaic.is_some();
+            helped(ui, help("mosaic"), |ui| ui.checkbox(&mut mosaic, "Mosaic"));
+            if mosaic != s.mosaic.is_some() {
+                if mosaic {
+                    s.stones = None;
+                }
+                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style: 0, tile: 2, border: 1, seed: 1 });
+                // a mosaic is its colours: started in a mosaic's unless the pattern's colouring is already chosen
+                if mosaic && state.paint.mode != Mode::Pattern {
+                    (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::MOSAIC.to_vec());
+                }
+            }
+            if let Some(laid) = &mut s.mosaic {
+                let styles = &brickloft_core::pattern::STYLES;
+                helped(ui, help("mosaic_style"), |ui| {
+                    ComboBox::from_label("Style").selected_text(styles[laid.style.min(styles.len() - 1)].name).show_ui(ui, |ui| {
+                        for (i, style) in styles.iter().enumerate() {
+                            ui.selectable_value(&mut laid.style, i, style.name);
+                        }
+                    })
+                    .response
+                });
+                helped(ui, help("mosaic_tile"), |ui| ui.add(Slider::new(&mut laid.tile, 1..=12).text("Tile size")));
+                helped(ui, help("mosaic_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));
+                    ui.label("Seed");
+                    if ui.button("Another").clicked() {
+                        laid.seed = laid.seed.wrapping_add(1);
+                    }
+                    hint(ui, help("mosaic_seed"));
                 });
             }
             helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));

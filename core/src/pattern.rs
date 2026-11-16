@@ -239,6 +239,178 @@ pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize,
     fit
 }
 
+/// How a mosaic is laid: the settings a form carries for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mosaic {
+    /// which of [`STYLES`]
+    pub style: usize,
+    /// how many cells across one tile of the mosaic is
+    pub tile: i32,
+    /// how many tiles wide the plain border round the edge is, at least 1
+    pub border: i32,
+    /// which filling: any number, each a different mosaic
+    pub seed: u64,
+}
+
+/// A style of mosaic: a small sample whose motifs wave function collapse
+/// lays out afresh over the floor (see [`crate::wfc`]).
+pub struct Style {
+    pub name: &'static str,
+    /// the sample, rows of digits, each digit one of the form's colours
+    sample: &'static str,
+    /// whether the motifs may lie any way round
+    turned: bool,
+}
+
+/// The styles on offer. Each sample is a text file beside this one, so
+/// that a style can be drawn and changed without reading any Rust.
+pub const STYLES: [Style; 5] = [
+    Style { name: "key", sample: include_str!("mosaics/key.txt"), turned: true },
+    Style { name: "diamonds", sample: include_str!("mosaics/diamonds.txt"), turned: true },
+    Style { name: "weave", sample: include_str!("mosaics/weave.txt"), turned: true },
+    Style { name: "flowers", sample: include_str!("mosaics/flowers.txt"), turned: true },
+    Style { name: "waves", sample: include_str!("mosaics/waves.txt"), turned: false },
+];
+
+/// How many times a mosaic is started again after a contradiction before
+/// the floor is laid plain.
+const TRIES: usize = 30;
+
+/// Fit a mosaic over a region and push it through cells `w0..w0 + depth`
+/// across `axis`, onto `bricks`, with each brick's colour (a digit of the
+/// style's sample) onto `shades`. Returns the fit of the region.
+///
+/// The region is fitted first as the one solid it is, so that its edge is
+/// as smooth as any flat form's. Then it is coloured. It is cut into square
+/// tiles, `tile` cells across, on the brick grid, and wave function
+/// collapse gives each tile a colour. The sloped bricks of the edge keep
+/// their places, in the style's first colour. Everything else the fit made
+/// is whole cells, and those are sorted by their tile's colour and joined
+/// again into the largest bricks of one colour, so that tiles of a colour
+/// side by side are one brick and not a brick each.
+///
+/// The colours were first fitted one at a time, each colour's tiles as a
+/// solid of its own. The outline fitter is made to prefer a slope to a
+/// staircase, and so it turned the stepped edge between two colours of
+/// small tiles into a slope, on both sides: bricks of two colours in one
+/// place. Sorting whole cells cannot do that.
+///
+/// A tile that a sloped brick of the edge reaches into is the first
+/// colour throughout, since a brick is one colour, and so are the tiles
+/// within `border` of the edge: a floor mosaic has a border, and it keeps
+/// the pattern clear of the part of the floor the edge has cut up.
+///
+/// If the pattern cannot be completed (see `wfc`), the floor is laid plain,
+/// in the style's first colour.
+#[allow(clippy::too_many_arguments)]
+pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
+    use crate::wfc::{learn, Grid, Sample};
+    let (ua, va) = match axis {
+        0 => (1, 2),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    let tile = settings.tile.clamp(1, 64);
+    let style = &STYLES[settings.style.min(STYLES.len() - 1)];
+    let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, opts);
+    // the tiles that cover the box, set on multiples of a tile's width so
+    // that moving the form does not slide the pattern under it
+    let first = [min[0].div_euclid(tile), min[1].div_euclid(tile)];
+    let across = ((max[0] + tile - 1).div_euclid(tile) - first[0]).max(1) as usize;
+    let down = ((max[1] + tile - 1).div_euclid(tile) - first[1]).max(1) as usize;
+    let tile_of = |x: i32, y: i32| (y.div_euclid(tile) - first[1]) as usize * across + (x.div_euclid(tile) - first[0]) as usize;
+    let middle = |k: usize| DVec2::new((first[0] + (k % across) as i32) as f64 + 0.5, (first[1] + (k / across) as i32) as f64 + 0.5) * tile as f64;
+    // how deep inside the region a tile's middle is, in tiles: under nothing, it is outside
+    let inside: Vec<f64> = (0..across * down).map(|k| -region(middle(k)) / tile as f64).collect();
+    let mut colours: Vec<u8> = Sample::read(style.sample)
+        .and_then(|sample| learn(&sample, 3, style.turned))
+        .and_then(|learnt| {
+            let mut grid = Grid::new(&learnt.rules, [across, down]);
+            for k in (0..across * down).filter(|k| inside[*k] < -0.75) {
+                grid.leave_out(k % across, k / across);
+            }
+            let filled = grid.fill(settings.seed, TRIES)?;
+            Ok(filled.iter().map(|tile| tile.map_or(0, |t| learnt.colour[t])).collect())
+        })
+        .unwrap_or_else(|_| vec![0; across * down]);
+    // the border, and the tiles the edge's sloped bricks reach into
+    let edge = settings.border.clamp(0, 8) as f64 - 0.5;
+    for k in (0..across * down).filter(|k| inside[*k] < edge) {
+        colours[k] = 0;
+    }
+    let cells = |piece: &crate::fit_planar::Piece| {
+        let (x, y, w, h) = (piece.x, piece.y, piece.w, piece.h);
+        (0..w * h).map(move |k| (x + k % w, y + k / w))
+    };
+    for piece in fit.pieces.iter().filter(|piece| piece.mask != 15) {
+        for (x, y) in cells(piece) {
+            colours[tile_of(x, y)] = 0;
+        }
+    }
+    let mut push = |mask4: u8, x: i32, y: i32, w: i32, h: i32, shade: u8| {
+        let mask = (0..8u8).fold(0u8, |m, c| m | (mask4 >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
+        let mut at = 0;
+        while at < depth {
+            let run = (depth - at).min(opts.max_ext.max(1));
+            let (mut min, mut ext) = ([0; 3], [0; 3]);
+            (min[ua], min[va], min[axis]) = (x, y, w0 + at);
+            (ext[ua], ext[va], ext[axis]) = (w, h, run);
+            bricks.push(CellBrick { mask, min, ext });
+            shades.push(shade);
+            at += run;
+        }
+    };
+    // the whole cells, each with its tile's colour
+    let mut whole: Vec<(i32, i32, u8)> = Vec::new();
+    for piece in &fit.pieces {
+        if piece.mask == 15 {
+            whole.extend(cells(piece).map(|(x, y)| (y, x, colours[tile_of(x, y)])));
+        } else {
+            push(piece.mask, piece.x, piece.y, piece.w, piece.h, 0);
+        }
+    }
+    // Joined into bricks of one colour: along each row into runs, and a run
+    // onto the brick above it where that is the same run of the same
+    // colour. (The largest rectangles would be fewer bricks still, and are
+    // a harder problem than a floor's worth of bricks is worth.)
+    whole.sort();
+    let limit = opts.max_ext.max(1);
+    let mut open: Vec<(i32, i32, i32, i32, u8)> = Vec::new(); // x, y, w, h, colour: bricks that end on the row above
+    let mut at = 0;
+    while at < whole.len() {
+        let row = whole[at].0;
+        let mut runs: Vec<(i32, i32, u8)> = Vec::new(); // x, w, colour
+        while at < whole.len() && whole[at].0 == row {
+            let (_, x, colour) = whole[at];
+            match runs.last_mut() {
+                Some(run) if run.0 + run.1 == x && run.2 == colour && run.1 < limit => run.1 += 1,
+                _ => runs.push((x, 1, colour)),
+            }
+            at += 1;
+        }
+        let mut still = Vec::new();
+        for (x, w, colour) in runs {
+            match open.iter().position(|b| b.0 == x && b.2 == w && b.4 == colour && b.1 + b.3 == row && b.3 < limit) {
+                Some(above) => {
+                    let mut brick = open.swap_remove(above);
+                    brick.3 += 1;
+                    still.push(brick);
+                }
+                None => still.push((x, row, w, 1, colour)),
+            }
+        }
+        // a brick nothing was joined to this row is finished
+        for (x, y, w, h, colour) in open.drain(..) {
+            push(15, x, y, w, h, colour);
+        }
+        open = still;
+    }
+    for (x, y, w, h, colour) in open {
+        push(15, x, y, w, h, colour);
+    }
+    fit
+}
+
 /// Which separate piece of a flat build each brick belongs to: bricks that
 /// touch are one piece, and each stone of a path is a piece of its own.
 /// Returns a number for each brick, the same for bricks of one piece.
@@ -347,6 +519,42 @@ mod tests {
         for k in 0..400 {
             let p = DVec2::new(-61.0 + (k % 40) as f64 * 3.1, if k % 2 == 0 { 8.3 } else { -8.3 });
             assert!(all.iter().all(|s| s.eval(p, &band) > 0.0), "a stone holds {p:?}, outside the path");
+        }
+    }
+
+    #[test]
+    fn a_mosaic_covers_the_floor_in_coloured_tiles_with_a_plain_border() {
+        // a disc of radius 30
+        let disc = |p: DVec2| p.length() - 30.0;
+        let (min, max) = ([-32, -32], [32, 32]);
+        for (style, named) in STYLES.iter().enumerate() {
+            let (mut bricks, mut shades) = (Vec::new(), Vec::new());
+            let settings = Mosaic { style, tile: 2, border: 1, seed: 7 };
+            let fit = lay_mosaic(&disc, &settings, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
+            let name = named.name;
+            assert_eq!(bricks.len(), shades.len(), "{name}");
+            // the whole disc is covered, closely, with no cell in two bricks
+            let area = std::f64::consts::PI * 900.0;
+            assert!((fit.solid - area).abs() < 0.03 * area && fit.error < 0.03 * area, "{name}: {} of {area}, {} wrong", fit.solid, fit.error);
+            let mut seen = HashSet::new();
+            let squares = bricks.iter().filter(|b| b.mask == 0xff);
+            assert!(squares.clone().all(|b| (0..b.ext[0]).all(|x| (0..b.ext[1]).all(|y| seen.insert((b.min[0] + x, b.min[1] + y))))), "{name}: two bricks share a cell");
+            // more than one colour, and far fewer bricks than tiles (706 tiles of 2 by 2 in the disc)
+            let used: HashSet<u8> = shades.iter().copied().collect();
+            assert!(used.len() >= 2, "{name} is all one colour");
+            assert!(bricks.len() < 700, "{name}: {} bricks", bricks.len());
+            // the sloped pieces of the edge are all the border's colour
+            assert!(bricks.iter().zip(&shades).filter(|(b, _)| b.mask != 0xff).all(|(_, shade)| *shade == 0), "{name}: a sloped piece is not the border's colour");
+            // one seed is one mosaic, another seed another
+            let again = |seed: u64| {
+                let (mut b, mut s) = (Vec::new(), Vec::new());
+                lay_mosaic(&disc, &Mosaic { seed, ..settings }, 2, min, max, 0, 1, &Opts::default(), &mut b, &mut s);
+                (b, s)
+            };
+            assert_eq!(again(7), (bricks.clone(), shades.clone()), "{name}");
+            if name != "waves" {
+                assert_ne!(again(8).0, bricks, "{name}: two seeds gave one mosaic");
+            }
         }
     }
 

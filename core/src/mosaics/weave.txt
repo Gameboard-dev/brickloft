@@ -1,0 +1,9 @@
+# A basket weave: pairs of bars lying across and standing up in turn.
+11102220
+00002220
+11102220
+00000000
+22201110
+22200000
+22201110
+00000000

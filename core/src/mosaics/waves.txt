@@ -1,0 +1,7 @@
+# Waves: stepped diagonal bands in three colours.
+001122
+011220
+112200
+122001
+220011
+200112

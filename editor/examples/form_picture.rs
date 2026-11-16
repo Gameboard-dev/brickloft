@@ -43,7 +43,12 @@ fn main() {
         None => (lo + hi) / 2.0,
     };
     let mut canvas = Canvas::new(SIZE, 2, middle, zoom * SIZE as f64 / (hi - lo).length() / 1.02, towards);
-    for brick in &built.bricks {
+    // a pattern's colours, if the form has one: a mosaic's ground, then its three other colours
+    const SHADES: [[f64; 3]; 4] = [[226.0, 214.0, 190.0], [176.0, 84.0, 60.0], [44.0, 74.0, 122.0], [204.0, 160.0, 72.0]];
+    for (n, brick) in built.bricks.iter().enumerate() {
+        if let Some(shade) = built.shades.get(n) {
+            canvas.brick = SHADES[*shade as usize % 4];
+        }
         canvas.shape(brick.mask, DVec3::from_array(brick.min.map(|v| v as f64)), DVec3::from_array(brick.ext.map(|v| v as f64)));
     }
     let file = std::io::BufWriter::new(std::fs::File::create(to).unwrap_or_else(|e| panic!("could not make {to}: {e}")));

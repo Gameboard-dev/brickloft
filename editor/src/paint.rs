@@ -19,14 +19,17 @@ pub enum Mode {
     Speckle,
     /// each separate piece of the form one of the colours: the stones of a path
     Patches,
+    /// each brick the colour its pattern gives it: the tiles of a mosaic
+    Pattern,
 }
 
-pub const MODES: [(Mode, &str); 5] = [
+pub const MODES: [(Mode, &str); 6] = [
     (Mode::Solid, "One colour"),
     (Mode::Blend, "Blend"),
     (Mode::Stripes, "Stripes"),
     (Mode::Speckle, "Speckled blend"),
     (Mode::Patches, "Each piece its own"),
+    (Mode::Pattern, "As the pattern has it"),
 ];
 
 /// Steps between two neighbouring colours of a blend. More would be smoother
@@ -66,7 +69,19 @@ fn scatter(at: [i32; 3]) -> f64 {
 /// weathered stone.
 pub const STONE: [[u8; 3]; 4] = [[168, 140, 120], [146, 122, 104], [190, 160, 130], [124, 110, 98]];
 
+/// The colours a mosaic starts in: cream for the ground, then terracotta,
+/// a deep blue and ochre.
+pub const MOSAIC: [[u8; 3]; 4] = [[226, 214, 190], [176, 84, 60], [44, 74, 122], [204, 160, 72]];
+
 impl Paint {
+    /// The colour of a brick whose pattern gives it colour number `shade`
+    /// (see `brickloft_core::spec::Built::shades`): that one of the
+    /// colours, going round again past the last. `None` for a paint with
+    /// no colours.
+    pub fn shade(&self, shade: u8) -> Option<[u8; 3]> {
+        (!self.colours.is_empty()).then(|| self.colours[shade as usize % self.colours.len()])
+    }
+
     /// The colour of separate piece number `piece` of a form (see
     /// `brickloft_core::pattern::pieces`): one of the colours, the same one
     /// for that piece every time. `None` for a paint with no colours.

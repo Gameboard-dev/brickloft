@@ -1,0 +1,8 @@
+# A square spiral of line on a plain field: grows into a maze of right-angled
+# lines, the meander (Greek key) of a floor border let loose over a floor.
+11111110
+00000010
+01111010
+01000010
+01111110
+00000000

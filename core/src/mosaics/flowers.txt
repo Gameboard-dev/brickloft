@@ -1,0 +1,7 @@
+# Small four-petalled flowers scattered on a plain field.
+000000
+001000
+012100
+001000
+000000
+000000
