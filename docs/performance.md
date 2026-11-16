@@ -431,10 +431,15 @@ were a third of a large sphere's measuring time on sixteen threads.
 
 A join of forms (see [algorithm.md](algorithm.md), "Forms joined on
 purpose") shares out the test of each block of cells for the zone and the
-sampling of each cell in it. Two spheres of radius 20 joined take 8.7 ms on
-one thread and 6.9 ms on sixteen: the zone is a few thousand cells, about
-3 ms of sampling, and growing it to whole bricks and running the fitter's
-passes over it stay on one thread.
+sampling of each cell in it, and the measuring of each stretched brick
+tried along the seam. Two spheres of radius 20 joined take 10.9 ms on one
+thread and 9.6 ms on sixteen, on a machine that was busy with other
+builds: the zone is a few thousand cells, about 3 ms of sampling, and
+growing it to whole bricks, evening it out and running the fitter's passes
+over it stay on one thread. Evening out goes by the bricks as they stand,
+one colour of a chessboard of cells at a time, and could be shared among
+threads within a colour. It has not been: it and the stretched bricks
+together are 1 to 4 ms of a join.
 
 ### How the order is kept
 

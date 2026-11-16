@@ -2943,6 +2943,45 @@ surface lies where the further form is at most $`1.25k`$ away, which is 7.5
 cells at a blend of 6. A larger blend would have its rim cut short wherever
 a curve's distance gave out.
 
+Raising that margin to 16 cells, which a blend of 12 needs, was measured
+and left out, because every curve pays for it whether it is joined or not.
+A curve's distance is found by looking through the pieces of its path
+filed near the place asked about, and a wider margin files each piece in
+more places, so there are more to look through at every one.
+
+| Form | Built, margin 8 | Built, margin 16 | One distance, margin 8 | One distance, margin 16 |
+|---|---|---|---|---|
+| a round tube along a spline of 14 points | 48 ms | 373 ms | 117 ns | 580 ns |
+| a ring of radius 40 | 19 ms | 35 ms | 53 ns | 118 ns |
+| an arch 60 wide | 4.6 ms | 6.8 ms | 62 ns | 116 ns |
+| an arch askew to the grid | 13 ms | 22 ms | 74 ns | 125 ns |
+
+#### Taking a form away
+
+A joined form marked to be cut out (`Spec::carve`) is subtracted from the
+forms it is joined to, where an unmarked one is added: a window through a
+wall, a hole through a sphere. The solid left of $`a`$ once $`b`$ is taken
+out of it is where $`a`$ is inside and $`b`$ is outside, which is the
+larger of $`a`$ and $`-b`$. Its smooth form is the smooth minimum turned
+over, and rounds the rim of the hole as a fillet rounds a crease:
+
+```math
+\mathrm{smax}(a, -b) = -\mathrm{smin}(-a, b) = \max(a, -b) + \frac{h^2}{4k}, \qquad h = \max\left(k - \lvert a + b\rvert,\ 0\right)
+```
+
+Three things differ from a form that adds.
+
+| What differs | Why |
+|---|---|
+| None of the form's own bricks are built. The editor draws them as red glass. | The form is a hole. With nothing drawn there would be nothing to see of it or take hold of. |
+| The zone follows the whole wall of the hole, however deep inside the other form it runs. | A joined form's surface inside another is buried, but a hole's wall shows. The wall is fitted cell by cell, because the hollow side of a sloped brick is not a brick: the game takes a brick's box whole. |
+| It is taken out of every form of the join, joined or not, and the rounding of the rim is its own blend alone. | The rim of a window is rounded as the window says, whatever the wall was joined with. |
+
+Clear of the zone, where whole blocks of the two forms overlap, the other
+forms give up the room they share with the cutting form's bricks exactly as
+a joined form gives way ("What is still cut" below). The cutting form's
+bricks are dropped only after that.
+
 #### The zone
 
 The joined solid differs from the two forms fitted separately only near
@@ -2968,10 +3007,21 @@ but the seam of a sphere sunk into a floor is a ring, and a box round a
 ring takes in the whole disc inside it and refits surface that has not
 changed.
 
+For a hole, with $`a`$ the form it is in and $`b`$ the form taken away, the
+bounds are one-sided, because the hole's wall runs as deep into $`a`$ as
+the hole does.
+
+| Condition | What it says |
+|---|---|
+| $`-b > a - \max(2,\ k - \sqrt{0.4k} + 1.74)`$ | the hole matters here: its inside is the nearer of the two surfaces, or near enough to it |
+| $`\max(a, -b) < 1`$ | what is left is no more than a cell away, by the plain measure and not the rounded one, so that a rim rounded by a large blend is all in the zone |
+| $`\mathrm{smax}(a, -b) > -1.5`$ | the cell is not deep inside what is left |
+
 The zone is fitted by the volume fitter's method (section 7): the best
 brick for each cell, tetrahedra with fewer than two backed faces removed,
 ramps stretched where that fits closer, and ramps joined along their
-ridges. One step is done differently, because it was most of a join's
+ridges. Two passes are added to it, which the next two sections describe.
+One step is done differently, because it was most of a join's
 time. The volume fitter asks the solid for its distance at each of a
 cell's 64 samples. Here each form's distance is asked at the cell's eight
 corners, once for all the cells that share a corner, and worked out at the
@@ -2982,6 +3032,109 @@ join stays sharp. A form whose own distance is not smooth across a cell (an
 edge of its own crosses it) is detected by comparing three true values in
 the cell with what the corners give, and is asked at every sample there as
 before.
+
+#### Evening out the seam
+
+The best brick for a cell is the one that disagrees least with the solid
+inside that cell, and takes no account of the cells beside it. On a
+surface that slopes gently, or runs askew to all three axes, the best brick
+changes from cell to cell: a ramp, nothing, a ramp, a tetrahedron. Each is
+right by volume and together they are a row of teeth. What shows is the
+upright sides of the teeth, which are faces of bricks standing where the
+solid has no face.
+
+So each cell is chosen a second time, by a cost with two parts
+(`even_out` in [core/src/blend/even.rs](../core/src/blend/even.rs)):
+
+```math
+\text{cost} = \text{disagreement in the cell} + \lambda \cdot \text{steps on the cell's six faces}
+```
+
+A step is counted on the face between two cells: the part of the face that
+one cell's brick comes up to and the other's does not. Bricks that follow a
+sloping surface exactly have none, because both come up to the same part
+of the face they share. A tooth has three. A step is not counted where the
+solid has one itself, which is where its surface lies flat in the face, so
+the top of a cube is not pulled away from the plane it lies in. With
+disagreement in sixty-fourths of a cell and steps in sixteenths of a face,
+$`\lambda`$ is 1.
+
+One cell's choice depends on its neighbours' bricks, so the choice is
+repeated until nothing changes
+([iterated conditional modes](https://en.wikipedia.org/wiki/Iterated_conditional_modes)).
+The cells are taken as the two colours of a chessboard in turn. A cell's
+six neighbours are all of the other colour, so the cells of one colour can
+be chosen in any order, or on any number of threads, with the same result,
+and each choice lowers the total cost, so the passes end. Choosing every
+cell at once was the alternative. Two neighbours can then each change to
+suit the other as it was, and change back on the next pass.
+
+#### Stretched bricks in the seam
+
+A unit ramp, tetrahedron or cut cube slopes at 45 degrees and at no other
+angle. The game stretches a brick along each axis separately, and a
+stretched brick slopes at whatever its three lengths make: a tetrahedron 4
+by 2 by 1 cells rises 1 in 4 one way and 1 in 2 the other. A sphere's own
+fitter lays its facets out from the sphere's centre with such bricks. A
+fillet has no centre, so its layout is taken from the solid, one cell at a
+time (`stretch` in
+[core/src/blend/stretch.rs](../core/src/blend/stretch.rs)).
+
+Where the surface crosses a cell, the change in the solid's distance across
+the cell is the surface's slope there, its gradient $`(g_x, g_y, g_z)`$. A
+stretched brick lies along a surface of that slope when its lengths are in
+the inverse proportions of the gradient's parts:
+
+```math
+l_x : l_y : l_z = \frac{1}{\lvert g_x\rvert} : \frac{1}{\lvert g_y\rvert} : \frac{1}{\lvert g_z\rvert}
+```
+
+A part of the gradient too small for any length up to 6 cells to match
+counts as none. With one such part the brick is a ramp, level along that
+axis. With none it is a tetrahedron or a cut cube, whichever fits. Each
+brick is tried at up to five sizes, in the one place where the cell is the
+first that its sloped face crosses. It is kept as a candidate only if it
+disagrees with the solid less than the unit bricks in its box do, so the
+join never gets further from the solid. Candidates are taken largest saving
+first, and no two overlap. The volume fitter's ramps stretched one way are
+then tried over what is left, since they are tried in every place and
+find runs the gradient at one cell does not.
+
+Trying every stretched brick in every position needs no gradient, and was
+set aside as a thousand times the work for the same bricks: a brick that
+does not lie along the gradient cannot fit.
+
+The two passes were measured on nine joins: a sphere on a cube, a sphere in
+a sphere and a sphere cut out of a cube, each at blends of 0, 2 and 6. The
+figures are sums over the nine, within the blend's reach of the seam
+(`seam` in [core/src/blend/tests.rs](../core/src/blend/tests.rs)).
+
+| | Disagreement with the solid, cells | Steps, cell faces | Unit sloped bricks | Of those, standing alone |
+|---|---|---|---|---|
+| before | 515 | 2,173 | 1,634 | 45 |
+| evened out only | 514 | 1,876 | 1,738 | 6 |
+| stretched only | 473 | 1,969 | 1,104 | 15 |
+| both | 466 | 1,818 | 1,136 | 1 |
+
+Together they take a tenth off the disagreement, a sixth off the steps and
+nearly a third off the unit sloped bricks, and leave one tooth standing
+alone where there were 45. The seam is still rougher than a sphere's own
+facets, and "Where it falls short" below says why.
+
+#### Brick size
+
+Forms built at one brick size larger than a microbrick, and standing a
+whole number of bricks of that size apart, are joined at that size: every
+brick the join fits is a multiple of it. The whole join is done on a
+lattice that many cells coarse (`common_size` in
+[core/src/blend.rs](../core/src/blend.rs)). A form's bricks and place are
+divided by the size on the way in, its distance is asked at a place
+multiplied by the size and then divided by it, the blend is divided by it,
+and the fitted bricks are multiplied by it on the way out. A solid measured
+in a larger unit is the same solid, so nothing in between changes. Forms of
+different sizes, or of one size out of step, share no lattice coarser than
+the cells', and are joined at single microbricks: sound, with a band of
+fine bricks round the seam.
 
 #### The seam
 
@@ -3008,7 +3161,8 @@ at the brick's middle, and is coloured as that form's bricks are.
 Deep inside, blocks of one form overlap blocks of another, and one of them
 gives way: a block is cut down to the cells that share no room, and a
 sloped brick that shares any is left out, which inside the other form is
-not seen. Forms that are not joined give way to nobody. Joined forms give
+not seen. Forms that are not joined give way to nobody but a form that is
+cut out, which every form on its grid gives way to. Joined forms give
 way to those that are not and to one another in an order fixed by where
 they stand, so the result is the same whichever form is being edited.
 
@@ -3017,28 +3171,45 @@ effect from the blend.
 
 | Form | Why it is not fitted as one with the others |
 |---|---|
-| a form standing an odd unit (half a microbrick) off the other along any axis | Its cells straddle the other's, and no brick is half a microbrick wide to fill the difference, so no set of bricks can meet both forms' own without a gap or an overlap. The panel says so under the blend. |
+| a form standing an odd unit (half a microbrick) off the other along any axis | Its cells straddle the other's, and no brick is half a microbrick wide to fill the difference, so no set of bricks can meet both forms' own without a gap or an overlap. |
 | a form laid as a pattern (a mosaic, stepping stones) | Its bricks are not its distance function: refitting it would fill the gaps between its stones and lose its colours. |
 | a plant | Its bricks are leaves and branches coloured one by one, for the same reason. |
 
+The first of these no longer arises from the editor. Whoever places a
+joined form moves it by half a microbrick along each axis it is off on
+(`settled` in [core/src/blend.rs](../core/src/blend.rs)): a drag with Ctrl
+goes a whole microbrick at a time, and a join made any other way (by
+Claude, by pasting, from an older save) is settled when the workspace is
+next built, with a note over the view. Half a microbrick is less than can
+be placed by eye, and the alternative, a lattice twice as fine, needs a
+brick half a microbrick across, which the game does not have. A form is
+lined up with the form it shares most room with, so one joined to two
+forms that are themselves half a microbrick apart still lines up with one
+only, and is cut where it meets the other. Two forms of one brick size are
+settled to whole bricks of that size in the same way.
+
 Forms on different grids are never joined: grids pass through one another.
-The zone is fitted at single microbricks whatever brick size the forms were
-built at.
 
 #### How long it takes, and why not on the graphics card
 
 A join is put together again whenever one of its forms, its place or its
 blend changes, which while a form is dragged is every frame. Measured on a
-desktop with 16 logical cores, otherwise idle, as the least of seven runs:
+desktop with 16 logical cores as the least of many runs, while other
+programs were building on it, so the figures are a little high:
 
 | Join | Blend 0 | Blend 2 | Blend 6 |
 |---|---|---|---|
-| a sphere of radius 20 in a cube 17 a side, one thread | 3.9 ms | 5.7 ms | 11.5 ms |
-| the same, all cores | 4.4 ms | 4.3 ms | 7.9 ms |
-| two spheres of radius 20, one thread | 8.7 ms | 10.0 ms | 14.0 ms |
-| the same, all cores | 6.9 ms | 7.4 ms | 9.7 ms |
+| a sphere of radius 20 in a cube 17 a side, one thread | 5.1 ms | 6.5 ms | 13.0 ms |
+| the same, all cores | 5.5 ms | 5.5 ms | 10.8 ms |
+| two spheres of radius 20, one thread | 10.9 ms | 13.7 ms | 17.5 ms |
+| the same, all cores | 9.6 ms | 10.8 ms | 13.4 ms |
 
-Testing the blocks and sampling the zone's cells are shared among threads
+Evening out the seam and laying stretched bricks are 1 to 4 ms of each
+figure. With both switched off in the same run, the same joins took 3.9,
+5.1 and 10.1 ms, and 8.1, 9.4 and 15.9 ms, on one thread.
+
+Testing the blocks, sampling the zone's cells and measuring the stretched
+bricks are shared among threads
 (see [performance.md](performance.md), "Threads"), and the bricks are the
 same on any number of them. The editor keeps the last join and reuses it
 when only a colour or a pick has changed.
@@ -3057,13 +3228,49 @@ in any case.
 
 #### Where it falls short
 
-The zone is fitted cell by cell, so it is rougher than a sphere's or a
-turned form's own layout, and the band of refitted bricks round a seam
-shows against them. It is also wider than the seam itself wherever a form's
-own bricks are large, since a sloped brick the zone touches is swallowed
-whole. A small blend on a curved seam comes out as a ring of single wedges
-and tetrahedra, since a fillet half a microbrick deep is less than one
-brick can follow.
+The seam is still rougher than a sphere's or a turned form's own layout,
+and the band of refitted bricks shows against them. The measure that says
+why is the same two figures for a sphere alone, counted for each cell of
+its surface.
+
+| A sphere of radius 20 | Disagreement, cells | Steps, cell faces |
+|---|---|---|
+| its own fitter | 0.18 | 0.08 |
+| fitted cell by cell | 0.11 | 0.40 |
+
+A sphere's own facets are further from the sphere than a cell by cell fit
+is, and have a fifth of its steps. They are smooth because they meet edge
+to edge, and they are placed to do that at the cost of closeness. A join's
+bricks are each chosen for closeness, one at a time, and two of them of
+different slopes do not meet along an edge. Three ways of trading closeness
+for smoothness without a layout were tried on the nine joins above, and
+none lowered the steps.
+
+| Tried | What happened |
+|---|---|
+| a stretched brick allowed to disagree a little more than the unit bricks it replaces | more bricks were laid, and both the disagreement and the steps rose, by 3 to 40% as the allowance grew |
+| a larger weight on steps when evening out | at 2 and 4 the steps fell 2 to 5% more and the disagreement rose 1 to 4% |
+| each cell given the brick whose corners are the corners the solid holds, which meet face to face by construction | a gentle slope becomes terraces, whose flat treads are steps of another kind: no fewer in all |
+
+What a smooth seam needs is a layout: the bricks of a patch of surface
+chosen together so that neighbours share edges, as a sphere's are. For a
+surface that is a height above a plane over the patch, corner heights
+snapped to whole cells on a grid of rectangles would give one: a
+tetrahedron, a cut cube, a ramp, a hip or an inner corner covers a
+rectangle whose corners differ by at most one layer, unless two opposite
+corners are the high ones. It is not built, and that much of it is
+reasoning and not measurement
+([future-work.md](future-work.md), "Blending forms into one").
+
+Two smaller shortfalls remain. The band is wider than the seam wherever a
+form's own bricks are large, since a sloped brick the zone touches is
+swallowed whole. Cutting such a brick into the shorter bricks of the same
+slope was built and measured, and taken out again: only a brick whose
+lengths share a factor can be cut (none of a sphere of radius 12, 45% of
+one of radius 20), and on two spheres of radius 20 it left 4.6% fewer cells
+to refit, for more bricks and five teeth where there was one. And a hole's
+wall is fitted cell by cell all the way through, so a round hole is
+rougher inside than the form that made it is outside.
 
 A joined form is not pushed clear when a form it sits in is reshaped, and
 moving it without Ctrl sets it clear again.

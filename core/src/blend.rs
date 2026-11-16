@@ -18,7 +18,11 @@
 //! crease. Above 0 the crease is filled by a fillet that leaves each surface
 //! `k` cells from the other. That solid is fitted cell by cell
 //! (`fit_volume`'s method) in a *zone*: the cells near where the two
-//! surfaces meet, and no others (see [`seeds`]). Cutting bricks back was all
+//! surfaces meet, and no others (see [`seeds`]). Two passes of the join's
+//! own follow the cell by cell fit: each cell is chosen again so as to make
+//! fewer steps against its neighbours (`even`), and stretched ramps and
+//! corner pieces are laid where the solid's slope puts one that fits closer
+//! (`stretch`). Cutting bricks back was all
 //! that was done before, and it left a notch a cell or two deep wherever a
 //! sloped brick had to be left out, since a slope cannot be cut down to
 //! cells.
@@ -62,7 +66,8 @@
 //! cell) off the other has cells that straddle the other's, and no brick is
 //! half a cell wide to fill the difference, so no zone can meet both forms'
 //! bricks without a gap or an overlap. Such a pair is joined as before, by
-//! cutting alone. So is a form laid as a pattern (a mosaic, stepping
+//! cutting alone, and whoever places a joined form is expected to move it
+//! half a cell first (see [`settled`]). So is a form laid as a pattern (a mosaic, stepping
 //! stones), whose bricks are not its distance function: refitting it would
 //! fill the gaps between its stones.
 //!

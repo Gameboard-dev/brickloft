@@ -3,7 +3,7 @@
   "arch_askew": "This arch runs at an angle to the brick grid: its feet differ along both X and Y. No flat outline can be fitted to it, so it is fitted cell by cell and comes out stepped.",
   "arch_kind": "The shape of the arch between its two feet.",
   "bezier_pull": "How strongly this point draws the curve towards itself. 1 is neutral.",
-  "blend": "How far the join between this form and the forms it stands in is rounded, in microbricks along each of them. At 0 the two meet in a sharp crease. The bricks are fitted afresh where the forms meet and are each form's own everywhere else. A form is joined by moving it into another with Ctrl held.",
+  "blend": "How far the join between this form and the forms it stands in is rounded, in microbricks along each of them. At 0 the two meet in a sharp crease. The bricks are fitted afresh where the forms meet and are each form's own everywhere else. A form is joined by moving it into another with Ctrl held, and then moves a whole microbrick at a time, so that its bricks line up with those of the form it joins.",
   "brick_budget": "The smallest brick size that keeps the build within this many bricks is used. A form laid as a pattern of tiles is not held to it, and nor is a plant: both are built at single microbricks unless you set a Brick size.",
   "brick_size": "Fits the form with bricks a multiple of this size. Automatic picks the finest size that keeps the build within the brick budget.",
   "carve": "Takes this form away from the forms it is joined to and builds none of its own bricks: a window through a wall, a hole through a sphere. The form is drawn as red glass so that it can still be seen and moved. Blend then rounds the rim of the hole. Untick it and the form is added to the others again.",

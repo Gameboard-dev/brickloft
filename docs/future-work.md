@@ -31,29 +31,65 @@ which the present tools deliberately do not.
 
 Forms joined with Ctrl + drag are fitted as one solid where they meet, as a
 smooth union with a blend the player sets, and keep their own bricks
-everywhere else. How it is done, what it costs and where it falls short are
-in [algorithm.md](algorithm.md), "Forms joined on purpose". What remains:
+everywhere else. A joined form can also be cut out of the others, is
+settled onto the cells of the form it joins, and is joined at the forms'
+own brick size where they share one. How it is done, what it costs and
+where it falls short are in [algorithm.md](algorithm.md), "Forms joined on
+purpose". What remains:
 
-- **A smoother fit at the seam.** The join is fitted cell by cell, with
-  single wedges and ramps stretched one way, and it shows as a rough band
-  against a sphere's own facets. Fitting the seam with the stretched corner
-  pieces the sphere fitter uses would need a layout for a surface that is
-  no sphere, which nothing here has yet.
+- **A layout for the seam.** The seam is evened out and laid with
+  stretched ramps and corner pieces, which took a tenth off its
+  disagreement with the joined surface and a sixth off its steps, and it is
+  still a rough band against a sphere's own facets. The measurements in
+  algorithm.md say why: a sphere's facets are smooth because they meet edge
+  to edge, at the cost of closeness, and bricks chosen one at a time for
+  closeness do not. Three ways of trading closeness for smoothness without
+  a layout were tried and none lowered the steps. What is needed is the
+  bricks of a patch chosen together. One way to try: over a patch where the
+  surface is a height above a plane, snap the heights at the corners of a
+  grid of rectangles to whole cells, and fill each rectangle with the brick
+  its four corners call for (a tetrahedron or a hip for one high corner, a
+  ramp for two, a cut cube or an inner corner for three). Neighbours then
+  share the line between their common corners. Open questions it leaves:
+  which way a patch faces where the surface turns over, how two patches of
+  different grids meet, what to do with a rectangle whose high corners are
+  opposite, and how the patch meets the forms' own bricks at the zone's
+  edge.
 - **A narrower band.** A sloped brick the join touches is refitted whole,
   so the band is as wide as the form's own bricks are large. Cutting a
-  stretched brick into shorter ones of the same slope, where the game has
-  such a brick, would let the band stop nearer the seam.
-- **Forms half a microbrick off one another.** They are joined by cutting
-  alone, with a notch at the seam, because their cells do not line up. The
-  editor could offer to move the joined form by half a microbrick.
-- **Brick size.** A join is fitted at single microbricks even between forms
-  built at a larger brick size.
-- **Taking material away.** A join only adds. A form subtracted from
-  another (a window cut through a wall) is the same method with the
-  distance of one form negated, and is not built.
+  stretched brick into the shorter bricks of its slope was built, measured
+  and taken out. A brick can be cut only where its slope crosses whole
+  cells, which needs its lengths to share a factor: none of the sloped
+  bricks of a sphere of radius 12 or of a turned form do, 45% of a sphere
+  of radius 20, 68% of a ring. On two spheres of radius 20 it left 4.6%
+  fewer cells to refit, with more bricks and more single wedges at the
+  band's new edge. A narrower band would have to come from the fitters
+  laying bricks near a seam that can be cut, or from the layout above
+  reaching to the forms' own facets.
+- **A hole's wall.** The wall of a hole is fitted cell by cell all the way
+  through the form it is cut in, where the form that made it has a layout
+  of its own for the same surface. Turning that layout inside out is not
+  possible brick for brick, since the hollow side of a sloped brick is not
+  a brick. A fitter run on the hole's inside as a solid of its own would
+  be.
 - **A blend above 6.** It needs the forms' distances to stay exact further
-  than 8 microbricks from their surfaces, which costs every curve's
-  distance search.
+  than 8 microbricks from their surfaces. Widening that for every form was
+  measured: curves took 1.5 to 8 times as long to build
+  ([algorithm.md](algorithm.md), "The joined solid"). Two ways are left.
+  A form's distance could be made a second time with a wider margin, for
+  joins alone and only when a blend above 6 is asked for. And forms joined
+  at a brick size above 1 already have a margin that many times as wide,
+  so their blend could go to 6 bricks of that size for nothing: it needs
+  the slider, the saved form and Claude's tools to take a limit that
+  depends on the brick size.
+- **Brick sizes out of step.** Forms of one brick size are settled to whole
+  bricks apart and joined at that size. Forms of two different sizes are
+  joined at single microbricks, with a band of fine bricks round the seam.
+  Joining them at the smaller of the two, where it divides the larger,
+  would be coarser and is not built.
+- **Seeing what is cut out.** A form that is cut out is drawn as plain red
+  glass, without edge lines, and its glass is not sorted by depth, so
+  through several layers of it the tint is uneven.
 
 ## Patterns
 
