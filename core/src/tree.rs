@@ -1474,7 +1474,7 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
         let (far, wide) = ((long - r - 1.7).max(0.0), (spread - r - 1.7).max(0.0));
         let at = DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8));
         g.leaves(at, DVec3::new(r, r, r * 0.8));
-        if tree.extras && g.unit() < 0.6 {
+        if tree.extras && g.unit() < 0.35 {
             berries(g, at, r * 0.8, at - outward * mass);
         }
     };
@@ -1934,7 +1934,7 @@ fn boxwood(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         let at = heart + DVec3::new(level * way.cos(), level * way.sin(), up) * dome * (1.0 - loose * g.between(0.0, 0.3));
         let r = mass * g.between(0.75, 1.2);
         g.leaves(DVec3::new(at.x, at.y, at.z.max(r * 0.8)), DVec3::new(r, r, r * 0.8));
-        if tree.extras && g.unit() < 0.6 {
+        if tree.extras && g.unit() < 0.35 {
             berries(g, DVec3::new(at.x, at.y, at.z.max(r * 0.8)), r * 0.8, heart);
         }
     }

@@ -46,7 +46,7 @@ until you tick it.
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
-| **Plant** | the foot of its trunk or stem | Kind: a pine, palm or oak tree, a boxwood or rose bush, a sunflower or a tulip. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip or petunias; reeds. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 
 ### The cube
 
@@ -341,7 +341,8 @@ stone.
 ## Plants
 
 **Plant** grows a tree, a bush or a flower: a pine, a palm or an oak; a
-boxwood or a rose bush; sunflowers or tulips. They are one form with a
+beech; a boxwood bush, a hedge or a hydrangea; peonies, sunflowers,
+tulips or petunias; a stand of reeds. They are one form with a
 **Kind** because they are set and coloured the same way: a height, a
 spread, three settings and a seed. Each kind is grown by a method of its
 own, from the facts of how that plant grows: how they are made is in
@@ -355,11 +356,16 @@ own, from the facts of how that plant grows: how they are made is in
 | **Palm** | a coconut palm: a slender, ringed, eight-sided trunk, swollen at the foot, that leans and curves upright, and one crown of arching fronds with a row of leaflets down each side |
 | **Oak** | an oak grown in the open: a short thick trunk, flared at the foot, dividing into heavy crooked limbs that spread wide and fork again and again, with leaves in separate masses at the ends of the branches |
 | **Boxwood bush** | a dense rounded evergreen: a closed, lumpy mound of leaves on several short stems |
-| **Rose bush** | long canes from the ground that climb and arch over, with tufts of leaves along them and blooms on the outside |
+| **Beech tree** | a smooth grey trunk carrying on up through a tall, dense, oval crown of flat layers of leaves |
+| **Hedge** | the boxwood clipped to a wall of any length, a little narrower at the top, with stems showing at its foot |
+| **Hydrangea** | a rounded bush of broad leaves carrying domed heads of small four-parted florets |
+| **Peony** | a clump of leafy stems each with one bloom of many layered petals, which opens from a round bud to a full bowl |
+| **Petunias** | a low mound of leaves covered in funnel-shaped flowers with darker throats, which can trail along the ground |
+| **Reeds** | a stand of bulrushes with brown heads, or of plumed common reed, with long flopping leaves |
 | **Sunflower** | a stout stem with heart-shaped leaves and a nodding head: a disc of seeds set by the golden angle, ringed with two rows of petals |
 | **Tulip** | a cup of six petals in two rings on a bare stem, with strap-shaped leaves from the ground |
 
-<img src="images/plant-rose.png" width="330" alt="A rose bush with pink blooms"> <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers of different heights facing the same way">
+<img src="images/plant-peony.png" width="330" alt="Three pink peonies, full blown"> <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers of different heights facing the same way">
 
 Every tree has a **Height** and a **Spread** (a palm's is its **Frond
 length**), which the dot at its top and the dot at its side set too. Three
@@ -369,15 +375,28 @@ more settings mean something different for each kind.
 |---|---|---|---|---|
 | Pine | **Tiers of boughs**, 4 to 40 | **Fullness**: more boughs, wider sprays | **Droop** of the boughs | **A star and baubles** |
 | Palm | **Fronds**, 5 to 40 | **Leaflet length** | **Lean** of the trunk | **Coconuts** |
-| Oak | **Main limbs**, 2 to 7 | **Foliage**: larger masses of leaves, less sky | **Gnarl**: how crooked the limbs are | none |
-| Boxwood | **Stems**, 2 to 12 | **Density** of the canopy | **Looseness** of its outline | none |
-| Rose | **Canes**, 3 to 16 | **Leaves and blooms** | **Arch of the canes** | **In flower** |
+| Oak | **Main limbs**, 2 to 7 | **Foliage**: larger masses of leaves, less sky | **Gnarl**: how crooked the limbs are | **Bare** |
+| Boxwood | **Stems**, 2 to 12 | **Density** of the canopy | **Looseness** of its outline | **Berries** |
+| Beech | **Main limbs**, 3 to 9 | **Foliage** | **Crookedness** | **Bare** |
+| Hedge | **Plants along it**, 1 to 40 | **Density** | **Looseness**: clipped to grown out | **Berries** |
+| Hydrangea | **Flower heads**, 1 to 24 | **Leaves** | **Looseness** | none |
+| Peony | **Stems in the clump**, 1 to 9 | **Petals and leaves** | **How open the bloom is**: bud to full blown | none |
+| Petunias | **Flowers**, 3 to 80 | **Leaves** | **How far it trails** | none |
+| Reeds | **Stems**, 1 to 120 | **Leaves** | **Sway** | **Feathery plumes** |
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
-A flower's **Spread** is half the width of its head or cup, and a clump
-is as many flowers as you ask for, each its own height, standing a little
-apart.
+A flower's **Spread** is half the width of its head, cup or bloom, and a
+clump is as many flowers as you ask for, each its own height.
+
+A hedge and a stand of reeds have a **Length** as well, along X, from
+their own thickness upwards. The hedge keeps its clipped texture and its
+stems at intervals however long it is. A quarter turn about Z runs it the
+other way. There is no dot for the length yet: the slider sets it.
+
+**Bare** shows an oak or a beech without its leaves, with twigs carried
+on from every branch end. It is the same tree as in leaf. **Berries** on
+a boxwood or hedge take the seventh colour of its set.
 
 **Seed** is which plant of its kind: any whole number, each a different
 one, and the same number is always the same plant. **Another** takes the
@@ -386,8 +405,8 @@ gives without making it a different tree.
 
 **Colours** offers each kind's sets of colours: for a pine spruce green,
 under snow, blue spruce and in frost; for a palm three; for an oak summer,
-early autumn, late autumn and spring; for a rose pink, red, white, yellow
-and a hydrangea's blue; for a tulip six, one of them flamed. A tree is coloured **As the pattern
+early autumn, late autumn and spring; for a peony pink, deep red, white, coral and blush; for a hydrangea blue,
+pink, white and blue running to pink; for a tulip six, one of them flamed. A tree is coloured **As the pattern
 has it**, with a colour for each of its parts: the trunk, leaves, leaves
 in shade, new growth, limbs, the top of a pine's boughs or the rib of a
 frond or a flower's petals, and two for the extras, the blooms or the
