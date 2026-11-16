@@ -120,7 +120,7 @@ impl Maze {
 /// lines between them.
 #[derive(Clone, Debug)]
 pub struct Layout {
-    kind: Kind,
+    pub(crate) kind: Kind,
     /// the middle of the maze
     centre: DVec2,
     /// half a wall's thickness

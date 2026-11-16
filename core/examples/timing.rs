@@ -2,7 +2,8 @@
 //! `cargo run --release -p brickloft-core --example timing`
 //!
 //! `-- threads` times the forms whose builds are shared out over threads
-//! instead, each on one thread and on all the machine has.
+//! instead, each on one thread and on all the machine has. `-- maze` does
+//! the same for mazes: a small, a usual and a large one of each texture.
 
 use brickloft_core::curves::ArchType;
 use brickloft_core::par::Threads;
@@ -70,10 +71,49 @@ fn threads(runs: usize) {
     }
 }
 
+/// `-- maze [runs]`: a small, a usual and a large maze, with walls plain,
+/// of bricks, of cobblestone and of hedge, on one thread and on all of
+/// them. Each time is the least of `runs` builds (3 unless given).
+fn mazes(runs: usize) {
+    use brickloft_core::maze::{Kind, Maze};
+    let mosaic = |name: &str| {
+        let style = brickloft_core::pattern::STYLES.iter().position(|s| s.name == name).expect("no such style");
+        Some(Mosaic { style, size: 2, bevel: false, border: 0, seed: 1, mortar: true, stagger: 50, upright: false, uneven: if name == "cobblestone" { [60; 2] } else { [0; 2] } })
+    };
+    let sizes = [("small: 4 rings, radius 80", Kind::Theta, 4, 80.0), ("usual: 6 rings, radius 120", Kind::Theta, 6, 120.0), ("larger: 9 rings, radius 180", Kind::Theta, 9, 180.0), ("large: 16 rings, radius 320", Kind::Theta, 16, 320.0), ("grid: 6 rings, radius 120", Kind::Grid, 6, 120.0)];
+    let all = Threads::available();
+    println!("least of {runs} builds; all threads: {}; walls 30 tall, 4 thick (hedge 6)", all.count());
+    println!("{:<28} {:<12} {:>8} {:>12} {:>12}", "maze", "texture", "bricks", "one thread", "all threads");
+    for (name, kind, rings, radius) in sizes {
+        for texture in ["none", "bricks", "cobblestone", "hedge"] {
+            let hedge = texture == "hedge";
+            let spec = Spec { form: Form::Maze, points: vec![DVec3::splat(0.5)], radius, thick: if hedge { 6.0 } else { 4.0 }, rise: Some(30.0), maze: Maze { kind, rings, hedge, ..Maze::default() }, mosaic: if hedge || texture == "none" { None } else { mosaic(texture) }, ..Spec::default() };
+            // (a maze past what may be built is refused, and says so)
+            if let Err(why) = build_with(&spec, true, all) {
+                println!("{name:<28} {texture:<12} refused: {}", why.split(':').next().unwrap_or_default());
+                continue;
+            }
+            let mut bricks = 0;
+            let mut least = |threads: Threads| {
+                (0..runs).fold(f64::INFINITY, |least, _| {
+                    let start = Instant::now();
+                    bricks = build_with(&spec, true, threads).expect(name).bricks.len();
+                    least.min(start.elapsed().as_secs_f64() * 1000.0)
+                })
+            };
+            let (one, many) = (least(Threads::ONE), least(all));
+            println!("{name:<28} {texture:<12} {bricks:>8} {one:>10.1}ms {many:>10.1}ms");
+        }
+    }
+}
+
 fn main() {
     // `-- <a saved report> [scale]`: time the form in that report instead,
     // measured and unmeasured, at its own size or so many times larger
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "maze") {
+        return mazes(args.get(1).map_or(3, |s| s.parse().expect("the number of runs is not a number")));
+    }
     if args.first().is_some_and(|a| a == "threads") {
         return threads(args.get(1).map_or(5, |s| s.parse().expect("the number of runs is not a number")));
     }

@@ -5,7 +5,9 @@
 //! together, fitted by the outline fitter as a circle's band or an arch
 //! is (`fit_planar`) and pushed up to the walls' height. Fitted together,
 //! a spoke and the ring wall it meets are one piece with no seam, and a
-//! ring wall is long sloped bricks all the way round.
+//! ring wall is long sloped bricks all the way round. The ground is
+//! fitted a square of it at a time, each on a thread of its own (see
+//! [`Walls::fitted`]).
 //!
 //! What the walls are made of only colours that fit, or replaces it:
 //!
@@ -47,12 +49,14 @@ pub const PLAIN_SOLUTION: u8 = 2;
 ///
 /// A hedge is bricks all over its surface and through its tufts: measured
 /// on straight hedges from 6 to 24 thick and 12 to 36 tall, between a
-/// tenth and a quarter of a brick to each cell of that volume, and built
-/// at about 100,000 bricks a second on one thread. This much hedge is
-/// therefore 100,000 to 250,000 bricks and a few seconds, which is what
-/// the largest single tree is. Past it the build is refused with what to
-/// change, where a larger one would have stopped the editor for a minute
-/// and made a prefab the game is slow to place.
+/// tenth and a quarter of a brick to each cell of that volume. A maze of
+/// 6 rings and radius 120 with hedges 6 thick and 30 tall is 300,000
+/// cells of it: 55,000 bricks, built in two and a half seconds on one
+/// thread and half a second on sixteen. This much hedge is therefore
+/// 100,000 to 250,000 bricks, and eight seconds on one thread or under
+/// two on sixteen. Past it the build is refused with what to change,
+/// where a larger one would have stopped the editor for a minute and
+/// made a prefab the game is slow to place.
 pub const MOST_HEDGE: f64 = 1_000_000.0;
 
 /// The most tiles the walls of a patterned maze may unroll to: their
@@ -62,10 +66,21 @@ pub const MOST_HEDGE: f64 = 1_000_000.0;
 pub const MOST_TILES: usize = 1_500_000;
 
 /// The longest the walls of any maze may be, all together, in cells.
-/// The outline fitter's time goes by the length of outline it follows,
-/// about 60 microseconds a cell of wall on one thread, so this is a
-/// build of about two seconds.
+/// The outline fitter's time goes by the length of outline it follows:
+/// measured, a maze of 16 rings and radius 320, with 14,000 cells of
+/// wall, is fitted in a second and a half on one thread. This much wall
+/// is therefore four or five seconds on one thread and under one on
+/// eight, and some 20,000 bricks before any pattern cuts them up.
 pub const MOST_WALL: usize = 40_000;
+
+/// How many cells each way a square of ground fitted on its own is (see
+/// [`Walls::fitted`]).
+///
+/// Measured on mazes of 6, 12 and 16 rings with corridors 20 wide: at 96
+/// the whole fit was quickest or near it (1.4 seconds for the largest,
+/// against 2.1 at 64, 2.5 at 192 and 17.7 as one outline) and laid 4%
+/// more pieces than one outline did.
+const TILE: i32 = 96;
 
 /// How many of a patterned wall's pieces are worth a thread of their own
 /// (see `par::Threads::map_ranges`): a piece is a lookup for each of its
@@ -151,6 +166,66 @@ impl Walls {
         }
     }
 
+    /// The walls' outline fitted: the ground cut into squares, each fitted
+    /// as an outline of its own, and the pieces put end to end in the
+    /// squares' order.
+    ///
+    /// ## Why not one outline
+    ///
+    /// The outline fitter searches each stretch of an outline for its
+    /// corners, and the walls of a maze are one outline or a few, a
+    /// hundred times as long as a ring's and joined at every spoke. Its
+    /// time rose faster than the outline's length: a maze of 12 rings
+    /// was fitted in 1.3 seconds and one of 13 in 10.8. Cut into squares
+    /// of [`TILE`] cells, no outline is longer than a square holds, the
+    /// time goes by the area, and each square is its own piece of work
+    /// for a thread (see [`crate::par`]): the squares do not depend on
+    /// one another, and their order is fixed by where they are.
+    ///
+    /// ## What the cuts cost
+    ///
+    /// A cut is along lattice lines, so it is exact: the pieces either
+    /// side of it are whole cells there and fill the wall between them
+    /// with no gap. A sloped brick cannot cross a cut, so a wall is two
+    /// bricks where it crosses one and might have been one, and beside a
+    /// cut the fitter may choose its corners differently. Measured, 4%
+    /// more pieces and 3.5% of the walls' area amiss against 3.4%.
+    ///
+    /// The squares are set out from the maze's middle, half a square to
+    /// each side of it, so that no cut runs along the spokes that lie on
+    /// the axes. For a grid the squares are an even number of cells of
+    /// the maze across, which puts every cut down the middle of a row of
+    /// cells and never along a wall.
+    fn fitted(&self, opts: &Opts) -> Fit {
+        let tile = match self.layout.kind {
+            super::Kind::Theta => TILE,
+            super::Kind::Grid => {
+                let gap = self.layout.gap().round().max(1.0) as i32;
+                gap * (2 * ((TILE as f64 / 2.0 / gap as f64).round() as i32)).max(2)
+            }
+        };
+        let middle = self.layout.centre();
+        let from = [(middle.x - tile as f64 / 2.0).floor() as i32, (middle.y - tile as f64 / 2.0).floor() as i32];
+        // the squares that have any of the ground in them, row by row
+        let first = [0, 1].map(|k| (self.min[k] - from[k]).div_euclid(tile));
+        let last = [0, 1].map(|k| (self.max[k] - 1 - from[k]).div_euclid(tile));
+        let tiles: Vec<([i32; 2], [i32; 2])> = (first[1]..=last[1])
+            .flat_map(|n| (first[0]..=last[0]).map(move |m| [m, n]))
+            .map(|at| ([0, 1].map(|k| (from[k] + at[k] * tile).max(self.min[k])), [0, 1].map(|k| (from[k] + (at[k] + 1) * tile).min(self.max[k]))))
+            .collect();
+        // (each square on one thread: a square is tens of milliseconds, far more than a thread costs to start, so every square is worth one)
+        let alone = Opts { threads: Threads::ONE, ..*opts };
+        let fits = opts.threads.map(tiles.len(), 1, |n| fit_planar(&|x, y| self.layout.wall(DVec2::new(x, y)), tiles[n].0, tiles[n].1, &alone));
+        let mut whole = Fit::default();
+        // (the areas added up here, in the squares' order: a sum of fractions is not the same in every grouping)
+        for fit in fits {
+            whole.pieces.extend(fit.pieces);
+            whole.solid += fit.solid;
+            whole.error += fit.error;
+        }
+        whole
+    }
+
     /// Negative inside the maze's walls, floor or strip; near a face, no
     /// more than the distance to it.
     pub fn distance(&self, p: DVec3) -> f64 {
@@ -175,9 +250,10 @@ impl Walls {
     ///
     /// `mosaic` is the pattern on its walls' faces, if they have one;
     /// hedge walls take no notice of it. The bricks are the same on any
-    /// number of threads: the threads are used inside each fit and each
-    /// pattern, which give their results in the order one thread would
-    /// (see [`crate::par`]).
+    /// number of threads: the threads are given whole squares of the
+    /// walls to fit, the cells of a hedge to look at and the tiles of a
+    /// pattern to draw, and each of those gives its results in the order
+    /// one thread would (see [`crate::par`]).
     pub fn built(&self, mosaic: Option<&Mosaic>, wedges: bool, max_ext: i32, threads: Threads) -> (Vec<CellBrick>, Vec<u8>, f64, f64) {
         let opts = Opts { brick_cost: 0.0, max_ext, wedges, threads };
         let (mut bricks, mut shades) = (Vec::new(), Vec::new());
@@ -219,7 +295,7 @@ impl Walls {
                 error += fit.error;
             }
             None => {
-                let fit = fit_planar(&|x, y| self.layout.wall(DVec2::new(x, y)), self.min, self.max, &opts);
+                let fit = self.fitted(&opts);
                 match mosaic {
                     Some(mosaic) => {
                         for (brick, shade) in self.patterned(&fit, mosaic, &opts) {
