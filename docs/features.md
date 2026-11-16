@@ -128,6 +128,13 @@ is on a numbered grid, shown in the list.
 | **Add to this grid** | another copy of this form on the same grid: kept clear of the others on it, and turned and moved with them |
 | **New grid** | another copy on a grid of its own |
 
+An arch whose two feet differ along both X and Y stands at an angle to its
+grid. It cannot be fitted smoothly there, and the panel says so. **Turn its
+grid to line it up** gives the arch a grid of its own, turned so that the
+arch runs straight along it, and leaves its feet where they are. The arch
+is then fitted as smoothly as any other. An arch from one of the reports
+this was written for went from 199 bricks to 31.
+
 The arrows and rings stand at the middle of everything on the grid being
 edited, sized to it.
 

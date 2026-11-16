@@ -437,6 +437,10 @@ pub fn run_form(form: usize, claude: bool) {
             }
         }
         state.camera_at = (d(camera.position()).to_array(), d(camera.view_direction()).to_array());
+        if asked.line_up {
+            state.record();
+            state.line_up();
+        }
         if asked.best {
             state.snap_best(None);
         }

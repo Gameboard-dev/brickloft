@@ -1083,6 +1083,57 @@ impl State {
         self.spin_from.is_some()
     }
 
+    /// Whether the form being edited is an arch standing at an angle to its
+    /// grid: its two ends differ along both x and y. Such an arch lies in no
+    /// plane of the grid, so no flat outline can be fitted to it and it is
+    /// fitted cell by cell, which comes out stepped.
+    pub fn askew(&self) -> bool {
+        let p = &self.spec.points;
+        self.form == ARCH && p.len() >= 2 && p[0].x != p[p.len() - 1].x && p[0].y != p[p.len() - 1].y
+    }
+
+    /// Turn the grid of an arch that is [`State::askew`] so that the arch
+    /// runs along the grid's x, where it stands: its first foot stays where
+    /// it is in the world, the other as near as half a microbrick allows,
+    /// and it is then fitted as a flat outline. Returns whether it was done.
+    ///
+    /// Bricks cannot be turned on a grid, so an arch across a grid's
+    /// diagonal cannot be made smooth on it. A grid can stand at any
+    /// angle, though, and the bricks on it are fitted as if it were level.
+    /// So the arch is given a grid of its own, turned about the upright by
+    /// the angle the arch stood at, and the arch's points are turned back
+    /// by as much within it.
+    pub fn line_up(&mut self) -> bool {
+        // (a form given quarter turns has its points in another frame: left alone)
+        if !self.askew() || self.spec.turned != brickloft_core::shapes::UPRIGHT as u8 {
+            return false;
+        }
+        let (first, last) = (self.spec.points[0], self.spec.points[self.spec.points.len() - 1]);
+        let angle = (last.y - first.y).atan2(last.x - first.x);
+        let stands = self.standing();
+        let held = out_of_grid(&self.spec, first + stands);
+        // every point about the first foot, turned back in plan and set on the half-cell grid
+        let back = |v: DVec3| DVec3::new(v.x * angle.cos() + v.y * angle.sin(), v.y * angle.cos() - v.x * angle.sin(), v.z);
+        for p in self.spec.points.iter_mut() {
+            let turned = first + back(*p - first);
+            *p = DVec3::new(snap(turned.x), first.y, snap(turned.z));
+        }
+        for (at, by) in self.spec.pulls.iter_mut() {
+            (*at, *by) = (first + back(*at - first), back(*by));
+        }
+        // a grid of its own, unless it has one to itself already
+        if self.others.iter().any(|o| o.spec.on_grid == self.spec.on_grid) {
+            self.spec.on_grid = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
+        }
+        // about the upright within the grid first, then the grid's own angle
+        self.spec.grid = turns(about(2, angle), self.spec.grid);
+        self.spec.grid_at = (held - turned_way(self.spec.grid, first + stands, false)).to_array();
+        self.lock = Lock::Axis(1); // it stays in its upright plane
+        self.built_from = None;
+        self.scene += 1;
+        true
+    }
+
     /// Put the grid being edited back on the world's grid, level, about
     /// where its middle is, to the nearest unit.
     pub fn level(&mut self) {
@@ -1923,6 +1974,29 @@ mod tests {
         let moved = state.spec.points[0] - before;
         assert_eq!(moved.x, 0.0, "the dot left its plane");
         assert!(moved.y.abs() <= 1.0 && (moved.z - 5.0).abs() <= 1.0, "the dot moved by {moved:?}");
+    }
+
+    #[test]
+    fn an_arch_at_an_angle_is_lined_up_on_a_grid_of_its_own_where_it_stands() {
+        let mut state = State::new(); // an arch across x
+        state.add_copy(); // and another on the same grid
+        let (from, to) = (cell(0.0, 0.0, 0.0), cell(6.0, 8.0, 0.0));
+        state.spec.points = vec![from, to];
+        state.refresh(|| 0.0);
+        assert!(state.askew());
+        let world = |state: &State, p: DVec3| out_of_grid(&state.spec, p + state.standing());
+        let (was_from, was_to, cell_by_cell) = (world(&state, from), world(&state, to), state.built.bricks.len());
+        assert!(state.line_up());
+        state.refresh(|| 0.0);
+        // along x within its grid, ten apart as before, and no longer askew
+        let (a, b) = (state.spec.points[0], state.spec.points[1]);
+        assert!(!state.askew() && a == from && b == from + DVec3::X * 10.0, "{a:?} {b:?}");
+        // on a grid of its own, at the angle it stood at, with its feet where they were
+        assert!(state.others.iter().all(|o| o.spec.on_grid != state.spec.on_grid));
+        assert!((world(&state, a) - was_from).length() < 1e-9 && (world(&state, b) - was_to).length() < 1e-9, "{:?} {:?}", world(&state, a), world(&state, b));
+        // and fitted as an outline: far fewer bricks than cell by cell
+        assert!(state.problem.is_none() && state.built.bricks.len() * 2 < cell_by_cell, "{} bricks, {cell_by_cell} before", state.built.bricks.len());
+        assert!(!state.line_up(), "an arch already lined up was turned again");
     }
 
     #[test]

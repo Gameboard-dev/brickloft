@@ -132,6 +132,8 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
 #[derive(Default)]
 pub struct Asked {
     pub report: bool,
+    /// turn the grid of an arch standing at an angle to it, to line the arch up
+    pub line_up: bool,
     /// delete every saved report
     pub clear_reports: bool,
     /// save a picture of the window
@@ -283,6 +285,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 let (a, b) = (s.points[0], s.points[s.points.len() - 1]);
                 if a.x != b.x && a.y != b.y {
                     ui.colored_label(Color32::from_rgb(255, 200, 90), help("arch_askew"));
+                    asked.line_up = helped(ui, help("line_up"), |ui| ui.button("Turn its grid to line it up")).clicked();
                 }
                 helped(ui, help("arch_kind"), |ui| {
                     ComboBox::from_label("Arch").selected_text(ARCHES[state.arch].0).show_ui(ui, |ui| {

@@ -473,6 +473,25 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "line_up_arch",
+      "title": "Line an angled arch up with a grid of its own",
+      "description": "An arch whose two feet differ along both x and y stands at an angle to its grid. It then lies in no plane of the grid and is fitted cell by cell, which comes out stepped and uses many more bricks. This gives the arch a grid of its own, turned so that the arch runs straight along it, with its feet left where they are in the world; it is then fitted as smoothly as any arch. Use it after placing an arch's feet where they are wanted. The form becomes the one being edited (index 0). Returns the workspace afresh.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The form's place in the list get_workspace gives."
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      }
     }
   ]
 }

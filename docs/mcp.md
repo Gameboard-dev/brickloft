@@ -9,7 +9,7 @@ change happen in the editor's window.
 
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers fourteen tools. Claude Code, or
+offers. The editor is the MCP server and offers fifteen tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -93,6 +93,7 @@ file, the entry is a server of type `http` with the URL above.
 | `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Shift + click and a drag do. |
 | `move_pull_point` | Changes how far an added point pulls the form. |
 | `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
+| `line_up_arch` | Gives an arch that stands at an angle to its grid a grid of its own, turned to line it up, so that it is fitted smoothly. Its feet stay where they are. |
 
 ### Forms and their settings
 

@@ -1462,7 +1462,11 @@ bricks are mirror images.
 
 Curves tilted off the grid are fitted cell by cell, so their surfaces can
 show stray pieces and steps. The outline methods need a curve lying flat
-across the grid.
+across the grid. For an arch standing at an angle to its grid, the editor
+offers to turn the arch's grid instead (`State::line_up` in
+[editor/src/state.rs](../editor/src/state.rs)). Bricks on a grid at an
+angle are fitted as if the grid were level, so the arch is then an ordinary
+flat outline.
 
 A thin pipe's outline has few directions. No sloped side of a pipe's
 outline may be deeper than its chamfer, so a tube under 6 cells across,

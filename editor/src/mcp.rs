@@ -855,6 +855,19 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             brickloft_core::spec::build(spec)?;
             state.open(forms);
         }
+        "line_up_arch" => {
+            let at = index(&forms)?;
+            if at > 0 {
+                state.activate(at - 1);
+            }
+            if !state.askew() {
+                return Err("that form is not an arch at an angle to its grid: its two feet must differ along both x and y".into());
+            }
+            state.record();
+            if !state.line_up() {
+                return Err("an arch that has been given quarter turns cannot be lined up; set `turned` back to 16 first".into());
+            }
+        }
         "remove_form" => {
             let at = index(&forms)?;
             if forms.len() == 1 {
@@ -920,7 +933,7 @@ mod tests {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 14);
+        assert_eq!(tool_names().len(), 15);
     }
 
     #[test]
