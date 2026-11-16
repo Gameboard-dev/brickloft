@@ -1,11 +1,15 @@
 //! Draw the bricks of a form from a report or spec file as a picture, to
 //! look at a fit without starting the editor:
 //!
-//!   cargo run --release -p brickloft-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [colours:N] [key=value ...]
+//!   cargo run --release -p brickloft-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [colours:N] [palette:STYLE[:N]] [key=value ...]
 //!
 //! `turn` is the side it is seen from, in degrees about z (default 35), and
 //! `tilt` how far above, in degrees (default 35). `zoom` enlarges the
-//! picture about the cell `x y z` (the middle of the form if not given). Extra `key=value`
+//! picture about the cell `x y z` (the middle of the form if not given).
+//! `palette:rug` paints a pattern in the colours the editor starts that
+//! style in, and `palette:rug:2` in the third of its sets (see
+//! `brickloft_editor::paint::palettes`), to judge a pattern as a player
+//! first sees it and not in this example's own colours. Extra `key=value`
 //! arguments override the file's settings, as with the `inspect` example.
 
 use brickloft_core::report::parse_spec;
@@ -47,9 +51,19 @@ fn main() {
     // colours its features share. `colours:N` uses the first N of them.
     const SHADES: [[f64; 3]; 8] = [[226.0, 214.0, 190.0], [176.0, 84.0, 60.0], [44.0, 74.0, 122.0], [204.0, 160.0, 72.0], [70.0, 120.0, 90.0], [120.0, 60.0, 100.0], [40.0, 40.0, 48.0], [150.0, 170.0, 190.0]];
     let colours = args.iter().find_map(|a| a.strip_prefix("colours:")?.parse::<usize>().ok()).unwrap_or(4).clamp(1, SHADES.len());
+    // a style's own colours instead, all of them: `palette:STYLE` or `palette:STYLE:N`
+    let own: Option<Vec<[f64; 3]>> = args.iter().find_map(|a| {
+        let mut parts = a.strip_prefix("palette:")?.split(':');
+        let sets = brickloft_editor::paint::palettes(parts.next()?);
+        let set = sets[parts.next().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0).min(sets.len() - 1)];
+        Some(set.iter().map(|c| c.map(f64::from)).collect())
+    });
     for (n, brick) in built.bricks.iter().enumerate() {
         if let Some(shade) = built.shades.get(n) {
-            canvas.brick = SHADES[brickloft_core::pattern::colour_of(*shade, colours)];
+            canvas.brick = match &own {
+                Some(set) => set[brickloft_core::pattern::colour_of(*shade, set.len())],
+                None => SHADES[brickloft_core::pattern::colour_of(*shade, colours)],
+            };
         }
         canvas.shape(brick.mask, DVec3::from_array(brick.min.map(|v| v as f64)), DVec3::from_array(brick.ext.map(|v| v as f64)));
     }

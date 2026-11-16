@@ -402,8 +402,9 @@ pub fn colour_of(shade: u8, count: usize) -> usize {
 /// The styles that are drawn by rule and not learnt from a sample.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drawn {
-    /// a rug in the Persian manner: a medallion of petals at the middle,
-    /// flowers and leaves over the field, and a border (see [`rug_garden`])
+    /// a rug in the Persian manner: borders, a layered medallion at the
+    /// middle, a corner piece in each corner, and scrolling stems with
+    /// flowers over the field (see [`rug_garden`])
     Rug,
     /// one eight-armed snowflake at the middle of the floor, its arms
     /// branching and branching again
@@ -564,6 +565,520 @@ fn planks([across, down]: [usize; 2], seed: u64, size: i32) -> Vec<Tile> {
     tiles
 }
 
+/// A rug in the Persian manner, as the colour at each place of one
+/// quarter of it (so many tiles out from its middle each way; the other
+/// three quarters are this one's mirror images).
+///
+/// ## What is on it
+///
+/// It is set out as a medallion carpet of Tabriz or Kashan is, each part
+/// on a ground of its own colour. From the edge inwards:
+///
+/// - A guard: a line, a chain of small lozenges, a line. The lozenges are
+///   two tiles across, every one four tiles cut on the diagonal, so the
+///   chain is exact on the grid and meets itself at a corner.
+/// - The main border, on the dark ground: one stem swinging from side to
+///   side of it, a flower in every hollow of the stem, on one side and
+///   the other by turns, and a small knot wherever the stem crosses the
+///   middle.
+/// - A second guard, and then the field.
+/// - At the middle of the field the medallion: two to four layers one
+///   inside the next, each with a ring of pointed lobes and round ones
+///   between them, each outlined, each on another ground with a bud in
+///   every pointed lobe, and a flower at the heart. A pointed pendant
+///   and two lozenges hang from it at each end of the rug's longer way.
+/// - In each corner of the field a quarter of such a figure.
+/// - Over the rest of the field, scrolls: a stem coiling in to a flower,
+///   with leaves along it, each scroll branching from the one it touches
+///   and coiling the other way. Small flowers fill what is left.
+///
+/// ## The features
+///
+/// A feature here is a tone and not a part, since every part is made of
+/// several tones and the same few come back all over the rug, which is
+/// what makes it one design: 1 the lines (every outline, guard line and
+/// stem), 2 the dark ground (the border's, and by turns the medallion's
+/// layers'), 3 the pale one, 4 the petals, 5 leaves, 6 the shaded half
+/// of a leaf and the ground of the corners, 7 the hearts of flowers. A
+/// flower is three of them, petals, a smaller flower within and a heart;
+/// that is all the shading eight flat colours allow. (The first rug gave
+/// each part one number, and each part came out one flat colour.)
+///
+/// ## How a layered figure is drawn
+///
+/// A layer is the places within a round body, or within one of the
+/// lobes that stand out from it. A round lobe is a disc. A pointed lobe
+/// is what two equal discs have in common, a little to each side of the
+/// lobe's axis: two bows meeting in a point, the shape of a pointed arch
+/// (<https://en.wikipedia.org/wiki/Vesica_piscis>). The lobes are all
+/// alike, so a place is turned into the one lobe's slice of the figure
+/// and asked about once. How far inside the outline the place is gives
+/// the outline itself (the first tile in) and a second line further in
+/// where there is room, both following every lobe; this is banding a
+/// distance function, as [`drawn`] does for the other styles
+/// (<https://iquilezles.org/articles/distfunctions2d/>). The first rug's
+/// medallion was a rose curve, one wavy outline, and its layers were the
+/// same flower smaller: it read as a child's flower. Lobes of two kinds
+/// by turns, each layer turned half a lobe from the last, are what a
+/// woven medallion has.
+///
+/// ## How the field is filled
+///
+/// By the loop of Wong, Zongker and Salesin, "Computer-generated floral
+/// ornament" (SIGGRAPH 1998, <https://doi.org/10.1145/280814.280948>):
+/// find the largest empty circle left in the field, put a motif in it,
+/// and go on until what is left is too small. The room at every tile is
+/// kept in a grid, how far it is from the border, the medallion, the
+/// corners and every circle so far, and each new circle only lowers it.
+/// A circle found this way touches something, and most often an earlier
+/// circle; its stem then starts from that one's stem and coils the
+/// opposite way, so that the two run together where they meet like two
+/// gears, which is how Hamekasi and Samavati join the scrolls of such
+/// patterns ("Designing Persian floral patterns using circle packing",
+/// GRAPP 2012, <https://doi.org/10.5220/0003850101350142>). A stem is a
+/// spiral that closes in evenly as it turns
+/// (<https://en.wikipedia.org/wiki/Archimedean_spiral>).
+///
+/// The first rug threw darts for its flowers and joined each to its
+/// nearest neighbour with a straight stem. Darts leave holes and
+/// crowds, and straight stems make a net, not a vine.
+///
+/// ## Small things are drawn on the grid
+///
+/// A flower under five tiles is a lozenge and a square on one middle,
+/// which is an eight-pointed star whose edges are the grid's lines and
+/// diagonals: whole tiles and tiles cut in two, exactly. A round outline
+/// that small comes out as a blot of steps. Larger flowers are the rose
+/// curve the first rug used
+/// (<https://en.wikipedia.org/wiki/Rose_(mathematics)>). A middle is put
+/// on a corner of the grid or on the middle of a tile to suit its size.
+///
+/// ## Why not pictures of flowers
+///
+/// A rug's flowers could be small pictures, drawn by hand and stamped
+/// over the field. A picture is one size, and a flower drawn in tiles
+/// for a rug forty tiles across is a blot on one two hundred across.
+/// A figure given as a rule is drawn afresh at whatever size the rug is:
+/// a small rug has a medallion of two layers and a border of lozenges,
+/// a large one four layers and flowers with petals. And every seed is
+/// another rug: the size and number of lobes of the medallion, which
+/// grounds its layers take, the size of the corners, and where every
+/// scroll falls.
+///
+/// ## Cost
+///
+/// A place asks about the frame or the two figures by a few sums each,
+/// and about the scrolls only of its own square of four tiles by four,
+/// which are two or three; so a rug 250 tiles square is drawn in about
+/// thirty thousandths of a second. Asking every scroll at every place
+/// would be hundreds of them.
+fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> f64) -> Box<dyn Fn(f64, f64) -> u8> {
+    use std::f64::consts::{PI, TAU};
+    // the features (see The features above)
+    const LINE: u8 = 1;
+    const DEEP: u8 = 2;
+    const PALE: u8 = 3;
+    const PETAL: u8 = 4;
+    const LEAF: u8 = 5;
+    const SHADE: u8 = 6;
+    const HEART: u8 = 7;
+
+    // A flower about a middle, in three tones: its petals, a smaller
+    // flower within them, and its heart. `None` outside it. Under
+    // two and a half tiles it is a lozenge, under five a lozenge and a
+    // square together, and above that a rose curve with a line round it.
+    // The size of one of the first two is a whole number where its
+    // middle is a corner of the grid, and a whole number and a half
+    // where it is the middle of a tile, so that its edges fall on tiles'
+    // edges and diagonals.
+    fn bloom(dx: f64, dy: f64, size: f64, petals: f64, [petal, inner, heart]: [u8; 3]) -> Option<u8> {
+        if size < 2.4 {
+            let far = dx.abs() + dy.abs();
+            return (far < size).then(|| if far < size - 1.0 { heart } else { petal });
+        }
+        if size < 5.0 {
+            let (sum, most) = (dx.abs() + dy.abs(), dx.abs().max(dy.abs()));
+            let square = size - if size < 4.0 { 1.0 } else { 2.0 };
+            return (sum < size || most < square).then(|| if most < 1.0 - size.fract() { heart } else if sum < size - 1.0 && most < square { inner } else { petal });
+        }
+        let far = dx.hypot(dy);
+        if far >= size {
+            return None;
+        }
+        let round = petals * dy.atan2(dx) / 2.0;
+        let edge = size * (0.58 + 0.42 * round.cos().abs().powf(0.6));
+        if far >= edge {
+            None
+        } else if far < (size * 0.22).max(0.6) {
+            Some(heart)
+        } else if far < size * 0.62 * (0.58 + 0.42 * round.sin().abs().powf(0.6)) {
+            Some(inner)
+        } else if edge - far < 0.7 {
+            Some(LINE)
+        } else {
+            Some(petal)
+        }
+    }
+
+    // One layer of a medallion or a corner piece.
+    #[derive(Clone, Copy)]
+    struct Layer {
+        /// how far its points stand from the middle
+        reach: f64,
+        /// how many pointed lobes, with as many round ones between
+        lobes: f64,
+        /// the angle its first pointed lobe is at
+        turned: f64,
+        /// the size of its round body
+        core: f64,
+        /// a pointed lobe: where the two discs it is the overlap of have their middles (along its axis, and to each side), and their size
+        point: [f64; 3],
+        /// a round lobe: its middle and its size
+        bulge: [f64; 3],
+        ground: u8,
+        /// a second line inside the outline, of this colour, where the layer is broad enough
+        lined: Option<u8>,
+        /// the bud in each pointed lobe: how far out, half its length, half its breadth, its two tones
+        bud: Option<([f64; 3], [u8; 2])>,
+    }
+    #[derive(Clone)]
+    struct Figure {
+        x: f64,
+        y: f64,
+        layers: Vec<Layer>,
+        /// the flower at its middle: its size, petals and tones
+        rose: (f64, f64, [u8; 3]),
+    }
+    // how far inside a layer's outline a place is (under nothing, outside it), and the place as its lobe sees it: out along the lobe's axis, and to the side
+    fn depth(layer: &Layer, far: f64, angle: f64) -> (f64, f64, f64) {
+        let turn = TAU / layer.lobes;
+        let a = angle - layer.turned;
+        let b = (a - turn * (a / turn).round()).abs();
+        let (px, py) = (far * b.cos(), far * b.sin());
+        let [vc, vs, vr] = layer.point;
+        let [rx, ry, rr] = layer.bulge;
+        ((layer.core - far).max(vr - (px - vc).hypot(py + vs)).max(rr - (px - rx).hypot(py - ry)), px, py)
+    }
+    fn figure_at(figure: &Figure, u: f64, v: f64) -> Option<u8> {
+        let (dx, dy) = (u - figure.x, v - figure.y);
+        let far = dx.hypot(dy);
+        if far >= figure.layers.first()?.reach {
+            return None;
+        }
+        if let Some(colour) = bloom(dx, dy, figure.rose.0, figure.rose.1, figure.rose.2) {
+            return Some(colour);
+        }
+        let angle = dy.atan2(dx);
+        // (the innermost layer the place is in is the one seen)
+        for layer in figure.layers.iter().rev().filter(|layer| far < layer.reach) {
+            let (deep, px, py) = depth(layer, far, angle);
+            if deep <= 0.0 {
+                continue;
+            }
+            if deep < 1.0 {
+                return Some(LINE);
+            }
+            if let Some(([at, long, broad], [petal, heart])) = layer.bud {
+                let (a, b) = ((px - at) / long, py / broad);
+                let within = if a > 0.0 { a + b } else { a.hypot(b) };
+                if within < 1.0 {
+                    return Some(if within < 0.45 { heart } else { petal });
+                }
+            }
+            if let Some(line) = layer.lined.filter(|_| (2.0..3.0).contains(&deep)) {
+                return Some(line);
+            }
+            return Some(layer.ground);
+        }
+        None
+    }
+    // A figure of layers about a place: `reach` is how far its points
+    // stand from its middle, and `star` how much of that is its round
+    // body. The larger it is the more layers it has (`most` at most),
+    // since a layer under five or six tiles broad is all outline. Each
+    // layer is turned half a lobe from the last, so that the points of
+    // one show between the points of the next.
+    fn figure(x: f64, y: f64, reach: f64, lobes: f64, star: f64, grounds: [u8; 4], most: usize) -> Figure {
+        let shares: &[f64] = if reach >= 34.0 { &[1.0, 0.74, 0.5, 0.3] } else if reach >= 22.0 { &[1.0, 0.68, 0.4] } else if reach >= 10.0 { &[1.0, 0.58] } else { &[1.0] };
+        let shares = &shares[..shares.len().min(most)];
+        let turn = TAU / lobes;
+        let mut layers: Vec<Layer> = shares
+            .iter()
+            .enumerate()
+            .map(|(k, share)| {
+                let reach = reach * share;
+                let core = reach * star;
+                let vc = core * 0.92;
+                let long = reach - vc;
+                let half = (vc * (turn / 2.0).tan() * 0.95).min(long * 0.9);
+                let vr = (long * long + half * half) / (2.0 * half);
+                let rc = core * 0.97;
+                let rr = rc * (turn / 2.0).sin() * 0.72;
+                Layer { reach, lobes, turned: if k % 2 == 1 { turn / 2.0 } else { 0.0 }, core, point: [vc, vr - half, vr], bulge: [rc * (turn / 2.0).cos(), rc * (turn / 2.0).sin(), rr], ground: grounds[k], lined: None, bud: None }
+            })
+            .collect();
+        let rose = (layers.last().map_or(1.0, |last| last.core * 0.6)).max(1.0);
+        let rose = if rose < 5.0 { rose.round() } else { rose };
+        for k in 0..layers.len() {
+            // what is on this layer's axis inside it: the next layer's round lobe, or the flower at the middle
+            let inner = layers.get(k + 1).map_or(rose, |next| next.bulge[0].hypot(next.bulge[1]) + next.bulge[2]);
+            let outer = layers[k].reach - 1.6;
+            let long = ((outer - inner) / 2.0 - 0.5).min(4.0);
+            let ground = layers[k].ground;
+            let tones = if ground == PALE { [PETAL, DEEP] } else if ground == PETAL { [PALE, DEEP] } else { [PETAL, HEART] };
+            if long >= 1.0 {
+                let breadth = (layers[k].point[2] - layers[k].point[1] - 1.3).clamp(0.9, (long * 0.75).max(0.9));
+                layers[k].bud = Some(([(outer + inner) / 2.0, long, breadth], tones));
+            }
+            if layers[k].reach - layers.get(k + 1).map_or(rose, |next| next.reach) >= 11.0 {
+                layers[k].lined = Some(tones[0]);
+            }
+        }
+        let last = layers.last().map_or(0, |last| last.ground);
+        Figure { x, y, layers, rose: (rose, 8.0, if last == PALE { [PETAL, HEART, DEEP] } else { [PALE, HEART, PETAL] }) }
+    }
+
+    // a number from `low` to `high`, not a whole one
+    let mut roll = |low: f64, high: f64| low + (high - low) * pick(0.0, 9999.0) / 9999.0;
+    let least = half_wide.min(half_deep);
+    // The frame, from the edge inwards: a guard, the main border, a
+    // guard. The main border is an even number of tiles, so that its
+    // middle line is a line of the grid. The frame is about a third of
+    // the way in to the middle on a rug of the usual size, as on a
+    // woven one; a small rug keeps a line each side for its guards and
+    // lozenges for its border.
+    let main = if least < 12.0 { 2.0 } else { (2.0 * (least * 0.09).round()).clamp(4.0, 14.0) };
+    let guard = if least >= 24.0 { 4.0 } else { 1.0 };
+    let frame = 2.0 * guard + main;
+    let (wide, deep) = (half_wide - frame, half_deep - frame);
+    let field = wide.min(deep);
+    let along_wide = wide >= deep;
+    let long = wide.max(deep);
+
+    // the medallion: eight lobes, or twelve where there are tiles enough to show them
+    let reach = (field * roll(0.7, 0.82)).min(long * 0.55).max(2.0);
+    let lobes = if reach < 24.0 { 8.0 } else { [8.0, 12.0][roll(0.0, 1.999) as usize] };
+    let star = roll(0.7, 0.8);
+    let grounds = [[DEEP, PALE, PETAL, DEEP], [PALE, DEEP, PETAL, PALE], [DEEP, PETAL, PALE, DEEP]][roll(0.0, 2.999) as usize];
+    let medallion = figure(0.0, 0.0, reach, lobes, star, grounds, 4);
+    // what hangs from it at each end of the rug's longer way: a pointed leaf shape and two lozenges beyond it
+    let hung = (reach * 0.22).round().max(3.0);
+    let pendant = (long - reach >= 2.0 * hung + 8.0).then(|| {
+        let half = hung * 0.6;
+        let size = (hung * hung + half * half) / (2.0 * half);
+        // (its middle along the rug, the two discs' middles to the side and their size, half its length)
+        [reach.floor() + hung, size - half, size, hung]
+    });
+    // the corner pieces: a quarter of such a figure about each corner of the field
+    let corner_reach = (field * roll(0.6, 0.75)).min(wide.hypot(deep) - reach - 4.0).max(0.0);
+    let corner = figure(wide, deep, corner_reach, lobes, star, [if roll(0.0, 1.0) < 0.6 { SHADE } else { grounds[0] }, grounds[1], grounds[2], grounds[3]], if corner_reach < 16.0 { 1 } else if corner_reach < 34.0 { 2 } else { 3 });
+
+    // The scrolls of the field, and the small flowers between them
+    // (which are scrolls with no stem).
+    #[derive(Clone, Copy)]
+    struct Scroll {
+        x: f64,
+        y: f64,
+        /// the stem: how far out it starts and ends, the angle it starts at, how far round it goes, and which way
+        stem: [f64; 5],
+        leaves: f64,
+        /// the flower at its middle
+        size: f64,
+        petals: f64,
+        tones: [u8; 3],
+    }
+    let pendant_room = |x: f64, y: f64| {
+        let (a, b) = if along_wide { (x, y) } else { (y, x) };
+        pendant.map_or(f64::INFINITY, |[at, _, _, hung]| (a - a.clamp(at - hung, at + hung + 6.0)).hypot(b) - hung * 0.6)
+    };
+    // The room at the middle of every tile of the field: how large a
+    // circle about it would touch the nearest thing. A tile is kept
+    // clear round the figures and the frame; the rug's two middle lines
+    // may be touched, where a scroll meets its mirror image.
+    let (cols, rows) = (wide.max(0.0) as usize, deep.max(0.0) as usize);
+    let mut room: Vec<f64> = (0..cols * rows)
+        .map(|k| {
+            let (x, y) = ((k % cols) as f64 + 0.5, (k / cols) as f64 + 0.5);
+            let about = |figure: &Figure| figure.layers.first().map_or(f64::INFINITY, |outer| -depth(outer, (x - figure.x).hypot(y - figure.y), (y - figure.y).atan2(x - figure.x)).0);
+            (wide - x - 1.0).min(deep - y - 1.0).min(x).min(y).min(about(&medallion) - 1.0).min(about(&corner) - 1.0).min(pendant_room(x, y) - 1.0)
+        })
+        .collect();
+    // The largest circle is not always taken, but the largest after each
+    // tile's room is lessened by its own share, up to a fifth: taken
+    // strictly, every seed fills a field the same way.
+    let sway: Vec<f64> = (0..cols * rows).map(|_| roll(0.8, 1.0)).collect();
+    // (the largest a scroll may be: without a limit the first fills the whole of the field beside the medallion)
+    let most = (field * roll(0.2, 0.26)).clamp(4.5, 10.0);
+    let mut scrolls: Vec<Scroll> = Vec::new();
+    for _ in 0..600 {
+        let Some(best) = (0..cols * rows).max_by(|a, b| (room[*a] * sway[*a]).total_cmp(&(room[*b] * sway[*b]))) else { break };
+        let size = room[best].min(most);
+        if size < 1.5 {
+            break;
+        }
+        let (x, y) = ((best % cols) as f64 + 0.5, (best / cols) as f64 + 0.5);
+        let tones = [[PALE, PETAL, HEART], [HEART, PETAL, DEEP], [PETAL, HEART, PALE]][roll(0.0, 2.999) as usize];
+        let scroll = if size < 3.0 {
+            Scroll { x, y, stem: [0.0; 5], leaves: 0.0, size: 1.5, petals: 4.0, tones }
+        } else {
+            let flower = if size < 5.0 { 1.5 } else if size < 9.0 { (size * 0.45).floor() + 0.5 } else { size * 0.5 };
+            // the scroll it touches, if any: it branches from that one's stem, and turns the other way
+            let parent = scrolls.iter().filter(|other| other.stem[3] > 0.0).map(|other| (((x - other.x).hypot(y - other.y) - other.stem[0].min(most) - size).abs(), other)).filter(|(gap, _)| *gap < 0.8).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, other)| *other);
+            let (start, from, hand) = match parent {
+                Some(other) => {
+                    let towards = (other.y - y).atan2(other.x - x);
+                    let [out, end, at, round, hand] = other.stem;
+                    let on = (hand * (towards + PI - at)).rem_euclid(TAU);
+                    let stem_there = if on <= round { out + (end - out) * on / round } else { out };
+                    (((x - other.x).hypot(y - other.y) - stem_there).clamp(size, size + 2.5), towards, -hand)
+                }
+                None => (size, roll(0.0, TAU), if roll(0.0, 1.0) < 0.5 { 1.0 } else { -1.0 }),
+            };
+            let end = flower + 0.9;
+            let round = ((start - end) / 2.6).clamp(0.75, 1.4) * TAU;
+            Scroll { x, y, stem: [start, end, from, round, hand], leaves: (round * (start + end) / 2.0 / 4.5).round().max(1.0), size: flower, petals: [5.0, 6.0, 8.0][roll(0.0, 2.999) as usize], tones }
+        };
+        // (a small flower keeps a tile clear about it; a scroll touches the next)
+        let keep = if size < 3.0 { 1.5 + 1.0 } else { size };
+        for (k, room) in room.iter_mut().enumerate() {
+            *room = room.min(((k % cols) as f64 + 0.5 - x).hypot((k / cols) as f64 + 0.5 - y) - keep);
+        }
+        scrolls.push(scroll);
+    }
+    // which scrolls may show in each square of four tiles by four, so that a place asks only those (see Cost above)
+    const SQUARE: f64 = 4.0;
+    let squares = ((wide / SQUARE) as usize + 1, (deep / SQUARE) as usize + 1);
+    let mut near: Vec<Vec<u16>> = vec![Vec::new(); squares.0 * squares.1];
+    for (n, scroll) in scrolls.iter().enumerate() {
+        let out = scroll.stem[0].max(scroll.size) + 2.0;
+        for j in ((scroll.y - out) / SQUARE).floor().max(0.0) as usize..=(((scroll.y + out) / SQUARE) as usize).min(squares.1 - 1) {
+            for i in ((scroll.x - out) / SQUARE).floor().max(0.0) as usize..=(((scroll.x + out) / SQUARE) as usize).min(squares.0 - 1) {
+                near[j * squares.0 + i].push(n as u16);
+            }
+        }
+    }
+
+    Box::new(move |u, v| {
+        // A tile is asked about at sixths of a tile (see `tile_at`), and
+        // a place and its mirror image come here by different sums, a
+        // hair apart. Both are put on the same sixth, so that every sum
+        // below is the same sum for the two, and the rug is its own
+        // mirror image exactly, with no tie to settle anywhere. (The
+        // hair is real, in three of the first two hundred columns, but
+        // an edge has to fall on it to show, and no rug tried without
+        // this line differed from its mirror image: it is a guard
+        // against a fault not yet seen.)
+        let (u, v) = ((u * 6.0).round() / 6.0, (v * 6.0).round() / 6.0);
+        let (from_wide, from_deep) = (half_wide - u, half_deep - v);
+        let inward = from_wide.min(from_deep);
+        if inward < frame {
+            // How far along the side, from the rug's corner: the same
+            // for a place and its mirror image in the corner's
+            // diagonal, so each band turns the corner as its own
+            // mirror image. Counted from the rug's middle, the two
+            // sides of a rug longer than it is broad would meet at a
+            // corner out of step.
+            let along = from_wide.max(from_deep);
+            let chain = |t: f64, [links, ground]: [u8; 2]| if (t - 1.0).abs() + (along.rem_euclid(2.0) - 1.0).abs() < 1.0 { links } else { ground };
+            if inward < guard || inward >= guard + main {
+                let t = if inward < guard { inward } else { inward - guard - main };
+                return if guard < 4.0 || !(1.0..3.0).contains(&t) { LINE } else { chain(t - 1.0, [PETAL, PALE]) };
+            }
+            // the main border: across it from its middle line, and along it from the middle of the corner
+            let (t, s) = (inward - guard - main / 2.0, along - guard - main / 2.0);
+            if main < 4.0 {
+                return chain(t + 1.0, [HEART, DEEP]);
+            }
+            // The stem crosses the middle line at the corner, at the
+            // middle of the side and a whole number of times between,
+            // so a side is a whole number of swings and no flower is
+            // cut by the rug's middle line. Each side has its own
+            // length of swing, the nearest to the border's breadth
+            // that divides it.
+            let side = (if from_deep < from_wide { half_wide } else { half_deep }) - guard - main / 2.0;
+            let step = side / (side / main).round().max(1.0);
+            let knot = if main >= 12.0 { 2.0 } else { 1.0 };
+            let at = (s / step).round();
+            if let Some(colour) = bloom(s - (at * step).round(), t, knot, 4.0, [PALE, PALE, HEART]) {
+                return colour;
+            }
+            let size = main / 4.0 + if main >= 10.0 { 0.5 } else { 0.0 };
+            let snap = |x: f64| if size.fract() != 0.0 { (x - 0.5).round() + 0.5 } else { x.round() };
+            if s > 0.0 && main >= 6.0 {
+                let crest = (s / step).floor();
+                let sign = if crest % 2.0 == 0.0 { 1.0 } else { -1.0 };
+                let tones = if crest % 2.0 == 0.0 { [PETAL, HEART, PALE] } else { [PALE, PETAL, HEART] };
+                if let Some(colour) = bloom(s - snap((crest + 0.5) * step), t + sign * (main / 2.0 - 1.0 - size), size, 6.0, tones) {
+                    return colour;
+                }
+                let swing = main / 2.0 - 1.0;
+                let slope = swing * PI / step * (PI * s / step).cos();
+                if (t - swing * (PI * s / step).sin()).abs() < 0.5 * (1.0 + slope * slope).sqrt() {
+                    return LINE;
+                }
+            }
+            return DEEP;
+        }
+        if let Some(colour) = figure_at(&medallion, u, v) {
+            return colour;
+        }
+        if let Some([at, aside, size, hung]) = pendant {
+            let (a, b) = if along_wide { (u - at, v) } else { (v - at, u) };
+            let deep = size - a.hypot(b + aside);
+            if deep > 0.0 {
+                return if deep < 1.0 { LINE } else if a.abs() + b < hung * 0.4 { HEART } else { PALE };
+            }
+            if let Some(colour) = bloom(a - hung - 2.0, b, 2.0, 4.0, [PETAL, PETAL, HEART]).or_else(|| bloom(a - hung - 5.0, b, 1.0, 4.0, [LINE; 3])) {
+                return colour;
+            }
+        }
+        if let Some(colour) = figure_at(&corner, u, v) {
+            return colour;
+        }
+        let here = &near[((v / SQUARE) as usize).min(squares.1 - 1) * squares.0 + ((u / SQUARE) as usize).min(squares.0 - 1)];
+        let mut leaf = 0;
+        for scroll in here.iter().map(|n| &scrolls[*n as usize]) {
+            let (dx, dy) = (u - scroll.x, v - scroll.y);
+            let far = dx.hypot(dy);
+            let [out, end, from, round, hand] = scroll.stem;
+            if far >= out.max(scroll.size) + 2.0 {
+                continue;
+            }
+            if let Some(colour) = bloom(dx, dy, scroll.size, scroll.petals, scroll.tones) {
+                return colour;
+            }
+            if round == 0.0 {
+                continue;
+            }
+            let first = (hand * (dy.atan2(dx) - from)).rem_euclid(TAU);
+            let stem_at = |on: f64| out + (end - out) * on / round;
+            let pitch = (out - end) * TAU / round;
+            for coil in 0..3 {
+                let on = first + TAU * coil as f64;
+                if on > round {
+                    break;
+                }
+                let off = far - stem_at(on);
+                if off.abs() < 0.5 {
+                    return LINE;
+                }
+                // the leaf nearest along the stem, on the outer side and the inner by turns (the inner only where the coils are far enough apart), and in two greens, one each side of its middle
+                let nth = (on * scroll.leaves / round).floor();
+                let outer = nth % 2.0 == 0.0;
+                let leaf_on = (nth + 0.5) * round / scroll.leaves;
+                if if outer { leaf_on < TAU } else { pitch >= 3.4 } {
+                    let run = (on - leaf_on) * stem_at(leaf_on) / 2.0;
+                    let rise = if outer { off } else { -off };
+                    if run.abs() < 1.0 && rise > 0.0 && rise < 0.5 + 1.6 * (1.0 - run * run) {
+                        leaf = if run * hand < 0.0 { LEAF } else { SHADE };
+                    }
+                }
+            }
+        }
+        leaf
+    })
+}
+
 /// A style drawn by rule, as a grid of tiles: a dense pattern of outlined
 /// lozenges, octagons, hexagons, squares and bars, ring within ring, whose
 /// outlines run into one another where the figures meet, and which is its
@@ -619,185 +1134,6 @@ fn planks([across, down]: [usize; 2], seed: u64, size: i32) -> Vec<Tile> {
 /// `unbroken` says which tiles are whole tiles of the floor. The pattern
 /// is set out about the middle of the rectangle of tiles that takes them
 /// all in.
-/// A rug in the Persian manner, as the colour at each place of one
-/// quarter of it (so many tiles out from its middle each way; the other
-/// three quarters are this one's mirror images).
-///
-/// ## What is on it
-///
-/// From the edge inwards, a rug of this kind has a border between two
-/// lines with one small motif repeated along it, then the field. At the
-/// middle of the field is the medallion, a flower of several layers one
-/// inside the next, with a smaller flower hung from it at each end. A
-/// quarter of another medallion fills each corner. Over the rest of the
-/// field flowers are scattered, each with a leaf or two, joined to their
-/// neighbours by stems.
-///
-/// ## How a flower is drawn
-///
-/// A flower is one outline round a middle, further out where a petal is
-/// and nearer between two. Going round the middle by the angle `a`, with
-/// `n` petals each standing `d` of the flower's size `R` proud:
-///
-///   r(a) = R (1 - d + d |cos(n a / 2)|^0.6)
-///
-/// A place is in the flower if it is nearer the middle than `r` at its
-/// angle. The power makes a petal round at its tip and the notch between
-/// two petals sharp, as the petals of a drawn flower are; without it the
-/// outline is a wavy circle. (It is the rose curve of Guido Grandi, with
-/// the size added so that the petals do not reach the middle:
-/// <https://en.wikipedia.org/wiki/Rose_(mathematics)>.) A medallion is
-/// three or four of these on one middle, each smaller than the last,
-/// with other numbers of petals and every other one turned by half a
-/// petal, so that the petals of one layer show between those of the
-/// next. A leaf is two bows meeting in a point at each end.
-///
-/// The seed chooses the number of layers and of petals, the sizes, and
-/// where the flowers of the field are, which is by throwing darts and
-/// keeping those that land clear of the medallion, the corners and one
-/// another, as the stepping stones' points are found.
-///
-/// ## Why not pictures of flowers
-///
-/// A rug's flowers could be small pictures, drawn by hand and stamped
-/// over the field. A picture is one size, and a flower drawn in tiles
-/// for a rug forty tiles across is a blot on one two hundred across.
-/// An outline given as a rule is drawn afresh at whatever size the rug
-/// is, and every seed is another flower.
-fn rug_garden(half_wide: f64, half_deep: f64, pick: &mut dyn FnMut(f64, f64) -> f64) -> Box<dyn Fn(f64, f64) -> u8> {
-    use std::f64::consts::PI;
-    #[derive(Clone, Copy)]
-    struct Flower {
-        x: f64,
-        y: f64,
-        petals: f64,
-        size: f64,
-        /// how much of its size a petal stands proud
-        proud: f64,
-        /// by half a petal
-        turned: bool,
-    }
-    // how far inside a flower's outline a place is: under nothing, outside it
-    fn within(flower: &Flower, u: f64, v: f64) -> f64 {
-        let (dx, dy) = (u - flower.x, v - flower.y);
-        let swell = (flower.petals * dy.atan2(dx) / 2.0 + if flower.turned { PI / 2.0 } else { 0.0 }).cos().abs().powf(0.6);
-        flower.size * (1.0 - flower.proud + flower.proud * swell) - dx.hypot(dy)
-    }
-    // The features: the lines of the border and the outlines of the
-    // medallion's layers; its layers by turns; the field's flowers and
-    // their leaves; the corner pieces; and the hearts of things.
-    const LINE: u8 = 1;
-    const LAYER: u8 = 2;
-    const OTHER_LAYER: u8 = 3;
-    const BLOOM: u8 = 4;
-    const LEAF: u8 = 5;
-    const CORNER: u8 = 6;
-    const HEART: u8 = 7;
-    let least = half_wide.min(half_deep);
-    // the border: an even number of tiles, so that its motifs sit on the grid
-    let border = (2.0 * (least * 0.1).round()).clamp(2.0, 8.0);
-    let (wide, deep) = (half_wide - border, half_deep - border);
-    let field = wide.min(deep);
-    // the medallion, outermost layer first: petals in fours, so that it is its own mirror image both ways
-    let size = (field * pick(55.0, 75.0) / 100.0).max(2.0);
-    let layers = pick(3.0, 4.0) as usize;
-    let medallion: Vec<Flower> = (0..layers)
-        .map(|k| Flower { x: 0.0, y: 0.0, petals: 4.0 * if k == 0 { pick(3.0, 4.0) } else if k == 1 { pick(2.0, 3.0) } else { pick(1.0, 2.0) }, size: size * (1.0 - k as f64 / (layers as f64 + 0.3)), proud: pick(20.0, 40.0) / 100.0, turned: k % 2 == 1 })
-        .collect();
-    // the flower hung from each end of it, along the longer way of the rug, if there is room
-    let hung = (size / 4.0).max(1.5);
-    let pendant = (wide.max(deep) - size > 2.0 * hung + 2.0).then(|| {
-        let out = (size + hung + 1.0).round();
-        Flower { x: if wide >= deep { out } else { 0.0 }, y: if wide >= deep { 0.0 } else { out }, petals: 8.0, size: hung, proud: 0.35, turned: false }
-    });
-    // the corner pieces: two layers about the field's corner
-    let corner_size = field * pick(35.0, 50.0) / 100.0;
-    let corner: Vec<Flower> = (0..2).map(|k| Flower { x: wide, y: deep, petals: 4.0 * pick(2.0, 4.0), size: corner_size * (1.0 - 0.4 * k as f64), proud: pick(20.0, 40.0) / 100.0, turned: k == 1 }).collect();
-    // The flowers of the field, by darts. One that lands within two
-    // tiles of a middle line is moved onto it, since the fold would cut
-    // it in two there; then it is whole, and its own mirror image.
-    let apart = pick(5.0, 7.0);
-    let mut blooms: Vec<Flower> = Vec::new();
-    let mut leaves: Vec<[f64; 6]> = Vec::new(); // where, which way (as a cosine and a sine), half its length and half its breadth
-    let mut stems: Vec<[f64; 4]> = Vec::new();
-    for _ in 0..400 {
-        let (mut x, mut y) = (pick(0.0, wide - 2.0), pick(0.0, deep - 2.0));
-        if x < 2.0 {
-            x = 0.0;
-        }
-        if y < 2.0 {
-            y = 0.0;
-        }
-        let clear = x.hypot(y) > size + 3.0
-            && (wide - x).hypot(deep - y) > corner_size + 3.0
-            && pendant.is_none_or(|hung| (x - hung.x).hypot(y - hung.y) > hung.size + 3.0)
-            // (clear of its own mirror image too)
-            && (x == 0.0 || x >= apart / 2.0)
-            && (y == 0.0 || y >= apart / 2.0)
-            && blooms.iter().all(|other| (x - other.x).hypot(y - other.y) >= apart);
-        if !clear {
-            continue;
-        }
-        // (on a middle line, four petals or eight: those are the flowers that are their own mirror image there)
-        let petals = if x == 0.0 || y == 0.0 { 4.0 * pick(1.0, 2.0) } else { pick(4.0, 8.0) };
-        let bloom = Flower { x, y, petals, size: pick(16.0, 28.0) / 10.0, proud: pick(30.0, 50.0) / 100.0, turned: pick(0.0, 1.0) < 1.0 && x != 0.0 && y != 0.0 };
-        // a stem to the nearest flower already there
-        if let Some(near) = blooms.iter().min_by(|a, b| (x - a.x).hypot(y - a.y).total_cmp(&(x - b.x).hypot(y - b.y))).filter(|near| (x - near.x).hypot(y - near.y) < 2.0 * apart) {
-            stems.push([x, y, near.x, near.y]);
-        }
-        // a leaf out from it one way, and often another the opposite way
-        let way = pick(0.0, 359.0).to_radians();
-        for side in 0..if pick(0.0, 2.0) > 0.0 { 2 } else { 1 } {
-            let (c, s) = ((way + PI * side as f64).cos(), (way + PI * side as f64).sin());
-            let long = pick(12.0, 20.0) / 10.0;
-            leaves.push([x + c * (bloom.size + long * 0.8), y + s * (bloom.size + long * 0.8), c, s, long, pick(6.0, 9.0) / 10.0]);
-        }
-        blooms.push(bloom);
-    }
-    // a layered flower's colour at a place: `None` outside it
-    fn layered(layers: &[Flower], fills: [u8; 2], u: f64, v: f64) -> Option<u8> {
-        // (the innermost layer the place is in is the one seen)
-        layers.iter().enumerate().rev().find_map(|(k, layer)| {
-            let deep = within(layer, u, v);
-            (deep > 0.0).then(|| if deep < 1.0 { LINE } else { fills[k % 2] })
-        })
-    }
-    Box::new(move |u, v| {
-        // the border: a line, a band of small lozenges with hearts, and a line
-        let inward = (half_wide - u).min(half_deep - v);
-        if inward < border {
-            if inward < 1.0 || inward >= border - 1.0 {
-                return LINE;
-            }
-            let along = if half_wide - u < half_deep - v { v } else { u };
-            let from = (along.rem_euclid(border) - border / 2.0).abs() + (inward - border / 2.0).abs();
-            return if from < 1.0 { HEART } else if from < border / 2.0 - 1.0 { BLOOM } else { 0 };
-        }
-        if u.hypot(v) < 1.2 {
-            return HEART;
-        }
-        if let Some(colour) = layered(&medallion, [LAYER, OTHER_LAYER], u, v).or_else(|| pendant.and_then(|hung| layered(&[hung], [OTHER_LAYER, LAYER], u, v))).or_else(|| layered(&corner, [CORNER, LAYER], u, v)) {
-            return colour;
-        }
-        if let Some(bloom) = blooms.iter().find(|bloom| within(bloom, u, v) > 0.0) {
-            return if (u - bloom.x).hypot(v - bloom.y) < bloom.size * 0.35 { HEART } else { BLOOM };
-        }
-        let in_leaf = |[x, y, c, s, long, broad]: &[f64; 6]| {
-            let (along, across) = ((u - x) * c + (v - y) * s, (v - y) * c - (u - x) * s);
-            along.abs() < *long && across.abs() < broad * (1.0 - (along / long).powi(2))
-        };
-        let on_stem = |[ax, ay, bx, by]: &[f64; 4]| {
-            let (dx, dy) = (bx - ax, by - ay);
-            let along = (((u - ax) * dx + (v - ay) * dy) / (dx * dx + dy * dy).max(1e-9)).clamp(0.0, 1.0);
-            (u - ax - dx * along).hypot(v - ay - dy * along) < 0.45
-        };
-        if leaves.iter().any(in_leaf) || stems.iter().any(on_stem) {
-            return LEAF;
-        }
-        0
-    })
-}
-
 fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &Mosaic) -> Vec<Tile> {
     let seed = settings.seed;
     match kind {
@@ -1432,6 +1768,93 @@ mod tests {
             // one seed is one pattern, and another seed another
             assert_eq!(lay(5), lay(5), "{name}");
             assert_ne!(lay(5), lay(6), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_rugs_border_turns_its_corners_and_closes_at_the_middle_of_each_side() {
+        // A rug 128 by 80: its main border is 8 tiles between guards of
+        // 4, and both its sides are a whole number of swings of 8.
+        let (across, down) = (128, 80);
+        let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false });
+        let tile = |i: usize, j: usize| tiles[j * across + i];
+        // Round a corner the frame is its own mirror image in the
+        // corner's diagonal, which swaps a tile's top right and bottom
+        // left: no band is out of step where the two sides meet.
+        for j in 0..24 {
+            for i in 0..24 {
+                if i.min(j) < 16 {
+                    let [a, b, c, d] = tile(j, i);
+                    assert_eq!(tile(i, j), [a, c, b, d], "the frame differs across the corner's diagonal at {i}, {j}");
+                }
+            }
+        }
+        // (and it is not plain there: the stem and its flowers are in it)
+        assert!((0..24).flat_map(|j| (0..24).map(move |i| (i, j))).filter(|(i, j)| *i.min(j) >= 4 && *i.min(j) < 12).map(|(i, j)| tile(i, j)).collect::<HashSet<_>>().len() > 8);
+        // At the middle of each side the stem crosses the border's
+        // middle line, 8 tiles in, at a knot: a lozenge of four cut
+        // tiles about that corner of the grid. Were a side not a whole
+        // number of swings, a flower would lie there, cut in two by the
+        // rug's middle line.
+        assert_eq!(tile(63, 7)[1..], [ON_CUT, ON_CUT, 3], "the top side's middle");
+        assert_eq!(tile(7, 39)[1..], [ON_CUT, ON_CUT, 3], "the left side's middle");
+        // a side that is not a multiple of the border's breadth closes too
+        let tiles = drawn(Drawn::Rug, [120, 80], &vec![true; 120 * 80], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false });
+        assert_eq!(tiles[7 * 120 + 59][1..], [ON_CUT, ON_CUT, 3], "the top side's middle, 120 across");
+    }
+
+    #[test]
+    fn a_rug_of_any_size_is_drawn() {
+        // down to floors too small for a field, or for anything
+        for across in (4..=70).step_by(3) {
+            for down in (4..=70).step_by(5) {
+                for seed in [2, 9] {
+                    let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false });
+                    assert!(tiles.iter().flatten().all(|colour| *colour < 8 || *colour == ON_CUT), "{across} by {down}, seed {seed}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_rug_is_its_own_mirror_image_tile_for_tile() {
+        // A mirror image swaps a tile's corners: left with right, or top with bottom.
+        for (across, down) in [(120, 80), (90, 132), (250, 160)] {
+            for seed in 0..12 {
+                let tiles = drawn(Drawn::Rug, [across, down], &vec![true; across * down], &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed, mortar: true, stagger: -1, upright: false });
+                for j in 0..down {
+                    for i in 0..across {
+                        let [a, b, c, d] = tiles[j * across + i];
+                        assert_eq!(tiles[j * across + across - 1 - i], [b, a, d, c], "{across} by {down}, seed {seed}: left to right at {i}, {j}");
+                        assert_eq!(tiles[(down - 1 - j) * across + i], [c, d, a, b], "{across} by {down}, seed {seed}: top to bottom at {i}, {j}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_rug_is_drawn_in_good_time() {
+        // A rug is drawn afresh at every change of its floor or its seed,
+        // while the player drags. The bound is several times what it
+        // takes built for release; built for debugging the sums are ten
+        // times slower, and the bound says nothing, so it is not held to.
+        // The least of five goes is what is held to the bound: the tests
+        // run many at once, and one go on its own measured 38 ms for a rug
+        // that takes 3 when nothing else is running.
+        for (across, down, bound) in [(120, 80, 30), (250, 160, 60), (250, 250, 100)] {
+            let whole = vec![true; across * down];
+            let took = (0..5)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    let tiles = drawn(Drawn::Rug, [across, down], &whole, &Mosaic { style: 1, size: 2, bevel: 1, border: 0, seed: 5, mortar: true, stagger: -1, upright: false });
+                    assert_eq!(tiles.len(), across * down);
+                    started.elapsed().as_millis()
+                })
+                .min()
+                .unwrap();
+            println!("a rug {across} by {down}: {took} ms");
+            assert!(cfg!(debug_assertions) || took < bound, "a rug {across} by {down} took {took} ms");
         }
     }
 
