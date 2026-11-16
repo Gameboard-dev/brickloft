@@ -360,6 +360,11 @@ type Snapshot = Vec<Placed>;
 /// What a join was put together from: each form, where it stands, and
 /// enough of its bricks to tell a build from the one before it.
 type JoinKey = (Spec, [i32; 3], usize, bool);
+/// What a form's drawn bricks depend on (see [`State::drawn_from`]): how it
+/// is described and coloured, where it stands, whether it is picked, and
+/// how many bricks it was built of and how; and, while forms are joined,
+/// the number of the workspace's last change.
+pub type DrawnFrom = (Spec, Paint, [i32; 3], bool, usize, bool, Option<u64>);
 
 /// How far along the line through `from` in direction `a` the ray from
 /// `origin` along `dir` comes nearest it; `None` if the ray runs along the
@@ -761,18 +766,46 @@ impl State {
 
     /// Put the workspace back as a snapshot has it.
     fn restore(&mut self, snapshot: Snapshot) {
+        // The bricks the workspace has now are kept for whichever of the
+        // snapshot's forms are the same forms: a form's bricks follow from
+        // how it is described, wherever it stands and whatever its grid.
+        // Every form was built again, always. Taking back the move of a
+        // cube then built the lawn beside it afresh, a second or more for
+        // a large one, and so did every change Claude made through MCP,
+        // which puts the workspace back whole each time.
+        let fitted = |spec: &Spec| Spec { grid: LEVEL, grid_at: [0.0; 3], on_grid: 0, blend: None, ..spec.clone() };
+        let mut kept: Vec<(Spec, Built, Option<Bounds>)> = std::mem::take(&mut self.others).into_iter().map(|o| (fitted(&o.spec), o.built, o.bounds)).collect();
+        let mine = fitted(&self.full_spec());
+        if self.built_from.as_ref() == Some(&mine) && self.problem.is_none() && !self.built.unmeasured {
+            kept.push((mine, std::mem::take(&mut self.built), self.bounds));
+        }
+        let mut again = |spec: &Spec| -> Option<(Built, Option<Bounds>)> {
+            let wanted = fitted(spec);
+            let at = kept.iter().position(|(from, ..)| *from == wanted)?;
+            // (taken, not copied, unless another of the snapshot's forms is the same again)
+            Some(kept.iter().skip(at + 1).any(|(from, ..)| *from == wanted).then(|| (kept[at].1.clone(), kept[at].2)).unwrap_or_else(|| { let (_, built, bounds) = kept.swap_remove(at); (built, bounds) }))
+        };
         let mut forms = snapshot.clone().into_iter();
         let Some((spec, paint, place)) = forms.next() else { return };
+        let own = again(&spec);
         self.others = forms
             .map(|(spec, paint, place)| {
-                let built = build(&spec).unwrap_or_default();
-                Item { bounds: bounds_of(&built), spec, paint, place, built, picked: false }
+                let (built, bounds) = again(&spec).unwrap_or_else(|| {
+                    let built = build(&spec).unwrap_or_default();
+                    let bounds = bounds_of(&built);
+                    (built, bounds)
+                });
+                Item { bounds, spec, paint, place, built, picked: false }
             })
             .collect();
         self.load_spec(spec);
         self.paint = paint;
         self.place = place;
         self.built_from = None;
+        if let Some((built, bounds)) = own {
+            (self.built, self.bounds, self.problem) = (built, bounds, None);
+            self.built_from = Some(fitted(&self.full_spec()));
+        }
         self.scene += 1;
         self.noted = snapshot;
     }
@@ -1341,6 +1374,23 @@ impl State {
     pub fn rings(&self) -> Option<(DVec3, f64)> {
         let (lo, hi) = self.grid_box()?;
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), self.gizmo()?.1[0]))
+    }
+
+    /// What the bricks drawn for the form being edited depend on, and what
+    /// those of all the others do: the view keeps the two apart and makes
+    /// again only the one whose answer here has changed (see `lib.rs`).
+    ///
+    /// The form being edited is drawn where it stands by one move of all
+    /// its bricks together, so where it stands, and its grid's place and
+    /// angle, are no part of what its bricks depend on: dragging it makes
+    /// nothing again. Forms joined on purpose are bricks of each other's
+    /// making, so while any is joined both answers change with every change
+    /// to the workspace.
+    pub fn drawn_from(&self) -> (DrawnFrom, Vec<DrawnFrom>) {
+        let joined = (self.spec.blend.is_some() || self.others.iter().any(|o| o.spec.blend.is_some())).then_some(self.scene);
+        let own = (Spec { grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() }, self.paint.clone(), [0; 3], false, self.built.bricks.len(), self.built.unmeasured, joined);
+        let rest = self.others.iter().map(|o| (o.spec.clone(), o.paint.clone(), o.place, o.picked, o.built.bricks.len(), o.built.unmeasured, joined)).collect();
+        (own, rest)
     }
 
     /// Each form's grid, the one being edited first: where it is, and its angle.
@@ -3080,6 +3130,86 @@ mod tests {
         let before = places(&state);
         pull(&mut state, 0, 4.0);
         assert!(places(&state).iter().zip(&before).all(|(now, was)| now[0] - was[0] == 8));
+    }
+
+    #[test]
+    fn taking_a_change_back_builds_only_the_forms_it_changed() {
+        let mut state = State::new();
+        state.load_spec(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 12.0)], radius: 12.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        state.record();
+        state.add_cube();
+        state.refresh(|| 0.0);
+        state.record();
+        // the cube is moved, and the move taken back: the sphere's bricks are the very ones it had
+        let bricks = state.others[0].built.bricks.as_ptr();
+        let was = state.place;
+        state.merge = false;
+        state.move_by([0, 0, 6], DVec3::ZERO);
+        state.record();
+        assert!(state.undo() && state.place == was);
+        assert_eq!(state.others[0].built.bricks.as_ptr(), bricks, "the sphere was built again for a move of the cube");
+        // and the cube's own, with nothing owed to be built
+        assert!(!state.built.bricks.is_empty() && !state.refresh(|| 0.0));
+        // a form that did change is built: the cube resized, and the resize taken back
+        let size = state.built.bricks[0].ext;
+        state.spec.radius += 4.0;
+        state.refresh(|| 0.0);
+        state.record();
+        assert_ne!(state.built.bricks[0].ext, size);
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.built.bricks[0].ext, size);
+        assert_eq!(state.others[0].built.bricks.as_ptr(), bricks);
+    }
+
+    /// Not a test: what moving and reshaping a form beside a large lawn
+    /// costs, part by part. Run by name, with `--release -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn timing_a_cube_on_a_lawn() {
+        use std::time::Instant;
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(brickloft_core::tree::Kind::Grass);
+        state.spec.radius = 60.0;
+        state.refresh(|| 0.0);
+        println!("lawn: {} bricks, box {:?}", state.built.bricks.len(), state.bounds);
+        state.add_cube();
+        state.refresh(|| 0.0);
+        // onto the lawn
+        let towards = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
+        state.move_by([towards[0], towards[1], 40], DVec3::ZERO);
+        println!("cube at {:?}, lawn at {:?}", state.place, state.others[0].place);
+        let time = |what: &str, mut run: Box<dyn FnMut() + '_>| {
+            let at = Instant::now();
+            for _ in 0..20 {
+                run();
+            }
+            println!("{what}: {:.2} ms each", at.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        };
+        let mut n = 0;
+        time("move the cube a unit", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("painted", Box::new(|| { std::hint::black_box(state.painted().len()); }));
+        time("push_others", Box::new(|| state.push_others()));
+        // down among the blades, inside the lawn's box
+        state.merge = true;
+        state.move_by([0, 0, -30], DVec3::ZERO);
+        state.merge = false;
+        state.spec.blend = None;
+        println!("cube at {:?}", state.place);
+        let mut n = 0;
+        time("move the cube a unit, among the blades", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("push_others, among the blades", Box::new(|| state.push_others()));
+        let mut n = 0;
+        time("resize the cube and refresh", Box::new(|| { n += 1; state.spec.radius += if n % 2 == 0 { 1.0 } else { -1.0 }; state.refresh(|| 0.0); }));
+        time("record a step to undo", Box::new(|| state.record()));
+        state.activate(0);
+        state.refresh(|| 0.0);
+        let mut n = 0;
+        time("move the lawn a unit", Box::new(|| { n += 1; state.move_by([if n % 2 == 0 { 1 } else { -1 }, 0, 0], DVec3::ZERO); }));
+        time("push_others from the lawn", Box::new(|| state.push_others()));
     }
 
     #[test]
