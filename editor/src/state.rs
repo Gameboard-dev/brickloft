@@ -2271,10 +2271,16 @@ mod tests {
         let most = [0, 1, 2].map(|k| (state.others[0].place[k] - state.place[k]) * 2 / 3);
         state.move_by(most, DVec3::ZERO);
         assert!(overlap(&state) && state.joined(), "it did not go in");
-        // no brick's box overlaps a brick of the other form, the other form is whole, and the joined one has lost bricks but not all
+        // no brick's box overlaps a brick of the other form, and the joined one has lost bricks but not all
         let all = state.painted();
         assert!(!boxes_meet(&all), "two forms' bricks share room");
-        assert_eq!(all.iter().filter(|b| b.2 == 1).count(), state.others[0].built.bricks.len());
+        // The other form is its own bricks away from the seam, and fitted
+        // afresh at it: it was whole before the join was a refit, which
+        // left a notch all round the seam where the joined form's sloped
+        // bricks were left out.
+        let own = &state.others[0].built.bricks;
+        let kept = all.iter().filter(|b| b.2 == 1 && own.contains(&b.0)).count();
+        assert!(kept > own.len() / 4 && kept < own.len(), "{kept} of the other form's {} bricks are its own", own.len());
         let left: i32 = all.iter().filter(|b| b.2 == 0).map(|b| b.0.ext.iter().product::<i32>()).sum();
         let had: i32 = state.built.bricks.iter().map(|b| b.ext.iter().product::<i32>()).sum();
         assert!(left > had / 4 && left < had, "{left} of {had} cells left, from {whole} bricks");
@@ -2289,6 +2295,89 @@ mod tests {
         state.move_by([2, 0, 0], DVec3::ZERO);
         assert!(!overlap(&state) && !state.joined());
         assert!(!boxes_meet(&state.painted()));
+    }
+
+    /// A cube with a sphere moved into its corner with Ctrl held, the
+    /// sphere being edited, and the bricks of the two wherever they stand.
+    fn a_sphere_in_a_cube() -> State {
+        let mut state = a_cube();
+        state.add_form(Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, ..Spec::default() });
+        state.refresh(|| 0.0);
+        state.record();
+        state.merge = true;
+        let to = [0, 1, 2].map(|k| state.others[0].place[k] + [20, 8, 30][k] - state.place[k]);
+        state.move_by(to, DVec3::ZERO);
+        state.merge = false;
+        state.record();
+        state
+    }
+
+    fn bricks_where_they_stand(state: &State) -> Vec<(CellBrick, [i32; 3], Option<[u8; 3]>)> {
+        let mut all: Vec<_> = state.painted().into_iter().map(|b| (b.0, b.3, b.1)).collect();
+        all.sort_by_key(|(b, place, _)| (*place, b.min, b.ext, b.mask));
+        all
+    }
+
+    #[test]
+    fn a_join_and_its_blend_come_back_with_undo_and_with_a_save() {
+        let mut state = a_sphere_in_a_cube();
+        assert_eq!(state.spec.blend, Some(0.0));
+        let sharp = bricks_where_they_stand(&state);
+        // a blend rounds the join: more room is filled, and the bricks differ
+        state.spec.blend = Some(4.0);
+        state.record();
+        let round = bricks_where_they_stand(&state);
+        let room = |all: &[(CellBrick, [i32; 3], Option<[u8; 3]>)]| all.iter().map(|b| b.0.volume()).sum::<f64>();
+        assert!(room(&round) > room(&sharp) + 20.0, "a blend of 4 added {} cells to the join", room(&round) - room(&sharp));
+        // undo takes the blend back and leaves the join; again, and the sphere is out of the cube
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.blend, Some(0.0));
+        assert!(bricks_where_they_stand(&state) == sharp, "undo did not bring the sharp join back");
+        assert!(state.undo());
+        state.refresh(|| 0.0);
+        assert!(!state.joined());
+        assert!(state.redo() && state.redo());
+        state.refresh(|| 0.0);
+        assert_eq!(state.spec.blend, Some(4.0));
+        assert!(bricks_where_they_stand(&state) == round, "redo did not bring the blend back");
+        // a save holds the join and its blend, and opening it builds the same bricks
+        let saved = crate::store::describe(&state.forms());
+        let mut opened = State::new();
+        opened.open(crate::store::forms_in(&saved).unwrap());
+        opened.refresh(|| 0.0);
+        assert_eq!(opened.spec.blend, Some(4.0));
+        assert!(bricks_where_they_stand(&opened) == round, "a save opened again is not the same bricks");
+    }
+
+    #[test]
+    fn a_join_is_the_same_bricks_whichever_of_its_forms_is_being_edited() {
+        let mut state = a_sphere_in_a_cube();
+        state.spec.blend = Some(2.0);
+        let before = bricks_where_they_stand(&state);
+        state.activate(0);
+        assert!(state.spec.form == Form::Cube && bricks_where_they_stand(&state) == before, "editing the cube changed the join");
+        // and both of them joined, as when the cube is then moved with Ctrl too
+        state.spec.blend = Some(0.0);
+        let both = bricks_where_they_stand(&state);
+        state.activate(0);
+        assert!(bricks_where_they_stand(&state) == both, "with both forms joined, choosing the other to edit changed the join");
+    }
+
+    #[test]
+    fn a_join_is_put_together_once_and_not_for_every_change_of_colour() {
+        let mut state = a_sphere_in_a_cube();
+        state.painted();
+        let first = state.joins.borrow().as_ref().map(|j| j.1.clone()).unwrap();
+        state.paint.colours = vec![[200, 30, 30]];
+        state.others[0].picked = true;
+        let recoloured = state.painted();
+        assert!(std::rc::Rc::ptr_eq(&first, &state.joins.borrow().as_ref().unwrap().1), "a change of colour put the join together again");
+        assert!(recoloured.iter().any(|b| b.1 == Some([200, 30, 30])));
+        // moving a form, or changing its blend, does
+        state.spec.blend = Some(1.0);
+        state.painted();
+        assert!(!std::rc::Rc::ptr_eq(&first, &state.joins.borrow().as_ref().unwrap().1));
     }
 
     #[test]
