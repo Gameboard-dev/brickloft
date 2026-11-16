@@ -74,7 +74,6 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
 /// What the player asked for with a button this frame.
 #[derive(Default)]
 pub struct Asked {
-    pub send: bool,
     pub report: bool,
     /// put the workspace on the clipboard as a .brz file
     pub copy: bool,
@@ -148,6 +147,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ui.label("Sliders go up to");
             ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=400.0).speed(1.0)).on_hover_text("How far the size sliders reach, in microbricks. Large forms take longer to fit.");
         });
+        ui.horizontal(|ui| {
+            ui.label("Longest brick");
+            ui.add(egui::DragValue::new(&mut state.spec.max_ext).range(1..=4000).speed(1.0)).on_hover_text("The longest edge a single brick may have, in microbricks. 80 is what the game was seen to accept when this was first tried; the game's own limit is said to be 800 studs, which is 4000 microbricks. Raise it and paste to find out: a form then needs fewer, longer bricks.");
+        });
         let largest = state.max_size;
         ui.separator();
         workspace(ui, state);
@@ -192,7 +195,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 ui.label("Stretch:");
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                     let across = axis == s.plane.min(2);
-                    ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() }));
+                    ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() }));
                 }
             }
             BEZIER => {
@@ -205,7 +208,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             SPHERE => {
                 ui.label("Stretch:");
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-                    ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
+                    ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name));
                 }
                 ComboBox::from_label("Keep").selected_text(["Whole", "Dome", "Segment"][state.cut as usize]).show_ui(ui, |ui| {
                     ui.selectable_value(&mut state.cut, Cut::Whole, "Whole");
@@ -222,7 +225,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if state.form == PYRAMID {
             ui.label("Stretch:");
             for (axis, name) in ["X", "Y"].iter().enumerate() {
-                ui.add(Slider::new(&mut s.stretch[axis], 0.25..=3.0).text(*name));
+                ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name));
             }
             let mut height = s.rise.unwrap_or(s.radius);
             ui.add(Slider::new(&mut height, 1.0..=largest.max(80.0)).step_by(1.0).text("Height"));
@@ -303,7 +306,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         });
         if crate::state::on_own_grid(s) {
             ui.horizontal(|ui| {
-                ui.label("On a grid of its own, at an angle.").on_hover_text("Bricks sit on a grid, and a grid other than the world's can stand at any angle. This form has been turned by its rings, so it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other form's way. Sent through the plugin it is placed level.");
+                ui.label("On a grid of its own, at an angle.").on_hover_text("Bricks sit on a grid, and a grid other than the world's can stand at any angle. This form has been turned by its rings, so it is copied to the clipboard on a grid of its own. Grids pass through each other, so it is in no other form's way.");
                 if ui.button("Level it").clicked() {
                     asked.level = true;
                 }
@@ -400,15 +403,6 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         }
 
         ui.separator();
-        asked.send = ui.add_enabled(state.problem.is_none() && !built.bricks.is_empty(), egui::Button::new("Send to Brickadia")).clicked();
-        ui.label("Everything in the workspace is sent. It is built at your ghost brick: the cell at the coloured axes lands there.");
-        {
-            let status = state.status.borrow();
-            if !status.is_empty() {
-                ui.label(status.as_str());
-            }
-        }
-
         ui.separator();
         saved_forms(ui, state);
 

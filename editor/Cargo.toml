@@ -1,16 +1,11 @@
 [package]
 name = "arcs-editor"
-description = "Browser editor for arcs: shape a form, see its bricks, send it to the game"
+description = "The arcs editor: shape a form, see its bricks, copy it to the clipboard for the game"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# cdylib is what wasm-bindgen packages for the browser; rlib lets src/main.rs
-# run the same editor as a desktop window while developing
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-# The desktop window, for development. Named differently from the library:
+# The program. Named differently from the library:
 # on Windows a program and a library called arcs-editor and arcs_editor both
 # want the debug file arcs_editor.pdb, and cargo warns that one overwrites
 # the other.
@@ -45,10 +40,3 @@ brdb = { version = "1.0.5", default-features = false, features = ["brz"] }
 # https://docs.rs/clipboard-win
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# pinned to the installed wasm-bindgen CLI: the two must match exactly or the
-# CLI refuses the build
-wasm-bindgen = "=0.2.129"
-web-sys = { version = "0.3", features = ["Window", "Location", "Request", "RequestInit", "Response", "Headers", "Navigator", "Clipboard", "Storage"] }
-js-sys = "0.3"

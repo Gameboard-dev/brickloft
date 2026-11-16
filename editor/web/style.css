@@ -1,3 +1,0 @@
-html, body { margin: 0; height: 100%; background: #1a1c21; color: #ddd; font: 14px system-ui, sans-serif; overflow: hidden; }
-canvas { display: block; width: 100vw; height: 100vh; outline: none; }
-#note { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 2em; }

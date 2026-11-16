@@ -2,10 +2,10 @@
 resolver = "2"
 # Every member listed here must exist: cargo (and so rust-analyzer) fails to
 # load the whole workspace if one is missing.
-members = ["core", "plugin", "editor"]
+members = ["core", "editor"]
 # The editor is a default member so that `cargo test` covers its logic too.
 # Its renderer is compiled once (about 50 s) and cached after that.
-default-members = ["core", "plugin", "editor"]
+default-members = ["core", "editor"]
 
 [workspace.package]
 version = "0.1.0"

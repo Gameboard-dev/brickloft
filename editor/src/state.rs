@@ -6,8 +6,6 @@ use arcs_core::curves::{ArchType, Circle};
 use arcs_core::shapes::CellBrick;
 use arcs_core::spec::{build, snap, Built, Form, Spec};
 use arcs_core::DVec3;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// The forms on offer, in menu order. `Form` itself carries the arch type,
 /// so the menu works on this index and the arch type is kept beside it.
@@ -187,8 +185,6 @@ pub struct State {
     pub built: Built,
     pub build_ms: f64,
     pub problem: Option<String>,
-    /// what the last send came to; shared with the browser callback that learns it
-    pub status: Rc<RefCell<String>>,
     /// where the last report went, or why it could not be made
     pub report_note: String,
     /// A notice to be read, as its heading and its text: shown over the view
@@ -345,7 +341,6 @@ impl State {
             built: Built::default(),
             build_ms: 0.0,
             problem: None,
-            status: Rc::default(),
             report_note: String::new(),
             alert: None,
             toast: None,

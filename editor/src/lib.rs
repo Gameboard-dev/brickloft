@@ -428,9 +428,6 @@ pub fn run_form(form: usize) {
         }
         first = false;
 
-        if asked.send {
-            send::send(&state.painted(), state.status.clone());
-        }
         #[cfg(not(target_arch = "wasm32"))]
         if asked.copy || copy_keyed {
             // Said over the view as well as in the panel: the keys give no

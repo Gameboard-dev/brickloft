@@ -3,10 +3,9 @@
 ## Build and test
 
 ```sh
-cargo test                      # core, plugin and editor logic
+cargo test                      # core and editor logic
 cargo run -p arcs-editor        # the editor as a desktop window (program `arcs`)
 cargo run -p arcs-editor -- 5   # the same, opening on the sixth form in the menu
-sh build-editor.sh              # the editor for the browser, into dist/
 cargo run --release -p arcs-core --example timing
 ```
 
@@ -18,7 +17,7 @@ cargo run -p arcs-core --example inspect -- arcs-report-1.txt simplify=0 grain=1
 ```
 
 The editor's **Save report** button writes `arcs-report-1.txt`, `-2` and so on
-(never replacing an earlier one) where the desktop editor was started (in the browser it copies the report to the clipboard). A
+(never replacing an earlier one) where the editor was started. A
 report holds the form's settings, its bricks, and the bricks measured against
 the form cell by cell: the cells one unit brick would improve, the worst
 cells, and maps of the form, the bricks and their difference. `inspect`
@@ -26,40 +25,27 @@ rebuilds the form from a report's `[spec]` section and prints a fresh one;
 extra `key=value` arguments override settings, to try a change on the same
 form. `core/src/report.rs` documents the format.
 
-`plugin/tests/fake_omegga.rs` starts the real plugin and plays omegga's and
-the editor's parts, so the whole path up to the call into the game is tested
-without a game. Each of its two tests has been seen to fail with its bug put
-back (a forged token accepted; positions one unit off).
-
-The brick orientation rules have been confirmed in the game. The plugin's
-own path (the link, sending a build, undo) has not been reported run against
-a live server.
+The brick orientation rules have been confirmed in the game, by pasting
+forms from the clipboard.
 
 ## Dependencies
 
 | Crate | Used by | Why this and not by hand |
 |---|---|---|
 | `glam` (f64 only) | core | vector maths |
-| `serde_json` | plugin | omegga's JSON-RPC and the editor's requests |
-| `tiny_http` | plugin | HTTP parsing is where hand-written servers go wrong |
-| `getrandom` | plugin | link tokens must be unguessable; std has no secure RNG |
-| `three-d` (window + egui only) | editor | rendering, orbit camera, picking, panel |
-| `wasm-bindgen`, `web-sys`, `js-sys` | editor, browser only | the one request the page makes |
+| `three-d` (window + egui only) | editor | rendering, camera, picking, panel |
+| `brdb` (its .brz half only) | editor | the game's own prefab file, for the clipboard |
+| `clipboard-win` | editor, Windows | putting a file on the clipboard |
 
-Not used: the `omegga` crate and `tokio` (the plugin is two blocking threads),
-Bevy (several times the compile time and download for the same four needs),
-any async runtime in the page.
-
-`wasm-bindgen` is pinned to the version of the installed `wasm-bindgen`
-command; the two must match exactly.
+Not used: Bevy (several times the compile time and download for the same
+four needs).
 
 ## Compile times (measured, Windows, cold cache)
 
 | Step | Time |
 |---|---|
-| core + plugin, with tests | 11 s |
+| core, with tests | 11 s |
 | editor dependencies, first time | 49 s |
-| editor for the browser, after that | 7 s |
 | core, after an edit | 3 to 5 s |
 
 Dependencies are built optimised once and cached; the workspace's own crates
@@ -99,7 +85,7 @@ by cell.
 
 Simplify thins flat forms only; volumes are thinned by brick size.
 
-Sizes are in microbricks. The browser build is somewhat slower than these.
+Sizes are in microbricks.
 The two thin shells are over budget: see "Limits" in
 [how-it-fits.md](how-it-fits.md).
 

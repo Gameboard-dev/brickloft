@@ -62,8 +62,7 @@ grid, so its whole grid is turned instead: the game keeps bricks on grids,
 and a grid other than the world's can stand at any angle. The form is
 fitted exactly as if it were level and is copied to the clipboard on a
 frozen grid of its own. Grids pass through each other, so such a form is
-not kept clear of the others. Sent through the plugin, which places on the
-world's grid, it is placed level.
+not kept clear of the others.
 
 ## Mirror
 
