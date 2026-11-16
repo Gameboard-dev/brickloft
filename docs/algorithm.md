@@ -2852,7 +2852,7 @@ length. With the limbs still to leave having radii $`r_k`$, the stem at
 any height has the radius
 
 ```math
-\sqrt{	extstyle\sum_k r_k^2}
+\sqrt{\textstyle\sum_k r_k^2}
 ```
 
 so it thins at each limb by da Vinci's rule and ends as the last of
