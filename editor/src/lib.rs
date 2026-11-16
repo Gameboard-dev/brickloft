@@ -297,6 +297,10 @@ pub fn run_form(form: usize) {
         // Ctrl+C, Z and Y belong to the text box.
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut, unused_variables))]
         let mut copy_keyed = false;
+        // a picture of the window was asked for with F12: with the panel,
+        // or with Shift held the view alone
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let mut shot_keyed: Option<bool> = None;
         for event in frame.events.iter_mut() {
             // Ctrl + the wheel resizes a round form, a cell of radius a
             // notch; without Ctrl, or on any other form, the wheel is the
@@ -321,6 +325,11 @@ pub fn run_form(form: usize) {
                     }
                     Key::A if held => {
                         state.pick_all();
+                        true
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    Key::F12 => {
+                        shot_keyed = Some(!modifiers.shift);
                         true
                     }
                     Key::Z if held => state.undo() || true,
@@ -494,10 +503,26 @@ pub fn run_form(form: usize) {
             screen.render(&camera, &arrows, &lights);
         }
         screen.render(&camera, &handle_mesh, &lights);
+        // the button is in the panel, so its picture has the panel in it
+        let shot = shot_keyed.or(asked.screenshot.then_some(true));
+        // Read back from the frame as drawn so far, before the window shows
+        // it. The alternative, asking Windows for a picture of the window,
+        // is one more system interface and cannot leave the panel out.
+        // https://docs.rs/three-d/latest/three_d/core/render_target/struct.RenderTarget.html#method.read_color
+        #[cfg(not(target_arch = "wasm32"))]
+        if shot == Some(false) {
+            state.toast = Some((send::save_screenshot(frame.viewport.width, frame.viewport.height, &screen.read_color()), None));
+        }
         if let Err(e) = screen.write(|| gui.render()) {
             // the panel failing to draw should not take the view down with it
             eprintln!("arcs editor: could not draw the panel: {e}");
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if shot == Some(true) {
+            state.toast = Some((send::save_screenshot(frame.viewport.width, frame.viewport.height, &screen.read_color()), None));
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = shot;
         FrameOutput::default()
     });
 }

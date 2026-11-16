@@ -18,13 +18,6 @@ crate-type = ["cdylib", "rlib"]
 name = "arcs"
 path = "src/main.rs"
 
-# Only for examples/shape_pictures.rs, which writes the pictures of the
-# shapes in docs/images. It is the version three-d's GUI already builds, so
-# it adds nothing to compile, and the program itself does not link it.
-# https://docs.rs/png
-[dev-dependencies]
-png = "0.17"
-
 [dependencies]
 arcs-core = { path = "../core" }
 # Rendering, the orbit camera, picking and the egui panel all come from this
@@ -38,6 +31,12 @@ three-d = { version = "0.19", default-features = false, features = ["window", "e
 # version three-d already builds, so it adds nothing to compile.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.28"
+# Writes PNG files: a screenshot of the window (see `send::save_screenshot`)
+# and the pictures of the shapes in docs/images (examples/shape_pictures.rs).
+# It is the version three-d's GUI already builds, so it adds nothing to
+# compile. Writing PNG by hand would mean writing its compression too.
+# https://docs.rs/png
+png = "0.17"
 # Writes Brickadia's own .brz file, for the Copy button (see src/brz.rs). Only
 # its .brz half: the other half is the SQLite world format, which would build
 # all of SQLite to be left unused. The format is a compressed archive of

@@ -75,6 +75,8 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
 #[derive(Default)]
 pub struct Asked {
     pub report: bool,
+    /// save a picture of the window
+    pub screenshot: bool,
     /// put the workspace on the clipboard as a .brz file
     pub copy: bool,
     /// search for the best fit near the current settings
@@ -411,8 +413,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             .button("Save report")
             .on_hover_text("Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong.")
             .clicked();
-        // a web page cannot put a file on the clipboard: see `brz`
+        // a web page cannot put a file on the clipboard (see `brz`), nor
+        // write one to disk
         if cfg!(not(target_arch = "wasm32")) {
+            asked.screenshot = ui
+                .button("Save screenshot")
+                .on_hover_text("Writes a picture of the window to arcs-screenshot-1.png, -2 and so on, beside where the program was started. F12 does the same, and Shift+F12 leaves this panel out of the picture.")
+                .clicked();
             asked.copy = ui
                 .add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard"))
                 .on_hover_text("Writes everything in the workspace to arcs-build.brz, a Brickadia prefab file, and puts that file on the clipboard. Ctrl+C does the same, and Ctrl+V adds the forms of a copied file back to the workspace.")

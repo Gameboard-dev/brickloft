@@ -10,7 +10,7 @@
 //! editor's renderer: that needs a window and a graphics card, and nine
 //! small pictures of at most 28 triangles do not.
 
-use arcs_core::shapes::KINDS;
+use arcs_core::shapes::{Kind, KINDS};
 use arcs_core::DVec3;
 use arcs_editor::mesh::shape_mesh;
 
@@ -185,7 +185,11 @@ fn main() {
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_compression(png::Compression::Best);
         let mut writer = encoder.write_header().expect("could not start the picture");
-        writer.write_image_data(&picture(kind.canonical())).expect("could not write the picture");
+        // The ramp's own pose stands on end, its slope facing sideways. It
+        // is drawn lying down instead (solid where x + z <= 1: corners 5
+        // and 7 missing), which is how a ramp is usually met.
+        let mask = if *kind == Kind::Ramp { 0x5f } else { kind.canonical() };
+        writer.write_image_data(&picture(mask)).expect("could not write the picture");
         println!("wrote {}", path.display());
     }
 }

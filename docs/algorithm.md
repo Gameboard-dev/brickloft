@@ -78,7 +78,8 @@ microbricks ([core/src/shapes.rs](../core/src/shapes.rs),
 the enum `Kind`). To describe a shape, take its box as the unit cube, where
 $`x`$, $`y`$ and $`z`$ each run from 0 to 1. The column "Solid" gives the
 rule a point of that cube must meet to be inside the shape. Each picture shows
-the shape in yellow inside the outline of its box. The pictures are drawn
+the shape in yellow inside the outline of its box. The ramp is drawn lying
+down, with $`z`$ in place of $`y`$ in its rule, so that its slope faces up. The pictures are drawn
 from the mesh the editor itself displays, by
 [editor/examples/shape_pictures.rs](../editor/examples/shape_pictures.rs).
 

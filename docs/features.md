@@ -187,6 +187,13 @@ The camera is flown.
 **Show rulers** draws the form's lengths in microbricks. **Floor below
 form** lowers the floor so a form can be looked at from underneath.
 
+## Screenshots
+
+**Save screenshot**, or **F12**, writes a picture of the window to
+`arcs-screenshot-1.png`, `-2` and so on beside where the program was
+started. **Shift+F12** leaves the panel out and saves the view alone. The
+browser page cannot write files, so it has neither.
+
 ## Reports
 
 **Save report** writes `arcs-report-1.txt`, `-2` and so on beside where the
@@ -217,4 +224,5 @@ before and after a change.
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift + scroll | camera speed |
+| F12, Shift+F12 | save a screenshot, with or without the panel |
 | Enter or Escape | close a message |
