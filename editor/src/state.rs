@@ -2347,6 +2347,68 @@ mod tests {
     }
 
     #[test]
+    fn a_hedge_is_bent_by_its_dots_and_narrowed_without_changing_its_length() {
+        use brickloft_core::tree::Kind;
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        state.usual_tree(Kind::Hedge);
+        // three dots along its line, then its height and its thickness; the thickness dot out to one side of the line
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Point(1), Handle::Point(2), Handle::Rise, Handle::Radius]);
+        let (middle, side) = (dots[1].1, dots[4].1);
+        assert!((side.y - middle.y).abs() == state.spec.radius && side.x == middle.x, "the thickness dot is at {side}, the middle of the line at {middle}");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let long = |state: &State| { let b = state.bounds.unwrap(); ((b.1[0] - b.0[0]) as f64, (b.1[1] - b.0[1]) as f64) };
+        let before = long(&state);
+        assert!((before.0 - 72.0).abs() < 6.0 && (before.1 - 24.0).abs() < 4.0, "{before:?}");
+        // widened, it is wider and no longer: the fault was that it grew longer with every step wider
+        let eye = DVec3::new(side.x, side.y, 300.0);
+        state.drag(Handle::Radius, eye, (side + DVec3::Y * 28.0 * (side.y - middle.y).signum() - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.radius, 40.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        let wide = long(&state);
+        assert!((wide.0 - before.0).abs() <= 2.0 * 30.0 && wide.0 < 140.0 && wide.1 > 70.0, "wide it is {wide:?}, from {before:?}");
+        // and narrowed again it is as it was
+        let side = state.handles()[4].1;
+        let eye = DVec3::new(side.x, side.y, 300.0);
+        state.drag(Handle::Radius, eye, (side - DVec3::Y * 28.0 * (side.y - middle.y).signum() - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.radius, 12.0);
+        assert!(state.refresh(|| 0.0));
+        assert_eq!(long(&state), before);
+        // its middle dot dragged aside bends it: it now reaches where a straight hedge does not
+        let eye = DVec3::new(middle.x, middle.y, 300.0);
+        state.drag(Handle::Point(1), eye, (middle + DVec3::Y * 30.0 - eye).normalize(), -DVec3::Z);
+        assert_eq!(state.spec.points[1].y - state.spec.points[0].y, 30.0);
+        assert_eq!(state.spec.points[1].z, state.spec.points[0].z, "the dot left the ground");
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        assert!(long(&state).1 > before.1 + 20.0, "{:?}", long(&state));
+        // a point added to it bends it further, as it does a curve
+        let on = state.built.path[state.built.path.len() / 4];
+        let added = state.add_pull(on + state.standing()).expect("no point could be added to a hedge");
+        assert_eq!(added, Handle::Pull(0));
+        // a hedge saved before it had a line: one point and a stretch. It opens as long as it was, with its ends as dots.
+        let old = Spec { form: Form::Tree, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, rise: Some(30.0), stretch: DVec3::new(6.0, 1.0, 1.0), tree: brickloft_core::tree::Tree::of(Kind::Hedge), ..Spec::default() };
+        state.load_spec(old);
+        assert_eq!((state.spec.points.len(), state.spec.points[2].x - state.spec.points[0].x, state.spec.stretch), (3, 120.0, DVec3::ONE));
+        // grass: a point added where it is clicked, and lifted, raises the ground there
+        state.usual_tree(Kind::Grass);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let flat = state.bounds.unwrap().1[2];
+        let handle = state.add_pull(DVec3::new(10.5, 3.5, 2.0) + state.standing()).expect("no point could be added to grass");
+        let at = state.handles().iter().find(|h| h.0 == handle).unwrap().1;
+        state.lock = Lock::Free;
+        let eye = DVec3::new(at.x, -300.0, at.z);
+        state.drag(handle, eye, (at + DVec3::Z * 14.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.pulls[0].1.z, 14.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none());
+        assert!(state.bounds.unwrap().1[2] >= flat + 10, "{} high raised, {flat} flat", state.bounds.unwrap().1[2]);
+        // a kind that does not lie along a line has one dot again, and no added points
+        state.usual_tree(Kind::Oak);
+        assert_eq!((state.spec.points.len(), state.spec.pulls.len()), (1, 0));
+    }
+
+    #[test]
     fn opening_a_save_replaces_the_workspace_and_can_be_undone() {
         let mut state = State::new();
         state.add_grid();
