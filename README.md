@@ -1,48 +1,41 @@
 # Brickloft
 
-Design a curved form, see exactly which microbricks it becomes, and paste it
-into [Brickadia](https://brickadia.com).
-
-Brickadia's microbricks are small boxes and wedges on a grid. Building an
-arch, a dome or a torus from them by hand means choosing thousands of bricks
-so that a curve comes out as slopes and not as a staircase. Brickloft does the
-choosing: you shape the form with a few dots and sliders, it fits the bricks,
-shows them, measures how far they are from the true form, and puts the
-result on the clipboard for the game to paste.
+Brickloft builds curved shapes out of bricks for
+[Brickadia](https://brickadia.com). You shape an arch, a dome, a torus or a
+vase on screen, Brickloft works out the bricks that make it, and you paste
+the result into the game.
 
 <img src="docs/images/editor.png" width="700" alt="The editor: a blue and white torus in the 3D view, with the settings panel down the left side">
 
-It is a desktop program written in Rust. Nothing is installed in the game or
-on a server.
+Brickadia is a building game, and its smallest pieces are microbricks:
+cubes, ramps and corner wedges that sit on a grid and can be stretched to
+any length. Anything square is easy to build from them. A curve is hard,
+because a grid has no curves. The usual result is a staircase, a row of
+little steps where a smooth slope should be.
 
-## What algorithm does it use?
+Take a dome for the top of a tower, 100 microbricks across. Built well, it
+is 2,215 bricks. Each one has to be the right shape, the right size and
+turned the right way, and each has to meet its neighbours exactly, because
+one misplaced wedge shows as a notch in the surface. By hand that is an
+evening of careful work, and the next dome, a little larger, starts again
+from nothing. In Brickloft you pick Sphere, drag one dot until the size is
+right, and press Ctrl+C. The dome that pastes into the game has no steps
+anywhere on it, and its volume is within 1.2% of a true sphere's.
 
-Brickloft chooses each brick by asking which corners of its box are inside the
-form being built. Bricks sit on a grid, and every brick shape is a box with
-some of its eight corners kept. A box with all eight corners is a cube, one
-with six is a wedge, and one with seven is a cube with a corner sliced off.
-Neighbouring bricks share corners, so when the corners are right the bricks
-meet face to face without gaps or steps.
+Brickloft can do this because every brick shape is a box with some of its
+corners kept. For each box it asks which corners lie inside the shape you
+drew, and that answer names the brick. Neighbouring bricks share their
+corners, so when the corners are right the bricks meet face to face and the
+slopes run on from one brick to the next. The care goes into where the
+boxes are put, and each kind of shape has its own method for that, described
+in [docs/algorithm.md](docs/algorithm.md). When the bricks are chosen,
+Brickloft measures them against the true shape and tells you how far apart
+the two are, so you can see how good a fit is before you paste it.
 
-The boxes have to be placed so that their corners land on the form's true
-surface, and each kind of form has its own method for that. A sphere is
-sliced along each direction at distances chosen so that the corners on its
-surface sit on the sphere. An arch or a ring has its outline traced by a
-chain of corner points. Every corner has a price, so one long slope costs
-less than a staircase of short steps that fits no better. Dynamic
-programming finds the cheapest chain exactly, because it works along the
-outline and keeps only the cheapest way of reaching each point. A tube is
-fitted as the same outline with its edges then cut back to a slope, which
-gives the tube an eight-sided section.
-
-A form that none of these methods covers is fitted cell by cell, and each
-cell takes whichever brick matches it best. That result is rougher, because
-no cell knows what its neighbours hold. After any of the methods, the
-finished bricks are compared with the true form. The volume where the two
-disagree is reported as the discrepancy, so every fit can be judged by the
-same number.
-
-The full explanation, with the equations, is in [docs/algorithm.md](docs/algorithm.md).
+It is a single desktop program, written in Rust. Nothing is installed in
+the game or on a server: the bricks travel on the clipboard as an ordinary
+Brickadia prefab. If you use Claude, it can drive the editor for you and
+build while you watch (see [docs/mcp.md](docs/mcp.md)).
 
 ## What it makes
 
