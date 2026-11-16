@@ -1477,7 +1477,7 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             check_size(&[long, wide, height as i64 + 8])?;
             // Grass is laid out and not fitted (see `crate::grass`): it comes with its bricks, as furniture does.
             if spec.tree.kind == crate::tree::Kind::Grass {
-                return Ok((Solid::Grass(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads))), path));
+                return Ok((Solid::Grass(crate::grass::Model::new(&spec.tree, foot, height, spread, &lay, spec.max_ext, threads)), path));
             }
             let tree = std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spread, &lay));
             let (lo, hi) = tree.bounds();
@@ -3108,7 +3108,7 @@ fn fit_layer(
 /// three quarters of a million bricks, each change of the slider back took
 /// seconds, and past a point the build was refused and the giant stood.
 /// A line has a length of its own, which the thickness does not touch.
-fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), String> {
+pub(crate) fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), String> {
     use crate::tree::{Kind, Lay, Tree};
     let level = |p: DVec3| DVec3::new(p.x, p.y, foot.z);
     if !Tree::lies_along(spec.tree.kind) {
@@ -3173,7 +3173,7 @@ pub fn lawn(spec: &Spec) -> Option<std::sync::Arc<crate::grass::Model>> {
     let foot = *spec.points.first()?;
     let (lay, _) = tree_lay(&spec, foot).ok()?;
     let height = spec.rise.unwrap_or(crate::tree::Tree::usual_size(spec.tree.kind).0);
-    Some(std::sync::Arc::new(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available())))
+    Some(crate::grass::Model::new(&spec.tree, foot, height, spec.radius, &lay, spec.max_ext, Threads::available()))
 }
 
 /// The ground under the lawn a spec describes, without its bricks: how

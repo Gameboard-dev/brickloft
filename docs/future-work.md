@@ -222,17 +222,19 @@ What remains:
   7.10). A cliff would stand where the slope is steep and a waterfall
   where a stream's level steps down, and a landscape made at random
   would be touches chosen by rule. None of the three is written.
-- **A touch on a very large lawn.** A build works out the whole ground
-  and lays every tile each time, 16 to 22 ms for a lawn 300 by 240
-  ([performance.md](performance.md#still-slow)). A touch changes the
-  ground within its range and the bricks of the tiles it reaches. Two
-  things kept between builds would make its cost the same on any lawn:
-  the heights as they were before the last touch, to which a new touch
-  is applied where it reaches, and each tile's bricks, kept under
-  everything the tile is laid from (the ground of its cells and those
-  round it, the lawn's settings, the reeds over it) and compared in
-  full, so that a kept tile is never another tile's. They were not
-  built because the lawns measured stayed within two frames a touch.
+- **A touch on a very large lawn.** The ground and each tile's bricks
+  are kept from one build to the next, so a touch builds what it changed
+  ([algorithm.md](algorithm.md), section 7.10). Four costs still grow
+  with the lawn at every touch
+  ([performance.md](performance.md#a-lawn)). The editor gives every
+  brick its colour again and compares every brick with the one drawn
+  before, 12 ms on a lawn of 335,000 bricks: the build could say which
+  tiles it laid, and the editor colour and compare those alone, which
+  means a build's result carrying more than its bricks. The build puts
+  every tile's bricks end to end in one list and the caller copies it,
+  about 3 ms for those bricks. Every kept tile's ground is compared,
+  1.3 to 2.8 ms for 320 tiles. With two pond levels the flood that finds
+  them is made again whole, 4 to 6 ms.
 - **One draw call for every shape.** The form being edited is drawn by
   one object with a call for each brick shape in it, a dozen for a lawn
   ([performance.md](performance.md#a-touch-of-the-brush-on-a-lawn)). A

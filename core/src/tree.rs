@@ -2520,7 +2520,17 @@ pub const LEAST_RANGE: f64 = 4.0;
 /// far below its own level as it was dug, and wants ground that deep
 /// under it, or to be raised by as much.
 pub fn ground(touches: &[Sculpt], p: DVec3) -> f64 {
-    let mut height: f64 = 0.0;
+    ground_on(0.0, touches, p)
+}
+
+/// [`ground`], for ground that already stands `height` high at `p` from
+/// touches made before these. The touches are applied one after another
+/// to one number, so the ground after more touches is the ground before
+/// them with those applied: the very same arithmetic in the same order,
+/// which is what lets a lawn keep its heights from one touch to the next
+/// ([`crate::grass`]) and still be, bit for bit, the lawn built whole.
+pub fn ground_on(height: f64, touches: &[Sculpt], p: DVec3) -> f64 {
+    let mut height = height;
     for touch in touches {
         let range = touch.range.max(LEAST_RANGE);
         let d = touch.at.truncate().distance(p.truncate());

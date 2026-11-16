@@ -37,7 +37,7 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
 | Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
 | Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
-| Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms) | 27,600 | 0% |
+| Lawn, 180 by 120, 24 touches of the brush | 14 ms (4 ms), and 4 ms (2.4 ms) for one more touch | 27,600 | 0% |
 | Lawn, 128 by 88, ponds at two levels and a stream | 24 ms (8 ms) | 20,900 | 0% |
 | Bookcase, 36 wide, 60 tall | 0.01 ms | 87 | 0% |
 | Wall of bookcases, 400 wide, 240 tall | 0.3 ms | 3,877 | 0% |
@@ -356,6 +356,38 @@ build different bricks from one lawn. Laying the lawn out removed the
 samples, and nothing as heavy is left for a card to do. What a build
 spends now is spread over the ground's table, the joining of soil into
 boxes and the blades, none of which is more than a few milliseconds.
+
+A build from nothing grows with the lawn's area, and a touch of the
+brush changes a few tiles of it. The last build of a lawn is kept, so
+the next works out the heights the touch reaches and lays the tiles
+whose ground changed ([algorithm.md](algorithm.md), section 7.10, What
+is kept from one build to the next). The table gives one more touch, 20
+in range, on a lawn that already has 24, from the test
+`where_a_touch_on_a_lawn_goes` in
+[core/src/grass/tests.rs](../core/src/grass/tests.rs). Times are on 16
+threads, with one thread in brackets.
+
+| Lawn | Bricks | Tiles laid, of all | From nothing | With the last build kept |
+|---|---|---|---|---|
+| 180 by 120 | 28,000 | 9 of 24 | 6 ms (15 ms) | 2.4 ms (4 ms) |
+| 300 by 240 | 86,000 | 9 of 80 | 10 to 14 ms (56 ms) | 2.5 to 3.3 ms (5 to 6 ms) |
+| 600 by 480 | 335,000 | 6 of 320 | 38 ms (207 ms) | 4 to 6 ms (5 to 8 ms) |
+| 600 by 480, 120 touches | 342,000 | 6 of 320 | 44 to 55 ms (303 ms) | 4 to 8 ms (9 to 13 ms) |
+| 300 by 240, two pond levels | 86,000 | 9 of 80 | 17 ms (58 ms) | 3.6 to 4.2 ms (5 to 6 ms) |
+| 600 by 480, two pond levels | 335,000 | 6 of 320 | 52 ms (218 ms) | 7 to 9 ms (9 to 11 ms) |
+
+A touch no longer costs by the number of touches already made: its cells
+start from the heights kept. Three parts of a kept touch still grow with
+the lawn. Comparing the tiles took 1.3 to 2.8 ms for the 320 tiles of
+the largest lawn. Putting every tile's bricks end to end in one list is
+1.5 ms for its 335,000 bricks, and handing that list to the caller is a
+second copy of about the same. With two pond levels the flood is made
+again at each touch, 4 to 6 ms on the largest lawn. Laying the six
+tiles the touch reaches is 1 to 4 ms.
+
+The lawns were measured while other programs were building on the same
+machine, so each figure is the least of three runs of five, and the
+ranges are what those runs disagreed by.
 
 ### Stretched ramps
 
@@ -833,8 +865,29 @@ so that a touch changes few of them. A form has one tile for every
 | Filling them | 1.0 to 1.5 ms | 1.3 to 5.1 ms |
 | The shadow map | 1.6 to 2.0 ms | 1.6 to 1.9 ms |
 
-The larger lawn's touch is 25 to 35 ms, so a stroke on it draws every
-other frame.
+The larger lawn's touch was 25 to 35 ms, so a stroke on it drew every
+other frame. That was with every touch building the lawn from nothing.
+With the last build kept ([a lawn](#a-lawn)), the first three steps
+were measured again without a window, by the test
+`timing_a_touch_on_lawns_of_three_sizes` in
+[editor/src/state.rs](../editor/src/state.rs), which makes a touch and
+takes it back in turn. Its building includes what the editor does with
+a build besides asking for it.
+
+| Step | 28,000 bricks | 86,000 bricks | 335,000 bricks |
+|---|---|---|---|
+| Building, from nothing | 4.4 ms | 11.3 ms | 36 ms |
+| Building, the last build kept | 2.4 ms | 3.5 ms | 8.8 ms |
+| Bricks with their colours | 0.35 ms | 1.0 ms | 4.0 ms |
+| Finding the tiles that changed | 0.5 ms | 1.5 ms | 8.0 ms |
+| Those three, before and after | 5.3 and 3.3 ms | 14 and 6 ms | 48 and 21 ms |
+
+The lawn of 86,000 bricks is back within a frame for these three steps.
+On the lawn of 335,000 the build is now the smaller part: colouring
+every brick and comparing every brick with the one drawn before take 12
+ms between them, and both go through the whole lawn at every touch.
+Filling the buffers and the shadow map were not measured again, since
+neither changed.
 
 Shadows are redrawn when the bricks change and at most thirty times a
 second while something is being dragged. Each redrawing draws every
@@ -909,15 +962,15 @@ A tree takes up to a second at its usual size on one thread, which is
 what the browser has, and four times as long at twice the size, since its
 time grows with its surface.
 
-A lawn's time grows with its area. One 300 cells by 240 takes 16 to 22
-ms to build on sixteen threads and a touch on it 25 to 35 ms in all, so
-a stroke on it draws every other frame, and a lawn four times that area
-would take about a tenth of a second a touch. Every touch works out the
-whole ground again and lays every tile again, though it changes the
-ground within its range only and the bricks of a few tiles. Keeping the
-ground and the unchanged tiles from one build to the next would make a
-touch cost the same on a lawn of any size
-([future-work.md](future-work.md), More plants).
+A lawn's first build grows with its area: 38 ms on sixteen threads for
+one 600 cells by 480, and 207 ms on one. A touch after that is built
+from what was kept of the build before, 4 to 6 ms on that lawn
+([a lawn](#a-lawn)). What still grows with the lawn at every touch is in
+the editor: every brick is given its colour again and compared with the
+brick drawn before, 12 ms on a lawn of 335,000 bricks, so a touch on it
+is about 21 ms before the graphics card is given anything
+([a touch of the brush on a lawn](#a-touch-of-the-brush-on-a-lawn),
+[future-work.md](future-work.md), More plants).
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at
