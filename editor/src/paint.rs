@@ -59,9 +59,16 @@ pub const STONE: [[u8; 3]; 4] = [[168, 140, 120], [146, 122, 104], [190, 160, 13
 /// and anyone who wants each feature picked out adds colours to the list.
 pub const MOSAIC: [[u8; 3]; 4] = [[226, 214, 190], [176, 84, 60], [44, 74, 122], [204, 160, 72]];
 
-/// The colours a rug starts in: a deep red ground, then gold, a dark
+/// The colours a rug starts in: a deep red ground, then old gold, a dark
 /// blue, ivory, a warm red, leaf green, a dark green and saffron, one for
-/// each feature of the rug (see `brickloft_core::pattern::rug_garden`).
+/// each feature of the rug (see `brickloft_core::pattern::rug_garden`):
+/// its lines, its dark ground and its pale one, petals, leaves, the
+/// shaded side of a leaf and the ground of the corners, and the hearts of
+/// flowers. The gold is darker than the saffron, so that a heart shows
+/// inside an outline, and the leaf green light enough to show on the red.
+/// In every set the second colour must show on all the others, being the
+/// outline of everything, and the third and fourth on each other and on
+/// the first, being grounds that lie side by side.
 pub const RUG: [[u8; 3]; 8] = [[112, 22, 30], [200, 150, 56], [24, 50, 92], [236, 220, 180], [198, 74, 44], [96, 140, 72], [24, 84, 66], [244, 204, 104]];
 
 /// The colours a floor of planks starts in: eight browns a little apart,
@@ -80,9 +87,9 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
         // a deep red ground; dark blue; teal; ivory; black and gold
         "rug" => &[
             &RUG,
-            &[[20, 36, 72], [212, 165, 70], [150, 30, 36], [236, 220, 180], [198, 74, 44], [62, 110, 62], [110, 22, 30], [240, 196, 96]],
+            &[[20, 36, 72], [200, 150, 56], [140, 28, 34], [236, 220, 180], [198, 74, 44], [96, 140, 72], [30, 96, 80], [244, 204, 104]],
             &[[16, 70, 78], [226, 200, 140], [170, 44, 36], [244, 228, 190], [214, 120, 60], [200, 160, 70], [120, 24, 30], [250, 210, 120]],
-            &[[236, 222, 186], [120, 24, 30], [24, 50, 92], [196, 150, 60], [170, 44, 36], [62, 110, 62], [20, 60, 60], [212, 165, 70]],
+            &[[236, 222, 186], [120, 24, 30], [24, 50, 92], [206, 160, 70], [170, 44, 36], [62, 110, 62], [20, 60, 60], [226, 132, 52]],
             &[[26, 18, 20], [212, 165, 70], [112, 22, 30], [236, 220, 180], [176, 60, 40], [90, 110, 60], [70, 14, 24], [240, 196, 96]],
         ],
         // browns; pale ash; ebony; painted blue; weathered grey; mahogany
