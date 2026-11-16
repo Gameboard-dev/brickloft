@@ -302,6 +302,9 @@ pub struct State {
     /// something done, said for a few seconds over the view: the words, and
     /// when they were first shown (by the panel's clock, once it has shown them)
     pub toast: Option<(String, Option<f64>)>,
+    /// recording the window as a GIF: its settings, and the recording under way (see `gif`)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub gif: crate::gif::Controls,
     /// how the form being edited is coloured
     pub paint: Paint,
     /// the workspace's other forms; the one being edited is the fields above
@@ -553,6 +556,8 @@ impl State {
             camera_at: ([0.0; 3], [1.0, 0.0, 0.0]),
             flight: std::collections::VecDeque::new(),
             toast: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            gif: crate::gif::Controls::default(),
             paint: Paint::default(),
             others: Vec::new(),
             scene: 0,

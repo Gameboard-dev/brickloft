@@ -8,7 +8,7 @@
 //! | Files | Folder |
 //! |---|---|
 //! | saved forms | `Documents/brickloft/forms/` |
-//! | screenshots | `Pictures/brickloft/` |
+//! | screenshots, and recordings of the window | `Pictures/brickloft/` |
 //! | reports, and the prefab a copy puts on the clipboard | `brickloft/` in the system's temporary folder |
 //!
 //! `Documents` and `Pictures` are taken to be in the home folder, which is
@@ -46,7 +46,7 @@ pub fn forms_once_at() -> Option<PathBuf> {
     Some(home().ok()?.join("Documents").join("omegga-arcs").join("forms"))
 }
 
-/// Where screenshots go, made if it is not there.
+/// Where screenshots and GIF recordings go, made if it is not there.
 pub fn screenshots() -> Result<PathBuf, String> {
     made(home()?.join("Pictures").join(OURS))
 }

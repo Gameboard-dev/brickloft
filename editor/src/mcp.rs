@@ -688,6 +688,30 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
     let mut forms = state.forms();
     // what asks about the workspace or moves the camera, and changes no form
     match name {
+        // a recording of the window (see `gif`): into the pictures folder and nowhere else, whatever is asked
+        "start_gif" => {
+            let chosen = |named: &str, among: &[&str]| match arguments.get(named) {
+                None | Some(Value::Null) => Ok(None),
+                Some(given) => among.iter().position(|one| given.as_str() == Some(one) || given.as_u64().is_some_and(|n| n.to_string() == *one)).map(Some).ok_or(format!("{named} is one of {}", among.join(", "))),
+            };
+            let (size, rate) = (chosen("size", &["full", "half", "third"])?, chosen("rate", &["10", "20", "25"])?);
+            (state.gif.size, state.gif.rate) = (size.unwrap_or(state.gif.size), rate.unwrap_or(state.gif.rate));
+            let panel = arguments.get("panel").and_then(Value::as_bool).unwrap_or(true);
+            return state.gif.start(panel, now_ms()).map(|said| format!("{said}. It records until stop_gif, or stops by itself at {:.0} seconds or {} MB.", crate::gif::LONGEST_MS / 1000.0, crate::gif::LARGEST >> 20));
+        }
+        "stop_gif" => {
+            if !state.gif.recording() {
+                return Err("Nothing is being recorded".into());
+            }
+            return match state.gif.wait(now_ms()) {
+                Some(crate::gif::Said::Done(said)) => {
+                    state.toast = Some((said.clone(), None));
+                    Ok(format!("{said}. {}", state.gif.cost))
+                }
+                Some(crate::gif::Said::Failed(why)) => Err(why),
+                None => Err("Nothing is being recorded".into()),
+            };
+        }
         "get_camera" => {
             let (at, looking) = state.camera_at;
             let looking = DVec3::from_array(looking);
@@ -988,11 +1012,12 @@ mod tests {
         // every tool listed is one `apply` knows, and the other way about
         let mut state = State::new();
         // (but for the picture, which the frame loop gives once it has drawn)
-        for name in tool_names().into_iter().filter(|name| name != "take_screenshot") {
+        // (and for a recording, which would be started in the pictures folder of whoever runs the tests: `gif` has its own)
+        for name in tool_names().into_iter().filter(|name| name != "take_screenshot" && name != "start_gif") {
             let said = apply(&mut state, &name, &json!({}), || 0.0);
             assert!(!said.is_err_and(|e| e.starts_with("Unknown tool")), "{name} is listed and not carried out");
         }
-        assert_eq!(tool_names().len(), 15);
+        assert_eq!(tool_names().len(), 17);
     }
 
     #[test]

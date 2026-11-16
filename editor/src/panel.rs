@@ -152,6 +152,8 @@ pub struct Asked {
     pub clear_reports: bool,
     /// save a picture of the window
     pub screenshot: bool,
+    /// start recording the window as a GIF, or stop
+    pub gif: bool,
     /// put the workspace on the clipboard as a .brz file
     pub copy: bool,
     /// search for the best fit near the current settings
@@ -658,6 +660,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         if cfg!(not(target_arch = "wasm32")) {
             asked.screenshot = helped(ui, help("save_screenshot"), |ui| ui.button("Save screenshot"))
                 .clicked();
+            // (a recording of the window, and how large and how often its pictures are: see `gif`)
+            #[cfg(not(target_arch = "wasm32"))]
+            ui.horizontal(|ui| {
+                let recording = state.gif.recording();
+                asked.gif = helped(ui, help("record_gif"), |ui| ui.button(if recording { "Stop recording" } else { "Record GIF" })).clicked();
+                // a recording under way keeps the size and rate it began with
+                ui.add_enabled_ui(!recording, |ui| {
+                    ComboBox::from_id_salt("gif size").width(80.0).selected_text(crate::gif::SIZES[state.gif.size].0).show_ui(ui, |ui| {
+                        for (which, (name, _)) in crate::gif::SIZES.iter().enumerate() {
+                            ui.selectable_value(&mut state.gif.size, which, *name);
+                        }
+                    })
+                        .response
+                        .on_hover_text(help("gif_size"));
+                    ComboBox::from_id_salt("gif rate").width(90.0).selected_text(crate::gif::RATES[state.gif.rate].0).show_ui(ui, |ui| {
+                        for (which, (name, _)) in crate::gif::RATES.iter().enumerate() {
+                            ui.selectable_value(&mut state.gif.rate, which, *name);
+                        }
+                    })
+                        .response
+                        .on_hover_text(help("gif_rate"));
+                });
+            });
             asked.copy = helped(ui, help("copy_to_clipboard"), |ui| ui.add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard")))
                 .clicked();
         }

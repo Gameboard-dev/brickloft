@@ -9,7 +9,7 @@ change happen in the editor's window.
 
 The connection uses the [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP), the standard way for an AI assistant to call tools that a program
-offers. The editor is the MCP server and offers fifteen tools. Claude Code, or
+offers. The editor is the MCP server and offers seventeen tools. Claude Code, or
 any other MCP client, is the client that calls them.
 
 - [What Claude can do](#what-claude-can-do)
@@ -88,6 +88,8 @@ file, the entry is a server of type `http` with the URL above.
 | `get_camera` | Gives the camera's position and the direction it looks in. |
 | `move_camera` | Sends the camera to a place, or along a path of places, looking at a chosen point at each. |
 | `take_screenshot` | Returns a picture of the editor's window as a PNG image, with the panel or without it. |
+| `start_gif` | Starts recording the window as an animated GIF in the editor's pictures folder, with the panel or without it. |
+| `stop_gif` | Stops the recording and says where the file is, how long it plays and how large it is. |
 | `set_view` | Switches the rulers, rings, arrows and dots on and off, and lowers the floor. |
 | `move_point` | Moves one of the points a form is drawn through (a yellow dot), leaving the others where they are. |
 | `add_pull_point` | Adds a point that pulls the form out of shape at one place (an orange dot), as Alt + click and a drag do. |
@@ -349,6 +351,18 @@ while the camera is flying is taken when the camera arrives. The picture is
 at most 1280 pixels wide unless Claude asks for another width, because a
 picture is costly for a model to read and a window's full width is seldom
 needed.
+
+`start_gif` and `stop_gif` record the window as an animated GIF, as the
+**Record GIF** button does ([features.md](features.md#recording-a-gif)):
+for a flight of the camera, or a form changing as Claude changes it.
+`start_gif` takes the same `panel` choice as a screenshot, a `size`
+(`full`, `half` or `third` of the window) and a `rate` (10, 20 or 25
+pictures a second). The file goes to `Pictures/brickloft` under a name
+with the date and time, and nowhere else: neither tool takes a path. The
+recording is not sent to Claude. `stop_gif` returns where the file is, how
+long it plays, how many pictures it holds, its size, and how long each
+picture took the editor. A recording left running stops by itself at 60
+seconds or 64 MB.
 
 ## Coordinates
 

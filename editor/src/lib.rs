@@ -11,6 +11,8 @@ pub mod brz;
 pub mod camera;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod crash;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gif;
 pub mod icon;
 pub mod material;
 #[cfg(not(target_arch = "wasm32"))]
@@ -259,6 +261,10 @@ pub fn run_form(form: usize, claude: bool) {
     // whether the shadows are of bricks that have since changed, and when they were last cast
     let (mut shadow_due, mut shadow_at) = (false, f64::NEG_INFINITY);
 
+    // the mark shown while a GIF is recorded, made when the first recording starts
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut gif_mark: Option<gif::Mark> = None;
+
     window.render_loop(move |mut frame| {
         camera.set_viewport(frame.viewport);
         let mut asked = panel::Asked::default();
@@ -385,6 +391,10 @@ pub fn run_form(form: usize, claude: bool) {
         // or with Shift held the view alone
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut shot_keyed: Option<bool> = None;
+        // a GIF recording was started or stopped with F11: with the panel,
+        // or with Shift held the view alone
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut, unused_variables))]
+        let mut gif_keyed: Option<bool> = None;
         for event in frame.events.iter_mut() {
             // Ctrl + the wheel resizes a round form, a cell of radius a
             // notch; without Ctrl, or on any other form, the wheel is the
@@ -414,6 +424,12 @@ pub fn run_form(form: usize, claude: bool) {
                     #[cfg(not(target_arch = "wasm32"))]
                     Key::F12 => {
                         shot_keyed = Some(!modifiers.shift);
+                        true
+                    }
+                    // (F11 and not Ctrl+F12: one key, beside the screenshot's, and neither the system nor the panel uses it)
+                    #[cfg(not(target_arch = "wasm32"))]
+                    Key::F11 => {
+                        gif_keyed = Some(!modifiers.shift);
                         true
                     }
                     // (D alone is a camera key, as A is: with Ctrl it is taken here first)
@@ -482,7 +498,8 @@ pub fn run_form(form: usize, claude: bool) {
                 if called.iter().any(|name| name == "take_screenshot") {
                     // a picture is of the editor, not of the notice that one was asked for
                     state.toast = None;
-                } else if let Some(last) = called.iter().rev().find(|name| !name.starts_with("get_") && *name != "measure_between") {
+                } else if let Some(last) = called.iter().rev().find(|name| !name.starts_with("get_") && *name != "measure_between" && !name.ends_with("_gif")) {
+                    // (nor is a recording, which has its own mark and says where it was saved)
                     // (asking about the workspace changes nothing, and is not announced)
                     state.toast = Some((format!("Claude: {}", last.replace('_', " ")), None));
                 }
@@ -772,6 +789,20 @@ pub fn run_form(form: usize, claude: bool) {
         if shot == Some(false) {
             state.toast = Some((send::save_screenshot(frame.viewport.width, frame.viewport.height, &screen.read_color()), None));
         }
+        // A GIF recording (see `gif`) is started or stopped here, and takes
+        // its pictures as a screenshot does: of the view before the panel is
+        // drawn, or below of the window with it.
+        #[cfg(not(target_arch = "wasm32"))]
+        let gif_at = now_ms();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(gif::Said::Failed(why)) = gif_keyed.or(asked.gif.then_some(true)).and_then(|panel| state.gif.toggle(panel, gif_at)) {
+                state.alert = Some(("Not recording", why));
+            }
+            if state.gif.wants(false, gif_at) {
+                state.gif.give(frame.viewport.width, frame.viewport.height, || screen.read_color(), gif_at);
+            }
+        }
         if let Err(e) = screen.write(|| gui.render()) {
             // the panel failing to draw should not take the view down with it
             eprintln!("brickloft editor: could not draw the panel: {e}");
@@ -785,6 +816,22 @@ pub fn run_form(form: usize, claude: bool) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(server) = claude.as_mut().filter(|server| server.wants_picture(true) && state.flight.is_empty()) {
             server.give_picture(true, frame.viewport.width, frame.viewport.height, &screen.read_color());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if state.gif.wants(true, gif_at) {
+                state.gif.give(frame.viewport.width, frame.viewport.height, || screen.read_color(), gif_at);
+            }
+            match state.gif.poll(gif_at) {
+                Some(gif::Said::Done(said)) => state.toast = Some((said, None)),
+                Some(gif::Said::Failed(why)) => state.alert = Some(("Recording", why)),
+                None => {}
+            }
+            // the mark of a recording, drawn last: after every picture of
+            // the window has been read back, so that it is in none of them
+            if let Some(status) = state.gif.status(gif_at) {
+                gif_mark.get_or_insert_with(|| gif::Mark::new(&context)).draw(&screen, frame.accumulated_time, frame.viewport, frame.device_pixel_ratio, &status);
+            }
         }
         #[cfg(target_arch = "wasm32")]
         let _ = shot;
