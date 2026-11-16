@@ -5,14 +5,40 @@ use crate::state::{Cut, Lock, State, ARCH, ARCHES, ARCH_POINTS, BEZIER, CIRCLE, 
 use arcs_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
+/// A small "?" that explains the control beside it when the pointer rests
+/// on it.
+///
+/// Every control also explains itself when the pointer rests on the control
+/// itself, which egui does for any widget. That alone left nothing on the
+/// panel to say that there was anything to read, so each control has a mark
+/// beside it as well.
+/// https://docs.rs/egui/latest/egui/struct.Response.html#method.on_hover_text
+fn hint(ui: &mut Ui, text: &str) {
+    ui.add(egui::Label::new(egui::RichText::new("?").weak()).sense(egui::Sense::hover())).on_hover_text(text);
+}
+
+/// A control with its explanation: said when the pointer rests on the
+/// control, and on the "?" set after it (see [`hint`]).
+fn helped(ui: &mut Ui, text: &str, add: impl FnOnce(&mut Ui) -> egui::Response) -> egui::Response {
+    ui.horizontal(|ui| {
+        let response = add(ui).on_hover_text(text);
+        hint(ui, text);
+        response
+    })
+    .inner
+}
+
 /// Saved forms: a folder to choose, its forms to open, and a name to save under.
 fn saved_forms(ui: &mut Ui, state: &mut State) {
     ui.label("Saved forms").on_hover_text("A save holds the whole workspace: every form, with its colours and the grid it is on.");
     let before = state.folder.clone();
-    ComboBox::from_label("Folder").selected_text(state.folder.as_str()).show_ui(ui, |ui| {
-        for folder in state.folders.clone() {
-            ui.selectable_value(&mut state.folder, folder.clone(), folder);
-        }
+    helped(ui, "The folder of saved forms shown below. Add folder makes a new one.", |ui| {
+        ComboBox::from_label("Folder").selected_text(state.folder.as_str()).show_ui(ui, |ui| {
+            for folder in state.folders.clone() {
+                ui.selectable_value(&mut state.folder, folder.clone(), folder);
+            }
+        })
+            .response
     });
     if state.folder != before {
         state.list_saved();
@@ -53,7 +79,7 @@ fn saved_forms(ui: &mut Ui, state: &mut State) {
 
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut state.save_name).hint_text("name").desired_width(110.0));
-        if ui.button("Save").clicked() {
+        if helped(ui, "Saves the whole workspace under this name in the chosen folder: every form, with its colours and the grid it is on. A save of the same name is replaced.", |ui| ui.button("Save")).clicked() {
             state.store_note = crate::store::save(&state.folder, &state.save_name, &state.painted(), &state.forms()).unwrap_or_else(|e| format!("Not saved: {e}"));
             state.list_saved();
         }
@@ -94,6 +120,12 @@ pub struct Asked {
     /// put the form back on the world's grid
     pub level: bool,
 }
+
+const SLIDERS: &str = "How far every size slider reaches, in microbricks: radius, height, thickness, depth and the reach of added points. Lower it for a finer slider. Large forms take longer to fit.";
+const LONGEST: &str = "The longest edge a single brick may have, in microbricks. 80 is what the game was seen to accept when this was first tried; the game's own limit is said to be 800 studs, which is 4000 microbricks. Raise it and paste to find out: a form then needs fewer, longer bricks.";
+const QUARTER: &str = "Turn the form a quarter turn about an axis, within the brick grid. The form is the same bricks whichever way it faces. For any other angle, drag one of the red, green or blue rings round: that turns the form's whole grid.";
+const MIRROR: &str = "Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.";
+const FLIP: &str = "Mirror the finished form along an axis, about the middle of its points.";
 
 /// Draw the panel.
 pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
@@ -165,24 +197,29 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.separator();
 
         let before = state.form;
-        ComboBox::from_label("Form").selected_text(FORMS[state.form]).show_ui(ui, |ui| {
-            for (i, name) in FORMS.iter().enumerate() {
-                ui.selectable_value(&mut state.form, i, *name);
-            }
+        helped(ui, "The kind of form to build. Choosing one starts it at its usual size.", |ui| {
+            ComboBox::from_label("Form").selected_text(FORMS[state.form]).show_ui(ui, |ui| {
+                for (i, name) in FORMS.iter().enumerate() {
+                    ui.selectable_value(&mut state.form, i, *name);
+                }
+            })
+            .response
         });
         if state.form != before {
             state.preset();
         }
-        if ui.button("Reset this form").on_hover_text("Put the dots, sizes, stretch, flips and other choices back to how this form starts out. How it is fitted and coloured is left alone.").clicked() {
+        if helped(ui, "Put the dots, sizes, stretch, flips and other choices back to how this form starts out. How it is fitted and coloured is left alone.", |ui| ui.button("Reset this form")).clicked() {
             state.reset();
         }
         ui.horizontal(|ui| {
             ui.label("Sliders go up to");
-            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=arcs_core::spec::MAX_SPAN).speed(1.0)).on_hover_text("How far every size slider reaches, in microbricks: radius, height, thickness, depth and the reach of added points. Lower it for a finer slider. Large forms take longer to fit.");
+            ui.add(egui::DragValue::new(&mut state.max_size).range(20.0..=arcs_core::spec::MAX_SPAN).speed(1.0)).on_hover_text(SLIDERS);
+            hint(ui, SLIDERS);
         });
         ui.horizontal(|ui| {
             ui.label("Longest brick");
-            ui.add(egui::DragValue::new(&mut state.spec.max_ext).range(1..=4000).speed(1.0)).on_hover_text("The longest edge a single brick may have, in microbricks. 80 is what the game was seen to accept when this was first tried; the game's own limit is said to be 800 studs, which is 4000 microbricks. Raise it and paste to find out: a form then needs fewer, longer bricks.");
+            ui.add(egui::DragValue::new(&mut state.spec.max_ext).range(1..=4000).speed(1.0)).on_hover_text(LONGEST);
+            hint(ui, LONGEST);
         });
         // One limit for every slider that sets a size. Each had its own (a
         // depth to 64 beside a radius to 60), so the limit shown was not the
@@ -200,13 +237,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         let is_curve = state.form <= BEZIER;
         match state.form {
             ARCH if arch_feet => {
-                ComboBox::from_label("Arch").selected_text(ARCHES[state.arch].0).show_ui(ui, |ui| {
-                    for (i, (name, _)) in ARCHES.iter().enumerate() {
-                        ui.selectable_value(&mut state.arch, i, *name);
-                    }
+                helped(ui, "The shape of the arch between its two feet.", |ui| {
+                    ComboBox::from_label("Arch").selected_text(ARCHES[state.arch].0).show_ui(ui, |ui| {
+                        for (i, (name, _)) in ARCHES.iter().enumerate() {
+                            ui.selectable_value(&mut state.arch, i, *name);
+                        }
+                    })
+                        .response
                 });
                 let mut natural = s.rise.is_none();
-                ui.checkbox(&mut natural, "Natural height (drag the top dot to set your own)");
+                helped(ui, "Ticked, the arch takes the height its shape gives it: a round arch is a semicircle. Dragging the top dot sets your own height.", |ui| ui.checkbox(&mut natural, "Natural height (drag the top dot to set your own)"));
                 if natural {
                     s.rise = None;
                 }
@@ -214,32 +254,35 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ARCH => {
                 if s.points.len() == 3 {
                     ui.label("The arc through its three points.");
-                    ui.checkbox(&mut s.closed, "Whole circle");
+                    helped(ui, "Builds the whole circle through the three points, where unticked it is the arc from the first point to the last.", |ui| ui.checkbox(&mut s.closed, "Whole circle"));
                 } else {
                     ui.label(format!("The curve through its {} points.", s.points.len()));
                 }
             }
             SPLINE => {
-                ui.checkbox(&mut s.closed, "Closed loop");
+                helped(ui, "Joins the last point back to the first.", |ui| ui.checkbox(&mut s.closed, "Closed loop"));
             }
             CIRCLE => {
-                ComboBox::from_label("Facing").selected_text(["X", "Y", "Z (flat)"][s.plane.min(2)]).show_ui(ui, |ui| {
-                    for (i, name) in ["X", "Y", "Z (flat)"].iter().enumerate() {
-                        ui.selectable_value(&mut s.plane, i, *name);
-                    }
+                helped(ui, "The axis the circle faces along. Z lays it flat.", |ui| {
+                    ComboBox::from_label("Facing").selected_text(["X", "Y", "Z (flat)"][s.plane.min(2)]).show_ui(ui, |ui| {
+                        for (i, name) in ["X", "Y", "Z (flat)"].iter().enumerate() {
+                            ui.selectable_value(&mut s.plane, i, *name);
+                        }
+                    })
+                        .response
                 });
                 // within its plane, into an ellipse; across it, the depth of a round tube
                 ui.label("Stretch:");
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                     let across = axis == s.plane.min(2);
-                    ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() }));
+                    helped(ui, "Stretches the form along this axis: 2 makes it twice as long that way, 0.5 half as long. Across the circle's plane it sets how deep a round tube is.", |ui| ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() })));
                 }
             }
             BEZIER => {
                 ui.label("Pull of each point (higher draws the curve closer):");
                 s.weights.resize(s.points.len(), 1.0);
                 for (i, w) in s.weights.iter_mut().enumerate() {
-                    ui.add(Slider::new(w, 0.1..=8.0).logarithmic(true).text(format!("point {}", i + 1)));
+                    helped(ui, "How strongly this point draws the curve towards itself. 1 is neutral.", |ui| ui.add(Slider::new(w, 0.1..=8.0).logarithmic(true).text(format!("point {}", i + 1))));
                 }
             }
             SPHERE => {
@@ -247,14 +290,17 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                     ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name));
                 }
-                ComboBox::from_label("Keep").selected_text(["Whole", "Dome", "Segment"][state.cut as usize]).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut state.cut, Cut::Whole, "Whole");
-                    ui.selectable_value(&mut state.cut, Cut::Dome, "Dome");
-                    ui.selectable_value(&mut state.cut, Cut::Segment, "Segment");
+                helped(ui, "The whole sphere, a dome (its top half), or a segment between two heights.", |ui| {
+                    ComboBox::from_label("Keep").selected_text(["Whole", "Dome", "Segment"][state.cut as usize]).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut state.cut, Cut::Whole, "Whole");
+                        ui.selectable_value(&mut state.cut, Cut::Dome, "Dome");
+                        ui.selectable_value(&mut state.cut, Cut::Segment, "Segment");
+                    })
+                        .response
                 });
                 if state.cut == Cut::Segment {
-                    ui.add(Slider::new(&mut state.segment.0, -largest..=largest).step_by(0.5).text("from height"));
-                    ui.add(Slider::new(&mut state.segment.1, -largest..=largest).step_by(0.5).text("to height"));
+                    helped(ui, "Where the segment starts, measured up from the sphere's centre.", |ui| ui.add(Slider::new(&mut state.segment.0, -largest..=largest).step_by(0.5).text("from height")));
+                    helped(ui, "Where the segment ends, measured up from the sphere's centre.", |ui| ui.add(Slider::new(&mut state.segment.1, -largest..=largest).step_by(0.5).text("to height")));
                 }
             }
             _ => {}
@@ -265,7 +311,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 ui.add(Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(*name));
             }
             let mut height = s.rise.unwrap_or(s.radius);
-            ui.add(Slider::new(&mut height, 1.0..=largest).logarithmic(true).step_by(1.0).text("Height"));
+            helped(ui, "The pyramid's height. Left alone it is as tall as half its base is wide.", |ui| ui.add(Slider::new(&mut height, 1.0..=largest).logarithmic(true).step_by(1.0).text("Height")));
             // left alone it is as tall as it is wide to one side
             if height != s.rise.unwrap_or(s.radius) {
                 s.rise = Some(height);
@@ -279,24 +325,24 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 PYRAMID => "Half its base",
                 _ => "Radius",
             };
-            ui.add(Slider::new(&mut s.radius, 0.5..=largest).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(name));
+            helped(ui, "The form's size from its middle to its edge, in microbricks. Ctrl + scroll over the view changes it too.", |ui| ui.add(Slider::new(&mut s.radius, 0.5..=largest).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(name)));
         }
 
         ui.separator();
         // Fill means different things to a curve and to a solid, so say which
         match state.form {
             SPHERE => {
-                ui.checkbox(&mut s.fill, "Solid (untick for a hollow shell)");
+                helped(ui, "Solid all through, or a hollow shell as thick as Wall thickness.", |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow shell)"));
             }
             REVOLVE => {
-                ui.checkbox(&mut s.fill, "Solid (untick for a shell along the profile)");
+                helped(ui, "Solid all through, or a shell along the profile as thick as Wall thickness: a vase or a bowl.", |ui| ui.checkbox(&mut s.fill, "Solid (untick for a shell along the profile)"));
             }
             PYRAMID => {
-                ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)");
+                helped(ui, "Solid all through, or a hollow tent open underneath.", |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)"));
             }
             _ => {
-                ui.checkbox(&mut s.fill, "Fill the area the curve encloses");
-                ui.checkbox(&mut s.tube, "Round tube instead of a flat band");
+                helped(ui, "Fills everything the curve encloses: a ring becomes a disc, an arch a filled arch.", |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
+                helped(ui, "Builds the curve as a round tube, which for a circle is a torus. Unticked it is a flat band with a thickness and a depth.", |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
             }
         }
         if is_curve && s.tube {
@@ -304,6 +350,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             ui.horizontal(|ui| {
                 ui.radio_value(&mut s.protrude, false, "Rounded").on_hover_text("A pipe: the edges chamfered round with sloped pieces.");
                 ui.radio_value(&mut s.protrude, true, "Protruded").on_hover_text("Flat bands side by side, each standing proud of the next.");
+                hint(ui, "How a round tube's section is made. Rounded is a pipe with chamfered edges. Protruded is flat bands of different widths side by side: smooth along the curve and stepped across it.");
             });
         }
         let wall = match state.form {
@@ -312,13 +359,13 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         };
         // (a pyramid's wall is measured straight up, and only a hollow one has any)
         if !(state.form == PYRAMID && s.fill) {
-            ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall));
+            helped(ui, "How thick the band, the tube or the wall is, in microbricks.", |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         if is_curve && !s.tube {
-            ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth"));
+            helped(ui, "How deep a flat band is, measured across the plane its curve lies in.", |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
         }
         if !s.pulls.is_empty() {
-            ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")).on_hover_text("How far from each added point the form goes with it: along a curve to either side, or all round on a sphere or pyramid.");
+            helped(ui, "How far from each added point the form goes with it: along a curve to either side, or all round on a sphere or pyramid.", |ui| ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")));
             if ui.button(format!("Remove the last added point ({})", s.pulls.len())).clicked() {
                 s.pulls.pop();
             }
@@ -328,18 +375,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 ui.label("A point pulled out of the circle's plane is built of sloped pieces where it was pulled, and is less smooth there than one pulled within the plane, more so the steeper it climbs. To tilt the whole circle, drag one of its rings.");
             }
         }
-        ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")).on_hover_text("How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.");
+        helped(ui, "How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.", |ui| ui.add(Slider::new(&mut state.follow, 0.0..=1.0).step_by(0.05).text("Neighbouring dots follow")));
         ui.label("Sizes are in microbricks. Half steps are single game units.");
         if is_curve && s.tube && s.thick < 3.0 {
             ui.label("A round tube this thin is, in bricks, a square bar: there is no room for a rounder cross-section under 3 microbricks.");
         }
         ui.horizontal(|ui| {
-            ui.label("Quarter turn").on_hover_text("Turn the form a quarter turn about an axis, within the brick grid. The form is the same bricks whichever way it faces. For any other angle, drag one of the red, green or blue rings round: that turns the form's whole grid.");
+            ui.label("Quarter turn").on_hover_text(QUARTER);
             for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                 if ui.button(*name).clicked() {
                     asked.turn = Some(axis);
                 }
             }
+            hint(ui, QUARTER);
         });
         if crate::state::on_own_grid(s) {
             ui.horizontal(|ui| {
@@ -350,17 +398,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         ui.horizontal(|ui| {
-            ui.label("Mirror").on_hover_text("Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.");
+            ui.label("Mirror").on_hover_text(MIRROR);
             for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
                 ui.checkbox(&mut s.mirror[axis], *name);
             }
+            hint(ui, MIRROR);
         });
-        ui.checkbox(&mut s.symmetric, "Tidy symmetric bricks").on_hover_text("Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.");
+        helped(ui, "Where the form is its own mirror image (side to side, front to back, top to bottom), make its bricks mirror images too: the low side of each such axis is kept and the high side rebuilt from it. Does nothing along an axis the form is not symmetric about.", |ui| ui.checkbox(&mut s.symmetric, "Tidy symmetric bricks"));
         ui.horizontal(|ui| {
             ui.label("Flip");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
-                ui.checkbox(&mut s.flip[axis], name).on_hover_text("Mirror the finished form along this axis, about the middle of its points.");
+                ui.checkbox(&mut s.flip[axis], name).on_hover_text(FLIP);
             }
+            hint(ui, FLIP);
         });
 
         if state.can_add_points() {
@@ -372,6 +422,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 if ui.button("Remove point").clicked() {
                     state.remove_point();
                 }
+                hint(ui, "Adds or removes one of the form's own dots. To pull a form out of shape at one place, Shift + click on it: that adds an orange point, and Shift + right-click takes it off.");
             });
         }
 
@@ -382,20 +433,20 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             Lock::Axis(1) => "Keep Y (move in X and Z)",
             Lock::Axis(_) => "Keep Z (move in X and Y)",
         };
-        ComboBox::from_label("Dots move").selected_text(lock_name(state.lock)).show_ui(ui, |ui| {
-            for l in [Lock::Free, Lock::Axis(0), Lock::Axis(1), Lock::Axis(2)] {
-                ui.selectable_value(&mut state.lock, l, lock_name(l));
-            }
+        helped(ui, "Which way a dragged dot moves: in the plane facing the camera, or with one of its coordinates kept as it is.", |ui| {
+            ComboBox::from_label("Dots move").selected_text(lock_name(state.lock)).show_ui(ui, |ui| {
+                for l in [Lock::Free, Lock::Axis(0), Lock::Axis(1), Lock::Axis(2)] {
+                    ui.selectable_value(&mut state.lock, l, lock_name(l));
+                }
+            })
+            .response
         });
-        ui.checkbox(&mut state.show_ruler, "Show rulers (lengths in microbricks)");
-        ui.add(Slider::new(&mut state.floor_gap, 0.0..=40.0).step_by(1.0).text("Floor below form"))
-            .on_hover_text("Lowers the floor in the view so you can look at a form from underneath. The floor is also see-through from below. It changes nothing that is built.");
-        ui.checkbox(&mut state.fine_snap, "Snap dots to half microbricks");
-        asked.best = ui
-            .button("Snap to best fit nearby")
-            .on_hover_text("A form fits cleanly only where its surfaces land on the brick grid. This tries each dot and size up to a microbrick either way and keeps whatever fits closest.")
+        helped(ui, "Draws the form's size along each axis, in microbricks.", |ui| ui.checkbox(&mut state.show_ruler, "Show rulers (lengths in microbricks)"));
+        helped(ui, "Lowers the floor in the view so you can look at a form from underneath. The floor is also see-through from below. It changes nothing that is built.", |ui| ui.add(Slider::new(&mut state.floor_gap, 0.0..=40.0).step_by(1.0).text("Floor below form")));
+        helped(ui, "Dots snap to half microbricks, which are single game units. Unticked they snap to whole microbricks.", |ui| ui.checkbox(&mut state.fine_snap, "Snap dots to half microbricks"));
+        asked.best = helped(ui, "A form fits cleanly only where its surfaces land on the brick grid. This tries each dot and size up to a microbrick either way and keeps whatever fits closest.", |ui| ui.button("Snap to best fit nearby"))
             .clicked();
-        ui.checkbox(&mut state.auto_best, "Do that after every drag");
+        helped(ui, "Runs Snap to best fit nearby by itself each time a drag ends.", |ui| ui.checkbox(&mut state.auto_best, "Do that after every drag"));
         if !state.best_note.is_empty() {
             ui.label(state.best_note.as_str());
         }
@@ -404,21 +455,22 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         let s = &mut state.spec;
         ui.label("Detail");
         let size_name = |g: i32| if g == 0 { "Automatic".to_string() } else { format!("{g} microbrick{}", if g == 1 { "" } else { "s" }) };
-        ComboBox::from_label("Brick size").selected_text(size_name(s.grain)).show_ui(ui, |ui| {
-            ui.selectable_value(&mut s.grain, 0, size_name(0));
-            for g in arcs_core::spec::GRAINS {
-                ui.selectable_value(&mut s.grain, g, size_name(g));
-            }
+        helped(ui, "Fits the form with bricks a multiple of this size. Automatic picks the finest size that keeps the build within the brick budget.", |ui| {
+            ComboBox::from_label("Brick size").selected_text(size_name(s.grain)).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.grain, 0, size_name(0));
+                for g in arcs_core::spec::GRAINS {
+                    ui.selectable_value(&mut s.grain, g, size_name(g));
+                }
+            })
+            .response
         });
         if s.grain == 0 {
-            ui.add(Slider::new(&mut s.budget, 100..=30000).logarithmic(true).text("Brick budget"))
-                .on_hover_text("The smallest brick size that keeps the build within this many bricks is used.");
+            helped(ui, "The smallest brick size that keeps the build within this many bricks is used.", |ui| ui.add(Slider::new(&mut s.budget, 100..=30000).logarithmic(true).text("Brick budget")));
         }
         if is_curve && !s.tube {
-            ui.add(Slider::new(&mut s.simplify, 0.0..=1.5).text("Simplify"))
-                .on_hover_text("How much closer a ramp must bring the outline to be worth a brick, in microbricks of area. 0 is the closest fit whatever the count; higher gives fewer, longer pieces. Flat forms only: on a 3D form, use Brick size.");
+            helped(ui, "How much closer a ramp must bring the outline to be worth a brick, in microbricks of area. 0 is the closest fit whatever the count; higher gives fewer, longer pieces. Flat forms only: on a 3D form, use Brick size.", |ui| ui.add(Slider::new(&mut s.simplify, 0.0..=1.5).text("Simplify")));
         }
-        ui.checkbox(&mut s.wedges, "Use ramps and corner pieces");
+        helped(ui, "Unticked, the form is built of cubes alone, as a staircase.", |ui| ui.checkbox(&mut s.wedges, "Use ramps and corner pieces"));
 
         ui.separator();
         let built = &state.built;
@@ -445,25 +497,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
 
         ui.separator();
         ui.horizontal(|ui| {
-            asked.report = ui
-                .button("Save report")
-                .on_hover_text("Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong. Reports go in the folder omegga-arcs in the system's temporary folder.")
+            asked.report = helped(ui, "Writes out this form's settings, its bricks, and a cell-by-cell comparison of the bricks with the form: where material is missing or extra. Useful for working out why a fit looks wrong. Reports go in the folder omegga-arcs in the system's temporary folder.", |ui| ui.button("Save report"))
                 .clicked();
             // a page's reports go to the clipboard: there are no files to clear
             if cfg!(not(target_arch = "wasm32")) {
-                asked.clear_reports = ui.button("Clear reports").on_hover_text("Deletes every saved report file. Nothing else is touched.").clicked();
+                asked.clear_reports = helped(ui, "Deletes every saved report file. Nothing else is touched.", |ui| ui.button("Clear reports")).clicked();
             }
         });
         // a web page cannot put a file on the clipboard (see `brz`), nor
         // write one to disk
         if cfg!(not(target_arch = "wasm32")) {
-            asked.screenshot = ui
-                .button("Save screenshot")
-                .on_hover_text("Saves a picture of the window in Pictures/omegga-arcs and puts it on the clipboard. F12 does the same, and Shift+F12 leaves this panel out of the picture.")
+            asked.screenshot = helped(ui, "Saves a picture of the window in Pictures/omegga-arcs and puts it on the clipboard. F12 does the same, and Shift+F12 leaves this panel out of the picture.", |ui| ui.button("Save screenshot"))
                 .clicked();
-            asked.copy = ui
-                .add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard"))
-                .on_hover_text("Writes everything in the workspace to arcs-build.brz, a Brickadia prefab file, and puts that file on the clipboard. Ctrl+C does the same, and Ctrl+V adds the forms of a copied file back to the workspace.")
+            asked.copy = helped(ui, "Writes everything in the workspace to arcs-build.brz, a Brickadia prefab file, and puts that file on the clipboard. Ctrl+C does the same, and Ctrl+V adds the forms of a copied file back to the workspace.", |ui| ui.add_enabled(state.problem.is_none() && !state.built.bricks.is_empty(), egui::Button::new("Copy to Clipboard")))
                 .clicked();
         }
         if !state.report_note.is_empty() {
@@ -507,6 +553,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
         if ui.add_enabled(!state.others.is_empty(), egui::Button::new("Remove")).on_hover_text("Take the form being edited out of the workspace.").clicked() {
             state.remove_active();
         }
+        hint(ui, "Add to this grid sets another of this form beside it on the same grid: the two are kept clear of each other and turn together. New grid gives the new form a grid of its own, which its rings turn to any angle. Remove takes the form being edited out of the workspace.");
     });
 }
 
@@ -515,10 +562,13 @@ fn colours(ui: &mut Ui, state: &mut State) {
     let before = state.paint.clone();
     let paint = &mut state.paint;
     let name = MODES.iter().find(|m| m.0 == paint.mode).map_or("", |m| m.1);
-    ComboBox::from_label("Colour").selected_text(name).show_ui(ui, |ui| {
-        for (mode, name) in MODES {
-            ui.selectable_value(&mut paint.mode, mode, name);
-        }
+    helped(ui, "How the form is coloured: one colour, a blend from one colour to another, stripes, or a speckled blend. Each brick is one colour.", |ui| {
+        ComboBox::from_label("Colour").selected_text(name).show_ui(ui, |ui| {
+            for (mode, name) in MODES {
+                ui.selectable_value(&mut paint.mode, mode, name);
+            }
+        })
+            .response
     });
     {
         // one colour for a solid; up to four to blend, stripe or speckle between
@@ -533,16 +583,20 @@ fn colours(ui: &mut Ui, state: &mut State) {
             if most > 1 && paint.colours.len() > 2 && ui.small_button("-").on_hover_text("One colour fewer").clicked() {
                 paint.colours.pop();
             }
+            hint(ui, "The colours used. Click one to change it. A blend, stripes or a speckle take up to four, added with + and taken away with -.");
         });
         if most > 1 {
-            ComboBox::from_label("Runs along").selected_text(["X", "Y", "Z (up)"][paint.axis.min(2)]).show_ui(ui, |ui| {
-                for (i, axis) in ["X", "Y", "Z (up)"].iter().enumerate() {
-                    ui.selectable_value(&mut paint.axis, i, *axis);
-                }
+            helped(ui, "The direction a blend or stripes run in across the form.", |ui| {
+                ComboBox::from_label("Runs along").selected_text(["X", "Y", "Z (up)"][paint.axis.min(2)]).show_ui(ui, |ui| {
+                    for (i, axis) in ["X", "Y", "Z (up)"].iter().enumerate() {
+                        ui.selectable_value(&mut paint.axis, i, *axis);
+                    }
+                })
+                    .response
             });
         }
         if paint.mode == Mode::Stripes {
-            ui.add(Slider::new(&mut paint.width, 1..=24).text("Stripe width"));
+            helped(ui, "How wide each stripe is, in microbricks.", |ui| ui.add(Slider::new(&mut paint.width, 1..=24).text("Stripe width")));
         }
         ui.label("Each brick is one colour.");
 }

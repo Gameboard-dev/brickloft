@@ -10,7 +10,9 @@ and two of the game's positional units, so half steps are single units.
 
 A 3D view of the bricks, with a panel down the left side. The form being
 edited is drawn in its colours with its **dots**; other forms are drawn a
-little darker.
+little darker. Each control in the panel has a small **?** beside it. Rest
+the pointer on the **?**, or on the control itself, to read what the
+control does.
 
 | Dot | What it is |
 |---|---|
