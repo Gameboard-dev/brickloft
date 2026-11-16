@@ -137,7 +137,7 @@ an angle is copied as a grid of its own, frozen in place.
 | **Ctrl+C** | copies the form being edited, and any others marked `+`, as a Brickadia prefab (`arcs-build.brz`) on the clipboard |
 | **Ctrl + click** another form | marks it `+` to be copied too, or unmarks it |
 | **Ctrl+A** | marks every form |
-| **Ctrl+V** | adds the forms of a copied prefab back to the workspace, as forms that can still be reshaped |
+| **Ctrl+V** | adds the forms of a copied prefab back to the workspace, as forms that can still be reshaped, on the grid being worked on |
 
 The prefab carries each form's bricks, colours, place and grid, and, in its
 description, the settings each form was made from. That is how a paste back

@@ -558,11 +558,20 @@ impl State {
     pub fn paste(&mut self, forms: Vec<Placed>) {
         let Some(first) = forms.first().map(|f| f.2) else { return };
         let mut origin = None;
-        // on grids of their own, numbered after the ones already here, so
-        // that what is pasted keeps its grids and joins none of these
+        // The grid of the first form pasted becomes the grid being worked
+        // on, so that a pasted form joins the forms beside it. (Pasting
+        // onto a grid of its own made every paste a separate grid, to be
+        // moved and turned apart from what it was pasted next to.) Any
+        // further grids in what is pasted stay grids of their own, numbered
+        // after the ones already here.
+        let (joined, here) = (forms[0].0.on_grid, (self.spec.on_grid, self.spec.grid, self.spec.grid_at));
         let after = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
         for (mut spec, paint, place) in forms {
-            spec.on_grid += after;
+            if spec.on_grid == joined {
+                (spec.on_grid, spec.grid, spec.grid_at) = here;
+            } else {
+                spec.on_grid += after;
+            }
             // the first is set down beside what is there; the rest keep
             // their distance from it
             let at = origin.map(|o: [i32; 3]| [0, 1, 2].map(|k| o[k] + place[k] - first[k]));
@@ -1799,6 +1808,24 @@ mod tests {
         state.turn(2, false);
         state.turn(2, true);
         assert_eq!(state.spec.turned, arcs_core::shapes::UPRIGHT);
+    }
+
+    #[test]
+    fn a_pasted_form_joins_the_grid_being_worked_on() {
+        let mut state = State::new();
+        state.add_grid();
+        let here = (state.spec.on_grid, state.spec.grid, state.spec.grid_at);
+        // copied from some other grid, standing at some other angle
+        let mut copied = state.full_spec();
+        (copied.on_grid, copied.grid, copied.grid_at) = (7, [0.0, 0.0, 0.6, 0.8], [40.0, 0.0, 0.0]);
+        let mut apart = copied.clone();
+        apart.on_grid = 9;
+        state.paste(vec![(copied.clone(), Paint::default(), [0; 3]), (copied, Paint::default(), [8, 0, 0]), (apart, Paint::default(), [16, 0, 0])]);
+        // the last pasted is the one being edited: a grid of its own
+        assert!(state.spec.on_grid != here.0, "a second grid in what was pasted joined the first");
+        let joined = state.others.iter().filter(|o| (o.spec.on_grid, o.spec.grid, o.spec.grid_at) == here).count();
+        // the form that was there, and the two pasted from one grid
+        assert_eq!(joined, 3);
     }
 
     #[test]
