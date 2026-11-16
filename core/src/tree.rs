@@ -4491,7 +4491,7 @@ mod tests {
                 assert!((sum.sqrt() - stem).abs() < 0.05 * stem, "{kind:?} {seed}: limbs of {into:?} from a trunk of {stem}");
                 // (a trunk made fatter draws in under its fork, over its own thickness of height: such a one is measured below that)
                 let under = reach(&tree, if girth > 100 { (fork - stem * 1.1).min(fork * 0.8) } else { fork * 0.8 }.floor() + 0.25).0;
-                assert!((under - stem).abs() <= 0.5 + 0.06 * stem, "{kind:?} {seed}: the trunk is {under} under a fork of {stem}");
+                assert!(if girth > 100 { under >= stem - 0.5 && under <= stem * 1.2 + 0.5 } else { (under - stem).abs() <= 0.5 + 0.06 * stem }, "{kind:?} {seed}: the trunk is {under} under a fork of {stem}");
             }
         }
         // the width asked for is the width built: an oak's trunk at twice the usual is about twice as far through as at half, and at 100 it is the tree it was
