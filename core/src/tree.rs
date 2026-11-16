@@ -2027,7 +2027,12 @@ mod tests {
             // (on one thread: with more it is quicker, by how many the machine has)
             let least = (0..4).map(|_| { let at = std::time::Instant::now(); crate::spec::build_with(&spec, true, crate::par::Threads::ONE).unwrap(); at.elapsed() }).min().unwrap();
             println!("{name}, {tall} tall: {least:?}");
-            assert!(least.as_secs_f64() < 1.2, "{name} took {least:?}");
+            // (The slowest kind takes about 0.6 s alone. The bound is four
+            // times that because the other tests run beside this one: at
+            // 1.2 s it failed in a full run on a busy machine and passed
+            // by itself. The faults it is for cost more: before the parts
+            // were filed in buckets a pine took 2.9 s.)
+            assert!(least.as_secs_f64() < 2.5, "{name} took {least:?}");
         }
     }
 
