@@ -33,14 +33,22 @@
 //! number of threads. And a touch of the brush changes only the bricks of
 //! the tiles it reaches, which is what lets the editor give the graphics
 //! card those tiles alone.
+//!
+//! And what lets a touch cost by the ground it changes and not by the
+//! lawn's size: the ground and each tile's bricks are kept from one build
+//! to the next (the module `kept`), so a build works out the heights the
+//! touch reaches and lays the tiles whose ground is no longer what they
+//! were laid from.
 
 use crate::par::Threads;
 use crate::shapes::{CellBrick, CUBE};
-use crate::tree::{ground, hash, Lay, Run, Tree, BED, LEAF, LEAF_DARK, LEAF_LIGHT, LEAST_SPREAD, SAND, STONE, TRUNK, WATER};
+use crate::tree::{ground, ground_on, hash, Lay, Run, Sculpt, Tree, BED, LEAF, LEAF_DARK, LEAF_LIGHT, LEAST_RANGE, LEAST_SPREAD, SAND, STONE, TRUNK, WATER};
 use glam::{DVec2, DVec3};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+mod kept;
 
 /// How many cells a tile of ground is along each side.
 ///
@@ -112,6 +120,7 @@ type Wet = (f64, Option<f64>);
 /// is now laid cell by cell: on it a lawn saved before has the levels and
 /// the streams it had, and a flood of every cell would be six times the
 /// work for water whose level is a whole number either way.
+#[derive(Clone)]
 struct Waters {
     lo: DVec3,
     step: f64,
@@ -125,9 +134,35 @@ struct Waters {
     near: Vec<u32>,
     /// the streams, a cell apart along their lengths: where, and how high the water is there
     stream: Vec<(DVec3, f64)>,
+    /// What the flood was made from, kept for the next: whether the lawn
+    /// covers each place of the grid, and how high the sculpted ground is
+    /// there. Empty where there was no flood.
+    inside: Vec<bool>,
+    lifted: Vec<f64>,
 }
 
 impl Waters {
+    /// Whether the water stands and runs where `other`'s does: all that
+    /// a cell's ground is worked out from, which the samples the flood
+    /// was made from are not.
+    fn same_water(&self, other: &Waters) -> bool {
+        let bits = |v: DVec3| v.to_array().map(f64::to_bits);
+        bits(self.lo) == bits(other.lo) && self.step.to_bits() == other.step.to_bits() && (self.nx, self.ny) == (other.nx, other.ny) && self.high == other.high && self.upper.to_bits() == other.upper.to_bits() && self.lower.to_bits() == other.lower.to_bits() && self.near == other.near
+            && self.stream.len() == other.stream.len() && self.stream.iter().zip(&other.stream).all(|(a, b)| bits(a.0) == bits(b.0) && a.1.to_bits() == b.1.to_bits())
+    }
+
+    /// Water at one level and no more: every pond at `lower`, and no stream.
+    fn still(lower: f64, lo: DVec3, step: f64) -> Waters {
+        Waters { lo, step, nx: 0, ny: 0, high: Vec::new(), upper: lower, lower, near: Vec::new(), stream: Vec::new(), inside: Vec::new(), lifted: Vec::new() }
+    }
+
+    /// Whether a lawn with this lay has a flood made of it, on a grid of
+    /// `nx` by `ny` places: only one with two levels of water.
+    /// (A patch past six hundred cells square keeps one level: the flood is a grid of the whole patch in memory.)
+    fn floods(lay: &Lay, nx: usize, ny: usize) -> bool {
+        lay.levels >= 2 && nx * ny <= 400_000
+    }
+
     fn cell(&self, p: DVec3) -> Option<usize> {
         let (i, j) = (((p.x - self.lo.x) / self.step).round(), ((p.y - self.lo.y) / self.step).round());
         (i >= 0.0 && j >= 0.0 && (i as usize) < self.nx && (j as usize) < self.ny).then(|| j as usize * self.nx + i as usize)
@@ -167,18 +202,15 @@ impl Waters {
         }
     }
 
+    /// The water of a lawn with two levels of it, from the grid's samples:
+    /// `inside`, whether the lawn covers each place, and `high`, how high
+    /// the sculpted ground is at each it covers (0 at the others). `lifted`
+    /// is the sculpted ground anywhere, for the banks of a stream.
     #[allow(clippy::too_many_arguments)]
-    fn found(lay: &Lay, lower: f64, covered: &dyn Fn(DVec3) -> bool, lifted: &dyn Fn(DVec3) -> f64, lo: DVec3, hi: DVec3, step: f64, seed: u32) -> Waters {
+    fn found(lower: f64, inside: &[bool], high: &[f64], lifted: &dyn Fn(DVec3) -> f64, lo: DVec3, step: f64, nx: usize, ny: usize, seed: u32) -> Waters {
         use std::{cmp::Reverse, collections::BinaryHeap};
-        let mut waters = Waters { lo, step, nx: 0, ny: 0, high: Vec::new(), upper: lower, lower, near: Vec::new(), stream: Vec::new() };
-        let (nx, ny) = (((hi.x - lo.x) / step).ceil() as usize + 1, ((hi.y - lo.y) / step).ceil() as usize + 1);
-        // (a patch past six hundred cells square keeps one level: the flood is a grid of the whole patch in memory)
-        if lay.levels < 2 || nx * ny > 400_000 {
-            return waters;
-        }
+        let mut waters = Waters::still(lower, lo, step);
         let at = |c: usize| DVec3::new(lo.x + (c % nx) as f64 * step, lo.y + (c / nx) as f64 * step, 0.0);
-        let inside: Vec<bool> = (0..nx * ny).map(|c| covered(at(c))).collect();
-        let high: Vec<f64> = (0..nx * ny).map(|c| if inside[c] { lifted(at(c)) } else { 0.0 }).collect();
         let around = |c: usize| {
             let (i, j) = ((c % nx) as i64, (c / nx) as i64);
             [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(move |(di, dj)| (i + di, j + dj)).map(move |(i, j)| (i >= 0 && j >= 0 && i < nx as i64 && j < ny as i64).then(|| j as usize * nx + i as usize))
@@ -393,7 +425,12 @@ const COVERED: u8 = 8;
 ///
 /// Cells are the world's: cell `(x, y)` is the square from `(x, y)` to
 /// `(x + 1, y + 1)`, as a brick's are.
+#[derive(Clone)]
 pub struct Ground {
+    /// What it was made from, kept so that the next ground can be made
+    /// from this one (see [`Ground::after`]); a piece cut out of a ground
+    /// for a tile to be laid from has none.
+    made: Option<Box<Made>>,
     /// where the plant's foot is, on the floor of its cell: the lawn's own places are measured from here
     stand: DVec3,
     /// the first cell of the table each way, and how many
@@ -411,37 +448,238 @@ pub struct Ground {
     watered: bool,
 }
 
+/// What a ground was made from, besides the touches: where the lawn is
+/// and what water it has. Two grounds of one site differ by their touches
+/// alone. Numbers are kept as their bits, so that two sites are the same
+/// only where every number of them is the very same number.
+#[derive(Clone, PartialEq)]
+struct Site {
+    base: [u64; 3],
+    spread: u64,
+    run: Vec<[u64; 3]>,
+    closed: bool,
+    water: Option<u64>,
+    levels: u8,
+    seed: u32,
+}
+
+impl Site {
+    fn of(base: DVec3, spread: f64, lay: &Lay, seed: u32) -> Site {
+        let bits = |v: DVec3| v.to_array().map(f64::to_bits);
+        Site { base: bits(base), spread: spread.max(LEAST_SPREAD).to_bits(), run: lay.run.iter().map(|p| bits(*p)).collect(), closed: lay.closed, water: lay.water.map(f64::to_bits), levels: lay.levels, seed }
+    }
+}
+
+/// See [`Ground::made`].
+#[derive(Clone)]
+struct Made {
+    site: Site,
+    touches: Vec<Sculpt>,
+    /// how high the sculpted ground is at each cell, before any stream is cut into it
+    was: Vec<f64>,
+    waters: Option<Waters>,
+    /// the cells marked [`REED`]
+    reeded: Vec<u32>,
+}
+
+/// Whether two touches are the very same: every number of them, bit for bit.
+fn same_touch(a: &Sculpt, b: &Sculpt) -> bool {
+    let bits = |t: &Sculpt| (t.at.to_array().map(f64::to_bits), t.range.to_bits(), t.amount.to_bits(), t.flatten);
+    bits(a) == bits(b)
+}
+
+/// How the touches a ground is wanted for differ from those a kept ground
+/// was made with, and so which places have another height.
+///
+/// A place's height is the touches that reach it, applied in turn
+/// ([`ground`]); a touch that does not reach a place does nothing there.
+/// Leave out the touches both lists begin with and those both end with,
+/// and what is left of each is the touches that differ: a place none of
+/// them reaches has the same touches reaching it in the same order as
+/// before, and so the same height. A place one does reach is worked out
+/// again, from the floor up; or, where touches were only added to the
+/// end, as a stroke of the brush adds them, by applying the new ones to
+/// the height it had ([`ground_on`]).
+struct Change<'a> {
+    /// the touches to apply where a touch that differs reaches
+    apply: &'a [Sculpt],
+    /// whether they are applied to the height the place had, or from the floor
+    onto: bool,
+    /// the touches that differ, of the old and of the new
+    differ: Vec<Sculpt>,
+    /// no ground was kept: every place is worked out
+    whole: bool,
+}
+
+/// The places of a table that are to be worked out again: which, and the box they lie in.
+struct Marks {
+    marked: Vec<bool>,
+    /// the first place of the box each way, and one past the last; empty if they are equal
+    lo: [usize; 2],
+    hi: [usize; 2],
+}
+
+impl<'a> Change<'a> {
+    fn whole(now: &'a [Sculpt]) -> Change<'a> {
+        Change { apply: now, onto: false, differ: Vec::new(), whole: true }
+    }
+
+    fn between(was: &[Sculpt], now: &'a [Sculpt]) -> Change<'a> {
+        let head = was.iter().zip(now).take_while(|(a, b)| same_touch(a, b)).count();
+        let tail = was[head..].iter().rev().zip(now[head..].iter().rev()).take_while(|(a, b)| same_touch(a, b)).count();
+        let differ = was[head..was.len() - tail].iter().chain(&now[head..now.len() - tail]).copied().collect();
+        if head == was.len() { Change { apply: &now[head..], onto: true, differ, whole: false } } else { Change { apply: now, onto: false, differ, whole: false } }
+    }
+
+    /// The height of the sculpted ground at `p`, which a touch that differs reaches and where it was `kept`.
+    fn height(&self, kept: f64, p: DVec3) -> f64 {
+        ground_on(if self.onto { kept } else { 0.0 }, self.apply, p)
+    }
+
+    /// The places of a table of `n` places each way, `step` apart from
+    /// `first`, that a touch which differs may reach: those in the square
+    /// round each such touch, a place more each way than its range. More
+    /// than it reaches, which costs those places' heights worked out once
+    /// more to the number they were, and is a box to mark and not a circle.
+    fn marks(&self, n: [usize; 2], first: DVec2, step: f64) -> Marks {
+        if self.whole {
+            return Marks { marked: vec![true; n[0] * n[1]], lo: [0, 0], hi: n };
+        }
+        let mut marks = Marks { marked: vec![false; n[0] * n[1]], lo: n, hi: [0, 0] };
+        for touch in &self.differ {
+            let range = touch.range.max(LEAST_RANGE);
+            // (a touch that is no number reaches who knows where: every place)
+            if !(touch.at.is_finite() && range.is_finite()) {
+                return Marks { marked: vec![true; n[0] * n[1]], lo: [0, 0], hi: n };
+            }
+            let span = |k: usize| ((((touch.at[k] - range - first[k]) / step).floor() - 1.0).clamp(0.0, n[k] as f64) as usize, (((touch.at[k] + range - first[k]) / step).ceil() + 2.0).clamp(0.0, n[k] as f64) as usize);
+            let ((i0, i1), (j0, j1)) = (span(0), span(1));
+            if i0 >= i1 || j0 >= j1 {
+                continue;
+            }
+            for j in j0..j1 {
+                marks.marked[j * n[0] + i0..j * n[0] + i1].fill(true);
+            }
+            (marks.lo, marks.hi) = ([marks.lo[0].min(i0), marks.lo[1].min(j0)], [marks.hi[0].max(i1), marks.hi[1].max(j1)]);
+        }
+        if marks.lo[0] >= marks.hi[0] {
+            (marks.lo, marks.hi) = ([0, 0], [0, 0]);
+        }
+        marks
+    }
+}
+
 impl Ground {
     /// The ground of the grass `lay` describes, standing at `base` and
     /// reaching `spread` to each side of its line.
     pub fn new(tree: &Tree, base: DVec3, spread: f64, lay: &Lay, threads: Threads) -> Ground {
+        Ground::after(None, tree, base, spread, lay, threads).0
+    }
+
+    /// [`Ground::new`], made from `kept` if that is a ground of the same
+    /// lawn with other touches: only what the touches that differ reach is
+    /// worked out, and the rest is `kept`'s. The same ground, to the bit,
+    /// as one made from nothing (see [`Change`]). With it, the box of
+    /// cells that were worked out, which may have changed: the first each
+    /// way and one past the last, the same twice if none were.
+    ///
+    /// Where the lawn has two levels of water the flood that finds them
+    /// is made again whole at every touch, from samples kept as the cells'
+    /// heights are: a hollow anywhere may change what stands where. If
+    /// the water comes out as it was, the cells are still only those the
+    /// touch reaches; if not, every cell is worked out, though only those
+    /// the touch reaches have another height to begin from.
+    fn after(kept: Option<Ground>, tree: &Tree, base: DVec3, spread: f64, lay: &Lay, threads: Threads) -> (Ground, [[i32; 2]; 2]) {
         let spread = spread.max(LEAST_SPREAD);
         let stand = DVec3::new(base.x, base.y, base.z.floor());
         let run = Run::new(lay);
         let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
         let sculpted = |p: DVec3| ground(&lay.mounds, p);
         let seed = seed_of(tree);
+        let site = Site::of(base, spread, lay, seed);
         let (low, high) = run.points.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p - spread), hi.max(*p + spread)));
-        let waters = lay.water.map(|lower| Waters::found(lay, lower, &covered, &sculpted, low, high, 2.4, seed));
         // (one cell more each way than the lawn reaches: a column of soil goes down to meet its neighbours, which it must know the height of)
         let lo = [(stand.x + low.x).floor() as i32 - 1, (stand.y + low.y).floor() as i32 - 1];
         let n = [((stand.x + high.x).ceil() as i32 + 1 - lo[0]).max(1) as usize, ((stand.y + high.y).ceil() as i32 + 1 - lo[1]).max(1) as usize];
+        let cells = n[0] * n[1];
+        // The ground kept, if it is this lawn's: its tables to be written
+        // over where the touches differ, and what it was made from.
+        let kept = kept.filter(|g| g.made.as_ref().is_some_and(|made| made.site == site && made.was.len() == cells));
+        let known = kept.is_some();
+        let (mut made, mut was_made) = match kept {
+            Some(mut ground) => {
+                let was_made = *ground.made.take().unwrap();
+                for c in &was_made.reeded {
+                    ground.flags[*c as usize] &= !REED;
+                }
+                (ground, Some(was_made))
+            }
+            None => (Ground { made: None, stand, lo, n, high: vec![0.0; cells], top: vec![0; cells], level: vec![0; cells], skin: vec![TRUNK; cells], flags: vec![0; cells], stone: vec![0.0; cells], watered: false }, None),
+        };
+        let touches_were = was_made.as_mut().map(|m| std::mem::take(&mut m.touches));
+        let change = touches_were.as_ref().map_or_else(|| Change::whole(&lay.mounds), |were| Change::between(were, &lay.mounds));
+        let mut was = was_made.as_mut().map_or_else(|| vec![0.0; cells], |m| std::mem::take(&mut m.was));
+        let mut waters_were = was_made.and_then(|m| m.waters);
+        let waters = lay.water.map(|lower| {
+            let step = 2.4;
+            let (nx, ny) = (((high.x - low.x) / step).ceil() as usize + 1, ((high.y - low.y) / step).ceil() as usize + 1);
+            if !Waters::floods(lay, nx, ny) {
+                return Waters::still(lower, low, step);
+            }
+            let at = |c: usize| DVec3::new(low.x + (c % nx) as f64 * step, low.y + (c / nx) as f64 * step, 0.0);
+            // the grid's samples: those kept, with the ones the touches that differ reach taken again
+            let (inside, lifted) = match waters_were.as_mut().filter(|w| w.inside.len() == nx * ny && w.lifted.len() == nx * ny) {
+                Some(were) => {
+                    let (inside, mut lifted) = (std::mem::take(&mut were.inside), std::mem::take(&mut were.lifted));
+                    let marks = change.marks([nx, ny], low.truncate(), step);
+                    for j in marks.lo[1]..marks.hi[1] {
+                        for c in (j * nx + marks.lo[0]..j * nx + marks.hi[0]).filter(|c| marks.marked[*c] && inside[*c]) {
+                            lifted[c] = change.height(lifted[c], at(c));
+                        }
+                    }
+                    (inside, lifted)
+                }
+                None => {
+                    let inside: Vec<bool> = (0..nx * ny).map(|c| covered(at(c))).collect();
+                    let lifted = (0..nx * ny).map(|c| if inside[c] { sculpted(at(c)) } else { 0.0 }).collect();
+                    (inside, lifted)
+                }
+            };
+            let mut waters = Waters::found(lower, &inside, &lifted, &sculpted, low, step, nx, ny, seed);
+            (waters.inside, waters.lifted) = (inside, lifted);
+            waters
+        });
+        // whether the water is where it was: if not, every cell is worked out again
+        let still = known && match (&waters_were, &waters) {
+            (None, None) => true,
+            (Some(were), Some(now)) => were.same_water(now),
+            _ => false,
+        };
         let floor = stand.z as i32;
         // (the cell the foot is in: the numbers a cell's stones are thrown by go by where it is from there, so a lawn moved is the same lawn)
         let foot = [stand.x.floor() as i32, stand.y.floor() as i32];
+        let touched = change.marks(n, DVec2::new(lo[0] as f64 + 0.5 - stand.x, lo[1] as f64 + 0.5 - stand.y), 1.0);
+        let (from, to) = if still { (touched.lo, touched.hi) } else { ([0, 0], n) };
         // Each row on its own: a cell's ground depends on nothing but
         // where it is. Shared out because the touches are many: every
-        // cell asks every touch how far off it is.
-        let rows: Vec<Vec<(f64, i32, i32, u8, u8, f32)>> = threads.map(n[1], 16, |j| {
-            (0..n[0])
+        // cell asks every touch how far off it is. (Sixteen rows of a
+        // whole lawn were worth a thread; of a few cells a row, as many
+        // more as make up those cells.)
+        let least = if to[0] - from[0] == n[0] { 16 } else { (16 * 180 / (to[0] - from[0]).max(1)).max(16) };
+        let rows: Vec<Vec<(f64, f64, i32, i32, u8, u8, f32)>> = threads.map(to[1] - from[1], least, |row| {
+            let j = from[1] + row;
+            (from[0]..to[0])
+                .filter(|i| !still || touched.marked[j * n[0] + i])
                 .map(|i| {
+                    let c = j * n[0] + i;
                     let (x, y) = (lo[0] + i as i32, lo[1] + j as i32);
                     let p = DVec3::new(x as f64 + 0.5 - stand.x, y as f64 + 0.5 - stand.y, 0.0);
-                    let was = sculpted(p);
+                    let was = if touched.marked[c] { change.height(was[c], p) } else { was[c] };
                     let here = waters.as_ref().map_or(was, |w| w.ground(p, was));
                     let top = floor + (here + SOIL_OVER).round() as i32;
-                    let mut flags = if covered(p) { COVERED } else { 0 };
-                    let Some((level, by)) = waters.as_ref().map(|w| w.level(p, was)) else { return (here, top, 0, TRUNK, flags, 0.0) };
+                    // (whether the lawn covers a cell goes by its line, which is the site's: as it was, if it was kept)
+                    let mut flags = if known { made.flags[c] & COVERED } else if covered(p) { COVERED } else { 0 };
+                    let Some((level, by)) = waters.as_ref().map(|w| w.level(p, was)) else { return (was, here, top, 0, TRUNK, flags, 0.0) };
                     let surface = floor + level.round() as i32;
                     if by.is_some() {
                         flags |= STREAM;
@@ -460,26 +698,88 @@ impl Ground {
                         TRUNK
                     };
                     if !wet {
-                        return (here, top, surface, skin, flags, 0.0);
+                        return (was, here, top, surface, skin, flags, 0.0);
                     }
                     // and here and there a stone on the bed
                     let chance = hash(x - foot[0], y - foot[1], 3, seed);
                     let stone = if here <= level - 1.5 && chance < STONES { 1.4 + 1.08 * chance / STONES } else { 0.0 };
-                    (here, top, surface, skin, flags | WET, stone as f32)
+                    (was, here, top, surface, skin, flags | WET, stone as f32)
                 })
                 .collect()
         });
-        let cells = n[0] * n[1];
-        let mut made = Ground { stand, lo, n, high: Vec::with_capacity(cells), top: Vec::with_capacity(cells), level: Vec::with_capacity(cells), skin: Vec::with_capacity(cells), flags: Vec::with_capacity(cells), stone: Vec::with_capacity(cells), watered: waters.is_some() };
-        for (here, top, level, skin, flags, stone) in rows.into_iter().flatten() {
-            made.high.push(here);
-            made.top.push(top);
-            made.level.push(level);
-            made.skin.push(skin);
-            made.flags.push(flags);
-            made.stone.push(stone);
+        // (written where they belong, in the order they were worked out in)
+        for (row, cells) in rows.into_iter().enumerate() {
+            let j = from[1] + row;
+            let places: Vec<usize> = (from[0]..to[0]).filter(|i| !still || touched.marked[j * n[0] + i]).collect();
+            for (i, (raw, here, top, level, skin, flags, stone)) in places.into_iter().zip(cells) {
+                let c = j * n[0] + i;
+                (was[c], made.high[c], made.top[c], made.level[c], made.skin[c], made.flags[c], made.stone[c]) = (raw, here, top, level, skin, flags, stone);
+            }
         }
-        made
+        made.watered = waters.is_some();
+        made.made = Some(Box::new(Made { site, touches: lay.mounds.clone(), was, waters, reeded: Vec::new() }));
+        let redone = [[lo[0] + from[0] as i32, lo[1] + from[1] as i32], [lo[0] + to[0] as i32, lo[1] + to[1] as i32]];
+        (made, redone)
+    }
+
+    /// The part of the ground over the cells from `lo` to before `hi`, as
+    /// a ground of its own: what a tile is laid from, so that a tile's
+    /// bricks can depend on nothing outside it (see [`kept`]). Where the
+    /// box reaches past the table the piece does not: there is nothing to
+    /// say of those cells in either.
+    fn cut(&self, lo: [i32; 2], hi: [i32; 2]) -> Ground {
+        let (lo, n) = self.window(lo, hi);
+        let cells = n[0] * n[1];
+        let mut cut = Ground { made: None, stand: self.stand, lo, n, high: Vec::with_capacity(cells), top: Vec::with_capacity(cells), level: Vec::with_capacity(cells), skin: Vec::with_capacity(cells), flags: Vec::with_capacity(cells), stone: Vec::with_capacity(cells), watered: self.watered };
+        for j in 0..n[1] {
+            let from = self.index(lo[0], lo[1] + j as i32).unwrap_or(0);
+            let row = from..from + n[0];
+            cut.high.extend_from_slice(&self.high[row.clone()]);
+            cut.top.extend_from_slice(&self.top[row.clone()]);
+            cut.level.extend_from_slice(&self.level[row.clone()]);
+            cut.skin.extend_from_slice(&self.skin[row.clone()]);
+            cut.flags.extend_from_slice(&self.flags[row.clone()]);
+            cut.stone.extend_from_slice(&self.stone[row]);
+        }
+        cut
+    }
+
+    /// The part of the box from `lo` to before `hi` that the table has: its first cell, and how many each way.
+    fn window(&self, lo: [i32; 2], hi: [i32; 2]) -> ([i32; 2], [usize; 2]) {
+        let end = self.cells().1;
+        let first = [lo[0].clamp(self.lo[0], end[0]), lo[1].clamp(self.lo[1], end[1])];
+        (first, [(hi[0].clamp(first[0], end[0]) - first[0]) as usize, (hi[1].clamp(first[1], end[1]) - first[1]) as usize])
+    }
+
+    /// Whether `cut` is what [`Ground::cut`] would now cut from `lo` to
+    /// before `hi`: every number of it the very same. Nothing is copied
+    /// to find out.
+    fn same_cut(&self, cut: &Ground, lo: [i32; 2], hi: [i32; 2]) -> bool {
+        let (lo, n) = self.window(lo, hi);
+        let bits = |v: DVec3| v.to_array().map(f64::to_bits);
+        if (cut.lo, cut.n, cut.watered) != (lo, n, self.watered) || bits(cut.stand) != bits(self.stand) {
+            return false;
+        }
+        (0..n[1]).all(|j| {
+            let from = self.index(lo[0], lo[1] + j as i32).unwrap_or(0);
+            let (row, of_cut) = (from..from + n[0], j * n[0]..(j + 1) * n[0]);
+            // (The heights by their bits, every one of a row looked at
+            // and the differences gathered, where stopping at the first
+            // that differs would be a branch a number: this way the
+            // compiler compares several at once, and a tile kept is
+            // nearly always the same to its last number anyway.)
+            self.top[row.clone()] == cut.top[of_cut.clone()]
+                && self.flags[row.clone()] == cut.flags[of_cut.clone()]
+                && self.level[row.clone()] == cut.level[of_cut.clone()]
+                && self.skin[row.clone()] == cut.skin[of_cut.clone()]
+                && self.high[row.clone()].iter().zip(&cut.high[of_cut.clone()]).fold(0, |differ, (a, b)| differ | (a.to_bits() ^ b.to_bits())) == 0
+                && self.stone[row].iter().zip(&cut.stone[of_cut]).fold(0, |differ, (a, b)| differ | (a.to_bits() ^ b.to_bits())) == 0
+        })
+    }
+
+    /// How many bytes the tables take, near enough.
+    fn bytes(&self) -> usize {
+        self.high.len() * 30 + self.made.as_ref().map_or(0, |made| made.was.len() * 8 + made.waters.as_ref().map_or(0, |w| w.inside.len() * 14))
     }
 
     /// The cells the table covers: the first each way, and one past the last.
@@ -549,6 +849,7 @@ fn tip(towards: [i32; 2]) -> u8 {
 }
 
 /// What every tile of a lawn is laid by, besides the ground.
+#[derive(Clone, Copy)]
 struct Rule<'a> {
     ground: &'a Ground,
     seed: u32,
@@ -567,6 +868,7 @@ struct Rule<'a> {
 }
 
 /// One tuft of blades, or the reed that stands in its place.
+#[derive(Clone)]
 struct Tuft {
     /// where it stands, from the lawn's foot
     at: DVec2,
@@ -578,6 +880,18 @@ struct Tuft {
 }
 
 impl Rule<'_> {
+    /// How far a blade may reach sideways: it leans under 40 degrees from upright.
+    fn reach(&self) -> i32 {
+        ((self.height.ceil() as i32 + 1).min(TALLEST) as f64 * 0.8).ceil() as i32 + 2
+    }
+
+    /// Every number a tile is laid by besides its ground and its reeds,
+    /// as bits: two rules with the same lay the same tile from the same
+    /// ground.
+    fn bits(&self) -> [u64; 8] {
+        [self.seed as u64, self.height.to_bits(), self.gap.to_bits(), self.lean.to_bits(), self.downwind.x.to_bits(), self.downwind.y.to_bits(), self.reeds.to_bits(), self.longest as u64]
+    }
+
     /// The tufts whose feet are in the cells from `lo` to before `hi`, in
     /// the order they are always taken in: by rows of the lattice.
     ///
@@ -679,8 +993,22 @@ impl Rule<'_> {
         (needed, extra)
     }
 
-    /// Every reed of the lawn, and for each cell one stands in or over,
-    /// the heights it fills there.
+    /// The tufts in the cells from `lo` to before `hi` that a reed may
+    /// stand at ([`Rule::reed_at`]), in the tufts' order.
+    ///
+    /// Whether a tuft is one goes by the ground of its own cell and by
+    /// nothing else, so when a touch has changed some cells the tufts to
+    /// ask again are those of the changed cells, and the rest are what
+    /// they were (see `Model::laid`).
+    fn candidates(&self, lo: [i32; 2], hi: [i32; 2]) -> Vec<Tuft> {
+        if self.reeds <= 0.0 || !self.ground.watered || lo[0] >= hi[0] || lo[1] >= hi[1] {
+            return Vec::new();
+        }
+        self.tufts(lo, hi).into_iter().filter(|tuft| self.reed_at(tuft)).collect()
+    }
+
+    /// Every reed of the lawn, from the tufts one may stand at, and for
+    /// each cell one stands in or over, the heights it fills there.
     ///
     /// All of them at once and before any tile, where everything else is
     /// laid tile by tile: a reed is a dozen cells across with its leaf
@@ -688,16 +1016,12 @@ impl Rule<'_> {
     /// the tufts' order, and one that would stand in another already
     /// there, or in the bank beside it, is left out: reeds stand a little
     /// apart, as plants do.
-    fn reeds(&self) -> (Vec<(CellBrick, u8)>, HashMap<[i32; 2], Vec<(i32, i32)>>) {
+    fn reeds_of(&self, candidates: &[Tuft]) -> (Vec<(CellBrick, u8)>, HashMap<[i32; 2], Vec<(i32, i32)>>) {
         let g = self.ground;
         let (mut bricks, mut stems): (Vec<(CellBrick, u8)>, HashMap<[i32; 2], Vec<(i32, i32)>>) = (Vec::new(), HashMap::new());
-        if self.reeds <= 0.0 || !g.watered {
-            return (bricks, stems);
-        }
-        let (lo, hi) = g.cells();
         // whether a brick stands clear of the ground and of every reed so far
         let clear = |b: &CellBrick, stems: &HashMap<[i32; 2], Vec<(i32, i32)>>| b.ext[2] > 0 && g.index(b.min[0], b.min[1]).is_none_or(|c| b.min[2] >= g.top[c]) && stems.get(&[b.min[0], b.min[1]]).is_none_or(|taken| taken.iter().all(|(from, to)| b.min[2] >= *to || b.min[2] + b.ext[2] <= *from));
-        for tuft in self.tufts(lo, hi).iter().filter(|tuft| self.reed_at(tuft)) {
+        for tuft in candidates {
             let (needed, extra) = self.reed(tuft);
             if needed.is_empty() || !needed.iter().all(|(b, _)| clear(b, &stems)) {
                 continue;
@@ -827,8 +1151,7 @@ impl Rule<'_> {
         const TIP: u8 = 255;
         let mut held = vec![0u8; side * side * deep];
         let mut tips: Vec<(CellBrick, u8)> = Vec::new();
-        // (how far a blade may reach sideways: it leans under 40 degrees from upright)
-        let reach = (tallest as f64 * 0.8).ceil() as i32 + 2;
+        let reach = self.reach();
         for tuft in self.tufts([lo[0] - reach, lo[1] - reach], [hi[0] + reach, hi[1] + reach]) {
             let Some(c) = g.index(tuft.cell[0], tuft.cell[1]).filter(|c| g.flags[*c] & COVERED != 0) else { continue };
             let number = |n: i32| hash(tuft.a, tuft.b, n, self.seed);
@@ -954,6 +1277,37 @@ impl Rule<'_> {
     }
 }
 
+/// The volume of some bricks and the box they fill, kept with a tile so
+/// that a lawn's can be had from its tiles' without going through its
+/// bricks.
+#[derive(Clone)]
+struct Sums {
+    volume: f64,
+    /// whether every brick's volume is a whole number of half cells: such volumes add up to the same number in any order
+    halves: bool,
+    lo: [i32; 3],
+    hi: [i32; 3],
+}
+
+impl Default for Sums {
+    fn default() -> Sums {
+        Sums { volume: 0.0, halves: true, lo: [i32::MAX; 3], hi: [i32::MIN; 3] }
+    }
+}
+
+impl Sums {
+    fn of(bricks: &[CellBrick]) -> Sums {
+        bricks.iter().fold(Sums::default(), |sums, b| {
+            let volume = b.volume();
+            Sums { volume: sums.volume + volume, halves: sums.halves && (volume * 2.0).fract() == 0.0, lo: [0, 1, 2].map(|k| sums.lo[k].min(b.min[k])), hi: [0, 1, 2].map(|k| sums.hi[k].max(b.min[k] + b.ext[k])) }
+        })
+    }
+
+    fn with(&self, other: &Sums) -> Sums {
+        Sums { volume: self.volume + other.volume, halves: self.halves && other.halves, lo: [0, 1, 2].map(|k| self.lo[k].min(other.lo[k])), hi: [0, 1, 2].map(|k| self.hi[k].max(other.hi[k])) }
+    }
+}
+
 /// Water standing over one cell: the cell, and from which height to before which.
 type Standing = ([i32; 2], i32, i32);
 
@@ -1047,7 +1401,7 @@ pub struct Model {
     /// the volume of all its bricks, in cells cubed
     pub volume: f64,
     /// the ground it lies on
-    pub ground: Ground,
+    pub ground: Arc<Ground>,
     lo: [i32; 3],
     hi: [i32; 3],
     index: OnceLock<Index>,
@@ -1070,36 +1424,164 @@ impl Model {
     /// The lawn `tree` and `lay` describe, standing at `base`, its
     /// blades `height` tall, reaching `spread` to each side of its line,
     /// in bricks no longer than `longest`.
-    pub fn new(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay, longest: i32, threads: Threads) -> Model {
+    ///
+    /// Made from what was kept of the lawn's last build, where there is
+    /// one (see [`kept`]): the same bricks in the same order as
+    /// [`Model::fresh`] makes from nothing, for less work.
+    pub fn new(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay, longest: i32, threads: Threads) -> Arc<Model> {
+        let site = Site::of(base, spread, lay, seed_of(tree));
+        kept::with(&site, |lawn| Model::laid(lawn, tree, base, height, spread, lay, longest, threads))
+    }
+
+    /// [`Model::new`], from nothing kept and keeping nothing: what a lawn
+    /// is, by which the keeping is checked.
+    pub fn fresh(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay, longest: i32, threads: Threads) -> Arc<Model> {
+        Model::laid(&mut kept::Lawn::default(), tree, base, height, spread, lay, longest, threads)
+    }
+
+    /// The lawn, with `lawn` holding what was kept of its last build
+    /// going in and of this one coming out. There is one way to build a
+    /// lawn and this is it: from nothing, `lawn` is empty, every cell of
+    /// the ground is worked out and every tile laid.
+    #[allow(clippy::too_many_arguments)]
+    fn laid(lawn: &mut kept::Lawn, tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay, longest: i32, threads: Threads) -> Arc<Model> {
         let tree = tree.clamped();
         let height = height.max(Tree::least_height(tree.kind));
-        let mut ground = Ground::new(&tree, base, spread, lay, threads);
         let seed = seed_of(&tree);
         let wind = TAU * hash(0, 0, 1, seed);
         let none = HashMap::new();
         let (gap, lean, downwind) = (3.4 - 1.9 * tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0, DVec3::new(wind.cos(), wind.sin(), 0.0));
-        let (reeds, stems) = Rule { ground: &ground, seed, height, gap, lean, downwind, reeds: lay.reeds, longest, stems: &none }.reeds();
-        let marked: Vec<usize> = stems.keys().filter_map(|at| ground.index(at[0], at[1])).collect();
-        for c in marked {
-            ground.flags[c] |= REED;
+        let site = Site::of(base, spread, lay, seed);
+        if lawn.site.as_ref() != Some(&site) {
+            *lawn = kept::Lawn::default();
+            lawn.site = Some(site.clone());
+        }
+        // (the rule but for its ground and reeds, which are not yet known: its numbers are)
+        let blank = Ground { made: None, stand: DVec3::ZERO, lo: [0; 2], n: [0; 2], high: Vec::new(), top: Vec::new(), level: Vec::new(), skin: Vec::new(), flags: Vec::new(), stone: Vec::new(), watered: false };
+        let sown = Rule { ground: &blank, seed, height, gap, lean, downwind, reeds: lay.reeds, longest, stems: &none }.bits();
+        // The very lawn that was built last, as when a lawn built while
+        // the mouse was down is built again on letting go, or its parts
+        // are asked for to write the game's file: it is that lawn.
+        let same_touches = |made: &Made| made.touches.len() == lay.mounds.len() && made.touches.iter().zip(&lay.mounds).all(|(a, b)| same_touch(a, b));
+        lawn.laid = 0;
+        if let Some((_, model)) = lawn.last.as_ref().filter(|(was, model)| *was == sown && model.ground.made.as_ref().is_some_and(|made| made.site == site && same_touches(made))) {
+            return model.clone();
+        }
+        // (dropped before the ground is taken, which the model has a hold of: with nobody else holding it, the ground is changed where it lies and not copied)
+        lawn.last = None;
+        let before = lawn.ground.take().map(|ground| Arc::try_unwrap(ground).unwrap_or_else(|held| (*held).clone()));
+        let (mut ground, redone) = Ground::after(before, &tree, base, spread, lay, threads);
+        // The reeds. The tufts one may stand at are kept, and asked again
+        // only in the cells whose ground was worked out again; which of
+        // them do stand is settled over the whole lawn each time, in the
+        // tufts' order, since each gives way to those before it. They are
+        // few: on a lawn 600 cells by 480, asking every tuft was 2.7 ms,
+        // and settling the reeds is the work of the reeds there are.
+        let bare = Rule { ground: &ground, seed, height, gap, lean, downwind, reeds: lay.reeds, longest, stems: &none };
+        let candidates = match lawn.tufts.take().filter(|(was, _)| *was == sown) {
+            Some((_, mut were)) => {
+                were.retain(|tuft| !(0..2).all(|k| tuft.cell[k] >= redone[0][k] && tuft.cell[k] < redone[1][k]));
+                were.extend(bare.candidates(redone[0], redone[1]));
+                were.sort_by_key(|tuft| (tuft.b, tuft.a));
+                were
+            }
+            None => {
+                let (lo, hi) = ground.cells();
+                bare.candidates(lo, hi)
+            }
+        };
+        let (reeds, stems) = bare.reeds_of(&candidates);
+        lawn.tufts = Some((sown, candidates));
+        let marked: Vec<u32> = stems.keys().filter_map(|at| ground.index(at[0], at[1])).map(|c| c as u32).collect();
+        for c in &marked {
+            ground.flags[*c as usize] |= REED;
+        }
+        if let Some(made) = ground.made.as_mut() {
+            made.reeded = marked;
         }
         let rule = Rule { ground: &ground, seed, height, gap, lean, downwind, reeds: lay.reeds, longest, stems: &stems };
         // the tiles: those of the world's own grid of them that the lawn reaches
         let (lo, hi) = ground.cells();
         let (first, last) = ([lo[0].div_euclid(TILE), lo[1].div_euclid(TILE)], [(hi[0] - 1).div_euclid(TILE), (hi[1] - 1).div_euclid(TILE)]);
         let across = (last[0] - first[0] + 1) as usize;
-        let tiles = threads.map(across * (last[1] - first[1] + 1) as usize, 2, |n| rule.tile([(first[0] + (n % across) as i32) * TILE, (first[1] + (n / across) as i32) * TILE]));
-        // (in the tiles' own order, then the water, then the reeds: the same whichever thread laid which)
-        let water: Vec<Standing> = tiles.iter().flat_map(|tile| tile.1.iter().copied()).collect();
-        let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-        for (brick, shade) in tiles.into_iter().flat_map(|tile| tile.0).chain(pooled(&water, longest)).chain(reeds) {
-            bricks.push(brick);
-            shades.push(shade);
+        let count = across * (last[1] - first[1] + 1) as usize;
+        let place = |n: usize| [first[0] + (n % across) as i32, first[1] + (n / across) as i32];
+        // What a tile is laid from: the ground of its own cells and of
+        // those as far round it as anything in it reads (a blade's reach,
+        // and the two cells a blade may stand from its tuft, and one
+        // more), and the reeds over its own cells.
+        let margin = rule.reach() + 3;
+        let around = |tile: [i32; 2]| ([tile[0] * TILE - margin, tile[1] * TILE - margin], [(tile[0] + 1) * TILE + margin, (tile[1] + 1) * TILE + margin]);
+        let mut reeded: HashMap<[i32; 2], kept::Stems> = HashMap::new();
+        for (at, taken) in &stems {
+            reeded.entry([at[0].div_euclid(TILE), at[1].div_euclid(TILE)]).or_default().push((*at, taken.clone()));
         }
-        let volume = bricks.iter().map(|b| b.volume()).sum();
-        let corner = |far: bool| [0, 1, 2].map(|k| bricks.iter().map(|b| b.min[k] + if far { b.ext[k] } else { 0 }).reduce(if far { i32::max } else { i32::min }).unwrap_or(0));
-        let (lo, hi) = (corner(false), corner(true));
-        Model { bricks, shades, volume, ground, lo, hi, index: OnceLock::new() }
+        reeded.values_mut().for_each(|over| over.sort());
+        let no_reeds = kept::Stems::new();
+        let stems_over = |tile: [i32; 2]| reeded.get(&tile).unwrap_or(&no_reeds);
+        // The tiles kept that are no longer what would be laid. (A tile
+        // kept takes a few microseconds to compare, so a hundred of them
+        // are worth a thread, and a lawn of fewer is gone through here.)
+        let kept_tiles = &lawn.tiles;
+        let fresh = threads.map(count, 100, |n| {
+            let tile = place(n);
+            let (from, to) = around(tile);
+            kept_tiles.get(&tile).is_some_and(|kept| kept.rule == sown && kept.stems == *stems_over(tile) && ground.same_cut(&kept.cut, from, to))
+        });
+        let stale: Vec<usize> = (0..count).filter(|n| !fresh[*n]).collect();
+        let laid = threads.map(stale.len(), 2, |k| {
+            let tile = place(stale[k]);
+            let (from, to) = around(tile);
+            let cut = ground.cut(from, to);
+            let over: HashMap<[i32; 2], Vec<(i32, i32)>> = stems_over(tile).iter().cloned().collect();
+            // (from the piece cut out, and from nothing else: what is kept with the tile is all it was laid from)
+            let (solid, water) = Rule { ground: &cut, stems: &over, ..rule }.tile([tile[0] * TILE, tile[1] * TILE]);
+            let (bricks, shades): (Vec<CellBrick>, Vec<u8>) = solid.into_iter().unzip();
+            let sums = Sums::of(&bricks);
+            kept::Tile { rule: sown, cut, stems: stems_over(tile).clone(), bricks, shades, water, sums }
+        });
+        lawn.laid = stale.len();
+        for (n, tile) in stale.iter().zip(laid) {
+            lawn.tiles.insert(place(*n), tile);
+        }
+        // (in the tiles' own order, then the water, then the reeds: the same whichever thread laid which, and whichever were kept)
+        let tiles: Vec<&kept::Tile> = (0..count).map(|n| &lawn.tiles[&place(n)]).collect();
+        let water: Vec<Standing> = tiles.iter().flat_map(|tile| tile.water.iter().copied()).collect();
+        // (the water is joined over the whole lawn, so it is joined again only when some of it has changed)
+        let pool = match lawn.pool.take().filter(|(was, long, _)| *long == longest && *was == water) {
+            Some((_, _, pool)) => pool,
+            None => pooled(&water, longest),
+        };
+        let rest = pool.len() + reeds.len();
+        let all = tiles.iter().map(|tile| tile.bricks.len()).sum::<usize>() + rest;
+        let (mut bricks, mut shades) = (Vec::with_capacity(all), Vec::with_capacity(all));
+        for tile in &tiles {
+            bricks.extend_from_slice(&tile.bricks);
+            shades.extend_from_slice(&tile.shades);
+        }
+        for (brick, shade) in pool.iter().chain(&reeds) {
+            bricks.push(*brick);
+            shades.push(*shade);
+        }
+        lawn.pool = Some((water, longest, pool));
+        // Its volume and its box, from each tile's own, which were added
+        // up when the tile was laid: gone through brick by brick, a lawn
+        // of 335,000 bricks took 1.6 ms a build for these two alone.
+        let tail = Sums::of(&bricks[bricks.len() - rest..]);
+        let sums = tiles.iter().map(|tile| &tile.sums).chain([&tail]).fold(Sums::default(), |all, part| all.with(part));
+        // (A volume is added up brick by brick in the bricks' order, and
+        // adding it up a tile at a time is the same number only while
+        // every sum on the way is exact, which it is where each brick's
+        // volume is so many halves of a cell: a box, or a box less an
+        // edge. Should a lawn come to have a brick that is not, it is
+        // added up in order as it always was.)
+        let volume = if sums.halves { sums.volume } else { bricks.iter().map(|b| b.volume()).sum() };
+        let (lo, hi) = if bricks.is_empty() { ([0; 3], [0; 3]) } else { (sums.lo, sums.hi) };
+        let ground = Arc::new(ground);
+        let model = Arc::new(Model { bricks, shades, volume, ground: ground.clone(), lo, hi, index: OnceLock::new() });
+        lawn.ground = Some(ground);
+        lawn.last = Some((sown, model.clone()));
+        model
     }
 
     /// The box the lawn's bricks fill.

@@ -2837,7 +2837,7 @@ The table answers what the land is like without the bricks being built:
 `Ground::at` gives a cell's height, the top of its soil, the water
 standing there and whether that water is a stream's, and `Ground::slope`
 gives the rise each way from the heights of the cells beside it. Making
-the table takes about a third of a lawn's build.
+the table takes about a third of a lawn's build from nothing.
 
 ##### Ponds
 
@@ -2969,6 +2969,61 @@ bricks of the tiles it reaches and of no others, which the editor uses
 to give the graphics card only those tiles of a very large lawn. Water
 and reeds belong to no tile: a pond's water is joined whole, and a reed
 is a dozen cells across with its leaf.
+
+##### What is kept from one build to the next
+
+Every touch of the brush builds the lawn again, and a touch changes the
+ground only within its range. The last build of a lawn is therefore kept
+([core/src/grass/kept.rs](../core/src/grass/kept.rs)), and the next
+build works out what the touch changed. A lawn 600 cells by 480 then
+takes 4 to 6 ms a touch where it took 38
+([performance.md](performance.md#a-lawn)).
+
+The ground's heights are kept with the touches they were made from. The
+touches that differ are what is left of the old list and the new once
+the touches both begin with and the touches both end with are taken
+away. A cell that none of them reaches has the same touches reaching it
+in the same order as before, so its height is the one kept. A cell that
+one of them reaches is worked out again from the floor. Where touches
+were only added to the end, as a stroke adds them, the new ones are
+applied to the height kept, which is the same arithmetic in the same
+order (`Ground::after`).
+
+Each tile's bricks are kept with what they were laid from: the ground
+of the tile's own cells and of the cells round them, as far as a blade
+reaches and three cells more, the reeds over the tile, and the lawn's
+settings. A tile is laid again unless all of that is, number for number,
+what it would be laid from now. Comparing a tile takes a few
+microseconds and laying one takes half a millisecond.
+
+A tile is laid from the piece of ground kept with it and from nothing
+else, in a build from nothing as in any other (`Ground::cut`). A kept
+tile therefore cannot depend on anything the comparison leaves out, and
+a lawn built from what was kept is the bricks of a lawn built from
+nothing, in the same order. The other design marks the cells a touch
+changed and reuses the tiles whose cells are unmarked. It compares less,
+and it is right only while every change to the ground remembers to mark.
+
+Water and reeds are settled over the whole lawn. The tufts where a reed
+may stand are kept, and asked again only in the cells that were worked
+out again. Which of them carry a reed is decided afresh each build,
+since a reed gives way to the reeds before it, and that costs by the
+number of reeds. The water is joined into boxes again only when a cell
+of water has changed.
+
+With two pond levels the flood is made again at every touch, because a
+hollow anywhere may change where water stands. Its samples of the ground
+are kept as the cells' heights are. If the water comes out where it
+was, the cells worked out are still only those the touch reaches. If it
+moved, every cell is worked out again and the tiles are compared as
+before.
+
+Four lawns are kept at most, in 192 megabytes at most, and the lawn
+built longest ago is dropped first. A lawn 600 cells by 480 takes about
+45 megabytes. A build takes its lawn out of the store and puts it back
+when it is done, so a build on another thread never waits for it. Two
+threads that build the same lawn at once both get the same bricks, the
+second from nothing.
 
 ##### Which part a brick is
 
