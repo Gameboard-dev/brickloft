@@ -96,6 +96,7 @@ file, the entry is a server of type `http` with the URL above.
 | `move_pull_point` | Changes how far an added point pulls the form. |
 | `remove_pull_point` | Takes an added point off, so the form goes back to its own shape there. |
 | `line_up_arch` | Gives an arch that stands at an angle to its grid a grid of its own, turned to line it up, so that it is fitted smoothly. Its feet stay where they are. |
+| `list_meshes` | Lists the mesh files in the editor's imports folder by name and size. These are the only files an `imported` form can be built from. |
 
 ### Forms and their settings
 
@@ -121,7 +122,7 @@ The settings Claude can give:
 
 | Setting | Meaning |
 |---|---|
-| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`, `cube`, `tree` or `furniture` |
+| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid`, `cube`, `tree`, `furniture`, `maze` or `imported` |
 | `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, a cube's middle, or the points of a curve or profile. A form added without points starts where the editor would start one. |
 | `radius`, `rise`, `thick`, `depth` | Sizes in microbricks |
 | `fill`, `tube`, `closed` | Solid or shell, round tube or flat band, closed loop |
@@ -368,6 +369,37 @@ the way through. A maze whose corridors would be under 3 microbricks
 wide, or whose walls or hedge are more than may be built, is refused
 with the reason and what to change.
 
+A model from a file is the form `imported`, and its own settings are one
+line of text, `import`: `name,up,fitter,loose,colours`, of which only
+the name is needed. The name is one that `list_meshes` gives. A mesh
+file gets into that list when you open it in the editor, by typing its
+path in the panel or dropping it on the window, which copies it into the
+editor's imports folder under a name made from its content. Claude
+cannot open a file, and cannot name one anywhere else: a name is sixteen
+hexadecimal digits and `.glb`, `.obj` or `.ply`, and anything else is
+refused before a file is looked for. For example, this call builds a
+mesh 80 microbricks along its longest side, with z as its up, in eight
+of its own colours:
+
+```json
+{
+  "name": "add_form",
+  "arguments": {
+    "settings": { "form": "imported", "import": "07d13976ad23fe22.glb,z,smoothed,0,8", "radius": 40 }
+  }
+}
+```
+
+`up` is `y`, `z` or `x`, and left out it is `y` for a `.glb` or `.obj`
+file and `z` for a `.ply`. `fitter` is `smoothed` or `blocks`. `loose`
+leaves out pieces of the build smaller than that many microbricks that
+touch no other piece, and 0 keeps everything. `colours` is how many
+colours the mesh's own are reduced to, 12 if left out, and 0 leaves them
+out. The form's `radius` is half the length of the mesh's longest side
+(24 if left out), its one point is its foot, `fill` false leaves a shell
+`thick` through, and `simplify` above 0 trades closeness for fewer
+bricks. A mesh added with no `colour` comes in its own colours.
+
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to
 build") and can correct the request.
@@ -445,8 +477,18 @@ tools below allow.
 
 **The tools are narrow.** They read and change the forms in the workspace,
 move the camera, and take a picture of the editor's own window. No tool
-reads or writes a file, runs a command, reaches the network, or touches the
-game. Saved forms, reports and the clipboard are out of reach.
+writes a file, runs a command, reaches the network, or touches the game.
+Saved forms, reports and the clipboard are out of reach.
+
+**One folder of files can be read, and only by name.** `list_meshes`
+gives the names and sizes of the mesh files in the editor's imports
+folder, and an `imported` form is built from one of them. Those are
+files you opened in the editor yourself. A name must be sixteen
+hexadecimal digits and one of three endings, so it has no slash, no
+`..` and no drive letter in it, and a name of any other shape is refused
+by the parser before any file is looked for. No tool takes a path, and
+no tool returns a file's contents: what comes back from a mesh is its
+bricks.
 
 **Every value is checked.** Settings are read by the same parser that reads
 a saved form and built under the same limits as any form. A request's size,

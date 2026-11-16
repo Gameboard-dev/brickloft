@@ -299,6 +299,17 @@ is one of the editor's forms, so each needs a way in, and both then need
 fitting with bricks. The plan below is not built. It was written on
 2026-11-16 from each project's public page and licence file, read that day.
 
+One part of it has since been built: a mesh from a file. Four ways of
+fitting one were tried and measured, and the Imported form builds a
+mesh by the best of them, from a `.glb`, `.obj` or `.ply` file, in the
+mesh's own colours
+([algorithm.md, section 7.13](algorithm.md#713-meshes-made-by-other-programs),
+[features.md](features.md#meshes-from-files)). The rest of the plan
+below is not built: grids of coloured cells and MarkovJunior, the
+generator that would make a mesh from a prompt, and the `.vox` and
+picture readers. What the mesh fitter itself still lacks is listed at
+the end of that section of algorithm.md.
+
 ### What the two need in common
 
 A new form, **Imported**, holds what another program made: a grid of

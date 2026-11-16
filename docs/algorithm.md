@@ -4232,6 +4232,404 @@ of hair and four of clothes, among which the seed picks.
 
 <img src="images/furniture-portraits.png" width="700" alt="Ten framed cartoon portraits in a row: heads and shoulders with different skin, hair, hats and glasses, each smiling"> <img src="images/furniture-paintings.png" width="700" alt="Framed paintings: four landscapes with mountains, lakes and firs, and four abstracts of rectangles, arcs and bands">
 
+### 7.13 Meshes made by other programs
+
+A triangle mesh from a file is the one form here that arrives with no
+formula. This section records how fitting one was chosen, with the
+measurements, because the first idea for it was the wrong one. The
+editor's Imported form builds a mesh by the last of the four routes
+described here, and what the form adds round the fitting comes after the
+measurements. The code is [`core/src/mesh.rs`](../core/src/mesh.rs) and
+the files under [`core/src/mesh/`](../core/src/mesh/). The readers of
+mesh files are in [`editor/src/import/`](../editor/src/import/), since
+the core library takes a mesh as numbers and knows nothing of files.
+
+#### What must not be lost
+
+Most programs that turn a mesh into toy bricks first fill a grid of
+cells and then join the cells into bricks. Testuz, Schwartzburg and Pauly
+(2013, [doi:10.2312/conf/EG2013/short/081-084](https://doi.org/10.2312/conf/EG2013/short/081-084))
+describe that order: voxelise, merge voxels into larger bricks, repair
+what would not hold together. Luo and others (2015, "Legolization",
+[doi:10.1145/2816795.2818091](https://doi.org/10.1145/2816795.2818091))
+work on which layout of bricks is strong enough to stand, which matters
+for plastic and not here, since a brick in the game does not fall. Both
+were read in their abstracts only. For bricks that are all boxes the
+order is harmless, because a box can show nothing a filled cell cannot.
+Brickadia's wedges stretch to any whole-number rise and run, so here the
+grid throws away the one thing those wedges are for: a filled cell does
+not say which way the surface through it faced, and a roof becomes
+stairs that no later step can turn back into a roof.
+
+Zhou, Chen and Xu (2019, [doi:10.1111/cgf.13603](https://doi.org/10.1111/cgf.13603))
+are the exception among the papers looked at. Their abstract says the
+system keeps an architectural model's repeats, details and planarity,
+deforms the mesh so that it agrees with where bricks can stand, and uses
+sloping bricks as well as boxes. Only the abstract could be opened, so
+what is taken from it is the aim and not a method.
+
+The rule adopted is that the mesh stays in hand until the last brick is
+chosen. Every sample that decides a brick is answered by the triangles,
+and the direction of a sloped brick comes from the triangle it lies on.
+
+#### The four routes tried
+
+| Route | What it does |
+|---|---|
+| Blocks | Cubes alone, joined into boxes: what fill-then-join gives. The baseline. |
+| Plain | The mesh as a distance function (nearest triangle, signed by the winding number) given to the fitter of section 7.1 unchanged: the best unit piece for each cell, then ramps stretched one way, one cell high. |
+| Guided | The same unit pieces. Then each cell the surface crosses is offered the stretched pieces whose sloped face lies the way the nearest triangle faces, to within 3 degrees: a ramp of any whole rise and run up to 12 where the surface runs along an axis, a stretched tetrahedron or cut cube up to 6 each way where it slopes along all three. A piece is laid if it disagrees with the mesh no more than the unit pieces it replaces. |
+| Scanned | Guided, with the cells and their samples found from the triangles directly and not by asking a distance function (below). |
+
+Two other approaches were considered and not built. Cutting the mesh
+into near-flat regions first (growing regions over neighbouring triangles
+by their normals, or the variational shape approximation of Cohen-Steiner,
+Alliez and Desbrun 2004,
+[doi:10.1145/1015706.1015817](https://doi.org/10.1145/1015706.1015817))
+would give each region one plane, and so one size of piece and one
+lattice for the whole of it. The guided route reaches the same result
+for flat faces without the regions, by ranking whole layouts (below).
+Regions remain the way to do what it cannot: moving a large plane onto
+the lattice. Laying a curved region out as one patch, as the sphere and
+the spun profile are laid out (sections 7.3 and 7.6), needs the region
+to be a known kind of surface, and a mesh's curved parts are not.
+
+#### Layouts, not single pieces
+
+Stretched pieces of one size facing one way tile a flat face if they all
+stand on one lattice of boxes. Taken one at a time by what each saves,
+pieces from different lattices landed on the same face and blocked each
+other, and a flat facet came out as scattered pieces with unit ones
+between. So the pieces found are grouped by size, direction and lattice,
+the groups are ranked by what all their pieces save and cover together,
+and a whole group is laid before the next is looked at. On the gem at
+size 77 that took 1,142 bricks to 1,030 and the steps for each cell of
+surface from 0.028 to 0.022, and the house at size 56 went from 18
+bricks to 10. On curved meshes it is neither better nor worse on
+balance: the sphere at 96 lost 16% of its bricks and a quarter of its
+closeness, and the torus gained 5% in bricks.
+
+#### Where the time goes, and the scanned route
+
+The plain and guided routes ask the distance function at every corner of
+every block of cells near the surface and at 64 places in every cell the
+surface may cross. For a mesh each question is two searches of a
+hierarchy of boxes: one for the nearest triangle and one for the winding
+number. A house of 22 triangles, 56 cells long, took 2.7 to 4 seconds on
+one thread, and a sphere 96 across took 85 to 165 seconds. That is well
+tuned code doing work it need not do.
+
+The scanned route gets the same answers from the triangles:
+
+1. A cell is crossed by the surface exactly when a triangle overlaps its
+   box, so each triangle is laid into the cells it overlaps (the
+   separating-axis test of Akenine-Möller 2001,
+   [doi:10.1080/10867651.2001.10487535](https://doi.org/10.1080/10867651.2001.10487535)).
+2. The winding number changes by exactly one across a triangle and
+   nowhere else. It is worked out through the hierarchy once for a cell,
+   near its middle, and each of the cell's 64 samples and 8 corners is
+   that number plus or minus one for every triangle of the cell that the
+   line from the middle to the sample passes through.
+3. A cell no triangle touches is all inside or all outside, and so is
+   the run of such cells between two that are touched: one winding
+   number settles a run.
+
+With $`T`$ triangles, $`S`$ cells on the surface and $`V`$ cells in the
+box, the plain route makes about $`70 S`$ searches of the hierarchy and
+the scanned route about $`2 S`$, with $`72 S`$ tests of a line against
+the few triangles of one cell. Nothing is asked of a cell inside the
+form: the inside is runs of cubes, written into the one byte a cell that
+the fitter of section 7.1 already keeps, which is the only thing whose
+size goes by $`V`$.
+
+A test (`scanning_the_triangles_gives_the_bricks_that_asking_the_distance_everywhere_gives`)
+holds the two to the same unit piece in every cell of a house, a gem, a
+torus and a lumpy ball. They may differ only in a cell with a corner
+lying exactly on the surface, which either may count as in or out.
+
+#### What was measured
+
+Bricks are measured from the bricks alone (`mesh::trial::measure`).
+Discrepancy is the volume where bricks and mesh disagree, as a share of
+the mesh's volume. The gap is how far the outer faces of the bricks
+stand from the surface, in microbricks. Steps are the area of faces
+between two cells with brick on one side and none on the other where the
+mesh is the same on both, for each cell the surface crosses, which is
+how the roughness of a seam between joined forms is measured too. The
+meshes are made by rule (`mesh::made`): a box turned 20 degrees about
+the upright, the same box tilted 25 degrees as well, a sphere of 9,024
+triangles, a torus, a gem of eight flat faces that each slope along all
+three axes (in whole numbers at size 48), a house with a roof at 1 in 2
+(on the lattice at size 56), a lumpy ball with no flat face, and a figure
+with a head, a body, arms and legs standing on a disc. The figure is
+124,136 triangles drawn as one skin on a grid of 96 cells
+(`made::surface_of`), which is how a network that makes a model from a
+photograph arrives at its mesh, so it has that kind of mesh's small even
+triangles, rounded corners and faintly ribbed flat faces.
+
+| Mesh | Size | Route | Bricks | Discrepancy | Worst gap | Steps per surface cell | Unit sloped bricks |
+|---|---|---|---|---|---|---|---|
+| Box turned 20° | 96 | Blocks | 79 | 2.97% | 0.54 | 0.306 | 0 |
+| | | Plain | 288 | 1.66% | 0.67 | 0.089 | 15 |
+| | | Scanned | 182 | 1.81% | 0.67 | 0.097 | 106 |
+| Box turned and tilted | 96 | Blocks | 2,265 | 2.91% | 0.50 | 0.418 | 0 |
+| | | Plain | 5,722 | 1.12% | 0.82 | 0.076 | 1,056 |
+| | | Scanned | 3,545 | 0.90% | 0.82 | 0.051 | 1,715 |
+| Gem | 48 | Blocks | 320 | 7.42% | 0.28 | 0.432 | 0 |
+| | | Plain | 1,794 | 3.52% | 0.33 | 0.116 | 1,472 |
+| | | Scanned | 133 | 0.00% | 0.00 | 0.000 | 0 |
+| Gem | 77 | Plain | 5,684 | 2.17% | 0.59 | 0.125 | 3,875 |
+| | | Scanned | 1,030 | 0.32% | 0.59 | 0.022 | 390 |
+| House | 56 | Blocks | 21 | 1.67% | 0.22 | 0.141 | 0 |
+| | | Plain | 40 | 0.00% | 0.00 | 0.000 | 0 |
+| | | Scanned | 10 | 0.00% | 0.00 | 0.000 | 0 |
+| House | 90 | Plain | 167 | 2.46% | 0.69 | 0.094 | 8 |
+| | | Scanned | 65 | 2.75% | 0.69 | 0.110 | 14 |
+| Sphere | 96 | Blocks | 3,431 | 1.46% | 0.54 | 0.430 | 0 |
+| | | Plain | 16,912 | 0.60% | 0.65 | 0.109 | 9,920 |
+| | | Scanned | 7,642 | 0.58% | 0.64 | 0.063 | 3,084 |
+| | | The editor's own sphere | 2,426 | 1.13% | 0.70 | 0.019 | 0 |
+| Torus | 128 | Plain | 14,854 | 1.07% | 0.64 | 0.108 | 8,088 |
+| | | Scanned | 10,287 | 1.14% | 0.68 | 0.090 | 4,365 |
+| | | The editor's own torus | 235 | 11.04% | 5.89 | 0.122 | 0 |
+| Lumpy ball | 96 | Plain | 15,259 | 1.05% | 0.73 | 0.122 | 9,094 |
+| | | Scanned | 10,388 | 0.95% | 1.31 | 0.087 | 4,602 |
+| Figure | 100 | Blocks | 1,355 | 4.23% | 0.55 | 0.336 | 0 |
+| | | Scanned | 4,462 | 1.81% | 1.73 | 0.078 | 1,805 |
+
+A flat face at a whole-number slope comes out exact: the gem at size 48
+is 133 stretched corner pieces lying in its eight faces, and the house
+at 56 is ten bricks. A flat face at an awkward slope comes out as the
+nearest whole-number pieces in courses, with unit pieces where the
+courses slip: the turned box is 182 bricks against 288, with ramps 8 by
+3 in runs the height of the wall. On curved meshes the guided pieces
+take a third to a half off the brick count and a sixth to two fifths off
+the steps, and are about as close.
+
+The editor's own sphere is still three times smoother than a sphere
+brought in as a mesh, in a third of the bricks, at twice the
+discrepancy: it is laid out as one design, and a mesh's curved surface
+is fitted piece by piece. Its own torus is 235 bricks and an octagon in
+section, 11% from the round tube.
+
+Times and memory are in [performance.md](performance.md).
+
+#### The Imported form
+
+The editor's Imported form
+([`core/src/mesh/form.rs`](../core/src/mesh/form.rs)) builds a mesh by
+the scanned route. The steps it adds are numbered here in the order they
+run.
+
+1. The mesh is stood in the lattice. Its size is the length of its
+   longest side in microbricks, and its point is its foot, the middle of
+   the underside of its box, so that making it larger leaves it standing
+   on the floor it stood on. The low corner of its box is then moved to
+   the nearest lattice plane along each axis. A mesh drawn in whole
+   units, built at a size equal to its length in those units, has every
+   flat face on a lattice plane wherever it is dragged. That is why the
+   house at 56 and the gem at 48 are exact in the table above.
+2. The cells the surface crosses are found and sampled, as described
+   under the scanned route.
+3. Loose pieces are dropped, if the form asks for that. A piece is a set
+   of cells that hold brick or that the surface crosses, joined through
+   their faces. A piece whose box is shorter than the size asked for
+   along every axis is emptied. Pieces are judged as they are built and
+   not as they are modelled, because a model's floating scrap is often
+   several shells, and a scrap that touches the body by one triangle is
+   one mesh with it.
+4. The inside is emptied, if a shell is asked for. The wall that stays
+   is the cells the surface crosses and the full cells within the
+   shell's thickness of them.
+5. Stretched pieces are laid along the surface, as described under the
+   guided route.
+6. Each cell that can be seen is given a colour, if the mesh has
+   colours, and what is left is joined into boxes of one colour.
+
+Two of these steps were first written another way and measured wrong.
+
+Pieces were to be found by flooding from cell to cell. A flood keeps a
+place in its queue for every cell of the largest piece, which is the
+whole inside of the model: 27 million places for a solid 300 across.
+Pieces are found a run of cells at a time instead. A run is a stretch of
+occupied cells along x, two runs in neighbouring rows that overlap
+belong to one piece, and a union-find
+([Wikipedia](https://en.wikipedia.org/wiki/Disjoint-set_data_structure))
+records which piece each run is part of. A solid has a few runs in each
+row, so the same model is some hundreds of thousands of runs.
+
+The shell's wall was first counted in steps through the faces of cells.
+Along a diagonal, six such steps reach 3.5 cells deep, so a ball asked
+for a wall of 6 had less brick in it than a true wall of 6 has
+(21,815 cells against 22,016), and the test of the shell failed on it.
+The wall is now counted in steps to any of the 26 cells round a cell. It
+is never thinner than was asked and is up to 1.7 times as thick along a
+diagonal. Its inner face is stepped, and nobody sees it from outside.
+
+**Simplify** prices a brick in microbricks of disagreement with the
+mesh, as it prices a brick of a flat outline in area. At 0 a stretched
+piece is laid only where it disagrees with the mesh no more than the
+unit pieces it replaces. Above 0 it may disagree more, by the price for
+each brick it saves. The price buys bricks at the cost of both closeness
+and smoothness, and most of what it can buy is bought by 0.25:
+
+| Mesh | Simplify | Bricks | Discrepancy | Worst gap | Steps per surface cell |
+|---|---|---|---|---|---|
+| Lumpy ball, 96 | 0 | 10,388 | 0.95% | 1.31 | 0.087 |
+| | 0.25 | 6,993 | 1.78% | 1.95 | 0.102 |
+| | 0.5 | 6,746 | 2.27% | 2.60 | 0.115 |
+| | 1 | 6,920 | 2.56% | 2.85 | 0.126 |
+| Figure, 100 | 0 | 4,462 | 1.81% | 1.73 | 0.078 |
+| | 0.25 | 3,247 | 3.05% | 2.20 | 0.096 |
+| | 0.5 | 3,083 | 3.85% | 2.21 | 0.111 |
+| | 1 | 3,129 | 4.31% | 2.51 | 0.119 |
+
+A quarter of a microbrick takes a third off the brick count and nearly
+doubles the discrepancy. Past a half the count stops falling, because
+larger pieces laid loosely block the pieces beside them. An Imported
+form therefore starts with Simplify at 0, where the editor's other forms
+start at 0.25.
+
+**Brick size** works as it does for every form: the mesh is stood at its
+size divided by the brick size, fitted there, and the bricks are scaled
+back up.
+
+#### A mesh's colours
+
+A brick is one colour and a form's paint holds at most 32. A mesh has a
+colour at every point of its surface, from its vertices or from a
+picture laid over it. So the surface's colours are reduced to a palette,
+and each brick is given the number of the palette colour nearest the
+colour of the surface at it
+([`core/src/mesh/colour.rs`](../core/src/mesh/colour.rs)).
+
+The palette has to be the same on every computer, because a form saved
+on one and opened on another is built again from the mesh. It is
+therefore made with whole numbers and no chance, in four steps:
+
+1. The surface is sampled at about 40,000 places fixed by the triangles
+   alone, each sample weighted by the area it stands for.
+2. The samples are gathered into 32,768 bins, eight levels wide in each
+   of red, green and blue, which bounds the work whatever the mesh.
+3. The bins are cut into as many boxes as there are to be colours. Each
+   cut is made where it takes most off the boxes' summed squared error
+   (the greedy rule of Wu, "Efficient statistical computations for
+   optimal color quantization", Graphics Gems II, 1991, applied to the
+   boxes of Heckbert's median cut, 1982,
+   [doi:10.1145/965145.801294](https://doi.org/10.1145/965145.801294)).
+4. Each box's mean colour is moved to the mean of the bins nearest it,
+   up to twelve times over (k-means: Lloyd 1982,
+   [doi:10.1109/TIT.1982.1056489](https://doi.org/10.1109/TIT.1982.1056489)).
+
+Cutting each box at its median, which is the method the boxes come from,
+was tried first and failed its test. A ball painted red, white and blue,
+with a thin band of mixed colour between each two, came back white,
+purple and lavender when three colours were asked for: the median put
+pure red and pure blue in one box and the mixed colours in the other,
+and k-means could not move out of that start. The usual way to start
+k-means is from random colours (k-means++), which would need a random
+number generator saved with the form to give the same palette twice. A
+colour space built to match the eye, such as Oklab, would group colours
+nearer to how they look, and needs cube roots, which the libraries of
+different systems do not all round alike. Distances are measured with
+red weighted 2, green 4 and blue 3
+([Riemersma](https://www.compuphase.com/cmetric.htm)).
+
+Bricks are then coloured without cutting the model's inside up. A cell
+can be seen if the surface crosses it or if any of the six cells beside
+it is not a full cube. Each such cell takes the colour of the surface
+nearest its middle. The cells deeper in are never seen and are left
+free to join whatever box reaches them, so the inside of a model stays a
+few large boxes. A stretched piece takes the colour of the surface
+nearest its own middle.
+
+How many colours to start with was chosen by looking at the figure built
+with 4, 8, 12, 16 and 32:
+
+<img src="images/mesh/figure-4-colours.png" width="230" alt="The figure in four colours: its skin and the grass under it are the same olive, and its hair is the red of its shirt"> <img src="images/mesh/figure-12-colours.png" width="230" alt="The figure in twelve colours: brown hair, skin, a red shirt, blue trousers and green grass, each in two or three shades"> <img src="images/mesh/figure-32-colours.png" width="230" alt="The figure in thirty-two colours: as with twelve, and with two black eyes">
+
+| Colours | What is seen | Bricks |
+|---|---|---|
+| 4 | skin and grass are one colour, and the hair is the colour of the shirt | 3,264 |
+| 8 | every part has a colour of its own | 3,444 |
+| 12 | each part has two or three shades, light to dark | 3,572 |
+| 16 | as 12 | 3,730 |
+| 32 | the eyes, a few bricks each, get a colour that was the hair's until then | 3,940 |
+
+A form starts with 12. More colours cost bricks, since a box is one
+colour, and the clustering spends colours by area, so a small feature
+such as an eye is the last thing to get one.
+
+#### Reading a mesh file
+
+The readers ([`editor/src/import/`](../editor/src/import/)) are written
+here and not taken from a crate. Each reads the small part of its format
+that bricks can use, and each has to distrust what it reads, since a
+mesh file may come from anywhere:
+
+| File | What is read | What is refused or passed over |
+|---|---|---|
+| Binary glTF (`.glb`) | each mesh's triangles, strips and fans, set where the scene's nodes put them; points, vertex colours and texture coordinates of any number type; a material's base colour; a base-colour picture if it is a PNG inside the file | refused: sparse accessors, Draco and meshopt compression, a buffer outside the file. Passed over: a JPEG or WebP picture, and everything about a material but its base colour |
+| Wavefront OBJ (`.obj`) | `v` lines, with a colour after the point if there is one, and `f` lines, cut into triangles | passed over: normals, groups, and the material file with its pictures |
+| PLY (`.ply`) | text and little-endian binary; a vertex's place and its red, green and blue; a face's list of vertices | refused: big-endian files. Passed over: any other property or element, by its size |
+
+Every count is checked before room is made for what it counts. A `.glb`
+whose accessor claims four billion points in 36 bytes is refused as cut
+short, in arithmetic that cannot wrap round. A file larger than 400 MB,
+a mesh of more than 3 million points or 2 million triangles, a scene of
+more than 100,000 parts, nodes nested more than 64 deep (which is also
+how a node that contains itself is caught), and a picture of more than
+4,096 by 4,096 pixels are each refused with the two numbers. A number
+that is infinite or not a number, and a triangle that names a point the
+mesh does not have, are refused too.
+
+All of these failures, and the fitter's own, are one type
+([`core/src/mesh/error.rs`](../core/src/mesh/error.rs)). A failure
+carries its numbers and no words, and the wording of each is written
+once, in that file.
+
+A vertex colour in a `.glb` is taken as it is written. The format says
+it is a measure of light, to be brought through the sRGB curve for the
+screen. The programs whose files are opened here write the screen's own
+bytes there, as OBJ and PLY files do, and brought through the curve
+those came out pale. A material's base colour is brought through the
+curve, by a table of 255 numbers in place of the power the curve is
+defined with, so that every computer gets the same byte.
+
+A file that is opened is copied into `Documents/brickloft/imports` under
+a name made from its content (its FNV-1a hash as sixteen hexadecimal
+digits, and its ending). A form says which mesh it is by that name
+alone, so a save opens after the original file has moved, and a form can
+never name a file outside that folder: a name of that shape has nothing
+in it that a path could be made of.
+
+#### What it does not do
+
+- A plane that is not on the lattice is not moved onto it. The house at
+  size 90 has walls and eaves between cells, and is 2.75% out with a
+  slot along its ridge. Moving large planes to the nearest lattice plane
+  first, the deformation Zhou, Chen and Xu's abstract describes, is not
+  built.
+- A ridge or a hip where two slopes meet is left to unit pieces. The
+  hip and inner-corner bricks of section 2 are not offered.
+- A curved surface gets no layout of its own.
+- A hole in the mesh is closed by the winding number where it falls to
+  one half. The scanned route settles a run of untouched cells by one
+  number, so the skin over a hole wider than a cell is stepped. The runs
+  that cross such a skin are still to be found and their cells sampled.
+- The winding number uses the arctangent, which not every system's
+  library computes alike to the last digit. A sample would be decided
+  differently only where the number is within that digit of one half.
+- A brick's colour is the colour at one point of the surface. Where a
+  picture has detail finer than a brick, the brick has whichever colour
+  that point fell on, not the average of what it covers.
+- A small feature's colour is lost before a large one's, since the
+  palette is chosen by area.
+- A picture's colour and a vertex's colour are multiplied as bytes, not
+  as light. The two give the same answer whenever either is white, which
+  is the usual case.
+- Changing which way is up reads and indexes the file again.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points
