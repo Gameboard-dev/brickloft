@@ -763,7 +763,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Boxwood bush", "Rose bush", "Sunflower", "Tulip"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -806,16 +806,30 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     let spread = match kind {
         Kind::Palm => "Frond length",
         Kind::Sunflower => "Half the head's width",
+        Kind::Peony => "Half the bloom's width",
+        Kind::Hedge | Kind::Reeds => "Half its thickness",
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
+    if matches!(kind, Kind::Hedge | Kind::Reeds) {
+        // its length, end to end: kept as how many times its thickness it is, so that a thicker hedge is a longer one
+        let mut length = 2.0 * s.radius * s.stretch.x.max(1.0);
+        if helped(ui, help("hedge_length"), |ui| ui.add(Slider::new(&mut length, 2.0 * s.radius..=largest.max(2.0 * s.radius)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Length"))).changed() {
+            s.stretch.x = (length / (2.0 * s.radius)).max(1.0);
+        }
+    }
     let (fullness, count, bend) = match kind {
         Kind::Pine => ("Fullness", "Tiers of boughs", "Droop"),
         Kind::Palm => ("Leaflet length", "Fronds", "Lean"),
         Kind::Oak => ("Foliage", "Main limbs", "Gnarl"),
         Kind::Boxwood => ("Density", "Stems", "Looseness"),
-        Kind::Rose => ("Leaves and blooms", "Canes", "Arch of the canes"),
+        Kind::Beech => ("Foliage", "Main limbs", "Crookedness"),
+        Kind::Hedge => ("Density", "Plants along it", "Looseness"),
+        Kind::Peony => ("Petals and leaves", "Stems in the clump", "How open the bloom is"),
+        Kind::Hydrangea => ("Leaves", "Flower heads", "Looseness"),
+        Kind::Petunia => ("Leaves", "Flowers", "How far it trails"),
+        Kind::Reeds => ("Leaves", "Stems", "Sway"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
     };
@@ -830,10 +844,16 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Palm => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Coconuts"));
         }
-        Kind::Rose => {
-            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "In flower"));
+        Kind::Oak | Kind::Beech => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Bare (no leaves)"));
         }
-        Kind::Oak | Kind::Boxwood | Kind::Sunflower | Kind::Tulip => {}
+        Kind::Boxwood | Kind::Hedge => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Berries"));
+        }
+        Kind::Reeds => {
+            helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
+        }
+        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia => {}
     }
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));

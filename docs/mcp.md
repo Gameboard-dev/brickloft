@@ -149,14 +149,18 @@ A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 gives it: the first colour is the ground or the mortar, and the others are
 shared among the pattern's parts.
 
-`tree` names the kind first: `pine`, `palm`, `oak`, `boxwood`, `rose`,
-`sunflower` or `tulip`. Whatever follows it replaces that kind's usual
+`tree` names the kind first: `pine`, `palm`, `oak`, `beech`, `boxwood`,
+`hedge`, `hydrangea`, `peony`, `sunflower`, `tulip`, `petunia` or `reeds`
+(`rose`, a kind that is gone, is read as `peony`). Whatever follows it replaces that kind's usual
 settings in order: the seed, how full (0 to 100), how many (a pine's
-tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, a rose's
-canes, the flowers in a clump), how bent (0 to 100: a pine's droop, a
-palm's lean, an oak's gnarl, a rose's arch, a sunflower's nod, how open a
-tulip is) and 1 or 0 for its extras (a star and baubles, coconuts, a
-rose's blooms). The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
+tiers, a palm's fronds, an oak's main limbs, a boxwood's stems, the plants
+along a hedge, a hydrangea's heads, the flowers in a clump, a stand's
+stems), how bent (0 to 100: a pine's droop, a
+palm's lean, an oak's gnarl, a hedge's looseness, how open a peony or a
+tulip is, a sunflower's nod, how far petunias trail, reeds' sway) and 1 or 0 for its extras (a star and baubles, coconuts,
+an oak or beech bare, berries on a boxwood or hedge, plumes on reeds). A
+hedge or a stand of reeds is `stretch` `[n, 1, 1]` times as long along x
+as it is thick, three times if `stretch` is not given. The form may be written `tree` or `plant`. `"tree": "oak"` is the oak as the editor starts one and
 `"tree": ["palm", 3]` the third palm. A tree's height is `rise` and its
 spread `radius`. Added with neither, it is its usual size, a pine 140
 microbricks tall, and comes in its kind's own eight colours with the mode

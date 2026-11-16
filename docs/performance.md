@@ -28,7 +28,8 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Pine tree, 140 tall | 1.1 s (0.21 s on 16 threads) | 33,643 | 15.3% |
 | Palm tree, 120 tall | 0.36 s (0.09 s) | 16,753 | 18.7% |
 | Oak tree, 110 tall, 124 across | 1.1 s (0.22 s) | 40,092 | 7.1% |
-| Rose bush, 46 tall | 0.16 s (0.04 s) | 7,143 | 9.7% |
+| Beech tree, 140 tall | 1.2 s (0.25 s) | 48,667 | 6.8% |
+| Hedge, 36 tall, 72 long | 0.17 s (0.07 s) | 11,189 | 3.1% |
 | Three sunflowers, 90 tall | 0.23 s (0.06 s) | 8,581 | 16.5% |
 
 The ordinary forms fit in tens of milliseconds and a large solid sphere in

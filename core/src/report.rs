@@ -301,7 +301,11 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 if parts.len() > 6 {
                     return Err(bad("expected `kind,seed,fullness,count,bend,extras`, or the first few of them"));
                 }
-                let kind = crate::tree::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, boxwood, rose, sunflower or tulip"))?.0;
+                // (the rose bush is gone: read as the flower nearest it, the peony)
+                let named = if parts[0] == "rose" { "peony" } else { parts[0] };
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == named).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, beech, boxwood, hedge, peony, sunflower, tulip, hydrangea, petunia or reeds"))?.0;
+                // (a rose's own numbers meant canes and blooms, and are no peony's: it comes as a peony starts out, of the same seed)
+                let parts = if parts[0] == "rose" { &parts[..parts.len().min(2)] } else { &parts[..] };
                 let mut tree = crate::tree::Tree::of(kind);
                 // (numbers from a file, which may be anyone's: kept to what the sliders allow)
                 let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };

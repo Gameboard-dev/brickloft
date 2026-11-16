@@ -68,7 +68,7 @@ build while you watch (see [docs/mcp.md](docs/mcp.md)).
 | Revolve | a profile spun about an upright axis: vases, bells, bowls |
 | Pyramid | a base and a height: solid, or a hollow tent |
 | Cube | a box with a length along each axis: a block, a floor, a wall, or a hollow room |
-| Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a boxwood, a rose, sunflowers, tulips |
+| Plant | a tree, a bush or a flower grown from a seed: a pine, a palm, an oak, a beech, a boxwood, a hedge, a hydrangea, peonies, sunflowers, tulips, petunias, reeds |
 
 Curves are built as a flat band or as a round tube. Every form can be
 stretched, mirrored, turned, pulled out of shape at any point, coloured, and

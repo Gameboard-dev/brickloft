@@ -58,16 +58,26 @@ pub enum Kind {
     Pine,
     Palm,
     Oak,
+    /// a tall smooth-barked tree with a dense domed crown
+    Beech,
     /// a dense rounded shrub
     Boxwood,
-    /// a shrub of arching canes, in flower
-    Rose,
+    /// the same shrub clipped to a wall of any length
+    Hedge,
+    /// a clump of stems each with one many-petalled bloom
+    Peony,
     Sunflower,
     Tulip,
+    /// a rounded shrub with large domed heads of small flowers
+    Hydrangea,
+    /// a low mound of trumpet flowers that trails
+    Petunia,
+    /// a stand of bulrushes or of plumed reeds
+    Reeds,
 }
 
 /// The kinds on offer, with the names they are written and read by.
-pub const KINDS: [(Kind, &str); 7] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Boxwood, "boxwood"), (Kind::Rose, "rose"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip")];
+pub const KINDS: [(Kind, &str); 12] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds")];
 
 /// How a tree is grown: the settings a form carries for it. Its height is
 /// the form's `rise` and its spread the form's `radius`.
@@ -96,13 +106,17 @@ impl Tree {
             Kind::Pine => (60, 15, 50),
             Kind::Palm => (60, 20, 45),
             Kind::Oak => (60, 5, 50),
+            Kind::Beech => (65, 6, 30),
             Kind::Boxwood => (60, 6, 40),
-            Kind::Rose => (60, 9, 50),
+            Kind::Hedge => (60, 5, 25),
+            Kind::Peony => (60, 3, 75),
             Kind::Sunflower => (60, 3, 40),
             Kind::Tulip => (60, 5, 30),
+            Kind::Hydrangea => (60, 9, 30),
+            Kind::Petunia => (60, 26, 40),
+            Kind::Reeds => (60, 24, 35),
         };
-        // (a rose is in flower unless asked not to be: its blooms are what it is known by)
-        Tree { kind, seed: 1, fullness, count, bend, extras: kind == Kind::Rose }
+        Tree { kind, seed: 1, fullness, count, bend, extras: false }
     }
 
     /// The fewest and most of whatever `count` counts, for a kind.
@@ -111,9 +125,14 @@ impl Tree {
             Kind::Pine => (4, 40),
             Kind::Palm => (5, 40),
             Kind::Oak => (2, 7),
+            Kind::Beech => (3, 9),
             Kind::Boxwood => (2, 12),
-            Kind::Rose => (3, 16),
+            Kind::Hedge => (1, 40),
+            Kind::Peony => (1, 9),
             Kind::Sunflower | Kind::Tulip => (1, 12),
+            Kind::Hydrangea => (1, 24),
+            Kind::Petunia => (3, 80),
+            Kind::Reeds => (1, 120),
         }
     }
 
@@ -132,12 +151,22 @@ impl Tree {
             Kind::Pine => (140.0, 36.0),
             Kind::Palm => (120.0, 44.0),
             Kind::Oak => (110.0, 62.0),
+            // (a beech is about three quarters as wide as it is tall)
+            Kind::Beech => (140.0, 52.0),
             Kind::Boxwood => (40.0, 21.0),
-            Kind::Rose => (46.0, 36.0),
+            // a hedge's spread is half its thickness; its length is apart (see [`Model::with_length`])
+            Kind::Hedge => (36.0, 12.0),
+            // a peony's spread is half the width of a full-blown bloom
+            Kind::Peony => (56.0, 10.0),
             // a flower's spread is its head's: half the width of a
             // sunflower's head, petals and all, and of a tulip's cup
             Kind::Sunflower => (90.0, 17.0),
             Kind::Tulip => (64.0, 6.0),
+            Kind::Hydrangea => (46.0, 28.0),
+            // (a petunia is a hand high and several across)
+            Kind::Petunia => (20.0, 26.0),
+            // a stand of reeds' spread is half its width; its length is apart, as a hedge's is
+            Kind::Reeds => (84.0, 10.0),
         }
     }
 }
@@ -150,6 +179,9 @@ impl Default for Tree {
 
 /// The least a tree may be, in cells: below this there is no room for a
 /// trunk with anything on it.
+/// How many times its own thickness a hedge is long when it is given no length.
+pub const HEDGE_LENGTH: f64 = 3.0;
+
 pub const LEAST_HEIGHT: f64 = 12.0;
 pub const LEAST_SPREAD: f64 = 3.0;
 
@@ -438,17 +470,44 @@ impl Model {
     /// the crown, which is the case a uniform grid is best at, and a
     /// sample finds its bucket by three multiplications with no descent.
     pub fn new(tree: &Tree, base: DVec3, height: f64, spread: f64) -> Model {
+        Model::with_length(tree, base, height, spread, spread * HEDGE_LENGTH)
+    }
+
+    /// [`Model::new`], for a plant that has a length as well: a hedge
+    /// reaches `long` to each side of its middle along x. Other kinds take
+    /// no notice of it.
+    pub fn with_length(tree: &Tree, base: DVec3, height: f64, spread: f64, long: f64) -> Model {
         let tree = tree.clamped();
         let (height, spread) = (height.max(LEAST_HEIGHT), spread.max(LEAST_SPREAD));
         // each kind has numbers of its own from one seed
-        let salt = 0x7EE5_0001u64 + tree.kind as u64;
+        // (by name and not by its place in the list, so that a kind
+        // added to the list does not change the plants the others grow)
+        let salt = 0x7EE5_0001u64 + match tree.kind {
+            Kind::Pine => 0,
+            Kind::Palm => 1,
+            Kind::Oak => 2,
+            Kind::Boxwood => 3,
+            Kind::Sunflower => 5,
+            Kind::Tulip => 6,
+            Kind::Beech => 7,
+            Kind::Hedge => 8,
+            Kind::Peony => 9,
+            Kind::Hydrangea => 10,
+            Kind::Petunia => 11,
+            Kind::Reeds => 12,
+        };
         let mut grown = Grown { parts: Vec::new(), limbs: Vec::new(), forks: Vec::new(), numbers: Numbers(tree.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt) };
         match tree.kind {
             Kind::Pine => pine(&mut grown, &tree, height, spread),
             Kind::Palm => palm(&mut grown, &tree, height, spread),
-            Kind::Oak => oak(&mut grown, &tree, height, spread),
+            Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK),
+            Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH),
+            Kind::Hedge => hedge(&mut grown, &tree, height, spread, long),
+            Kind::Peony => peony(&mut grown, &tree, height, spread),
+            Kind::Hydrangea => hydrangea(&mut grown, &tree, height, spread),
+            Kind::Petunia => petunia(&mut grown, &tree, height, spread),
+            Kind::Reeds => reeds(&mut grown, &tree, height, spread, long),
             Kind::Boxwood => boxwood(&mut grown, &tree, height, spread),
-            Kind::Rose => rose(&mut grown, &tree, height, spread),
             Kind::Sunflower => sunflower(&mut grown, &tree, height, spread),
             Kind::Tulip => tulip(&mut grown, &tree, height, spread),
         }
@@ -1034,6 +1093,51 @@ impl Grown {
     }
 }
 
+/// How a broadleaf tree grows: the numbers that make the one rule of
+/// forking an oak or a beech (see [`broadleaf`]).
+struct Habit {
+    /// the trunk's radius, as a share of the tree's height
+    girth: f64,
+    /// between what shares of the height the trunk first divides
+    bole: (f64, f64),
+    /// a mass of leaves, as a share of the spread: at no fullness, and what full adds
+    mass: (f64, f64),
+    /// whether the trunk carries on up through the crown as the thickest limb
+    leader: bool,
+    /// between what angles from upright the limbs leave the trunk, in radians
+    polar: (f64, f64),
+    /// how hard a heavy limb is drawn outwards and down, and a thin one up
+    out: f64,
+    sag: f64,
+    up: f64,
+    /// how far a limb wanders at full crookedness
+    wander: f64,
+    /// how flat a tuft of leaves is: its height over its width
+    flat: f64,
+    /// how far up the crown its widest part is
+    heart: f64,
+    /// branches thinner than this carry leaves along them, not only at their ends
+    leafy: f64,
+    /// how far the roots run out, against an oak's
+    roots: f64,
+    /// 0 for stout crooked twigs, 1 for many slender straight ones (see [`twigs`])
+    fine: f64,
+}
+
+/// An oak: low fork, wide heavy limbs, leaves in separate masses.
+const OAK: Habit = Habit { girth: 0.055, bole: (0.17, 0.23), mass: (0.058, 0.045), leader: false, polar: (0.78, 1.22), out: 0.36, sag: 0.1, up: 0.15, wander: 0.44, flat: 0.78, heart: 0.15, leafy: 1.5, roots: 1.0, fine: 0.0 };
+
+/// A beech, *Fagus sylvatica*: a smooth grey trunk that carries on up
+/// through a dense, oval crown about three quarters as wide as the tree
+/// is tall, with limbs that climb and then sweep out into flat sprays of
+/// slender twigs.
+/// https://en.wikipedia.org/wiki/Fagus_sylvatica
+/// https://plants.ces.ncsu.edu/plants/fagus-sylvatica/common-name/european-beech
+/// It is the oak's rule with other numbers, which is the reason the rule
+/// has numbers: a leading stem, limbs that wander less, flatter tufts of
+/// leaves on more of the branches (so the crown closes), and small roots.
+const BEECH: Habit = Habit { girth: 0.04, bole: (0.22, 0.28), mass: (0.09, 0.055), leader: true, polar: (0.75, 1.1), out: 0.24, sag: 0.0, up: 0.1, wander: 0.24, flat: 0.58, heart: 0.34, leafy: 3.0, roots: 0.55, fine: 1.0 };
+
 /// The thinnest an oak's branch is followed to, in cells: thinner than
 /// this it would not survive the fit, and it ends in leaves.
 const TWIG: f64 = 1.0;
@@ -1087,14 +1191,14 @@ struct Shoot {
 /// else, so the crown is clumps with sky between them and the limbs show
 /// from below, as on the tree. Each mass is a few flattened balls with a
 /// rough surface (see [`ROUGH`]).
-fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
+fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit) {
     let (dense, gnarl) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let limbs = tree.count.max(2) as usize;
-    let girth = (height * 0.055).max(2.4);
-    // the height the trunk divides at: low, a fifth to a quarter of the way up
-    let bole = height * g.between(0.17, 0.23);
+    let girth = (height * habit.girth).max(2.4);
+    // the height the trunk divides at: for an oak low, a fifth to a quarter of the way up
+    let bole = height * g.between(habit.bole.0, habit.bole.1);
     // how big a mass of leaves is
-    let mass = (spread * (0.058 + 0.045 * dense)).max(2.6);
+    let mass = (spread * (habit.mass.0 + habit.mass.1 * dense)).max(2.6);
 
     // the trunk, a little crooked, widening to its foot
     let lengths = ((bole / 5.0).ceil() as usize).max(2);
@@ -1109,8 +1213,8 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     for k in 0..roots {
         let way = turn + TAU * (k as f64 + g.between(-0.25, 0.25)) / roots as f64;
         let out = DVec3::new(way.cos(), way.sin(), 0.0);
-        let far = girth * g.between(1.9, 2.6);
-        let high = girth * g.between(1.4, 2.2);
+        let far = girth * g.between(1.9, 2.6) * habit.roots;
+        let high = girth * g.between(1.4, 2.2) * habit.roots;
         g.cone(out * girth * 0.4 + DVec3::Z * high, out * far - DVec3::Z * girth * 0.2, girth * 0.62, girth * 0.3, TRUNK);
     }
 
@@ -1120,7 +1224,7 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     // the leaves they carry.
     let fork = stem(bole);
     let (out, over) = ((spread - mass * 1.4).max(spread * 0.5), (height - mass * 1.3).max(height * 0.6));
-    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * 0.15);
+    let heart = DVec3::new(fork.x, fork.y, bole + (over - bole) * habit.heart);
     let dome = DVec3::new(out, out, over - heart.z);
     let under = heart.z - bole * 0.8;
     // where a point is in the dome: 0 at its heart, 1 on its outline
@@ -1144,7 +1248,11 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         g.numbers.0 = numbers;
         ends.clear();
         // the limbs the trunk divides into, sharing its cross-section
-        let shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
+        let mut shares: Vec<f64> = (0..limbs).map(|_| g.between(0.7, 1.3)).collect();
+        if habit.leader {
+            // (the stem carries on as the thickest of them)
+            shares[0] *= 2.4;
+        }
         let total: f64 = shares.iter().sum();
         let turn = g.between(0.0, TAU);
         let mut waiting = Vec::new();
@@ -1156,7 +1264,7 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             // striking out at wide angles, 45 to 70 degrees off upright;
             // and where there are four or more, one of them nearer
             // upright, to fill the top of the crown
-            let polar = if k == 0 && limbs >= 4 { g.between(0.15, 0.4) } else { g.between(0.78, 1.22) };
+            let polar = if k == 0 && habit.leader { g.between(0.02, 0.12) } else if k == 0 && limbs >= 4 { g.between(0.15, 0.4) } else { g.between(habit.polar.0, habit.polar.1) };
             waiting.push(Shoot { from: fork, way: DVec3::new(way.cos() * polar.sin(), way.sin() * polar.sin(), polar.cos()), radius, parent: trunk, level: 1, roll: g.between(0.0, TAU) });
         }
         g.forks.push((girth, radii));
@@ -1173,8 +1281,8 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
                     let outward = DVec3::new(at.x - fork.x, at.y - fork.y, 0.0).normalize_or_zero();
                     let heavy = (radius / girth).min(1.0);
                     // heavy limbs spread and sag; thin ones turn up
-                    let mut pull = outward * (0.36 * heavy) - DVec3::Z * (0.1 * heavy) + DVec3::Z * (0.15 * (1.0 - heavy).powi(2));
-                    let wander = g.any_way() * (0.44 * gnarl);
+                    let mut pull = outward * (habit.out * heavy) - DVec3::Z * (habit.sag * heavy) + DVec3::Z * (habit.up * (1.0 - heavy).powi(2));
+                    let wander = g.any_way() * (habit.wander * gnarl);
                     if sized {
                         // near the outline, turned back along it
                         let q = within(at);
@@ -1197,7 +1305,7 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
                     break;
                 }
                 // the outer branches carry leaves along them too
-                if radius < 1.5 {
+                if radius < habit.leafy {
                     ends.push((at, way, 0.7));
                 }
                 // the fork: `share` of the cross-section carries on
@@ -1259,9 +1367,20 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
     // and two smaller beside it. A branch's tufts run into each other
     // and into its neighbours', which makes the masses; no mass is one
     // ball, which in bricks is a clipped bush.
+    let hold = |c: DVec3| {
+        let (room, far) = ((spread - 1.0).max(0.0), (c - fork).truncate().length());
+        let back = (c - fork).truncate() * (room / far.max(1e-9)).min(1.0);
+        DVec3::new(fork.x + back.x, fork.y + back.y, c.z.clamp(bole * 0.6, height - 1.0))
+    };
     for (end, way, size) in ends {
         let mut at = place(end);
         let mut way = DVec3::new(way.x * wide, way.y * wide, way.z * tall).normalize_or_zero();
+        if tree.extras {
+            // bare: the branch carried on in twigs, where in leaf it ends in tufts (see [`twigs`])
+            let deep = if size >= 1.0 { 2 + habit.fine as u8 } else { 1 };
+            twigs(g, at, way, mass * (1.25 + 0.2 * habit.fine), deep, habit.fine, gnarl, &hold);
+            continue;
+        }
         for tuft in 0..if size >= 1.0 { 3 } else { 1 } {
             let r = mass * size * g.between(0.85, 1.35) * (1.0 - 0.14 * tuft as f64);
             // (each ball kept inside the tree's size, clusters and all: the
@@ -1272,7 +1391,7 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
                 DVec3::new(fork.x + back.x, fork.y + back.y, c.z.min(height - r - 1.7))
             };
             at = held(at, r);
-            g.leaves(held(at + DVec3::Z * r * 0.2, r), DVec3::new(r, r, r * 0.78));
+            g.leaves(held(at + DVec3::Z * r * 0.2, r), DVec3::new(r, r, r * habit.flat));
             for _ in 0..2 {
                 let (off, small) = (g.any_way(), r * g.between(0.55, 0.8));
                 g.leaves(held(at + DVec3::new(off.x, off.y, off.z * 0.5) * r * 0.9, small), DVec3::new(small, small, small * 0.72));
@@ -1280,6 +1399,447 @@ fn oak(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
             way = (way + g.any_way() * 0.6 + DVec3::Z * 0.2).normalize();
             way.z = way.z.max(-0.1);
             at += way * r * 1.15;
+        }
+    }
+}
+
+/// Berries on a tuft of leaves at `at`, `r` across: a few small balls
+/// standing just proud of its outside.
+///
+/// A box has no berries (its fruit is a small brown capsule); these are a
+/// holly's or a cotoneaster's, asked for on a clipped bush because a hedge
+/// in berry is what is wanted of it in a build.
+/// https://www.rhs.org.uk/plants/hollies
+fn berries(g: &mut Grown, at: DVec3, r: f64, from: DVec3) {
+    for _ in 0..2 {
+        let out = ((at - from).normalize_or_zero() + g.any_way() * 0.7).normalize_or_zero();
+        g.blob(at + out * (r + 0.3), DVec3::splat(1.25), EXTRA, false);
+    }
+}
+
+/// A hedge: box clipped to a wall, as long as it is asked to be.
+///
+/// The same plant as the boxwood and the same tufts of leaves, held to
+/// another outline: a long box with its top a little narrower than its
+/// foot (the "batter" a hedge is clipped to, so that light reaches its
+/// base) and its edges rounded.
+/// https://www.rhs.org.uk/plants/types/hedges/pruning-hedges
+///
+/// It is a kind of its own and not a setting of the boxwood. A bush is
+/// round and has a number of stems; a hedge has a length, and is a row of
+/// plants, each with its own few stems showing at the foot. One kind with
+/// both would have had a length that did nothing to a round bush.
+///
+/// The tufts are set on the top and the sides in rows, each row half a
+/// step along from the last, and pushed in by a random amount the
+/// looseness sets: at none it is freshly clipped, at full it has grown
+/// out. The inside is filled, so no light shows through it.
+fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
+    let (dense, loose) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let long = long.max(spread);
+    let mass = (spread * (0.26 + 0.1 * dense)).clamp(2.6, height * 0.3);
+    let foot = height * 0.1;
+    // half its width at a height: narrower towards the top
+    let half = |z: f64| (spread - mass * 0.6) * (1.0 - 0.14 * (z / height));
+    // the inside: a row of large masses along its middle
+    let inner = (spread - mass).max(2.0);
+    let fill = ((2.0 * long / inner).ceil() as usize).max(1);
+    for n in 0..=fill {
+        // (stopping short of the two ends, which the tufts close)
+        let reach = (long - inner - mass * 0.4).max(0.0);
+        let x = -reach + 2.0 * reach * n as f64 / fill as f64;
+        g.blob(DVec3::new(x, 0.0, foot + (height - foot) * 0.5), DVec3::new(inner, inner, ((height - foot) * 0.5 - mass * 0.4).max(2.0)), LEAF_DARK, true);
+    }
+    // the plants it is a row of: each a few stems from the ground
+    let plants = tree.count.max(1) as usize;
+    let trunk = g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.2, 1.2], None, 0);
+    for n in 0..plants {
+        let x = -long + 2.0 * long * (n as f64 + 0.5) / plants as f64;
+        for _ in 0..2 + (g.unit() * 2.0) as usize {
+            let from = DVec3::new(x + g.between(-0.2, 0.2) * spread, g.between(-0.35, 0.35) * spread, 0.0);
+            let to = from + DVec3::new(g.between(-0.3, 0.3) * spread, g.between(-0.2, 0.2) * spread, foot + mass);
+            let thick = g.between(1.0, 1.5);
+            let bent = from.lerp(to, 0.5) + g.any_way() * 0.8;
+            g.limb(vec![from, bent, to], vec![thick, thick * 0.9, thick * 0.8], Some(trunk), 1, TRUNK);
+        }
+    }
+    // the tufts: rows along the top and down each side
+    let step = mass * 1.15;
+    let along = ((2.0 * long / step).ceil() as usize).max(1);
+    // (`outward` is the way the face it is on looks: it is set back from the face by its own size, and by more the looser the hedge)
+    let tuft = |g: &mut Grown, at: DVec3, outward: DVec3| {
+        let r = mass * g.between(0.8, 1.15);
+        let at = at - outward * (r * 0.75 + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
+        // (kept inside the hedge's size, its clusters of leaves and all)
+        let (far, wide) = ((long - r - 1.7).max(0.0), (spread - r - 1.7).max(0.0));
+        let at = DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8));
+        g.leaves(at, DVec3::new(r, r, r * 0.8));
+        if tree.extras && g.unit() < 0.35 {
+            berries(g, at, r * 0.8, at - outward * mass);
+        }
+    };
+    let across = ((2.0 * half(height) / step).ceil() as usize).max(1);
+    let up = (((height - foot) / step).ceil() as usize).max(1);
+    for i in 0..=along {
+        for j in 0..=across {
+            let x = -long + (2.0 * long) * (i as f64 + 0.5 * (j % 2) as f64) / along as f64;
+            tuft(g, DVec3::new(x.min(long), -half(height) + 2.0 * half(height) * j as f64 / across as f64, height), DVec3::Z);
+        }
+        for k in 0..up {
+            let z = foot + mass * 0.6 + (height - foot - mass * 0.6) * k as f64 / up as f64;
+            let x = (-long + (2.0 * long) * (i as f64 + 0.5 * (k % 2) as f64) / along as f64).min(long);
+            for side in [-1.0, 1.0] {
+                tuft(g, DVec3::new(x, side * (half(z) + mass * 0.3), z), DVec3::Y * side);
+            }
+        }
+    }
+    // and its two ends
+    for end in [-1.0, 1.0] {
+        for j in 0..=across {
+            for k in 0..up {
+                let z = foot + mass * 0.6 + (height - foot - mass * 0.6) * k as f64 / up as f64;
+                tuft(g, DVec3::new(end * long, -half(z) + 2.0 * half(z) * j as f64 / across as f64, z), DVec3::X * end);
+            }
+        }
+    }
+}
+
+/// A peony, *Paeonia lactiflora*, of the double kind, or a clump of them.
+///
+/// A double peony's bloom is many petals in rounds: a few broad guard
+/// petals outside, and inside them round after round of narrower ones,
+/// the innermost made over from stamens. It opens from a hard round bud,
+/// through a soft ball, to a full-blown bowl with its guard petals laid
+/// back and, in a semi-double, a heart of yellow stamens showing.
+/// https://americanpeonysociety.org/?p=35
+/// https://en.wikipedia.org/wiki/Paeonia_lactiflora
+///
+/// The petals are set by the golden angle, the innermost first, which
+/// puts no petal behind another in any round (see [`vogel`]); rings of
+/// petals, the other way, stack them in spokes. Each petal is two ribs
+/// side by side that leave the heart leaning out by an angle of its own
+/// and curl back in along their length. Opening is those two numbers:
+/// in the bud every petal stands nearly upright and curls over hard, so
+/// the bloom is a ball; full blown, the outer petals lean right out and
+/// lie nearly straight, and each round inside leans and uncurls less.
+/// So one setting takes the same petals from bud to bowl.
+///
+/// The plant is a clump of stems from one crown, leaning apart, each with
+/// a few leaves of three lobed leaflets and one bloom at its top.
+fn peony(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
+    let (full, open) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let stems = tree.count.max(1) as usize;
+    let turn = g.between(0.0, TAU);
+    for plant in 0..stems {
+        // the first upright, the rest leaning out from the crown, a golden angle apart
+        let way = turn + plant as f64 * GOLDEN_ANGLE;
+        let out = DVec3::new(way.cos(), way.sin(), 0.0);
+        let lean = if plant == 0 { 0.06 } else { g.between(0.22, 0.5) };
+        let tall = height * if plant == 0 { 1.0 } else { g.between(0.72, 0.95) };
+        let bloom = spread * if plant == 0 { 1.0 } else { g.between(0.8, 0.98) };
+        let top = tall - bloom * (0.55 + 0.25 * (1.0 - open));
+        let steps = 7;
+        let stem = |t: f64| out * (1.5 * (plant.min(1) as f64) + lean * top * (t + 0.6 * t * t) / 1.6) + DVec3::Z * top * t;
+        let thick = (tall * 0.028).clamp(1.2, 1.8);
+        let limb = g.limb((0..=steps).map(|k| stem(k as f64 / steps as f64)).collect(), vec![thick; steps + 1], None, 0, TRUNK);
+        // the leaves: each a stalk with three lobed leaflets
+        let leaves = 3 + (tall / 30.0) as usize;
+        let around = g.between(0.0, TAU);
+        for n in 0..leaves {
+            let t = 0.22 + 0.55 * n as f64 / (leaves - 1).max(1) as f64;
+            let at = around + n as f64 * GOLDEN_ANGLE;
+            let (to, side) = (DVec3::new(at.cos(), at.sin(), 0.0), DVec3::new(-at.sin(), at.cos(), 0.0));
+            let long = bloom * (1.1 - 0.4 * t) * (0.7 + 0.5 * full);
+            let stalk = stem(t) + (to * 0.85 + DVec3::Z * 0.5) * long * 0.45;
+            g.cone(stem(t), stalk, 1.0, 0.9, LIMB);
+            for leaflet in [-1.0, 0.0, 1.0] {
+                let along = (to + side * leaflet * 0.9 - DVec3::Z * 0.2).normalize();
+                blade(g, stalk, along, along.cross(DVec3::Z).normalize_or_zero(), long * if leaflet == 0.0 { 0.8 } else { 0.62 }, 1, 0.42, 0.18);
+            }
+            g.limbs.push(Limb { path: vec![stem(t), stalk], radius: vec![1.0, 0.9], parent: Some(limb), level: 1 });
+        }
+        // the bloom
+        let axis = (stem(1.0) - stem(0.88)).normalize();
+        let (u, v) = (across(axis), axis.cross(across(axis)));
+        let heart = stem(1.0);
+        g.cone(heart - axis * 1.0, heart + axis * bloom * 0.12, thick, bloom * 0.3, LIMB);
+        // the stamens, which only an open bloom shows
+        for k in 1..=((bloom * 0.22 / 1.2).powi(2)) as usize {
+            let (far, at) = vogel(k, 1.2);
+            g.blob(heart + (u * at.cos() + v * at.sin()) * far + axis * bloom * 0.3, DVec3::splat(1.2), STAR, false);
+        }
+        let petals = (22.0 + 22.0 * full + bloom) as usize;
+        for k in 0..petals {
+            // 0 for the innermost, 1 for the guard petals
+            let t = (k as f64 + 0.5) / petals as f64;
+            let at = k as f64 * GOLDEN_ANGLE;
+            let (to, round) = (u * at.cos() + v * at.sin(), v * at.cos() - u * at.sin());
+            // how far it leans out where it leaves the heart, and how hard it curls back in
+            let leans = 0.25 + 0.5 * t + open * (0.2 + 0.95 * t.powf(1.3));
+            let curl = (1.0 - open * (0.35 + 0.6 * t)) * (1.5 + 0.9 * t);
+            let long = bloom * (0.46 + 0.44 * t) * (0.86 + 0.14 * open);
+            let wide = 0.6 + 1.3 * t;
+            for hand in [-1.0, 1.0] {
+                let mut place = heart + axis * bloom * (0.18 + 0.1 * (1.0 - t)) + to * bloom * (0.05 + 0.2 * t) + round * hand * wide * 0.5;
+                for step in 0..3 {
+                    let angle: f64 = leans - curl * (step as f64 + 0.5) / 3.0;
+                    let next = place + (axis * angle.cos() + to * angle.sin() + round * hand * 0.12 * (1.0 - step as f64)).normalize() * long / 3.0;
+                    g.cone(place, next, 1.25 - 0.1 * step as f64, 1.15 - 0.1 * step as f64, if t < 0.5 { EXTRA } else { TOP });
+                    place = next;
+                }
+            }
+        }
+    }
+}
+
+/// The twigs of a bare tree at the end of a branch: forks of thin shoots,
+/// `deep` forks of them, each shorter than the last.
+///
+/// A tree in leaf ends its branches where they are a cell thick, with
+/// the leaves hiding the stop. Bare, that stop is a stump. The twigs
+/// carry the branching on: they cannot thin as real twigs do, a cell
+/// being the least that is built, so they are told from the branches by
+/// their number and their shortness and not by their thickness. `fine`
+/// is how slender the tree's habit is: a beech's twigs are many, straight
+/// and close-angled, an oak's fewer, stouter and crooked.
+#[allow(clippy::too_many_arguments)]
+fn twigs(g: &mut Grown, from: DVec3, way: DVec3, long: f64, deep: u8, fine: f64, crooked: f64, hold: &dyn Fn(DVec3) -> DVec3) {
+    let mut waiting = vec![(from, way, long, deep)];
+    while let Some((at, way, long, left)) = waiting.pop() {
+        let way = (way + g.any_way() * (0.15 + 0.5 * crooked) + DVec3::Z * 0.12).normalize();
+        let end = hold(at + way * long * g.between(0.8, 1.2));
+        let thick = 0.95 - 0.1 * fine;
+        g.cone(at, end, thick, thick - 0.1, LIMB);
+        if left > 0 {
+            let hinge = turned(across(way), way, g.between(0.0, TAU));
+            let angle = g.between(0.4, 0.6) + 0.35 * (1.0 - fine);
+            waiting.push((end, turned(way, hinge, angle), long * 0.78, left - 1));
+            waiting.push((end, turned(way, hinge, -angle * g.between(0.5, 1.0)), long * 0.78, left - 1));
+            // (a beech carries its leader on between the two as well)
+            if fine > 0.5 && left > 1 {
+                waiting.push((end, way, long * 0.85, left - 2));
+            }
+        }
+    }
+}
+
+/// A hydrangea: a mophead, *Hydrangea macrophylla*.
+///
+/// A rounded shrub about as wide as it is tall, of broad leaves, carrying
+/// at the ends of its shoots large domed heads of flowers. A head is some
+/// hundreds of florets, each of four petal-like sepals, and is blue on
+/// acid ground and pink on chalk.
+/// https://plants.ces.ncsu.edu/plants/hydrangea-macrophylla/
+///
+/// The shrub is the boxwood's (stems by forks, tufts of leaves over a
+/// dome) with larger, fewer tufts, for a leaf a hand long. The heads
+/// stand on the upper part of the dome, a golden angle apart. A head is
+/// not a ball: its florets are set over a cap by Vogel's model (see
+/// [`vogel`]), and each floret is four small balls in a cross about a
+/// middle of another colour, lying on the cap. Four cells across is the
+/// least a cross can be, so a head has a few dozen florets where the
+/// plant's has hundreds; what is kept is that the head is a dome of
+/// separate four-parted flowers. The florets of a head are of two colour
+/// numbers, mixed, which the sets paint as two tones of one colour or as
+/// the blue running to pink of a bush on middling ground.
+fn hydrangea(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
+    let (dense, loose) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let heads = tree.count.max(1) as usize;
+    let mass = (spread * (0.26 + 0.1 * dense)).clamp(2.8, height * 0.3);
+    let head = (spread * 0.3).min(height * 0.28).max(3.0);
+    let heart = DVec3::Z * height * 0.48;
+    let dome = DVec3::new((spread - mass * 0.9).max(2.0), (spread - mass * 0.9).max(2.0), (height * 0.5 - head * 0.7).max(2.0));
+    // a few stems from the ground, to show at its foot
+    let trunk = g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.2, 1.2], None, 0);
+    let turn = g.between(0.0, TAU);
+    for k in 0..5 {
+        let way = turn + TAU * k as f64 / 5.0 + g.between(-0.3, 0.3);
+        let out = DVec3::new(way.cos(), way.sin(), 0.0);
+        let (from, to) = (out * spread * g.between(0.08, 0.2), out * spread * g.between(0.3, 0.5) + DVec3::Z * height * 0.4);
+        let bent = from.lerp(to, 0.5) + g.any_way() * 1.2;
+        g.limb(vec![from, bent, to], vec![1.4, 1.2, 1.0], Some(trunk), 1, TRUNK);
+    }
+    // the leaves: tufts over the dome, the lowest left out
+    let tufts = ((0.8 + 0.7 * dense) * 4.0 * dome.x * dome.z.max(dome.x) / (mass * mass)).ceil() as usize;
+    for n in 0..tufts {
+        let up = 1.0 - 2.0 * (n as f64 + 0.5) / tufts as f64;
+        if up < -0.7 {
+            continue;
+        }
+        let (level, way) = ((1.0 - up * up).sqrt(), n as f64 * GOLDEN_ANGLE);
+        let at = heart + DVec3::new(level * way.cos(), level * way.sin(), up) * dome * (1.0 - loose * g.between(0.0, 0.3));
+        let r = mass * g.between(0.75, 1.15);
+        g.leaves(DVec3::new(at.x, at.y, at.z.max(r * 0.8)), DVec3::new(r, r, r * 0.7));
+    }
+    // the heads: over the upper two thirds of the dome
+    for n in 0..heads {
+        let up = 1.0 - 1.25 * (n as f64 + 0.5) / heads as f64;
+        let (level, way) = ((1.0 - up * up).sqrt(), n as f64 * GOLDEN_ANGLE + turn);
+        let normal = (DVec3::new(level * way.cos(), level * way.sin(), up) + DVec3::Z * 0.35).normalize();
+        let size = head * g.between(0.8, 1.1);
+        let middle = heart + DVec3::new(level * way.cos(), level * way.sin(), up) * dome + normal * size * 0.25;
+        let (u, v) = (across(normal), normal.cross(across(normal)));
+        // a green cushion under the florets, so that no light shows through the head
+        g.blob(middle - normal * size * 0.15, DVec3::splat(size * 0.62), LEAF_DARK, false);
+        let apart = 3.3;
+        for k in 1..=((size / apart).powi(2) * 2.4) as usize {
+            let (far, at) = vogel(k, apart * 0.62);
+            if far > size {
+                break;
+            }
+            // on a cap: the further out, the further round the dome of the head
+            let round = far / size * 1.25;
+            let out = u * at.cos() + v * at.sin();
+            let face = (normal * round.cos() + out * round.sin()).normalize();
+            let floret = middle + face * size * 0.78;
+            let (a, b) = (across(face), face.cross(across(face)));
+            let twist = g.between(0.0, TAU);
+            let shade = if g.unit() < 0.5 { TOP } else { EXTRA };
+            for petal in 0..4 {
+                let to = twist + TAU * petal as f64 / 4.0;
+                g.blob(floret + (a * to.cos() + b * to.sin()) * 1.15, DVec3::splat(1.0), shade, false);
+            }
+            g.blob(floret + face * 0.55, DVec3::splat(0.75), STAR, false);
+        }
+    }
+}
+
+/// A petunia: a garden petunia of the spreading kind, *Petunia x hybrida*.
+///
+/// A low mound of small leaves, a hand high and several across, whose
+/// stems lie along the ground with their tips turned up, covered in
+/// funnel-shaped flowers of five joined lobes, often with a darker throat.
+/// https://plants.ces.ncsu.edu/plants/petunia-x-hybrida/
+///
+/// The mound is tufts of leaves over a low dome, and the trailing stems
+/// run out from under it along the ground, as far as the trailing setting
+/// says, each ending in a tuft and a flower. The flowers stand all over
+/// the mound a golden angle apart, facing outwards and up. A flower is a
+/// short green tube, five lobes round its mouth (each a short round rib
+/// leaning back, so that the face is a shallow funnel and not a flat
+/// star) and a throat of another colour number sunk in the middle.
+fn petunia(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
+    let (dense, trail) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let flowers = tree.count.max(1) as usize;
+    let mass = (spread * 0.16).clamp(2.6, height * 0.4);
+    let bloom = (spread * 0.14).clamp(3.0, 5.5);
+    // the mound keeps to the middle; the more it trails, the smaller the mound and the longer the stems
+    let mound = spread * (1.0 - 0.45 * trail);
+    let heart = DVec3::Z * height * 0.15;
+    let dome = DVec3::new((mound - mass).max(2.0), (mound - mass).max(2.0), (height * 0.85 - mass * 0.7 - bloom * 0.5).max(2.0));
+    let trunk = g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.0, 1.0], None, 0);
+    let tufts = ((1.0 + 0.8 * dense) * 2.0 * dome.x * dome.x / (mass * mass)).ceil() as usize;
+    for n in 0..tufts {
+        let up = 1.0 - (n as f64 + 0.5) / tufts as f64;
+        let (level, way) = ((1.0 - up * up).sqrt(), n as f64 * GOLDEN_ANGLE);
+        let at = heart + DVec3::new(level * way.cos(), level * way.sin(), up) * dome;
+        let r = mass * g.between(0.75, 1.15);
+        g.leaves(DVec3::new(at.x, at.y, at.z.max(r * 0.55)), DVec3::new(r, r, r * 0.6));
+    }
+    // a flower at `at`, facing `face`
+    let flower = |g: &mut Grown, at: DVec3, face: DVec3| {
+        let (a, b) = (across(face), face.cross(across(face)));
+        let size = bloom * g.between(0.85, 1.1);
+        g.cone(at - face * size * 0.5, at, 1.0, 1.5, LIMB);
+        let twist = g.between(0.0, TAU);
+        for lobe in 0..5 {
+            let to = twist + TAU * lobe as f64 / 5.0;
+            let out = a * to.cos() + b * to.sin();
+            g.cone(at + out * 1.0, at + out * size + face * size * 0.3, 1.25, 1.1, TOP);
+        }
+        g.blob(at + face * 0.3, DVec3::splat(1.3), EXTRA, false);
+    };
+    // the trailing stems, and how many of the flowers they carry
+    let stems = (3.0 + 9.0 * trail) as usize;
+    let turn = g.between(0.0, TAU);
+    let mut left = flowers;
+    for k in 0..stems.min(flowers) {
+        let way = turn + k as f64 * GOLDEN_ANGLE;
+        let out = DVec3::new(way.cos(), way.sin(), 0.0);
+        let far = mound * 0.6 + (spread - mound * 0.6 - bloom) * g.between(0.6, 1.0);
+        let (from, low, tip) = (out * mound * 0.4 + DVec3::Z * 1.2, out * far * 0.7 + DVec3::Z * 1.0, out * far + DVec3::Z * (1.5 + mass * 0.6));
+        g.limb(vec![from, low, tip], vec![1.0, 0.95, 0.9], Some(trunk), 1, TRUNK);
+        g.leaves(low + DVec3::Z * mass * 0.3, DVec3::new(mass * 0.8, mass * 0.8, mass * 0.5));
+        g.leaves(tip, DVec3::new(mass * 0.75, mass * 0.75, mass * 0.5));
+        flower(g, tip + (out * 0.5 + DVec3::Z).normalize() * mass * 0.6, (out * 0.7 + DVec3::Z).normalize());
+        left -= 1;
+    }
+    for n in 0..left {
+        let up = 1.0 - 0.92 * (n as f64 + 0.5) / left as f64;
+        let (level, way) = ((1.0 - up * up).sqrt(), n as f64 * GOLDEN_ANGLE + turn);
+        let normal = DVec3::new(level * way.cos(), level * way.sin(), up);
+        let at = heart + normal * (dome + mass * 0.75);
+        flower(g, DVec3::new(at.x, at.y, at.z.max(bloom * 0.6)), (normal + DVec3::Z * 0.5).normalize());
+    }
+}
+
+/// Reeds: a stand of bulrushes (cattails), *Typha latifolia*, or with
+/// feathery plumes, of common reed, *Phragmites australis*.
+///
+/// Tall unbranched stems, close together, with long narrow leaves that
+/// stand nearly upright and flop at their tips. A bulrush carries the
+/// brown sausage it is known by, a thumb thick and a hand long, with a
+/// thinner spike above it; a common reed carries a loose plume that
+/// hangs to one side.
+/// https://en.wikipedia.org/wiki/Typha_latifolia
+/// https://en.wikipedia.org/wiki/Phragmites_australis
+///
+/// The bulrush is what a stand starts as, because its head is the one
+/// that can be told at this size: a plume is a soft thing, and in bricks
+/// a soft thing is a rough lump. The plume is there to be chosen.
+///
+/// The stems stand in an oval, as long as the stand is asked to be and
+/// as wide as its spread, scattered evenly by throwing each a golden
+/// angle and a square root further out than the last (see [`vogel`]),
+/// stretched to the oval. All lean the same way by an amount of their
+/// own, as reeds do in a wind.
+fn reeds(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
+    let (full, sway) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let stems = tree.count.max(1) as usize;
+    let long = long.max(spread);
+    let wind = g.between(0.0, TAU);
+    let downwind = DVec3::new(wind.cos(), wind.sin(), 0.0);
+    for n in 0..stems {
+        let (far, at) = vogel(n + 1, 1.0 / (stems as f64).sqrt());
+        let foot = DVec3::new(far * at.cos() * (long - 2.0).max(1.0), far * at.sin() * (spread - 2.0).max(1.0), 0.0);
+        let tall = height * g.between(0.7, 1.0);
+        let lean = sway * g.between(0.05, 0.3);
+        let own = (downwind + g.any_way() * 0.5).normalize_or_zero();
+        let stem = |t: f64| foot + DVec3::new(own.x, own.y, 0.0) * lean * tall * t * t + DVec3::Z * tall * t;
+        let steps = 6;
+        let limb = g.limb((0..=steps).map(|k| stem(0.86 * k as f64 / steps as f64)).collect(), vec![1.0; steps + 1], None, 0, TRUNK);
+        // the head
+        let (low, high) = (stem(0.72), stem(0.86));
+        if tree.extras {
+            // a plume: soft shoots hanging to the lee
+            for k in 0..6 {
+                let from = low.lerp(stem(0.98), k as f64 / 5.0);
+                let hang = (downwind * 0.9 + g.any_way() * 0.5 + DVec3::Z * (0.5 - 0.15 * k as f64)).normalize();
+                g.cone(from, from + hang * tall * 0.07, 1.2, 0.85, TOP);
+            }
+            g.cone(low, stem(0.98), 1.0, 0.8, TOP);
+        } else {
+            // the sausage, and the thin spike that stands out of its top
+            g.cone(low, high, 1.9, 1.9, EXTRA);
+            g.cone(high, stem(1.0), 0.9, 0.8, STAR);
+        }
+        // the leaves: from low on the stem, nearly upright, flopping at the tip
+        let leaves = 1 + (full * 2.6) as usize;
+        for k in 0..leaves {
+            let way = at + k as f64 * GOLDEN_ANGLE;
+            let out = DVec3::new(way.cos(), way.sin(), 0.0);
+            let reach = tall * g.between(0.45, 0.8);
+            let mut place = stem(0.03 + 0.1 * k as f64);
+            let mut path = vec![place];
+            for step in 0..5 {
+                let polar: f64 = 0.12 + (0.5 + 0.9 * sway) * ((step as f64 + 0.5) / 5.0).powi(3) * 1.6;
+                let next = place + (DVec3::Z * polar.cos() + out * polar.sin()) * reach / 5.0;
+                g.cone(place, next, 1.0 - 0.03 * step as f64, 0.97 - 0.03 * step as f64, if k % 2 == 0 { LEAF } else { LEAF_DARK });
+                place = next;
+                path.push(place);
+            }
+            let radius = vec![1.0; path.len()];
+            g.limbs.push(Limb { path, radius, parent: Some(limb), level: 1 });
         }
     }
 }
@@ -1374,73 +1934,9 @@ fn boxwood(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         let at = heart + DVec3::new(level * way.cos(), level * way.sin(), up) * dome * (1.0 - loose * g.between(0.0, 0.3));
         let r = mass * g.between(0.75, 1.2);
         g.leaves(DVec3::new(at.x, at.y, at.z.max(r * 0.8)), DVec3::new(r, r, r * 0.8));
-    }
-}
-
-/// A rose: a shrub rose in flower.
-///
-/// A shrub rose is canes and not a trunk: long shoots from the ground
-/// that climb and then arch over under their own weight, with leaves in
-/// clusters along them and the flowers at the ends of the canes and of
-/// the side shoots, on the outside of the bush where the light is.
-/// https://en.wikipedia.org/wiki/Rose
-///
-/// Each cane is a palm's frond stood on the ground: it leaves at a small
-/// angle from upright and turns over more and more towards its tip. The
-/// canes are grown at no particular size and then stretched to the height
-/// and spread asked for. A tuft of leaves sits every few cells along the
-/// outer two thirds of a cane, and a bloom on the outward side of some of
-/// them and of every tip: a ball of petals with a small heart of another
-/// colour looking out of it, which is as much of a rose as six cells hold.
-fn rose(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
-    let (full, arching) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
-    let canes = tree.count.max(1) as usize;
-    let tuft = (3.0 + 2.2 * full).min(height * 0.2);
-    let bloom = (height * 0.05).clamp(1.9, 3.2);
-    let trunk = g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.2, 1.2], None, 0);
-    let mut paths: Vec<Vec<DVec3>> = Vec::new();
-    for i in 0..canes {
-        let way = i as f64 * GOLDEN_ANGLE + g.between(-0.3, 0.3);
-        let out = DVec3::new(way.cos(), way.sin(), 0.0);
-        let (leaves_at, arch) = (g.between(0.1, 0.45), (0.7 + 1.5 * arching) * g.between(0.8, 1.2));
-        let long = g.between(0.7, 1.0);
-        let mut path = vec![DVec3::ZERO];
-        for k in 0..10 {
-            let polar = (leaves_at + arch * ((k as f64 + 0.5) / 10.0).powf(1.6)).min(2.3);
-            path.push(path[k] + (DVec3::Z * polar.cos() + out * polar.sin()) * long / 10.0);
+        if tree.extras && g.unit() < 0.35 {
+            berries(g, DVec3::new(at.x, at.y, at.z.max(r * 0.8)), r * 0.8, heart);
         }
-        paths.push(path);
-    }
-    // stretched to size: the highest cane to the height, the widest to the spread, less the leaves on them
-    let top = paths.iter().flatten().map(|p| p.z).fold(1e-9, f64::max);
-    let wide = paths.iter().flatten().map(|p| p.truncate().length()).fold(1e-9, f64::max);
-    let (tall, broad) = ((height - tuft - bloom).max(height * 0.5) / top, (spread - tuft - bloom - (spread * 0.12).max(1.8)).max(spread * 0.5) / wide);
-    let middle = DVec3::Z * height * 0.4;
-    for path in paths {
-        // (each cane from its own place in the ground, a cell or two from the middle)
-        let foot = (path[1] - path[0]).truncate().normalize_or_zero().extend(0.0) * (spread * 0.12).max(1.8);
-        let path: Vec<DVec3> = path.iter().map(|p| foot + DVec3::new(p.x * broad, p.y * broad, (p.z * tall).max(0.0))).collect();
-        let long: f64 = path.windows(2).map(|w| w[0].distance(w[1])).sum();
-        let radius: Vec<f64> = (0..path.len()).map(|k| 1.3 - 0.45 * k as f64 / (path.len() - 1) as f64).collect();
-        // leaves and blooms along it, from a third of the way
-        let tufts = ((long * 0.67 / (tuft * 1.5)).floor() as usize).max(1);
-        for n in 0..=tufts {
-            let s = 0.33 + 0.67 * n as f64 / tufts as f64;
-            let f = (s * (path.len() - 1) as f64).min(path.len() as f64 - 1.001);
-            let at = path[f as usize].lerp(path[f as usize + 1], f - f.floor());
-            let outward = ((at - middle).normalize_or_zero() + DVec3::Z * 0.5).normalize();
-            let off = g.any_way();
-            let r = tuft * g.between(0.8, 1.2);
-            g.leaves(at + DVec3::new(off.x, off.y, off.z * 0.4) * r * 0.5, DVec3::new(r, r, r * 0.75));
-            if tree.extras && (n == tufts || g.unit() < 0.3 + 0.4 * full) {
-                let face = (outward + g.any_way() * 0.4).normalize();
-                let heart = at + face * (r * 0.7 + bloom * 0.5);
-                let big = bloom * g.between(0.85, 1.1);
-                g.blob(heart, DVec3::splat(big), EXTRA, false);
-                g.blob(heart + face * bloom * 0.75, DVec3::splat(bloom * 0.45), STAR, false);
-            }
-        }
-        g.limb(path, radius, Some(trunk), 1, TRUNK);
     }
 }
 
@@ -1529,7 +2025,8 @@ fn sunflower(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
         let apart = 1.3;
         for k in 1..=((disc / apart).powi(2)) as usize {
             let (far, at) = vogel(k, apart);
-            let bulge = 1.4 * (1.0 - (far / disc).powi(2));
+            // (domed: a head is a shallow cushion, highest in the middle)
+            let bulge = disc * 0.34 * (1.0 - (far / disc).powi(2));
             let seed = middle + (u * at.cos() + v * at.sin()) * far + normal * bulge;
             g.blob(seed, DVec3::splat(1.3), if far < disc * 0.6 { STAR } else { EXTRA }, false);
         }
@@ -1540,10 +2037,15 @@ fn sunflower(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
                 let (out, round) = (u * at.cos() + v * at.sin(), v * at.cos() - u * at.sin());
                 let long = (head - disc) * (1.0 - 0.14 * row as f64) * g.between(0.88, 1.05) * (0.8 + 0.3 * full);
                 let from = middle + out * disc * 0.92 - normal * (0.3 + 1.1 * row as f64);
-                let tip = from + out * long + normal * g.between(-0.12, 0.1) * long;
-                // two ribs side by side at its root, meeting at its tip: a petal is flat
+                // Cupped forward where it leaves the disc and laid back
+                // at its tip, so the ring of petals is a shallow bowl
+                // with a rolled rim and not a flat plate. Two ribs side by
+                // side at its root, meeting at its tip: a petal is flat.
+                let half = from + out * long * 0.5 + normal * long * (0.2 - 0.06 * row as f64);
+                let tip = from + out * long * 0.96 - normal * long * g.between(0.12, 0.3);
                 for hand in [-0.75, 0.75] {
-                    g.cone(from + round * hand, tip, 1.15, 0.75, TOP);
+                    g.cone(from + round * hand, half + round * hand * 0.6, 1.15, 1.05, TOP);
+                    g.cone(half + round * hand * 0.6, tip, 1.05, 0.75, TOP);
                 }
             }
         }
@@ -1719,7 +2221,7 @@ mod tests {
     fn one_seed_is_one_tree_and_another_seed_another() {
         for (kind, name) in KINDS {
             let (a, again, other) = (build(&small(kind, 5)).unwrap(), build(&small(kind, 5)).unwrap(), build(&small(kind, 6)).unwrap());
-            assert!(a.bricks.len() > 800, "{name}: only {} bricks", a.bricks.len());
+            assert!(a.bricks.len() > 400, "{name}: only {} bricks", a.bricks.len());
             assert_eq!((&a.bricks, &a.shades), (&again.bricks, &again.shades), "{name}: one seed gave two trees");
             assert_ne!(a.bricks, other.bricks, "{name}: two seeds gave one tree");
             // and each kind has numbers of its own: the same seed is not the same shape in another kind
@@ -1731,7 +2233,8 @@ mod tests {
     #[test]
     fn no_two_bricks_share_a_cell_and_each_has_its_colour() {
         for (kind, name) in KINDS {
-            let built = build(&Spec { tree: Tree { extras: true, ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
+            // (with its extras, but a broadleaf tree's, which is to be bare)
+            let built = build(&Spec { tree: Tree { extras: !matches!(kind, Kind::Oak | Kind::Beech), ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
             let mut seen = std::collections::HashSet::new();
             for b in &built.bricks {
                 for z in 0..b.ext[2] {
@@ -1751,7 +2254,12 @@ mod tests {
             // nothing below the ground it stands on, and it stands on it
             assert_eq!(built.bricks.iter().map(|b| b.min[2]).min(), Some(0), "{name}");
             // its extras are there when asked for
-            if matches!(kind, Kind::Pine | Kind::Palm | Kind::Rose) {
+            if matches!(kind, Kind::Pine | Kind::Palm | Kind::Boxwood | Kind::Hedge | Kind::Reeds) {
+                // (reeds' extras are plumes in place of the brown heads, which are the colour the others' extras are)
+                if kind == Kind::Reeds {
+                    assert!(!built.shades.contains(&EXTRA) && build(&small(kind, 2)).unwrap().shades.contains(&EXTRA));
+                    continue;
+                }
                 assert!(count(|s| s == EXTRA) > 3, "{name}: no extras");
                 let plain = build(&Spec { tree: Tree { extras: false, ..small(kind, 2).tree }, ..small(kind, 2) }).unwrap();
                 assert!(!plain.shades.contains(&EXTRA), "{name}: extras not asked for");
@@ -2157,26 +2665,179 @@ mod tests {
             }
             assert!(covered as f64 > all as f64 * 0.93, "leaves cover {covered} of {all} of the middle of the bush");
 
-            // the rose: as many canes as asked, each from the ground, climbing and then turning over
-            let rose = model(Kind::Rose, seed);
-            let (height, spread) = Tree::usual_size(Kind::Rose);
-            let canes: Vec<&Limb> = rose.limbs.iter().filter(|l| l.level == 1).collect();
-            assert_eq!(canes.len(), Tree::of(Kind::Rose).count as usize);
-            for cane in &canes {
-                assert!(cane.path[0].z == 0.0 && cane.path[0].truncate().length() < spread * 0.2);
-                let slope = |a: usize| (cane.path[a + 1].z - cane.path[a].z) / cane.path[a + 1].distance(cane.path[a]);
-                assert!(slope(0) > 0.7 && slope(cane.path.len() - 2) < slope(0) - 0.3, "a cane climbing {} at its foot and {} at its tip", slope(0), slope(cane.path.len() - 2));
-            }
-            let (lo, hi) = rose.bounds();
-            assert!(hi.z > height * 0.8 && hi.z <= height + 1.0 && (hi.x - lo.x).max(hi.y - lo.y) > spread * 1.5, "{lo} to {hi}");
-            // in flower: blooms with hearts, further out than the leaves; and none when not in flower
-            let built = build(&spec(Kind::Rose, seed)).unwrap();
-            let out = |these: Vec<DVec3>| these.iter().map(|p| (*p - DVec3::Z * height * 0.4).length()).sum::<f64>() / these.len().max(1) as f64;
-            let (blooms, hearts, leaves) = (bricks_of(&built, &[EXTRA]), bricks_of(&built, &[STAR]), bricks_of(&built, &[LEAF, LEAF_DARK, LEAF_LIGHT]));
-            assert!(blooms.len() > 100 && hearts.len() > 10 && leaves.len() > 500, "{} of bloom, {} of heart, {} of leaf", blooms.len(), hearts.len(), leaves.len());
-            assert!(out(hearts) > out(blooms.clone()) && out(blooms) > out(leaves) * 1.05);
-            let bare = build(&Spec { tree: Tree { extras: false, ..spec(Kind::Rose, seed).tree }, ..spec(Kind::Rose, seed) }).unwrap();
-            assert!(!bare.shades.contains(&EXTRA) && !bare.shades.contains(&STAR));
         }
+    }
+
+    /// The box the bricks of some colour numbers fill.
+    fn extent(built: &crate::spec::Built, wanted: &[u8]) -> (DVec3, DVec3) {
+        bricks_of(built, wanted).iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p), hi.max(*p)))
+    }
+
+    #[test]
+    fn a_beech_keeps_its_stem_and_a_bare_tree_is_the_same_tree_in_twigs() {
+        for seed in 1..4 {
+            let tree = model(Kind::Beech, seed);
+            let (height, spread) = Tree::usual_size(Kind::Beech);
+            // the thickest limb is the stem carried on: it starts nearly upright and climbs most of the crown
+            let leader = tree.limbs[1..].iter().filter(|l| l.level == 1).max_by(|a, b| a.radius[0].total_cmp(&b.radius[0])).unwrap();
+            let first = (leader.path[1] - leader.path[0]).normalize();
+            assert!(first.z > 0.9, "the leader leaves the trunk at {first}");
+            assert!(leader.path.last().unwrap().z > height * 0.55, "the leader ends at {}", leader.path.last().unwrap().z);
+            for (limb, into) in &tree.forks {
+                assert!((into.iter().map(|r| r * r).sum::<f64>() - limb * limb).abs() < 1e-9 * limb * limb);
+            }
+            // taller than wide, where an oak is wider than tall; and slimmer in the trunk
+            let (lo, hi) = tree.bounds();
+            assert!((hi.x - lo.x).max(hi.y - lo.y) < hi.z * 0.85 && hi.z > height * 0.85 && (hi.x - lo.x) <= spread * 2.0 + 1e-6, "{lo} to {hi}");
+            let oak = model(Kind::Oak, seed);
+            let (olo, ohi) = oak.bounds();
+            assert!((ohi.x - olo.x).max(ohi.y - olo.y) > ohi.z);
+            assert!(tree.limbs[0].radius.last().unwrap() / height < oak.limbs[0].radius.last().unwrap() / ohi.z);
+        }
+        for kind in [Kind::Oak, Kind::Beech] {
+            let leafy = spec(kind, 2);
+            let bare = Spec { tree: Tree { extras: true, ..leafy.tree }, ..leafy.clone() };
+            let (in_leaf, stripped) = (model(kind, 2), Model::new(&bare.tree, bare.points[0], bare.rise.unwrap(), bare.radius));
+            // the same tree: limb for limb
+            assert_eq!(in_leaf.limbs.len(), stripped.limbs.len());
+            assert!(in_leaf.limbs.iter().zip(&stripped.limbs).all(|(a, b)| a.path == b.path && a.radius == b.radius), "{kind:?}: bare, it is another tree");
+            // no leaf on it, and twigs where the leaves were: thin ends reaching as far up and out as the leaves did
+            let built = build(&bare).unwrap();
+            assert!(!built.shades.iter().any(|s| is_leaf(*s)), "{kind:?}: a bare tree has leaves");
+            let ((lo, hi), (was_lo, was_hi)) = (stripped.bounds(), in_leaf.bounds());
+            assert!(hi.z > was_hi.z * 0.9 && (hi.x - lo.x) > (was_hi.x - was_lo.x) * 0.8, "{kind:?}: bare it is {lo} to {hi}, in leaf {was_lo} to {was_hi}");
+            // many more ends than branches: each branch end forks at least twice more
+            let tips = stripped.parts.iter().filter(|p| matches!(p.shape, Shape::Cone { ra, .. } if ra < 0.96) && p.shade == LIMB).count();
+            let ends = in_leaf.limbs.len();
+            assert!(tips > ends * 3, "{kind:?}: {tips} twigs on {ends} limbs");
+        }
+        // a beech has more and finer twigs than an oak
+        let twigs = |kind: Kind| { let s = spec(kind, 2); Model::new(&Tree { extras: true, ..s.tree }, s.points[0], s.rise.unwrap(), s.radius).parts.iter().filter(|p| matches!(p.shape, Shape::Cone { ra, .. } if ra < 0.96)).count() };
+        assert!(twigs(Kind::Beech) > twigs(Kind::Oak));
+    }
+
+    #[test]
+    fn a_hedge_is_as_long_as_asked_closed_and_level_and_has_berries_when_asked() {
+        let (height, spread) = Tree::usual_size(Kind::Hedge);
+        let grown = |long: f64, extras: bool| {
+            let s = Spec { stretch: DVec3::new(long / spread, 1.0, 1.0), tree: Tree { extras, ..Tree::of(Kind::Hedge) }, ..spec(Kind::Hedge, 1) };
+            (build(&s).unwrap(), Model::with_length(&s.tree, s.points[0], height, spread, long))
+        };
+        let ((short, short_model), (long, long_model)) = (grown(30.0, false), grown(90.0, true));
+        for (model, half) in [(&short_model, 30.0), (&long_model, 90.0)] {
+            let (lo, hi) = model.bounds();
+            assert!((hi.x - lo.x) > 2.0 * half - 6.0 && (hi.x - lo.x) <= 2.0 * half + 4.0, "{} long of {}", hi.x - lo.x, 2.0 * half);
+            assert!((hi.y - lo.y) > 2.0 * spread - 8.0 && (hi.y - lo.y) <= 2.0 * spread + 4.0 && hi.z > height - 4.0 && hi.z <= height + 2.0, "{lo} to {hi}");
+            // closed and level: from above, leaves all along its middle, at nearly one height
+            let mut tops = Vec::new();
+            let mut x = -half + 8.0;
+            while x < half - 8.0 {
+                let top = (0..(height as i32 + 4)).rev().find(|z| model.eval(DVec3::new(x + 0.5, 0.5, *z as f64 + 0.5)) < 0.0);
+                tops.push(top.expect("a gap in the top of the hedge") as f64);
+                x += 3.0;
+            }
+            let (least, most) = (tops.iter().cloned().fold(f64::MAX, f64::min), tops.iter().cloned().fold(0.0, f64::max));
+            assert!(most - least <= height * 0.25 && least > height * 0.7, "the top runs from {least} to {most}");
+        }
+        // the same plant, longer: more stems, the same thickness
+        assert!(long_model.limbs.len() == short_model.limbs.len() || long_model.limbs.len() > 3);
+        assert!(long.bricks.len() > short.bricks.len() * 2);
+        // berries when asked for, on the outside, and none otherwise
+        assert!(!short.shades.contains(&EXTRA));
+        let berries = bricks_of(&long, &[EXTRA]);
+        assert!(berries.len() > 40, "{} bricks of berry", berries.len());
+        assert!(berries.iter().all(|b| b.y.abs() > spread * 0.45 || b.z > height * 0.6 || b.x.abs() > 80.0), "a berry inside the hedge");
+        // and a boxwood has them the same way
+        let bush = |extras: bool| build(&Spec { tree: Tree { extras, ..Tree::of(Kind::Boxwood) }, ..spec(Kind::Boxwood, 1) }).unwrap();
+        assert!(bush(true).shades.iter().filter(|s| **s == EXTRA).count() > 30 && !bush(false).shades.contains(&EXTRA));
+    }
+
+    #[test]
+    fn a_peony_opens_from_a_ball_to_a_bowl_of_many_petals() {
+        let one = |open: i32| Spec { tree: Tree { count: 1, bend: open, ..Tree::of(Kind::Peony) }, ..spec(Kind::Peony, 3) };
+        let (height, spread) = Tree::usual_size(Kind::Peony);
+        let (bud, blown) = (build(&one(0)).unwrap(), build(&one(100)).unwrap());
+        let size = |built: &crate::spec::Built| {
+            let (lo, hi) = extent(built, &[TOP, EXTRA]);
+            ((hi.x - lo.x).max(hi.y - lo.y), hi.z - lo.z)
+        };
+        let ((bud_wide, bud_tall), (wide, tall)) = (size(&bud), size(&blown));
+        // a bud is a ball, as tall as wide and well under the full bloom's width; full blown it is a bowl, wider than tall and as wide as asked
+        assert!(bud_wide < wide * 0.75 && (bud_tall / bud_wide - 1.0).abs() < 0.35, "a bud {bud_wide:.1} wide and {bud_tall:.1} tall");
+        assert!(wide > tall * 1.3 && wide > spread * 1.5 && wide < spread * 2.5, "full blown {wide:.1} wide and {tall:.1} tall, for {}", spread * 2.0);
+        // both rings of petals, inner inside outer, and stamens at the heart of the open one
+        let middle = |built: &crate::spec::Built, shade: u8| { let these = bricks_of(built, &[shade]); let (lo, hi) = extent(built, &[TOP, EXTRA]); let c = (lo + hi) / 2.0; these.iter().map(|p| (*p - c).truncate().length()).sum::<f64>() / these.len().max(1) as f64 };
+        assert!(middle(&blown, EXTRA) < middle(&blown, TOP) && middle(&blown, STAR) < middle(&blown, EXTRA), "inner {} outer {} heart {}", middle(&blown, EXTRA), middle(&blown, TOP), middle(&blown, STAR));
+        assert!(bricks_of(&blown, &[TOP]).len() > 150 && bricks_of(&blown, &[EXTRA]).len() > 60);
+        // many petals: more with fullness
+        let petals = |full: i32| Model::new(&Tree { count: 1, fullness: full, ..Tree::of(Kind::Peony) }, DVec3::splat(0.5), height, spread).parts.iter().filter(|p| p.shade == TOP || p.shade == EXTRA).count() / 6;
+        assert!(petals(0) >= 30 && petals(100) > petals(0) + 15, "{} and {} petals", petals(0), petals(100));
+        // a clump is that many stems, each with leaves, and stands as tall as asked
+        let clump = model(Kind::Peony, 1);
+        assert_eq!(clump.limbs.iter().filter(|l| l.level == 0).count(), Tree::of(Kind::Peony).count as usize);
+        assert!(clump.limbs.iter().filter(|l| l.level == 1).count() >= 9);
+        assert!(clump.bounds().1.z > height * 0.85 && clump.bounds().1.z < height * 1.15);
+        // the rose bush that was: read as a peony of the same seed
+        let old = crate::report::parse_spec("form = tree\ntree = rose,7,60,9,50,1\n").unwrap();
+        assert_eq!(old.tree, Tree { seed: 7, ..Tree::of(Kind::Peony) });
+    }
+
+    #[test]
+    fn a_hydrangea_has_domed_heads_of_florets_petunias_trail_and_reeds_stand_in_a_bank() {
+        // hydrangea: leaves, and heads of two colours of floret with middles, high on the bush
+        let (height, spread) = Tree::usual_size(Kind::Hydrangea);
+        let bush = build(&spec(Kind::Hydrangea, 1)).unwrap();
+        let (one, other, middles, leaves) = (bricks_of(&bush, &[TOP]), bricks_of(&bush, &[EXTRA]), bricks_of(&bush, &[STAR]), bricks_of(&bush, &[LEAF, LEAF_DARK, LEAF_LIGHT]));
+        assert!(one.len() > 150 && other.len() > 150 && middles.len() > 40 && leaves.len() > 2000, "{} {} {} {}", one.len(), other.len(), middles.len(), leaves.len());
+        let mean = |these: &[DVec3]| these.iter().map(|p| p.z).sum::<f64>() / these.len() as f64;
+        assert!(mean(&one) > mean(&leaves) && mean(&one) > height * 0.45);
+        // a head is a dome of separate florets and not a ball: its surface is in pieces of both colours, side by side
+        let near = one.iter().filter(|a| other.iter().any(|b| a.distance(*b) < 3.0)).count();
+        assert!(near > one.len() / 3, "only {near} of {} bricks of one colour are beside the other", one.len());
+        // more heads asked for, more flower
+        let heads = |count: i32| bricks_of(&build(&Spec { tree: Tree { count, ..Tree::of(Kind::Hydrangea) }, ..spec(Kind::Hydrangea, 1) }).unwrap(), &[TOP, EXTRA, STAR]).len();
+        assert!(heads(18) > heads(4) * 2);
+        let (lo, hi) = model(Kind::Hydrangea, 1).bounds();
+        assert!(hi.z <= height + 3.0 && hi.z > height * 0.8 && (hi.x - lo.x) <= spread * 2.0 + 8.0 && (hi.x - lo.x) > spread * 1.5, "{lo} to {hi}");
+
+        // petunias: low and wide, a throat in every flower, and trailing stems when asked
+        let (height, spread) = Tree::usual_size(Kind::Petunia);
+        let grown = |trail: i32| { let s = Spec { tree: Tree { bend: trail, ..Tree::of(Kind::Petunia) }, ..spec(Kind::Petunia, 1) }; (build(&s).unwrap(), Model::new(&s.tree, s.points[0], height, spread)) };
+        let ((mound, mound_model), (trailing, trailing_model)) = (grown(0), grown(100));
+        for model in [&mound_model, &trailing_model] {
+            let (lo, hi) = model.bounds();
+            assert!(hi.z <= height + 4.0 && (hi.x - lo.x) > hi.z * 1.8 && (hi.x - lo.x) <= spread * 2.0 + 6.0, "{lo} to {hi}");
+        }
+        assert!(trailing_model.limbs.len() > mound_model.limbs.len() + 5, "{} stems trailing, {} not", trailing_model.limbs.len(), mound_model.limbs.len());
+        for built in [&mound, &trailing] {
+            let (lobes, throats) = (bricks_of(built, &[TOP]), bricks_of(built, &[EXTRA]));
+            assert!(lobes.len() > 300 && throats.len() >= Tree::of(Kind::Petunia).count as usize / 2, "{} of lobe, {} of throat", lobes.len(), throats.len());
+            // a throat is in the middle of its flower: every one has lobes close round it
+            assert!(throats.iter().all(|t| lobes.iter().filter(|l| l.distance(*t) < 5.0).count() >= 3));
+        }
+        // trailing, it lies lower: the mound is smaller and the rest is along the ground
+        let high = |built: &crate::spec::Built| { let these = bricks_of(built, &[LEAF, LEAF_DARK, LEAF_LIGHT]); these.iter().map(|p| p.z).sum::<f64>() / these.len() as f64 };
+        assert!(high(&trailing) < high(&mound), "{} trailing, {} not", high(&trailing), high(&mound));
+
+        // reeds: as many unbranched stems as asked, in a bank as long as asked, a brown head and a spike on each
+        let (height, spread) = Tree::usual_size(Kind::Reeds);
+        let stand = |long: f64, extras: bool| { let s = Spec { stretch: DVec3::new(long / spread, 1.0, 1.0), tree: Tree { extras, ..Tree::of(Kind::Reeds) }, ..spec(Kind::Reeds, 1) }; (build(&s).unwrap(), Model::with_length(&s.tree, s.points[0], height, spread, long)) };
+        let (bulrushes, bank) = stand(60.0, false);
+        let stems: Vec<&Limb> = bank.limbs.iter().filter(|l| l.level == 0).collect();
+        assert_eq!(stems.len(), Tree::of(Kind::Reeds).count as usize);
+        assert!(stems.iter().all(|l| l.path.windows(2).all(|w| w[1].z > w[0].z) && l.path[0].z == 0.0));
+        let feet = stems.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), l| (lo.min(l.path[0]), hi.max(l.path[0])));
+        assert!((feet.1.x - feet.0.x) > 80.0 && (feet.1.y - feet.0.y) < 2.0 * spread && (feet.1.y - feet.0.y) > spread * 0.8, "the stems stand from {} to {}", feet.0, feet.1);
+        let (heads, spikes, leaves) = (bricks_of(&bulrushes, &[EXTRA]), bricks_of(&bulrushes, &[STAR]), bricks_of(&bulrushes, &[LEAF, LEAF_DARK, LEAF_LIGHT, TOP]));
+        assert!(heads.len() >= stems.len() * 3 && spikes.len() >= stems.len() && leaves.len() > 300, "{} of head, {} of spike, {} of leaf", heads.len(), spikes.len(), leaves.len());
+        let mean = |these: &[DVec3]| these.iter().map(|p| p.z).sum::<f64>() / these.len() as f64;
+        assert!(mean(&heads) > height * 0.5 && mean(&spikes) > mean(&heads) && mean(&leaves) < mean(&heads));
+        // the leaves spring low on the stems and flop outwards at their tips
+        let blades: Vec<&Limb> = bank.limbs.iter().filter(|l| l.level == 1).collect();
+        assert!(blades.len() >= stems.len() && blades.iter().all(|l| l.path[0].z < height * 0.3));
+        // plumes in place of the brown heads when asked for
+        let (plumed, _) = stand(60.0, true);
+        assert!(!plumed.shades.contains(&EXTRA) && bricks_of(&plumed, &[TOP]).len() > stems.len() * 3);
+        assert!(bank.bounds().1.z > height * 0.8 && bank.bounds().1.z <= height + 2.0);
     }
 }

@@ -1972,8 +1972,9 @@ A plant is one solid, fitted cell by cell (section 7.1) and coloured part
 by part ([core/src/tree.rs](../core/src/tree.rs)). The solid is the union
 of several thousand simple parts: tapered round branches, the eight-sided
 lengths of a palm's trunk, and balls of leaves. There are three trees (a
-pine, a palm and an oak), two bushes (a boxwood and a rose) and two
-flowers (a sunflower and a tulip). Each is grown by a method of its own,
+pine, a palm, an oak and a beech), three bushes (a boxwood, a hedge of it
+and a hydrangea), four flowers (a peony, a sunflower, a tulip and
+petunias) and a stand of reeds. Each is grown by a method of its own,
 because they differ in how they grow and a single rule general enough for
 all of them describes none of them closely. The trees come first below,
 and the bushes and flowers after them reuse their parts.
@@ -2209,9 +2210,36 @@ influences every branch near it, so changing one setting grows a
 different tree. Here a seed is one skeleton, and the height, spread and
 foliage can be changed while the tree stays recognisably itself.
 
+#### The beech, and bare trees
+
+<img src="images/tree-beech.png" width="330" alt="A beech in bricks: a smooth grey trunk carrying on up through a tall, dense crown of flat layers of leaves"> <img src="images/tree-beech-bare.png" width="330" alt="The same beech bare: the grey trunk and limbs ending in many short forking twigs">
+
+A beech is the oak's rule with other numbers
+([*Fagus sylvatica*](https://plants.ces.ncsu.edu/plants/fagus-sylvatica/common-name/european-beech)).
+Its smooth grey trunk carries on up through the crown as the thickest
+limb, where an oak's ends at the first fork. Its limbs wander half as
+much, are not pulled down, and leave the trunk at 43 to 63 degrees. Its
+crown is an oval about three quarters as wide as the tree is tall, widest
+a third of the way up. Its tufts of leaves are flatter, and branches up to
+three cells thick carry them, where only an oak's thinnest do, so the
+crown closes. The numbers are the `Habit` of each tree in
+[core/src/tree.rs](../core/src/tree.rs).
+
+**Bare** takes the leaves off an oak or a beech. A tree in leaf ends its
+branches where they are one cell thick, and the leaves hide the stop.
+Bare, each stop would be a stump. Every branch end is therefore carried
+on in twigs: a shoot that forks into two shorter ones, and those again,
+two forks deep on an oak and three on a beech, where a beech also carries
+its shoot straight on between the two. A twig cannot be thinner than a
+branch end, one cell being the least that is built, so twigs are told from
+branches by their number and shortness. A beech's are many, straight and
+close-angled, and an oak's fewer and crooked. The skeleton under them is
+the tree's own: the same seed bare and in leaf is the same tree, limb for
+limb.
+
 #### The bushes
 
-<img src="images/plant-boxwood.png" width="330" alt="A boxwood bush in bricks: a dense rounded mound of lumpy green foliage, lighter on top, on several short stems"> <img src="images/plant-rose.png" width="330" alt="A rose bush in bricks: arching green canes with tufts of leaves and pink blooms with yellow hearts on the outside">
+<img src="images/plant-boxwood.png" width="330" alt="A boxwood bush in bricks: a dense rounded mound of lumpy green foliage, lighter on top, on several short stems">
 
 A boxwood is a dense rounded evergreen, about as tall as it is wide, on
 several stems ([*Buxus sempervirens*](https://plants.ces.ncsu.edu/plants/buxus-sempervirens/)).
@@ -2228,17 +2256,42 @@ shrub left to grow. Builders of brick bushes get the same effect by
 turning each layer of leaves against the one below
 ([leafy bush tutorial](https://fullplatebuilds.com/2018/12/07/leafy-bush-tutorial/)).
 
-A rose is canes: long shoots from the ground that climb and then arch
-over, with the flowers at the ends of the canes and of their side shoots
-([roses](https://plants.ces.ncsu.edu/plants/rosa/)). A cane is a palm's
-frond stood on the ground. It leaves at 6 to 26 degrees from upright and
-turns over by a further $`\beta\,x^{1.6}`$ along its length, with
-$`\beta`$ set by **Arch of the canes**. The canes are set round the
-middle by the golden angle, grown at no particular size and stretched to
-the height and spread asked for. A tuft of leaves sits every few cells
-along the outer two thirds of a cane. A bloom sits on the outward side of
-some tufts and of every tip: a ball of petals about five cells across with
-a small heart of another colour facing outwards.
+A hedge is the boxwood clipped to a wall. It is a kind of its own and
+not a setting of the boxwood, because a bush is round and has a number of
+stems, and a hedge has a length and is a row of plants. Its outline is a
+long box, a little narrower at the top than at the foot, which is the
+"batter" a hedge is clipped to so that light reaches its base
+([pruning hedges](https://www.rhs.org.uk/plants/types/hedges/pruning-hedges)).
+The same tufts of leaves are set over the top, the two sides and the two
+ends in rows, each row half a step along from the last, and each tuft is
+set back by a random amount that **Looseness** scales: at none the hedge
+is freshly clipped, at full it has grown out. The inside is filled, and
+each plant of the row shows two or three stems under the leaves. The
+length is the form's thickness stretched along x, so a hedge of any length
+has the same texture all along it and takes as long to build as its
+surface is large.
+
+**Berries** puts small balls of another colour number just proud of the
+tufts of a boxwood or a hedge. A box has no berries: its fruit is a small
+brown capsule
+([*Buxus sempervirens*](https://plants.ces.ncsu.edu/plants/buxus-sempervirens/)).
+These are a holly's or a cotoneaster's, offered because a hedge in berry
+is wanted in a build.
+
+A hydrangea is a mophead
+([*Hydrangea macrophylla*](https://plants.ces.ncsu.edu/plants/hydrangea-macrophylla/)):
+a rounded shrub of broad leaves with large domed heads of flowers at the
+ends of its shoots. The shrub is the boxwood's with larger, fewer tufts.
+The heads stand over the upper two thirds of the dome, a golden angle
+apart. A head is not a ball. Its florets are set over a cap by Vogel's
+model, and each floret is four small balls in a cross about a middle of
+another colour, lying on the cap, because a real floret has four
+petal-like sepals. Four cells is the least a cross can be across, so a
+head has a few dozen florets where the plant's has some five hundred.
+The florets of a head take two colour numbers at random, which the sets
+paint as two tones of blue, pink or white, or as blue running to pink.
+
+<img src="images/plant-hedge.png" width="330" alt="A clipped box hedge in bricks, five times as long as it is thick, with red berries over its top and sides"> <img src="images/plant-hydrangea.png" width="330" alt="A hydrangea in bricks: a rounded bush of leaves on a few stems, carrying domed flower heads of small blue and pink florets">
 
 #### The flowers
 
@@ -2263,7 +2316,11 @@ golden angle on from the last, which packs them evenly at any size of
 head. Rings of seeds, the obvious alternative, leave gaps between the
 rings and line the seeds up in spokes. The inner seeds have one colour
 number and the outer ring another, the disc bulges a little in the middle,
-and its back is a coarser plate of the same pattern in green. Round the
+and its back is a coarser plate of the same pattern in green. The disc is
+a cushion a third as high in the middle as it is wide across its radius,
+and each petal is cupped forward where it leaves the disc and laid back at
+its tip, so the head has depth and a rolled rim. A flat disc with flat
+petals, which it was at first, read as a plate on a stick. Round the
 disc are the ray florets, the petals: 13, 21 or 34 of them by the size of
 the head, Fibonacci numbers as a real head's are, with a second row behind
 and between the first. Each petal is two round ribs side by side at its
@@ -2288,6 +2345,58 @@ outwards along their length.
 A clump of either flower is several plants from one seed. They stand
 round the first by Vogel's model again, each at its own height between
 60% and 96% of the tallest.
+
+A peony is the double kind
+([*Paeonia lactiflora*](https://en.wikipedia.org/wiki/Paeonia_lactiflora);
+[its flower forms](https://americanpeonysociety.org/?p=35)): a few broad
+guard petals outside, and inside them round after round of narrower ones.
+It opens from a hard round bud, through a soft ball, to a full-blown bowl.
+The petals are set by the golden angle, the innermost first, so that no
+petal stands behind another in any round. The petal numbered $`k`$ of
+$`N`$ has the place $`t = (k + \tfrac12)/N`$, 0 for the innermost and 1
+for a guard petal. It leaves the heart leaning out from the bloom's axis
+by $`\lambda`$ and curls back in by $`\kappa`$ along its length:
+
+```math
+\lambda = 0.25 + 0.5\,t + o\,(0.2 + 0.95\,t^{1.3}), \qquad \kappa = \left(1 - o\,(0.35 + 0.6\,t)\right)(1.5 + 0.9\,t)
+```
+
+in radians, where $`o`$ is **How open the bloom is**, from 0 to 1. At
+$`o = 0`$ every petal stands nearly upright and curls over hard, and the
+bloom is a ball. At $`o = 1`$ the guard petals lean right out and lie
+nearly straight, and each round inside leans and uncurls less, which is
+the bowl. One setting therefore takes the same petals from bud to full
+blown. A full bloom shows a heart of stamens in a third colour. The plant
+is a clump of stems from one crown, each with leaves of three lobed
+leaflets and one bloom.
+
+<img src="images/plant-peony.png" width="330" alt="Three pink peonies in bricks, full blown: bowls of many layered petals, darker towards the middle, on leafy stems"> <img src="images/plant-peony-bud.png" width="330" alt="The same peonies in bud: round balls of closed petals on the same stems">
+
+Petunias are a low mound of small leaves covered in funnel-shaped flowers
+([*Petunia x hybrida*](https://plants.ces.ncsu.edu/plants/petunia-x-hybrida/)).
+The flowers stand over the mound a golden angle apart, facing outwards and
+up. A flower is a short green tube, five lobes round its mouth, each
+leaning back so the face is a shallow funnel, and a throat of another
+colour number in the middle. **How far it trails** makes the mound smaller
+and sends stems out from under it along the ground, each ending in a tuft
+of leaves and a flower.
+
+#### Reeds
+
+<img src="images/plant-reeds.png" width="330" alt="A stand of bulrushes in bricks: thin green stems each with a brown sausage-shaped head and a pale spike above it, among long narrow leaves that flop at their tips"> <img src="images/plant-petunias.png" width="330" alt="A low mound of purple petunias in bricks, each flower five lobes round a dark throat, over green leaves">
+
+A stand of reeds is bulrushes
+([*Typha latifolia*](https://en.wikipedia.org/wiki/Typha_latifolia)), or
+with **Feathery plumes** the common reed
+([*Phragmites australis*](https://en.wikipedia.org/wiki/Phragmites_australis)).
+The bulrush is what a stand starts as because its brown sausage with the
+thin spike above it can be told at this size. A plume is a soft thing,
+and in bricks a soft thing is a rough lump. The stems are scattered evenly
+over an oval by Vogel's model stretched to the oval's two lengths, and
+like a hedge the stand has a length along x, for a bank. Every stem leans
+downwind by an amount of its own that **Sway** scales. The leaves spring
+low on the stem, stand nearly upright and flop outwards at the tip: the
+angle from upright grows with the cube of the way along the leaf.
 
 #### One colour for each part
 
@@ -2392,7 +2501,12 @@ At the usual sizes:
 | Palm | 120 tall, fronds 44 long | 1,149 | 16,753 | 0.36 s | 0.09 s |
 | Oak | 110 tall, 124 across | 3,283 | 40,092 | 1.1 s | 0.22 s |
 | Boxwood | 40 tall, 42 across | 1,065 | 8,513 | 0.23 s | 0.05 s |
-| Rose | 46 tall, 72 across | 533 | 7,143 | 0.16 s | 0.04 s |
+| Beech | 140 tall, 104 across | 4,293 | 48,667 | 1.2 s | 0.25 s |
+| Hedge, 72 long | 36 tall, 24 thick | 3,429 | 11,189 | 0.17 s | 0.07 s |
+| Hydrangea | 46 tall, 56 across | 1,373 | 17,227 | 0.31 s | 0.07 s |
+| Peonies, three | 56 tall | 1,057 | 3,751 | 0.19 s | 0.06 s |
+| Petunias | 20 tall, 52 across | 387 | 5,756 | 0.11 s | 0.03 s |
+| Reeds, 24 stems | 84 tall | 432 | 8,368 | 0.24 s | 0.07 s |
 | Sunflowers, three | 90 tall | 659 | 8,581 | 0.23 s | 0.06 s |
 | Tulips, five | 64 tall | 551 | 5,880 | 0.30 s | 0.10 s |
 
@@ -2956,8 +3070,9 @@ grid has an outline the two-dimensional fitter can fill.
 A tree, bush or flower is fitted cell by cell, the roughest method, so
 its trunk and limbs are stepped where a sphere's surface would be smooth,
 and its discrepancy is high (7.10). A sunflower's seeds are too few for
-its spirals to be counted, and a rose's bloom is a ball with a heart and
-has no petals of its own. Its smallest parts are two cells thick, so a
+its spirals to be counted. A hydrangea's head has a few dozen florets
+where the plant's has hundreds. A bare tree's twigs are as thick as its
+branch ends. Its smallest parts are two cells thick, so a
 tree under about 40 cells tall has room for an outline and little more.
 The leaves of an oak are balls of clusters and not leaves, and a pine's
 needles are the shoots that carry them. A tree is not its own mirror

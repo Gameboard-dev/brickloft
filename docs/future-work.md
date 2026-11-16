@@ -115,15 +115,17 @@ What remains:
 ## More plants
 
 Three trees, two bushes and two flowers are built: a pine, a palm and an
-oak, a boxwood and a rose, sunflowers and tulips, each grown by its own
+oak and a beech, a boxwood, a hedge and a hydrangea, peonies, sunflowers,
+tulips and petunias, and reeds, each grown by its own
 method ([algorithm.md](algorithm.md), section 7.10). What remains:
 
 - **More bushes.** A hedge is the boxwood's canopy held inside a box in
   place of a dome. An upright or spiky plant (a juniper, a yucca, an
   agave) needs a rule of its own, a rosette of stiff blades, which the
-  tulip's leaves are a start on. A hydrangea or rhododendron is the rose
-  with a rounder habit and its blooms in large heads at the ends of the
-  shoots.
+  tulip's leaves are a start on. A rose bush was built and taken out: its blooms were
+  balls, and a rose needs petals in a spiral, as the peony now has. A hedge
+  that turns a corner or follows a curve, and a dot to drag a hedge's
+  length by, are not there.
 - **More flowers.** A daisy is a small sunflower. A lily or a daffodil
   needs a trumpet, and a rose seen close needs petals in a spiral, which
   the golden angle would place. A bed of mixed flowers would be several
@@ -134,9 +136,9 @@ method ([algorithm.md](algorithm.md), section 7.10). What remains:
   with a thicker trunk and stiffer fronds. A Scots pine needs a rule the
   pine does not have, for a crown that loses its lower boughs and flattens
   with age.
-- **A bare tree.** The oak's skeleton is complete without its leaves, and
-  a winter oak is a setting away. Its twigs stop at one cell thick, so a
-  bare crown would be coarser than a real one.
+- **Finer bare trees.** A bare oak or beech carries twigs on from its
+  branch ends, but a twig is as thick as a branch end, one cell, so the
+  crown is coarser than a real one. A larger tree is finer.
 - **Smoother limbs.** A tree is fitted cell by cell. Its trunk and limbs
   are round tubes along curves, which the pipe and lifted-tube layouts
   build with far fewer steps (sections 7.5 and 7.7). Building the limbs

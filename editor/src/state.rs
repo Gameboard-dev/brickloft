@@ -1134,6 +1134,8 @@ impl State {
         let (height, spread) = Tree::usual_size(kind);
         self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
         (self.spec.radius, self.spec.rise) = (spread, Some(height));
+        // (a hedge or a stand of reeds starts three times as long as it is thick; nothing else is stretched)
+        self.spec.stretch = DVec3::new(if matches!(kind, brickloft_core::tree::Kind::Hedge | brickloft_core::tree::Kind::Reeds) { brickloft_core::tree::HEDGE_LENGTH } else { 1.0 }, 1.0, 1.0);
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
 
