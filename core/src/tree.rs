@@ -1550,7 +1550,8 @@ fn broadleaf(g: &mut Grown, tree: &Tree, height: f64, spread: f64, habit: &Habit
         let radius = g.limbs[n].radius.clone();
         let level = g.limbs[n].level;
         for i in 1..path.len() {
-            g.cone(path[i - 1], path[i], radius[i - 1], radius[i], if level == 1 && radius[i] > girth * 0.42 { TRUNK } else { LIMB });
+            g.cone(path[i - 1], path[i], radius[i - 1], radius[i], // (a slender tree's limbs keep its trunk's bark while they are over a cell and a half thick: a birch is white well up into its crown)
+            if (level == 1 && radius[i] > girth * 0.42) || (habit.girth < 0.03 && radius[i] > 1.5) { TRUNK } else { LIMB });
         }
         g.limbs[n].path = path;
     }
@@ -2343,11 +2344,11 @@ fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
                 // their own for each place, so that the same seed has
                 // them in the same places whatever else changes.
                 let (throw, thin) = (hash(x.round() as i32, y.round() as i32, 5, seed), hash(x.round() as i32, y.round() as i32, 6, seed));
-                if (here - level).abs() < 2.6 && throw < lay.reeds * 0.3 {
+                if (here - level).abs() < 2.6 && throw < lay.reeds * 0.14 {
                     let tall = 14.0 + 12.0 * thin + height;
                     let (foot, top) = (p + DVec3::Z * (here + 0.8), p + DVec3::new(drawn[0].0.x, drawn[0].0.y, 0.0) * 1.5 + DVec3::Z * (here + tall));
                     g.cone(foot, top, 1.0, 0.9, LEAF_DARK);
-                    g.cone(foot.lerp(top, 0.62), foot.lerp(top, 0.86), 1.7, 1.7, BED);
+                    g.cone(foot.lerp(top, 0.66), foot.lerp(top, 0.86), 1.45, 1.45, BED);
                     let out = DVec3::new(drawn[0].1.x, drawn[0].1.y, 0.0).normalize_or_zero();
                     g.cone(foot, foot + DVec3::Z * tall * 0.4 + out * 1.5, 1.0, 0.95, LEAF);
                     g.cone(foot + DVec3::Z * tall * 0.4 + out * 1.5, foot + DVec3::Z * tall * 0.6 + out * 6.0, 0.95, 0.8, LEAF);

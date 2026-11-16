@@ -218,6 +218,9 @@ pub fn palettes(style: &str) -> &'static [&'static [[u8; 3]]] {
             &[[92, 70, 46], [76, 150, 58], [54, 122, 48], [112, 176, 72], [70, 54, 40], [70, 130, 190], [214, 196, 150], [132, 130, 124]],
             &[[100, 78, 50], [96, 148, 62], [70, 118, 54], [150, 176, 86], [74, 58, 42], [64, 120, 170], [206, 190, 146], [126, 124, 118]],
             &[[132, 106, 70], [176, 164, 96], [146, 132, 78], [204, 192, 124], [96, 76, 52], [84, 130, 160], [222, 204, 160], [140, 136, 128]],
+            // autumn: tawny and russet with some green left, and the reeds' heads dark; winter: frosted blades, pale sand and stones, and the pond ice
+            &[[96, 72, 46], [176, 140, 62], [150, 96, 44], [134, 150, 72], [84, 58, 36], [72, 112, 150], [204, 184, 140], [128, 122, 114]],
+            &[[120, 104, 88], [214, 226, 222], [168, 186, 180], [240, 246, 248], [150, 130, 96], [206, 228, 240], [226, 222, 208], [176, 178, 182]],
         ],
         // hydrangeas: blue; pink; white; blue running to pink, as on middling ground
         "hydrangea" => &[
@@ -295,7 +298,7 @@ pub fn tree_palette_names(kind: &str) -> &'static [&'static str] {
         "hedge" => &["Box with red berries", "Dark yew", "Golden privet"],
         "peony" => &["Pink", "Deep red", "White", "Coral", "Blush"],
         "hydrangea" => &["Blue", "Pink", "White", "Blue to pink"],
-        "grass" => &["Lawn", "Meadow", "Dry"],
+        "grass" => &["Lawn", "Meadow", "Dry", "Autumn", "Winter"],
         "birch" => &["Summer", "Autumn gold", "Spring"],
         "willow" => &["Summer", "Spring gold", "Autumn"],
         "datepalm" => &["Date palm", "Dusty"],

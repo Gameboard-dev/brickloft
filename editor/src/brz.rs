@@ -35,6 +35,7 @@ const UNPAINTED: [u8; 3] = [214, 208, 196];
 
 /// The intensity water's glass is written with, of 10 (see `brick_for`).
 const WATER_INTENSITY: u8 = 6;
+const ICE_INTENSITY: u8 = 3;
 
 /// Largest file a paste will read. A prefab of a million bricks is a few
 /// megabytes; anything near this is not one of ours.
@@ -86,6 +87,8 @@ enum Stuff {
     Blade,
     /// the water of a pond
     Water,
+    /// the same water frozen: a player stands on it
+    Ice,
 }
 
 /// What each brick of a patch of grass is: its blades are walked through
@@ -104,21 +107,43 @@ enum Stuff {
 /// the brick stood over the ground, which told blades from soil and
 /// could not tell water from a stone lying in it.
 ///
-/// Only grass as it was grown: turned or flipped, its bricks are no
-/// longer where the plant is, and all are solid.
+/// Any other plant's greenery is walked through too if the form says so,
+/// and its wood is not: a crown to walk through, limbs to stand on.
+///
+/// Only a plant as it was grown: turned or flipped, its bricks are no
+/// longer where the plant is, and all are solid. So are those of a plant
+/// too large for single microbricks, which is built at a larger size.
 fn stuff_of(spec: &brickloft_core::spec::Spec) -> Box<dyn Fn(&brickloft_core::shapes::CellBrick) -> Stuff> {
-    use brickloft_core::{spec::Form, tree, DVec3};
-    let grass = spec.form == Form::Tree && spec.tree.kind == tree::Kind::Grass && spec.turned == brickloft_core::shapes::UPRIGHT && !spec.flip.contains(&true);
-    let Some(plant) = Some(spec).filter(|_| grass).and_then(brickloft_core::spec::plant) else { return Box::new(|_| Stuff::Solid) };
-    let solid_blades = spec.tree.extras;
+    use brickloft_core::{spec::Form, tree, tree::Kind, DVec3};
+    let as_grown = spec.form == Form::Tree && spec.turned == brickloft_core::shapes::UPRIGHT && !spec.flip.contains(&true);
+    let kind = spec.tree.kind;
+    // Grass's blades are walked through unless it says they are solid
+    // (its `extras`); any other plant's greenery is solid unless it says
+    // it is walked through (`tube`, which a plant has no other use for).
+    // A pond is frozen if the grass says so (`fill`, likewise).
+    let (grass, soft, frozen) = (kind == Kind::Grass, if kind == Kind::Grass { !spec.tree.extras } else { spec.tube }, spec.fill);
+    if !as_grown || !(grass || soft) {
+        return Box::new(|_| Stuff::Solid);
+    }
+    let Some(plant) = brickloft_core::spec::plant(spec) else { return Box::new(|_| Stuff::Solid) };
     Box::new(move |cell| {
         // (asked where its colour was: at the middle of a sloped brick, and of a box at the middle of one of its cells, all of which are one part)
         let ext = if cell.mask == brickloft_core::shapes::CUBE { [1; 3] } else { cell.ext };
         let middle = DVec3::new(cell.min[0] as f64 + ext[0] as f64 / 2.0, cell.min[1] as f64 + ext[1] as f64 / 2.0, cell.min[2] as f64 + ext[2] as f64 / 2.0);
-        match plant.shade(middle) {
-            tree::WATER => Stuff::Water,
-            tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT if !solid_blades => Stuff::Blade,
-            _ => Stuff::Solid,
+        // What is wood, by the part and not by its colour, which a
+        // player may change: the trunk and the limbs of anything; the
+        // marks on a birch's bark; the fibre under a palm's crown; and in
+        // grass its soil, sand, stones and the bed of its pond. The rest
+        // is greenery: leaves, needles, fronds, petals, berries, baubles.
+        // A brick is of one part all through (see `tree::Model::colour`),
+        // so none is half wood and half leaf.
+        match (kind, plant.shade(middle)) {
+            (Kind::Grass, tree::WATER) => if frozen { Stuff::Ice } else { Stuff::Water },
+            (Kind::Grass, tree::LEAF | tree::LEAF_DARK | tree::LEAF_LIGHT) if soft => Stuff::Blade,
+            (Kind::Grass, _) => Stuff::Solid,
+            (_, tree::TRUNK | tree::LIMB) => Stuff::Solid,
+            (Kind::Birch, tree::EXTRA) | (Kind::Palm | Kind::DatePalm, tree::STAR) => Stuff::Solid,
+            _ => Stuff::Blade,
         }
     })
 }
@@ -148,7 +173,7 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
             // nothing at all, pointing included, so that what lies in a
             // pond can be reached through it.
             collision: match stuff {
-                Stuff::Solid => Collision::default(),
+                Stuff::Solid | Stuff::Ice => Collision::default(),
                 Stuff::Blade => Collision { player: false, weapon: false, physics: false, ..Collision::default() },
                 Stuff::Water => Collision { player: false, weapon: false, physics: false, interact: false, ..Collision::default() },
             },
@@ -160,8 +185,14 @@ fn brick_for(solver: &Solver, cell: &brickloft_core::shapes::CellBrick, colour: 
             // unless said; 6 is the 0.6 asked for. Whether more is more
             // see-through or less on glass is not something the writer's
             // source says.
-            material: if stuff == Stuff::Water { brdb::assets::materials::GLASS } else { brdb::assets::materials::PLASTIC },
-            material_intensity: if stuff == Stuff::Water { WATER_INTENSITY } else { 5 },
+            // Ice is the same glass at 3: by the reading that makes water's
+            // 6 a transparency of 0.6, half as see-through.
+            material: if matches!(stuff, Stuff::Water | Stuff::Ice) { brdb::assets::materials::GLASS } else { brdb::assets::materials::PLASTIC },
+            material_intensity: match stuff {
+                Stuff::Water => WATER_INTENSITY,
+                Stuff::Ice => ICE_INTENSITY,
+                _ => 5,
+            },
             ..Default::default()
         })
     }
@@ -360,6 +391,32 @@ mod tests {
             assert_eq!(brick.material, brdb::assets::materials::GLASS);
             assert_eq!(brick.material_intensity, 6);
             assert!(!brick.collision.player && !brick.collision.weapon && !brick.collision.physics && !brick.collision.interact);
+        }
+        // frozen, the same bricks are ice: glass still, less see-through, and they stop the player
+        let frozen = prefab(&bricks, &[(Spec { fill: true, ..pond.clone() }, Paint::default(), [0; 3])]).unwrap();
+        let ice: Vec<&Brick> = frozen.bricks.iter().zip(&dug.shades).filter(|(_, s)| **s == brickloft_core::tree::WATER).map(|(b, _)| b).collect();
+        assert_eq!(ice.len(), water.len());
+        assert!(ice.iter().all(|b| b.collision.player && b.collision.physics && b.collision.weapon && b.material == brdb::assets::materials::GLASS && b.material_intensity == 3));
+        let back = Brz::read_slice(&frozen.to_brz_vec().unwrap()).unwrap().into_reader();
+        let data = back.read_global_data().unwrap();
+        let read: Vec<Brick> = back.brick_chunk_index(1).unwrap().into_iter().flat_map(|chunk| back.brick_chunk_soa(1, chunk.index).unwrap().iter_bricks(chunk.index, data.clone()).map(|b| b.unwrap()).collect::<Vec<_>>()).collect();
+        assert_eq!(read.iter().filter(|b| b.material == brdb::assets::materials::GLASS && b.collision.player && b.material_intensity == 3).count(), ice.len(), "the ice as the file has it");
+
+        // A tree whose greenery is walked through: every brick of leaf stops nothing of the player's and every brick of trunk and limb does; solid all through unless asked.
+        let oak = Spec { form: Form::Tree, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius: 30.0, rise: Some(56.0), tree: Tree::of(Kind::Oak), ..Spec::default() };
+        let grown = build(&oak).unwrap();
+        let bricks: Vec<Painted> = grown.bricks.iter().map(|c| (*c, None, 0, [0; 3])).collect();
+        let solid = prefab(&bricks, &[(oak.clone(), Paint::default(), [0; 3])]).unwrap();
+        assert!(solid.bricks.iter().all(|b| b.collision.player));
+        let soft = prefab(&bricks, &[(Spec { tube: true, ..oak.clone() }, Paint::default(), [0; 3])]).unwrap();
+        let back = Brz::read_slice(&soft.to_brz_vec().unwrap()).unwrap().into_reader();
+        let data = back.read_global_data().unwrap();
+        let read: Vec<Brick> = back.brick_chunk_index(1).unwrap().into_iter().flat_map(|chunk| back.brick_chunk_soa(1, chunk.index).unwrap().iter_bricks(chunk.index, data.clone()).map(|b| b.unwrap()).collect::<Vec<_>>()).collect();
+        let (leaf, wood) = (grown.shades.iter().filter(|s| matches!(**s, LEAF | LEAF_DARK | LEAF_LIGHT)).count(), grown.shades.iter().filter(|s| matches!(**s, TRUNK | brickloft_core::tree::LIMB)).count());
+        assert!(leaf > 300 && wood > 20, "{leaf} of leaf, {wood} of wood");
+        assert_eq!((read.iter().filter(|b| !b.collision.player).count(), read.iter().filter(|b| b.collision.player).count()), (leaf, wood), "an oak's leaves and wood in the file");
+        for (brick, shade) in soft.bricks.iter().zip(&grown.shades) {
+            assert_eq!(brick.collision.player, matches!(*shade, TRUNK | brickloft_core::tree::LIMB), "a brick of colour {shade}");
         }
         for ((brick, _), shade) in world.bricks.iter().zip(&dug.bricks).zip(&dug.shades).filter(|(_, s)| matches!(**s, brickloft_core::tree::SAND | brickloft_core::tree::STONE | brickloft_core::tree::BED | TRUNK)) {
             // (the heads of the reeds are the bed's colour and solid too)
