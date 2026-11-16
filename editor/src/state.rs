@@ -1322,13 +1322,24 @@ impl State {
 
     /// Build again if anything changed since the last build. Returns whether it did.
     pub fn refresh(&mut self, now_ms: impl Fn() -> f64) -> bool {
+        let rebuilt = self.rebuild(now_ms);
+        // Joined forms are settled once the form being edited has been
+        // built, since where a form lines up goes by where its bricks are:
+        // before, a workspace just opened was settled against the bricks
+        // of the form the editor starts with, and a form half a microbrick
+        // off stayed there until the next frame.
+        // (outside a drag, which settles the form it moves as it goes, and says nothing: see `move_by`)
+        if !self.busy && self.built_from.is_some() && self.settle_joins([0; 3]) {
+            self.toast = Some(("Moved a joined form a little, so that its bricks line up with those of the form it joins".to_string(), None));
+        }
+        rebuilt
+    }
+
+    /// [`State::refresh`], less the settling of joined forms.
+    fn rebuild(&mut self, now_ms: impl Fn() -> f64) -> bool {
         // A change of blend changes no brick of the form itself, so nothing
         // is built for it, but the join is other bricks and the view must
         // draw them.
-        // (outside a drag, which settles the form it moves as it goes, and says nothing: see `move_by`)
-        if !self.busy && self.settle_joins([0; 3]) {
-            self.toast = Some(("Moved a joined form a little, so that its bricks line up with those of the form it joins".to_string(), None));
-        }
         if self.blend_shown != (self.spec.blend, self.spec.carve) {
             self.blend_shown = (self.spec.blend, self.spec.carve);
             self.scene += 1;
@@ -2919,6 +2930,19 @@ mod tests {
         state.refresh(|| 0.0);
         assert!(off(&state) == [0; 3] && state.toast.is_some() && fresh(&state) > 20);
         assert!(state.unblended().is_none());
+    }
+
+    #[test]
+    fn a_workspace_opened_with_a_form_joined_half_a_microbrick_off_is_settled_the_first_time_it_is_built() {
+        // the joined form is not the one being edited, and the one that is has not been built when the workspace is opened
+        let cube = Spec { form: Form::Cube, points: vec![cell(0.0, 0.0, 8.0)], radius: 8.5, fill: true, ..Spec::default() };
+        let ball = Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius: 10.0, fill: true, blend: Some(3.0), ..Spec::default() };
+        let mut state = State::new();
+        state.open(vec![(cube, Paint::default(), [0; 3]), (ball, Paint::default(), [9, 4, 31])]);
+        state.refresh(|| 0.0);
+        assert_eq!(state.others[0].place, [10, 4, 32], "the joined form was left half a microbrick off");
+        let own = &state.others[0].built.bricks;
+        assert!(state.painted().iter().filter(|b| b.2 == 1 && b.0.mask != brickloft_core::shapes::CUBE && !own.contains(&b.0)).count() > 20, "the join was not fitted afresh");
     }
 
     #[test]
