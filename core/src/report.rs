@@ -153,7 +153,8 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("torus", _) => Form::Torus,
                     ("revolve", _) => Form::Revolve,
                     ("pyramid", _) => Form::Pyramid,
-                    ("tree", _) => Form::Tree,
+                    // (a bush or a flower is a tree of another kind)
+                    ("tree" | "plant", _) => Form::Tree,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -285,7 +286,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 if parts.len() > 6 {
                     return Err(bad("expected `kind,seed,fullness,count,bend,extras`, or the first few of them"));
                 }
-                let kind = crate::tree::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of tree: pine, palm or oak"))?.0;
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, boxwood, rose, sunflower or tulip"))?.0;
                 let mut tree = crate::tree::Tree::of(kind);
                 // (numbers from a file, which may be anyone's: kept to what the sliders allow)
                 let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };

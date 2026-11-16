@@ -11,7 +11,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Tree"];
+pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Plant"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -2079,7 +2079,7 @@ mod tests {
         assert_eq!((state.spec.tree, state.spec.rise), (Tree { seed: 9, ..Tree::of(Kind::Oak) }, Some(Tree::usual_size(Kind::Oak).0)));
         assert_eq!(state.paint.colours, crate::paint::palette("oak"));
         // every set of colours has a colour for each of a tree's eight parts, and a name
-        for kind in ["pine", "palm", "oak"] {
+        for kind in brickloft_core::tree::KINDS.map(|k| k.1) {
             assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == 8), "{kind}");
             assert_eq!(crate::paint::palettes(kind).len(), crate::paint::tree_palette_names(kind).len(), "{kind}");
         }
