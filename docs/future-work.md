@@ -1,8 +1,8 @@
 # Future work
 
-What is planned and not yet built: more for Claude to do, blending forms
-into one, what remains for the patterns, and trees. None of it changes how
-forms are fitted today (see [algorithm.md](algorithm.md)).
+What is planned and not yet built: more for Claude to do, and what
+remains for joined forms, the patterns and the plants. None of it changes
+how forms are fitted today (see [algorithm.md](algorithm.md)).
 
 ## More for Claude to do through MCP
 
@@ -57,8 +57,8 @@ in [algorithm.md](algorithm.md), "Forms joined on purpose". What remains:
 
 ## Patterns
 
-Five patterns are built: stepping stones, medallions, a rug, planks and
-masonry. They were first planned as uses of
+Six patterns are built: stepping stones, medallions, a rug, planks,
+bricks and cobblestone. They were first planned as uses of
 [wave function collapse](https://github.com/mxgmn/WaveFunctionCollapse),
 which fills a grid with tiles so that every tile agrees with its
 neighbours. None of them uses it now.
@@ -68,14 +68,12 @@ and gives the reasons.
 | Planned as | Built as | How |
 |---|---|---|
 | Stepping stone path | **stepping stones** | points scattered by dart throwing, the ground divided among them as a Voronoi diagram, each stone fitted by itself |
-| Stone slab wall | **masonry** | every piece the ground nearest its own point, with a measure that makes rectangles for bricks and goes over to the plain distance for stones; the tops bevelled cell by cell |
+| Stone slab wall | **bricks**, **cobblestone** | bricks as courses and joints on the grid, each line moved by an amount of its own, with tops that can be bevelled by one cell; cobbles as a Voronoi diagram of one point to each square of a grid |
 | Mosaic floor | **medallions**, **planks** | a few figures repeated, with bands of a distance measure switched on and off; boards of lengths drawn from the seed |
 | Persian rug | **rug** | a medallion carpet: borders, a medallion of lobed layers, corner pieces, and a field of scrolls packed circle by circle |
 
-Bricks and slabs were two patterns before masonry replaced both, and a
-snowflake pattern was built and then removed as having no use. A file that
-names bricks or slabs opens as masonry, and one that names a snowflake
-opens with no pattern.
+A save made by an earlier version may name a pattern that is gone. It
+opens as bricks or cobblestone, whichever is nearer, or with no pattern.
 
 Wave function collapse was written and tried, and the solver remains in
 [core/src/wfc.rs](../core/src/wfc.rs) with its tests. Its rules reach a
@@ -83,11 +81,6 @@ few tiles, so it could not give a stone a size, a rug a medallion at its
 middle, or a floor its symmetry, and the floors it made from small samples
 were even and aimless. A pattern made only of small repeated motifs is
 the case it still suits, and no such pattern is planned yet.
-
-In progress:
-
-- **Parallel processing.** Work is under way to use several processor
-  cores. It is not finished, and no result is recorded here yet.
 
 What remains:
 
@@ -97,27 +90,24 @@ What remains:
   drawn in. Closing the seams needs the two stones either side of an edge
   to be given the same edge, which fitting each stone by itself does not
   do.
-- **Bevelled corners of stones.** The bevelled top of an uneven stone in
-  masonry is clean along its sides and jagged at its corners. Where two
-  edges meet at an odd angle, the corners a cell reaches are no brick's
-  shape, and the cell is laid whole or left out. Bricks, whose corners are
-  right angles, are not affected.
 - **A small rug.** The rug shows its detail on a floor 100 tiles or more
   across. Below that its medallion has one or two layers and its guards
   are plain lines.
-- **A pattern with depth.** Masonry's bevel is the only depth a pattern
-  has. Every other pattern is one layer of tiles pushed through the band's
-  depth.
-- **Patterns on forms.** A pattern might later be laid over a fitted form
-  (a mosaic on a dome) by choosing colours for the form's bricks. That
-  needs the pattern mapped onto a curved surface and is a separate step.
+- **A pattern with depth.** The one-cell bevel of bricks is the only depth
+  a pattern has. Every other pattern is one layer of tiles pushed through
+  the form.
+- **Patterns on curved surfaces.** A tile pattern is laid on the flat part
+  of a form and on the sides of a box, and the curved part stays plain. A
+  mosaic on a dome needs the pattern mapped onto a curved surface and the
+  surface cut into bricks small enough to carry it. Stepping stones are
+  laid only through a flat form.
 
 ## More plants
 
-Three trees, two bushes and two flowers are built: a pine, a palm and an
-oak and a beech, a boxwood, a hedge and a hydrangea, peonies, sunflowers,
-tulips and petunias, and reeds, each grown by its own
-method ([algorithm.md](algorithm.md), section 7.10). What remains:
+Twelve kinds of plant are built: four trees (a pine, a palm, an oak and
+a beech), three bushes (a boxwood, a hedge and a hydrangea), four flowers
+(peonies, sunflowers, tulips and petunias) and reeds, each grown by its
+own method ([algorithm.md](algorithm.md), section 7.10). What remains:
 
 - **More bushes.** A hedge is the boxwood's canopy held inside a box in
   place of a dome. An upright or spiky plant (a juniper, a yucca, an

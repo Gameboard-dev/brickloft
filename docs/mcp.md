@@ -128,8 +128,8 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
-| `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
-| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven` after it or not, lays a flat band or filled outline as a pattern of tiles; `none` for no pattern (see below) |
+| `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |
+| `mosaic` | `[style, size, bevel, border, seed]`, with `mortar, stagger, upright, uneven_along, uneven_across` after it or not, lays a form as a pattern of tiles; `none` for no pattern (see below) |
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `blend` | Joins the form to the forms it stands in: `0` for a sharp crease, up to `6` for a fillet that many microbricks wide, `none` for a form that stands apart (see below) |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
@@ -167,36 +167,44 @@ microbricks tall, and comes in its kind's own eight colours with the mode
 `pattern`. A tree is tens of thousands of bricks and takes up to a second
 to build, so a call that changes one takes that long to answer.
 
-`mosaic` takes five values, and for masonry four more may follow. A form
-has `mosaic` or `stones`, and if both are given the stones are laid.
+`mosaic` takes five values, and for bricks and cobblestone five more may
+follow. A form has `mosaic` or `stones`, and if both are given the stones
+are laid.
 
 | Value | Meaning |
 |---|---|
-| `style` | `medallions`, `rug`, `planks` or `masonry` (see [features.md](features.md#patterns)) |
-| `size` | how large the boards, bricks or stones are: 2 is usual, and 1 to 16 is accepted |
-| `bevel` | masonry only: how many microbricks of each piece's top slope down to its edge, 0 to 8, and no more than the form's `depth` less one |
+| `style` | `medallions`, `rug`, `planks`, `bricks` or `cobblestone` (see [features.md](features.md#patterns)) |
+| `size` | how large the boards, bricks or cobbles are: 2 is usual, the panel's slider goes from 1 to 8, and up to 16 is accepted |
+| `bevel` | bricks only: 1 slopes the top microbrick of every brick down to its edge, and 0 leaves the tops flat. The form must be 2 or more deep. For every other style it is read as 0. |
 | `border` | how many microbricks of plain ground are left round the edge, 0 to 8 |
 | `seed` | any whole number, each a different pattern |
-| `mortar` | masonry: 1 for a microbrick of mortar between pieces, 0 for none |
-| `stagger` | masonry: how far each course is moved along from the one before, in hundredths of a brick's length. 50 is the usual bond, 0 stacks the bricks, and -1 moves each course by an amount of its own. |
-| `upright` | masonry: 1 for courses running up the floor, 0 for across it |
-| `uneven` | masonry: 0 for bricks all alike, rising to 100 for stones of any shape |
+| `mortar` | bricks and cobblestone: 1 for a microbrick of mortar between pieces, 0 for none |
+| `stagger` | bricks: how far each course is moved along from the one before, in hundredths of a brick's length. 50 is the usual bond, 0 stacks the bricks, and -1 moves each course by an amount of its own. |
+| `upright` | bricks: 1 for courses running up the floor, 0 for across it |
+| `uneven_along` | bricks and cobblestone: how unlike one another the pieces are along the courses, 0 to 100 |
+| `uneven_across` | bricks and cobblestone: the same across the courses, 0 to 100 |
 
-Left out, the last four are 1, -1, 0 and 0. The three values `mortar`,
-`stagger` and `upright` may also be given without `uneven`. A file or a
-call that names the old styles is still read: `bricks` and `slabs` become
-masonry with a bevel of 0, and `snowflake` becomes no pattern.
+Left out, the last five are 1, -1, 0, 0 and 0. Cobblestone wants about 60
+for both `uneven` values, because cobbles all alike are a grid of squares.
+A style named by an earlier version of the editor is still read, as
+bricks or cobblestone or as no pattern.
 
-For example, this call lays a wall of bevelled bricks in a half-brick
-bond, 80 microbricks by 60 and 3 deep. A straight spline lying flat is a
-rectangle as wide as its `thick`, and the bevel needs a `depth` of 2 or
-more.
+A tile pattern colours a form and does not reshape it. It is laid through
+a flat form, on the flat part of a form that is not flat all over, and on
+the four sides of a box 6 microbricks or more through its shortest
+length. A form with a `mosaic` is built at single microbricks whatever
+its `budget`, unless a `grain` is given.
+
+For example, this call lays a floor of bevelled bricks in a half-brick
+bond, 80 microbricks by 60 and 4 deep. The cube's `radius` is half its
+longest side and `stretch` scales the other two, and the bevel needs a
+depth of 2 or more.
 
 ```json
 {
   "name": "add_form",
   "arguments": {
-    "settings": { "form": "spline", "points": [[-40.5, 0.5, 0.5], [39.5, 0.5, 0.5]], "thick": 60, "depth": 3, "mosaic": ["masonry", 2, 1, 0, 3, 1, 50, 0, 0] }
+    "settings": { "form": "cube", "radius": 40, "stretch": [1, 0.75, 0.05], "mosaic": ["bricks", 2, 1, 0, 3, 1, 50, 0, 0, 0] }
   }
 }
 ```

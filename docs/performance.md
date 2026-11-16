@@ -29,8 +29,14 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Palm tree, 120 tall | 0.36 s (0.09 s) | 16,753 | 18.7% |
 | Oak tree, 110 tall, 124 across | 1.1 s (0.22 s) | 40,092 | 7.1% |
 | Beech tree, 140 tall | 1.2 s (0.25 s) | 48,667 | 6.8% |
-| Hedge, 36 tall, 72 long | 0.17 s (0.07 s) | 11,189 | 3.1% |
-| Three sunflowers, 90 tall | 0.23 s (0.06 s) | 8,581 | 16.5% |
+| Boxwood bush, 40 tall | 0.23 s (0.05 s) | 8,513 | 4.9% |
+| Hedge, 36 tall, 72 long | 0.17 s (0.07 s) | 11,189 | 3.2% |
+| Hydrangea, 46 tall | 0.31 s (0.07 s) | 17,227 | 5.4% |
+| Three peonies, 56 tall | 0.19 s (0.06 s) | 3,751 | 13.3% |
+| Three sunflowers, 90 tall | 0.23 s (0.06 s) | 8,965 | 16.3% |
+| Five tulips, 64 tall | 0.30 s (0.10 s) | 5,880 | 13.9% |
+| Petunias, 20 tall | 0.11 s (0.03 s) | 5,756 | 14.7% |
+| Reeds, 84 tall, 60 long | 0.24 s (0.07 s) | 8,368 | 21.6% |
 
 The ordinary forms fit in tens of milliseconds and a large solid sphere in
 about a fifth of a second. The two thin shells are the exceptions. A wall
@@ -39,7 +45,8 @@ cell by cell, and their brick counts show what that method costs. For
 comparison, a shell of radius 70 with a wall 4 thick, which the layout can
 handle, takes a tenth as many bricks laid out as it did cell by cell.
 
-The trees are the slowest forms and are not in the timing example. Their
+The plants are not in the timing example, and the trees among them are
+the slowest forms. Their
 times come from the test `where_the_time_goes` in
 [core/src/tree.rs](../core/src/tree.rs), run by name with `--ignored
 --nocapture` (see [Trees](#trees) below).

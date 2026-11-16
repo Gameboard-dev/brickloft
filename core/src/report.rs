@@ -617,6 +617,32 @@ fn scan(probe: &Probe, built: &Built, keep: bool, mut seen: Option<&mut Seen>, t
                         for &other in others {
                             bricks |= samples_of(built.bricks[other])?;
                         }
+                        // A sample on the face two half bricks share is inside
+                        // the two of them together, though each alone counts
+                        // only the middle half of the samples on its sloped
+                        // face (see `inside_sampled`): two ramps filling a cell
+                        // measured an eighth of it empty, and a disc laid in
+                        // diagonally cut tiles read 9.5% wrong where the same
+                        // disc plain read 1.3%. Such a sample has a brick on
+                        // every side of it, which is asked of points a little
+                        // off it each way. One on an open sloped face has not,
+                        // and keeps the count its own brick gave it.
+                        let here: Vec<CellBrick> = holds.iter().chain(others).map(|&b| built.bricks[b]).collect();
+                        let within = |p: DVec3| {
+                            here.iter().any(|b| {
+                                b.mask == CUBE || shape_info(b.mask).is_some_and(|info| {
+                                    let u = [0, 1, 2].map(|k| (p[k] - b.min[k] as f64) / b.ext[k] as f64);
+                                    crate::shapes::inside_shape(info, u[0], u[1], u[2])
+                                })
+                            })
+                        };
+                        let open = !bricks;
+                        for s in (0..K * K * K).filter(|s| open >> s & 1 == 1) {
+                            let p = corner + sample(s);
+                            if (0..8).all(|n| within(p + DVec3::new(if n & 1 == 0 { -1e-4 } else { 1e-4 }, if n & 2 == 0 { -1e-4 } else { 1e-4 }, if n & 4 == 0 { -1e-4 } else { 1e-4 }))) {
+                                bricks |= 1 << s;
+                            }
+                        }
                     }
                     // A sample exactly on the form's surface is on neither side of
                     // it, so it agrees with whatever the bricks do there. Counted

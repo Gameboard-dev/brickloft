@@ -24,6 +24,7 @@ has one place, the same on Windows, macOS and Linux
 | `brickloft-N.png` | Save screenshot, F12 | `Pictures/brickloft/` in the home folder |
 | `brickloft-report-N.txt` | Save report | `brickloft/` in the system's temporary folder |
 | `brickloft-build.brz` | Ctrl+C: the prefab put on the clipboard | the same temporary folder |
+| `brickloft-crash.txt` | A crash: what went wrong and where ([editor/src/crash.rs](../editor/src/crash.rs)) | the same temporary folder |
 
 The temporary folder is `%TEMP%` on Windows, `$TMPDIR` on macOS and `/tmp`
 on Linux unless `TMPDIR` says otherwise. The commands below take a report's
@@ -35,7 +36,7 @@ The optional browser page is built with `sh build-editor.sh`; see
 ## Test it
 
 ```sh
-cargo test          # everything: about 110 tests, a few seconds
+cargo test          # everything: about 230 tests, under a minute
 cargo test -p brickloft-core
 cargo test -p brickloft-editor
 ```
@@ -118,6 +119,7 @@ core/src/
   shapes.rs       the nine brick shapes as corner masks
   orient.rs       corner mask -> the game's asset, orientation and size
   spec.rs         a form's settings -> the right fitter -> bricks
+  spec/cube.rs    the cube: a box with its sides on the lattice
   fit_volume.rs   cell by cell
   fit_planar.rs   flat outlines
   fit_round.rs    spheres, ellipsoids, domes
@@ -125,6 +127,11 @@ core/src/
   fit_stack.rs    round tubes as pipes
   fit_lathe.rs    profiles spun about an axis
   fit_ribbon.rs   bands and tubes lifted out of their plane
+  pattern.rs      stepping stones and the tile patterns
+  wfc.rs          wave function collapse, kept with its tests and used by no pattern
+  tree.rs         plants: trees, bushes, flowers and reeds
+  blend.rs        joined forms fitted as one solid where they meet
+  par.rs          sharing work out over threads
   report.rs       measuring a fit; the report format
   surface.rs      the surface survey and section drawings
 editor/src/
@@ -141,7 +148,10 @@ editor/src/
   paint.rs        colouring a form
   ruler.rs        the rulers
   store.rs        saved forms
-  send.rs         saving a report
+  send.rs         saving a report and a screenshot
+  places.rs       where each kind of file is kept
+  crash.rs        writing a crash to brickloft-crash.txt
+  icon.rs         the window's icon
 ```
 
 `core` depends on nothing but a vector-maths crate and knows nothing of the
