@@ -46,7 +46,7 @@ until you tick it.
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
 | **Cube** | its middle, and a dot on each of its six sides | A size along each of x, y and z, in whole microbricks; solid or hollow (see [The cube](#the-cube)). |
-| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
+| **Plant** | the foot of its trunk or stem | Kind: a pine, palm, oak or beech tree; a boxwood bush, a hedge or a hydrangea; a peony, a sunflower, a tulip, petunias, daisies or daffodils, or a bed of them mixed; a single flower (a rose, a water lily or a gerbera); a Scots pine, a date palm, a birch, a willow or a cherry in blossom; a cypress or a yucca; reeds; grass. Height, spread, three settings of its own and a seed (see [Plants](#plants)). |
 | **Furniture** | its middle, and a dot on each of its six sides | Kind: a bookcase. Width, depth and height in whole microbricks; board thickness, shelves, uprights, a plinth, a back panel, mouldings, how full of books it is, and a seed (see [Furniture](#furniture)). |
 | **Maze** | the middle of its floor, a dot on its rim and one at the top of its walls | Kind: theta (rings) or grid (squares). Rings, ring gap, how the rings are divided, wall thickness and height, where the way in is, a floor, the way through marked, a seed; walls plain, patterned or hedge (see [Mazes](#mazes)). |
 
@@ -276,7 +276,7 @@ A failure shows a message that has to be closed (Enter or Escape will do).
 ### Saved forms
 
 **Save** under **Saved forms** keeps the whole workspace: every form, with
-its colours (up to eight), where it stands and the grid it is on. Saves are kept in
+its colours (up to 32), where it stands and the grid it is on. Saves are kept in
 folders (`arches`, `domes`, or your own) under `Documents/brickloft/forms`
 in your home folder, the same on Windows, macOS and Linux.
 
@@ -467,6 +467,7 @@ own, from the facts of how that plant grows: how they are made is in
 | **Reeds** | a stand of bulrushes with brown heads, or of plumed common reed, with long flopping leaves |
 | **Sunflower** | a stout stem with heart-shaped leaves and a nodding head: a disc of seeds set by the golden angle, ringed with two rows of petals |
 | **Tulip** | a cup of six petals in two rings on a bare stem, with strap-shaped leaves from the ground |
+| **Single flower** | one large bloom with no plant under it, to set down as a centrepiece: a rose, a water lily or a gerbera, facing whichever way it is tilted and turned |
 
 <img src="images/plant-peony.png" width="330" alt="Three pink peonies, full blown"> <img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers of different heights facing the same way">
 
@@ -496,6 +497,7 @@ more settings mean something different for each kind.
 | Bed of mixed flowers | **Flowers**, 2 to 40 | **Leaves** | **Unevenness** | none |
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
+| Single flower | none | **Petals** | **How open it is**: a closed bud to full blown | **Sepals under it** |
 
 A pine is dressed as a Christmas tree with **Star**, **Baubles** (how
 many, 0 for none), **Tinsel** (a garland wound round it, as tight to
@@ -517,6 +519,36 @@ thinnest bricks can show.
 
 A flower's **Spread** is half the width of its head, cup or bloom, and a
 clump is as many flowers as you ask for, each its own height.
+
+<img src="images/plant-rose.png" width="330" alt="A single red rose, most of the way open, with green sepals under it"> <img src="images/plant-rose-lying.png" width="330" alt="The same rose tipped over on a short stem, with loose petals on the floor beside it">
+
+A **Single flower** is one bloom, 48 microbricks across when full blown,
+with settings of its own.
+
+| Setting | What it does |
+|---|---|
+| **Flower** | A rose (a high-centred double rose: a furled heart, cupped petals in two tones, outer petals with rolled lips), a water lily (a star of pointed petals round yellow stamens) or a gerbera (two rows of rays round a disc). |
+| **Petals** | How many: 10 to 30 for a rose, 14 to 36 for a water lily, 13, 21 or 34 rays in each row of a gerbera. |
+| **How open it is** | From a closed bud, its outer petals wrapped over the inner, through half open to full blown. |
+| **Tilt** | 0 to 90 degrees from facing straight up. At 90 the bloom lies on its side. |
+| **Turn** | 0 to 359 degrees: which way round it is tipped. With no tilt it turns the bloom about its own middle. |
+| **Sepals under it** | The green under the bloom: a rose's five sepals, which lie against the bud and turn back as it opens, a water lily's four, or a gerbera's bracts. |
+| **A short length of stem** | For a cut flower laid down. |
+| **Fallen petals beside it** | Three to five loose petals on the floor, on the side the bloom faces. |
+
+**Spread** is half the bloom's width when full blown, and a bud of the
+same spread is a third as wide. **Height** is how deep the bloom is. The
+tilt and turn are grown into the bloom, so its bricks stay on the grid,
+and it is set down on whatever part of it is lowest: it never sinks
+below the floor of its point. Use them to lay a rose on a table at a
+slant. The form's own quarter turns and a turned grid still apply on top
+of them. Its colour sets are red, pink, white, yellow and cream edged
+with red, and choosing a flower changes to the set that flower starts in
+(a red rose, a white water lily, a yellow gerbera) unless you have
+picked another. With **Leaves can be walked through in the game**
+ticked, its petals and sepals are walked through and its stem is solid.
+
+<img src="images/plant-waterlily.png" width="330" alt="A white water lily: pointed petals in a star round a yellow heart"> <img src="images/plant-gerbera.png" width="330" alt="A yellow gerbera from above: two rows of rays round a brown disc">
 
 A hedge, a stand of reeds and a patch of grass lie along a line. They
 start with three yellow dots in a row: drag an end to lengthen it and the
@@ -590,7 +622,7 @@ gives without making it a different tree.
 
 **Colours** offers each kind's sets of colours: for a pine spruce green,
 under snow, blue spruce and in frost; for a palm three; for an oak summer,
-early autumn, late autumn and spring; for a peony pink, deep red, white, coral and blush; for a hydrangea blue,
+early autumn, late autumn and spring; for a peony pink, deep red, white, coral and blush; for a single flower red, pink, white, yellow and cream edged with red; for a hydrangea blue,
 pink, white and blue running to pink; for a tulip six, one of them flamed. A tree is coloured **As the pattern
 has it**, with a colour for each of its parts: the trunk, leaves, leaves
 in shade, new growth, limbs, the top of a pine's boughs or the rib of a

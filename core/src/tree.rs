@@ -47,6 +47,9 @@ use crate::shapes::{CellBrick, CUBE};
 use glam::DVec3;
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
+mod bloom;
+pub use bloom::{Bloom, Flower, FLOWERS, MOST_TILT};
+
 /// The golden angle, in radians: the turn between one leaf and the next
 /// that never lines two leaves up, so each has the most light (Vogel 1979).
 /// A coconut palm's fronds are set about 137.5 degrees apart.
@@ -94,10 +97,12 @@ pub enum Kind {
     Bed,
     /// a Japanese flowering cherry in blossom
     Cherry,
+    /// a single flower head with no plant under it (see [`bloom`])
+    Flower,
 }
 
 /// The kinds on offer, with the names they are written and read by.
-pub const KINDS: [(Kind, &str); 23] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed"), (Kind::Cherry, "cherry")];
+pub const KINDS: [(Kind, &str); 24] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass"), (Kind::Birch, "birch"), (Kind::Willow, "willow"), (Kind::DatePalm, "datepalm"), (Kind::ScotsPine, "scotspine"), (Kind::Cypress, "cypress"), (Kind::Yucca, "yucca"), (Kind::Daisy, "daisy"), (Kind::Daffodil, "daffodil"), (Kind::Bed, "bed"), (Kind::Cherry, "cherry"), (Kind::Flower, "flower")];
 
 /// How a tree is grown: the settings a form carries for it. Its height is
 /// the form's `rise` and its spread the form's `radius`.
@@ -133,6 +138,8 @@ pub struct Tree {
     pub lights: u8,
     /// A pine: whether its lights are written with a light on each in the game, or as glowing bricks alone.
     pub shine: bool,
+    /// A single flower head: which flower, which way it faces and what lies with it.
+    pub bloom: Bloom,
 }
 
 /// The most lights a pine carries, strung or as candles. Each is a light
@@ -171,8 +178,10 @@ impl Tree {
             Kind::Daffodil => (50, 5, 30),
             Kind::Bed => (50, 14, 40),
             Kind::Cherry => (60, 7, 40),
+            // (its count is unused; its bend is how open it is)
+            Kind::Flower => (60, 1, 60),
         };
-        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, hang: HANG.2, lights: 0, shine: true }
+        Tree { kind, seed: 1, fullness, count, bend, extras: false, girth: 100, baubles: 0, tinsel: false, hang: HANG.2, lights: 0, shine: true, bloom: Bloom::default() }
     }
 
     /// The fewest and most of whatever `count` counts, for a kind.
@@ -190,7 +199,7 @@ impl Tree {
             Kind::Petunia => (3, 80),
             Kind::Reeds => (1, 120),
             // (grass has nothing to count)
-            Kind::Cypress => (1, 1),
+            Kind::Cypress | Kind::Flower => (1, 1),
             Kind::Grass => (0, 40),
             Kind::Birch | Kind::Willow | Kind::ScotsPine | Kind::Cherry => (3, 9),
             Kind::DatePalm => (8, 60),
@@ -204,7 +213,7 @@ impl Tree {
     /// file or sent by another program may say anything.
     pub fn clamped(self) -> Tree {
         let (least, most) = Tree::count_range(self.kind);
-        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), hang: self.hang.clamp(HANG.0, HANG.1), lights: self.lights.min(2), ..self }
+        Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), girth: self.girth.clamp(GIRTH.0, GIRTH.1), baubles: self.baubles.clamp(0, 100), hang: self.hang.clamp(HANG.0, HANG.1), lights: self.lights.min(2), bloom: self.bloom.clamped(), ..self }
     }
 
     /// Whether a kind has a trunk whose thickness [`Tree::girth`] sets: the
@@ -271,6 +280,8 @@ impl Tree {
             Kind::Bed => (56.0, 36.0),
             // (wider than it is tall)
             Kind::Cherry => (84.0, 56.0),
+            // a single flower's spread is half the width of the bloom full blown, and its height the bloom's own depth
+            Kind::Flower => (28.0, 24.0),
         }
     }
 }
@@ -678,6 +689,7 @@ impl Model {
             Kind::Daffodil => 21,
             Kind::Bed => 22,
             Kind::Cherry => 23,
+            Kind::Flower => 24,
         };
         let mut grown = Grown { parts: Vec::new(), limbs: Vec::new(), forks: Vec::new(), numbers: Numbers(tree.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt) };
         match tree.kind {
@@ -742,6 +754,7 @@ impl Model {
             Kind::Boxwood => boxwood(&mut grown, &tree, height, spread),
             Kind::Sunflower => sunflower(&mut grown, &tree, height, spread),
             Kind::Tulip => tulip(&mut grown, &tree, height, spread),
+            Kind::Flower => bloom::flower(&mut grown, &tree, height, spread),
         }
         // grown standing on the origin; moved to where it stands, on the
         // floor of the cell its point is in
@@ -3711,7 +3724,7 @@ mod tests {
             let count = |wanted: fn(u8) -> bool| built.shades.iter().filter(|s| wanted(**s)).count();
             let (bark, leaves) = (count(|s| s == TRUNK), count(is_leaf));
             // (a flower's stem and leaves are few bricks beside a tree's)
-            assert!((bark > 20 || matches!(kind, Kind::Cypress | Kind::Yucca)) && leaves > 150, "{name}: {bark} bricks of bark or stem and {leaves} of leaves");
+            assert!((bark > 20 || matches!(kind, Kind::Cypress | Kind::Yucca | Kind::Flower)) && leaves > 150, "{name}: {bark} bricks of bark or stem and {leaves} of leaves");
             // nothing below the ground it stands on, and it stands on it
             assert_eq!(built.bricks.iter().map(|b| b.min[2]).min(), Some(0), "{name}");
             // its extras are there when asked for
