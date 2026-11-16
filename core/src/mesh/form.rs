@@ -204,20 +204,27 @@ pub struct Laid {
 }
 
 impl Stood {
-    /// The mesh of `import` with the middle of its box at `centre`,
-    /// `radius` from there to each end of its longest side, filled or
-    /// (with `shell` set) hollow with walls so thick.
+    /// The mesh of `import` standing on `foot`, which is the middle of the
+    /// underside of its box, `radius` from the middle of its box to each
+    /// end of its longest side; filled or (with `shell` set) hollow with
+    /// walls so thick.
+    ///
+    /// It stands on its foot and not about its middle so that making it
+    /// larger leaves it standing where it stood: about its middle, as it
+    /// was first written, a figure made half as tall again sank a quarter
+    /// of its height into the floor.
     ///
     /// The low corner of the mesh's box is put on a lattice plane along
-    /// each axis, the nearest to where `centre` asks: a mesh drawn in
-    /// whole units, at a size equal to its longest side, then has every
-    /// one of its flat faces on the lattice, wherever it is dragged.
-    pub fn new(import: &Import, centre: DVec3, radius: f64, shell: Option<f64>) -> Result<Stood, MeshError> {
+    /// each axis, the nearest to where `foot` asks (and the one at or
+    /// below it, upwards): a mesh drawn in whole units, at a size equal to
+    /// its longest side, then has every one of its flat faces on the
+    /// lattice, wherever it is dragged.
+    pub fn new(import: &Import, foot: DVec3, radius: f64, shell: Option<f64>) -> Result<Stood, MeshError> {
         let Some(mesh) = import.mesh.clone() else {
             return Err(if import.name.is_empty() { MeshError::NoFile } else { MeshError::Missing { name: import.name.clone() } });
         };
         let size = (2.0 * radius).max(1.0);
-        let low = [0, 1, 2].map(|k| (centre[k] - mesh.half[k] * size).round() as i32 - PAD as i32);
+        let low = [0, 1, 2].map(|k| if k == 2 { foot.z.floor() as i32 } else { (foot[k] - mesh.half[k] * size).round() as i32 } - PAD as i32);
         let stood = Stood { mesh, size, low, fitter: import.fitter, loose: import.loose, colours: import.colours.max(0) as usize, shell };
         let cells: u64 = stood.stand().cells().iter().map(|v| *v as u64).product();
         if cells > crate::spec::MAX_CELLS as u64 {
@@ -241,6 +248,14 @@ impl Stood {
         let d = self.stand().distance(p - DVec3::from_array(self.low.map(|v| v as f64)));
         // a shell is what is inside the mesh and not deeper in than its wall
         self.shell.map_or(d, |thick| d.max(-d - thick))
+    }
+
+    /// What a build of it measures as against the form itself, from its
+    /// bricks alone (see [`super::trial::measure`]).
+    pub fn measured(&self, laid: &Laid, threads: Threads) -> super::trial::Measured {
+        let low = DVec3::from_array(self.low.map(|v| v as f64));
+        let local: Vec<CellBrick> = laid.bricks.iter().map(|b| CellBrick { min: [0, 1, 2].map(|k| b.min[k] - self.low[k]), ..*b }).collect();
+        super::trial::measure(&|p| self.distance(p + low), self.stand().cells().map(|v| v as usize), &local, threads)
     }
 
     /// The colours its bricks are numbered by (see [`Laid::shades`]).
@@ -613,7 +628,9 @@ mod tests {
     use super::*;
 
     fn stood(mesh: Mesh, radius: f64, import: Import, shell: Option<f64>) -> Stood {
-        Stood::new(&Import { mesh: Some(Arc::new(mesh)), ..import }, DVec3::new(0.5, 0.5, radius), radius, shell).unwrap()
+        // (on the floor: its box from 0 upwards, and about cell 0 across)
+        let _ = radius;
+        Stood::new(&Import { mesh: Some(Arc::new(mesh)), ..import }, DVec3::new(0.5, 0.5, 0.5), radius, shell).unwrap()
     }
 
     fn no_two_share_a_cell(bricks: &[CellBrick]) {
@@ -656,6 +673,9 @@ mod tests {
     #[test]
     fn a_form_with_no_mesh_or_one_too_large_is_refused_by_name() {
         assert_eq!(Stood::new(&Import::default(), DVec3::ZERO, 20.0, None).err(), Some(MeshError::NoFile));
+        // made larger, it stands where it stood
+        let ball = |radius| Stood::new(&Import { mesh: Some(Arc::new(made::sphere(8))), ..Import::default() }, DVec3::new(3.5, 3.5, 7.5), radius, None).unwrap().bounds();
+        assert_eq!((ball(10.0).0[2], ball(30.0).0[2], ball(30.0).1[2] - ball(10.0).1[2]), (7 - PAD as i32, 7 - PAD as i32, 40));
         let named = Import { name: "0123456789abcdef.glb".into(), ..Import::default() };
         assert_eq!(Stood::new(&named, DVec3::ZERO, 20.0, None).err(), Some(MeshError::Missing { name: named.name.clone() }));
         let ball = Import { mesh: Some(Arc::new(made::sphere(8))), ..Import::default() };
@@ -664,8 +684,8 @@ mod tests {
 
     #[test]
     fn a_house_is_built_where_it_is_put_the_same_on_any_number_of_threads() {
-        // at the size its faces are on the lattice, wherever its middle is asked to be
-        for centre in [DVec3::new(0.5, 0.5, 15.0), DVec3::new(10.3, -7.8, 40.6)] {
+        // at the size its faces are on the lattice, wherever its foot is asked to be
+        for centre in [DVec3::new(0.5, 0.5, 0.5), DVec3::new(10.3, -7.8, 40.6)] {
             let import = Import { mesh: Some(Arc::new(made::house())), ..Import::default() };
             let stood = Stood::new(&import, centre, 28.0, None).unwrap();
             let one = stood.built(true, 80, 0.0, Threads::ONE);
@@ -682,13 +702,15 @@ mod tests {
             let volume: f64 = one.bricks.iter().map(CellBrick::volume).sum();
             assert!((volume - one.solid).abs() < 1e-6);
             assert!(stood.distance(DVec3::new(centre.x.round(), centre.y.round(), lo[2] as f64 + 10.0)) < -5.0 && stood.distance(DVec3::new(centre.x, centre.y, hi[2] as f64 + 3.0)) > 2.0);
+            // standing on its foot: its lowest brick is in the cell the foot is in
+            assert_eq!(one.bricks.iter().map(|b| b.min[2]).min(), Some(centre.z.floor() as i32));
         }
     }
 
     #[test]
     fn an_imported_form_is_built_by_the_way_every_form_is() {
         use crate::spec::{build, build_with, Form, Probe, Spec};
-        let spec = |mesh: Option<Mesh>, radius: f64| Spec { form: Form::Imported, points: vec![DVec3::new(0.5, 0.5, 15.0)], radius, fill: true, import: Import { mesh: mesh.map(Arc::new), name: "0123456789abcdef.glb".into(), ..Import::default() }, ..Spec::default() };
+        let spec = |mesh: Option<Mesh>, radius: f64| Spec { form: Form::Imported, points: vec![DVec3::new(0.5, 0.5, 0.5)], radius, fill: true, import: Import { mesh: mesh.map(Arc::new), name: "0123456789abcdef.glb".into(), ..Import::default() }, ..Spec::default() };
         let house = spec(Some(made::house()), 28.0);
         let built = build_with(&house, true, Threads::forced(3)).unwrap();
         assert_eq!(built.bricks, build_with(&house, true, Threads::ONE).unwrap().bricks);

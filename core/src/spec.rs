@@ -57,9 +57,9 @@ pub enum Form {
     /// `radius` to the middle of its outside wall, with walls `thick`
     /// through and `rise` tall
     Maze,
-    /// 1 point, the middle of its box: the mesh `import` names, `radius`
-    /// from there to each end of its longest side; `fill` for solid, or a
-    /// shell `thick` through
+    /// 1 point, the middle of the underside of its box: the mesh `import`
+    /// names, `radius` from the middle of its box to each end of its
+    /// longest side; `fill` for solid, or a shell `thick` through
     Imported,
 }
 

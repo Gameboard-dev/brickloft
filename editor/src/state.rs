@@ -189,8 +189,8 @@ pub(crate) fn form_index(form: Form) -> usize {
 pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
-        // on the floor
-        CIRCLE | PYRAMID | TREE | MAZE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        // on the floor (a mesh's point is its foot: see `brickloft_core::mesh::Stood::new`)
+        CIRCLE | PYRAMID | TREE | MAZE | IMPORTED => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         // Standing on the floor too. Its point is its middle, as a
@@ -198,8 +198,6 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
         // cell below as a cube's is, since its height is whatever its
         // kind starts at and may be even.
         FURNITURE => (vec![DVec3::new(0.5, 0.5, radius)], Vec::new()),
-        // A mesh too: its point is the middle of its box, half its height up (see `half_height`).
-        IMPORTED => (vec![DVec3::new(0.5, 0.5, radius)], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
         BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
         // resting on the floor
@@ -212,12 +210,7 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
 /// or for furniture half its height, which is what stands it on the
 /// floor. Its radius is half its depth (see `State::usual_furniture`).
 pub fn half_height(form: usize, spec: &Spec) -> f64 {
-    match (form, &spec.import.mesh) {
-        (FURNITURE, _) => (2.0 * spec.radius * spec.stretch.z).round() / 2.0,
-        // (a mesh's radius is half its longest side, which need not be its height)
-        (IMPORTED, Some(mesh)) => (2.0 * spec.radius * mesh.half.z * 2.0).round() / 2.0,
-        _ => spec.radius,
-    }
+    if form == FURNITURE { (2.0 * spec.radius * spec.stretch.z).round() / 2.0 } else { spec.radius }
 }
 
 /// A brick of the workspace: the brick, its colour (`None` for the player's
@@ -1916,7 +1909,14 @@ impl State {
         let standing = self.standing();
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
-            CIRCLE | SPHERE | PYRAMID | IMPORTED if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            // A mesh: one dot at the end of its longest side, for its size.
+            // Its point is its foot, so the dot is the mesh's radius out
+            // from the middle of its box, which is half its height up.
+            IMPORTED if !p.is_empty() => {
+                let up = self.spec.import.mesh.as_ref().map_or(0.0, |mesh| 2.0 * self.spec.radius * mesh.half.z);
+                all.push((Handle::Radius, DVec3::new(p[0].x, p[0].y, p[0].z.floor() + up) + self.radius_dir() * self.spec.radius));
+            }
             // A dot at the middle of each side, where the bricks end. No
             // radius dot: it would move all six sides at once, which
             // Ctrl + scroll does, and seven dots round a small cube leave
@@ -2447,6 +2447,12 @@ impl State {
             Handle::Radius if self.form == TREE => {
                 let (foot, across) = self.tree_middle();
                 self.spec.radius = snap((hit - foot).dot(across).abs()).clamp(brickloft_core::tree::LEAST_SPREAD, HANDLE_LIMIT);
+            }
+            Handle::Radius if self.form == IMPORTED => {
+                // (from its foot: the dot is one radius out if its longest side lies level, and two up if that side is its height)
+                let (foot, along) = (self.spec.points[0], self.radius_dir());
+                let out = (hit - DVec3::new(foot.x, foot.y, foot.z.floor())).dot(along) / (1.0 + along.z);
+                self.spec.radius = snap(out.abs()).clamp(1.0, HANDLE_LIMIT);
             }
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());

@@ -474,7 +474,7 @@ fn a_form_is_given_its_mesh_from_the_folder_and_built_once_for_all_who_ask() {
     let path = from.join("gem.obj");
     std::fs::write(&path, obj(&made::gem().parts(48.0))).unwrap();
     let (name, up) = adopt(&path).unwrap();
-    let mut spec = Spec { form: Form::Imported, points: vec![brickloft_core::DVec3::new(0.5, 0.5, 12.0)], radius: 24.0, fill: true, import: Import { name: name.clone(), up, ..Import::default() }, ..Spec::default() };
+    let mut spec = Spec { form: Form::Imported, points: vec![brickloft_core::DVec3::new(0.5, 0.5, 0.5)], radius: 24.0, fill: true, import: Import { name: name.clone(), up, ..Import::default() }, ..Spec::default() };
     assert!(brickloft_core::spec::build(&spec).unwrap_err().contains("is not in the imports folder"));
     attach(&mut spec);
     assert!(spec.import.mesh.is_some());
@@ -541,15 +541,26 @@ fn a_mesh_is_opened_in_the_editor_built_behind_the_window_and_saved_by_its_name(
     // in the mesh's own colours, and not built yet: the window has not been held up for it
     assert_eq!((state.paint.mode, state.paint.colours.len()), (Mode::Pattern, 12));
     assert!(state.built.bricks.is_empty());
+    // the first frame after begins its build on another thread and draws on without it
+    assert!(!state.refresh_behind(|| 0.0) && state.fitting() && state.built.bricks.is_empty());
     settle(&mut state);
     let first = state.built.bricks.len();
     assert!(first > 50 && state.built.shades.len() == first && state.problem.is_none(), "{first} bricks, {:?}", state.problem);
     let colours: std::collections::HashSet<[u8; 3]> = state.painted().iter().filter_map(|brick| brick.1).collect();
     assert!(colours.len() >= 3 && colours.iter().all(|c| state.paint.colours.contains(c)));
+    // its dot is at the end of its longest side, half way up (a ball is as long each way, and the first way is x); it stands on the floor
+    let (handle, dot) = *state.handles().iter().find(|h| h.0 == crate::state::Handle::Radius).unwrap();
+    let (low, high) = state.bounds.unwrap();
+    assert!((dot.x - high[0] as f64).abs() <= 1.0 && dot.z == 24.0 && low[2] == 0, "the dot is at {dot} and the bricks reach from {low:?} to {high:?}");
     // a change of size or of brick size builds it again from the mesh in hand: the file is not read or indexed again
     let mesh = state.spec.import.mesh.clone().unwrap();
-    state.spec.radius = 12.0;
+    // the dot dragged half way in halves its size
+    let eye = dot + brickloft_core::DVec3::new(0.0, -200.0, 0.0);
+    state.drag(handle, eye, (dot - brickloft_core::DVec3::X * 12.0 - eye).normalize(), brickloft_core::DVec3::Y);
+    assert_eq!(state.spec.radius, 12.0);
     settle(&mut state);
+    // and it stands where it stood
+    assert_eq!(state.bounds.map(|b| (b.0[2], b.1[2])), Some((0, 24)));
     let smaller = state.built.bricks.len();
     state.spec.grain = 2;
     settle(&mut state);
