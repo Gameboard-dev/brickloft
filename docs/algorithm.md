@@ -2845,7 +2845,13 @@ third at most, over about twice its own thickness of height. Buttress
 roots are ridges 0.3 of the trunk thick that run down that flare from no
 higher than half way to the fork, and a kind with $`\rho < 0.7`$ has
 none. A tree that keeps its stem narrows to 0.78 of $`g`$ at its fork,
-and the limbs there share that section by da Vinci's rule. Before this
+and the limbs there share that section by da Vinci's rule. **Trunk
+width** multiplies $`g`$ by 0.5 to 2 before any of this, so the flare, the
+ridges and the limbs all follow it; the flare's height stays that of the
+usual trunk when the trunk is made fatter, and no trunk is made under
+1.6, which is the least that is still eight-sided. A pine's and a palm's
+thickness are multiplied the same way, a palm's rings and swollen foot
+being so many of its thickness. Before this
 the sizes met in square steps and the buttresses were stout cones that
 ended against a trunk that had hardly widened, which read as a post in a
 collar.

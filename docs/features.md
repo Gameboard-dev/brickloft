@@ -497,6 +497,12 @@ more settings mean something different for each kind.
 | Sunflower | **Flowers in the clump**, 1 to 12 | **Petal and leaf size** | **Nod of the head** | none |
 | Tulip | **Flowers in the clump**, 1 to 12 | **Leaf size** | **How open the cup is** | none |
 
+Every tree (pine, palm, date palm, oak, beech, birch, willow, Scots pine,
+cypress, cherry) also has **Trunk width**, from 50% to 200% of what is
+usual for its kind and height. The limbs are thicker or thinner with the
+trunk. Bushes and flowers do not have it: their stems are already the
+thinnest bricks can show.
+
 A flower's **Spread** is half the width of its head, cup or bloom, and a
 clump is as many flowers as you ask for, each its own height.
 

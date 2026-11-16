@@ -1070,6 +1070,11 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
     helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
+    // (the trees alone: see `Tree::has_trunk`)
+    if Tree::has_trunk(kind) {
+        let (least, most) = brickloft_core::tree::GIRTH;
+        helped(ui, help("tree_girth"), |ui| ui.add(Slider::new(&mut s.tree.girth, least..=most).suffix("%").text("Trunk width")));
+    }
     match kind {
         Kind::Pine => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "A star and baubles"));

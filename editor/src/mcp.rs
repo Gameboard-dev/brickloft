@@ -1243,7 +1243,7 @@ mod tests {
             assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": bad } }), || 0.0).is_err(), "{bad} was accepted");
         }
         apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": "pine,1,5000,-3,999,7", "radius": 12, "rise": 30 } }), || 0.0).unwrap();
-        assert_eq!(state.forms()[0].0.tree, Tree { kind: Kind::Pine, seed: 1, fullness: 100, count: 4, bend: 100, extras: true });
+        assert_eq!(state.forms()[0].0.tree, Tree { kind: Kind::Pine, seed: 1, fullness: 100, count: 4, bend: 100, extras: true, girth: 100 });
         // a tree too large to build is refused, and the workspace is as it was
         let before = state.forms();
         assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "radius": 990, "rise": 990 } }), || 0.0).is_err());
