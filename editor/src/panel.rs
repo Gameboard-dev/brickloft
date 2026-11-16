@@ -756,6 +756,11 @@ fn colours(ui: &mut Ui, state: &mut State) {
             Mode::Pattern => crate::paint::MOST_COLOURS,
             _ => 4,
         };
+        // (A form that had a pattern's eight colours and is set to blend or stripes keeps the first four: the rest would be blended through and could not be seen or changed here.)
+        // (One colour shows the first and keeps the rest, for when the form is set back.)
+        if most > 1 {
+            paint.colours.truncate(most);
+        }
         // A colour is made the same as another by copying one and pasting
         // it on the other, from the menu a right click on either opens.
         // The copied colour is kept in the panel's own memory and not on
