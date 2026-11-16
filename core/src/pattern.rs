@@ -237,8 +237,8 @@ fn in_piece(mask: u8, u: f64, v: f64) -> bool {
 /// Fitted apart, the triangles of two facing edges may lie in boxes that
 /// share cells, and both are kept, since what the two bricks fill does not
 /// meet: the gap runs between them. Only where what they fill would meet
-/// (each fit may stray half a cell from its stone, and the least gap is one
-/// cell) is the later stone fitted again a little smaller.
+/// (each fit may stray half a cell from its stone, and the gap may be
+/// nothing) is the later stone fitted again a little smaller.
 #[allow(clippy::too_many_arguments)]
 pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
     use crate::fit_planar::Piece;
@@ -993,7 +993,7 @@ fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], settings: &
 }
 
 /// Fit a mosaic over a region and push it through cells `w0..w0 + depth`
-/// across `axis`, onto `bricks`, with each brick's colour (0 to 3) onto
+/// across `axis`, onto `bricks`, with each brick's colour (0 to 7) onto
 /// `shades`. Returns the fit of the region.
 ///
 /// The region is fitted first as the one solid it is, so that its edge is

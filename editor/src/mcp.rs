@@ -547,7 +547,7 @@ fn recoloured(paint: &Paint, changes: &Value) -> Result<Paint, String> {
         match key.as_str() {
             "mode" => paint.mode = MODES.iter().find(|m| Some(m.1) == value.as_str()).ok_or("mode is one, blend, stripes or pattern")?.0,
             "colours" => {
-                let colours = value.as_array().filter(|c| (1..=4).contains(&c.len())).ok_or("colours is a list of one to four colours")?;
+                let colours = value.as_array().filter(|c| (1..=crate::paint::MOST_COLOURS).contains(&c.len())).ok_or("colours is a list of one to eight colours")?;
                 paint.colours = colours
                     .iter()
                     .map(|c| {
@@ -787,9 +787,13 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             let place = arguments.get("place").map(placed).transpose()?;
             state.record();
             // set down beside what is there, and edited; then as asked
+            // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
+            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name));
             state.add_form(spec);
             if let Some(paint) = paint {
                 state.paint = paint;
+            } else if let Some(style) = own {
+                state.paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(style).to_vec(), ..Paint::default() };
             }
             if let Some(place) = place {
                 state.place = place;

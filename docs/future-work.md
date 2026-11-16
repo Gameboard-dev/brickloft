@@ -116,8 +116,6 @@ What remains:
 - **Patterns on forms.** A pattern might later be laid over a fitted form
   (a mosaic on a dome) by choosing colours for the form's bricks. That
   needs the pattern mapped onto a curved surface and is a separate step.
-- **Eight colours through MCP.** The panel gives a pattern up to eight
-  colours and the MCP tools accept four (see [mcp.md](mcp.md)).
 
 ## Trees and flora
 

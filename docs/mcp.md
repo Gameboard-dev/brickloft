@@ -131,7 +131,7 @@ The settings Claude can give:
 | `on_grid`, `grid_degrees`, `grid_at` | Which grid the form is on, the grid's angle in degrees about x, y and z, and where the grid stands |
 | `grain`, `budget`, `simplify`, `max_ext` | Brick size, brick budget, simplification and the longest brick |
 
-A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to four
+A colour has a `mode` (`one`, `blend`, `stripes` or `pattern`), one to eight
 `colours` written `#rrggbb`, the axis it `runs_along`, and a
 `stripe_width`. The mode `pattern` gives each brick the colour its pattern
 gives it: the first colour is the ground or the mortar, and the others are
@@ -161,10 +161,9 @@ lying flat is a rectangle as wide as its `thick`.
 }
 ```
 
-A pattern shows its colours only in the mode `pattern`, and a form added
-with no `colour` is in one colour. The panel lets a player give a pattern
-up to eight colours. The tools accept four at most, although the
-description of `mosaic` that the editor sends to Claude says eight.
+A pattern shows its colours only in the mode `pattern`. A form added with
+a pattern and no `colour` comes in that pattern's own colours, as it does
+from the panel. A pattern takes up to eight colours.
 
 A call that cannot be built is refused whole, with the reason, and changes
 nothing. Claude then sees why (for example "the form is too large to
