@@ -1329,13 +1329,15 @@ fn solid_as_made(spec: &Spec, threads: Threads) -> Result<(Solid, Vec<DVec3>), S
             // grown tree does take is checked when it is fitted. (At the
             // full reach each way, eight times the cells, an oak was
             // refused from about 150 tall, a size it builds at easily.)
-            // a hedge's length is its thickness stretched along x
-            let long = spread * spec.stretch.x.clamp(1.0, MAX_SPAN);
+            let (lay, path) = tree_lay(spec, foot)?;
             let reach = (spread + height / 2.0) as i64 + 8;
-            check_size(&[reach.max(long as i64 + 8), reach, height as i64 + 8])?;
-            let tree = std::sync::Arc::new(crate::tree::Model::with_length(&spec.tree, foot, height, spread, long));
+            let run = lay.run.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            // (a plant with no line takes no more room for one)
+            let (long, wide) = if lay.run.is_empty() { (reach, reach) } else { ((run.1.x - run.0.x) as i64 / 2 + reach, (run.1.y - run.0.y) as i64 / 2 + reach) };
+            check_size(&[long, wide, height as i64 + 8])?;
+            let tree = std::sync::Arc::new(crate::tree::Model::laid(&spec.tree, foot, height, spread, &lay));
             let (lo, hi) = tree.bounds();
-            volume(Field::Tree(tree), lo, hi, Vec::new())
+            volume(Field::Tree(tree), lo, hi, path)
         }
         Form::Revolve => {
             let p = need(2)?;
@@ -2880,6 +2882,47 @@ fn fit_layer(
         }
     }
     fit
+}
+
+/// Where a hedge, a stand of reeds or a patch of grass lies (see
+/// [`crate::tree::Lay`]), from its foot, and the same line in space for
+/// drawing and for points to take hold of.
+///
+/// With two points or more the line is the smooth curve through them, as
+/// a spline's is, closed if the form is, and for a hedge or reeds bent
+/// further by any points added to it, as any curve is. Grass's added
+/// points raise its ground and leave its line alone.
+///
+/// With one point it is straight along x, the form's thickness stretched:
+/// what a hedge was before it had a line, which a saved one still is. The
+/// length was then the thickness times a number, so that widening a hedge
+/// lengthened it. A hedge 240 long made 160 thick was 1,600 long and
+/// three quarters of a million bricks, each change of the slider back took
+/// seconds, and past a point the build was refused and the giant stood.
+/// A line has a length of its own, which the thickness does not touch.
+fn tree_lay(spec: &Spec, foot: DVec3) -> Result<(crate::tree::Lay, Vec<DVec3>), String> {
+    use crate::tree::{Kind, Lay, Tree};
+    let level = |p: DVec3| DVec3::new(p.x, p.y, foot.z);
+    if !Tree::lies_along(spec.tree.kind) {
+        return Ok((Lay::default(), Vec::new()));
+    }
+    let mut path: Vec<DVec3> = if spec.points.len() < 2 {
+        let long = spec.radius * spec.stretch.x.clamp(1.0, MAX_SPAN);
+        vec![foot - DVec3::X * long, foot + DVec3::X * long]
+    } else {
+        let through: Vec<DVec3> = spec.points.iter().map(|p| level(*p)).collect();
+        let closed = spec.closed && through.len() > 2;
+        catmull_rom(&through, closed)?
+    };
+    let closed = spec.closed && spec.points.len() > 2;
+    let grass = spec.tree.kind == Kind::Grass;
+    if !grass && !spec.pulls.is_empty() {
+        let flat: Vec<(DVec3, DVec3)> = spec.pulls.iter().map(|(at, by)| (level(*at), DVec3::new(by.x, by.y, 0.0))).collect();
+        path = pulled(&path, closed, &flat, spec.pull_reach);
+    }
+    let mounds = if grass { spec.pulls.iter().map(|(at, by)| (*at - foot, by.z)).collect() } else { Vec::new() };
+    let lay = Lay { run: path.iter().map(|p| *p - foot).collect(), closed, mounds, reach: spec.pull_reach };
+    Ok((lay, path))
 }
 
 fn check_size(sides: &[i64]) -> Result<(), String> {

@@ -763,7 +763,7 @@ fn workspace(ui: &mut Ui, state: &mut State) {
 /// kind has under its own names, and which tree of the kind it is.
 fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     use brickloft_core::tree::{Kind, Tree, KINDS, LEAST_HEIGHT, LEAST_SPREAD};
-    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds"][kind as usize];
+    let titled = |kind: Kind| ["Pine tree", "Palm tree", "Oak tree", "Beech tree", "Boxwood bush", "Hedge", "Peony", "Sunflower", "Tulip", "Hydrangea", "Petunias", "Reeds", "Grass"][kind as usize];
     let before = state.spec.tree.kind;
     let mut kind = before;
     helped(ui, help("tree_kind"), |ui| {
@@ -800,7 +800,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
     }
     let s = &mut state.spec;
     let mut height = s.rise.unwrap_or(Tree::usual_size(kind).0);
-    if helped(ui, help("tree_height"), |ui| ui.add(Slider::new(&mut height, LEAST_HEIGHT..=largest.max(LEAST_HEIGHT)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Height"))).changed() {
+    if helped(ui, help("tree_height"), |ui| ui.add(Slider::new(&mut height, Tree::least_height(kind)..=largest.max(LEAST_HEIGHT)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Height"))).changed() {
         s.rise = Some(height);
     }
     let spread = match kind {
@@ -808,15 +808,16 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Sunflower => "Half the head's width",
         Kind::Peony => "Half the bloom's width",
         Kind::Hedge | Kind::Reeds => "Half its thickness",
+        Kind::Grass => "Reach to each side",
         Kind::Tulip => "Half the cup's width",
         _ => "Spread",
     };
     helped(ui, help("tree_spread"), |ui| ui.add(Slider::new(&mut s.radius, LEAST_SPREAD..=largest.max(LEAST_SPREAD)).logarithmic(true).step_by(0.5).clamping(egui::SliderClamping::Never).text(spread)));
-    if matches!(kind, Kind::Hedge | Kind::Reeds) {
-        // its length, end to end: kept as how many times its thickness it is, so that a thicker hedge is a longer one
-        let mut length = 2.0 * s.radius * s.stretch.x.max(1.0);
-        if helped(ui, help("hedge_length"), |ui| ui.add(Slider::new(&mut length, 2.0 * s.radius..=largest.max(2.0 * s.radius)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text("Length"))).changed() {
-            s.stretch.x = (length / (2.0 * s.radius)).max(1.0);
+    if Tree::lies_along(kind) {
+        // (its length is its line's: there is no slider for it, which once tied it to the thickness)
+        ui.label(if kind == Kind::Grass { "Drag its dots to lay it out. Alt + click on it adds a point to raise or lower the ground." } else { "Drag its dots to lengthen or bend it. Alt + click on it adds a point to bend it further." });
+        if s.points.len() > 2 {
+            helped(ui, help("closed_loop"), |ui| ui.checkbox(&mut s.closed, if kind == Kind::Grass { "Closed outline, filled" } else { "Closed loop" }));
         }
     }
     let (fullness, count, bend) = match kind {
@@ -830,11 +831,15 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Hydrangea => ("Leaves", "Flower heads", "Looseness"),
         Kind::Petunia => ("Leaves", "Flowers", "How far it trails"),
         Kind::Reeds => ("Leaves", "Stems", "Sway"),
+        Kind::Grass => ("How thick it grows", "", "Lean"),
         Kind::Sunflower => ("Petal and leaf size", "Flowers in the clump", "Nod of the head"),
         Kind::Tulip => ("Leaf size", "Flowers in the clump", "How open the cup is"),
     };
     let (least, most) = Tree::count_range(kind);
-    helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+    // (grass has nothing to count)
+    if least < most {
+        helped(ui, help("tree_count"), |ui| ui.add(Slider::new(&mut s.tree.count, least..=most).text(count)));
+    }
     helped(ui, help("tree_fullness"), |ui| ui.add(Slider::new(&mut s.tree.fullness, 0..=100).suffix("%").text(fullness)));
     helped(ui, help("tree_bend"), |ui| ui.add(Slider::new(&mut s.tree.bend, 0..=100).suffix("%").text(bend)));
     match kind {
@@ -853,7 +858,7 @@ fn tree(ui: &mut Ui, state: &mut State, largest: f64) {
         Kind::Reeds => {
             helped(ui, help("tree_extras"), |ui| ui.checkbox(&mut s.tree.extras, "Feathery plumes (common reed)"));
         }
-        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia => {}
+        Kind::Peony | Kind::Sunflower | Kind::Tulip | Kind::Hydrangea | Kind::Petunia | Kind::Grass => {}
     }
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut s.tree.seed).speed(1.0));

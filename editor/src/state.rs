@@ -898,6 +898,8 @@ impl State {
             Some(ends) => (Cut::Segment, ends),
         };
         self.spec = spec;
+        // (a hedge saved before it had a line is given the line it was)
+        self.lay_tree();
     }
 
     /// A number the best-fit search may change: one coordinate of a point,
@@ -1077,6 +1079,49 @@ impl State {
         self.preset_settings();
         let (points, weights) = usual_points(self.form, self.spec.radius);
         (self.spec.points, self.spec.weights) = (points, weights);
+        self.lay_tree();
+    }
+
+    /// Give a plant that lies along a line (a hedge, reeds, grass) the
+    /// points of the line it starts on, three in a row along x, and any
+    /// other plant its one point. The point in the middle is there to be
+    /// dragged aside, which bends it.
+    ///
+    /// A hedge had one point and a length worked out from its thickness,
+    /// so that making it thicker made it longer (see
+    /// `brickloft_core::spec::tree_lay`). Its ends are dots now, and its
+    /// length is where they are.
+    fn lay_tree(&mut self) {
+        use brickloft_core::tree::{Kind, Tree};
+        if self.form != TREE {
+            return;
+        }
+        let kind = self.spec.tree.kind;
+        let at = self.spec.points.first().copied().unwrap_or(cell(0.0, 0.0, 0.0));
+        if Tree::lies_along(kind) {
+            if self.spec.points.len() < 2 {
+                // (as long as it was, if it was stretched; else three times its thickness, or for grass a patch a little longer than wide)
+                let long = if self.spec.stretch.x > 1.0 { self.spec.radius * self.spec.stretch.x } else if kind == Kind::Grass { 30.0 } else { (self.spec.radius * brickloft_core::tree::HEDGE_LENGTH).round() };
+                self.spec.points = vec![at - DVec3::X * long.round(), at, at + DVec3::X * long.round()];
+            }
+            // its dots stay on the ground
+            self.lock = Lock::Axis(2);
+        } else {
+            self.spec.points.truncate(1);
+            self.spec.closed = false;
+            self.spec.pulls.clear();
+        }
+        self.spec.stretch = DVec3::ONE;
+    }
+
+    /// The point a plant's height and spread dots stand at: the middle one
+    /// of a line's, or its only one. And the way across it there, level.
+    fn tree_middle(&self) -> (DVec3, DVec3) {
+        let p = &self.spec.points;
+        let n = p.len() / 2;
+        let along = if p.len() >= 2 { (p[(n + 1).min(p.len() - 1)] - p[n.saturating_sub(1)]).truncate().normalize_or_zero() } else { brickloft_core::DVec2::ZERO };
+        let across = if along == brickloft_core::DVec2::ZERO { DVec3::X } else { DVec3::new(-along.y, along.x, 0.0) };
+        (DVec3::new(p[n].x, p[n].y, p[0].z.floor()), across)
     }
 
     /// The part of [`State::preset`] that is not the form's points.
@@ -1134,8 +1179,9 @@ impl State {
         let (height, spread) = Tree::usual_size(kind);
         self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
         (self.spec.radius, self.spec.rise) = (spread, Some(height));
-        // (a hedge or a stand of reeds starts three times as long as it is thick; nothing else is stretched)
-        self.spec.stretch = DVec3::new(if matches!(kind, brickloft_core::tree::Kind::Hedge | brickloft_core::tree::Kind::Reeds) { brickloft_core::tree::HEDGE_LENGTH } else { 1.0 }, 1.0, 1.0);
+        // (from one kind that lies along a line to another, the line is kept)
+        self.spec.stretch = DVec3::ONE;
+        self.lay_tree();
         self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
     }
 
@@ -1379,9 +1425,10 @@ impl State {
             // a tree: one dot at its top for its height, and one at its
             // side, half way up, for its spread
             TREE if !p.is_empty() => {
-                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                // (of a hedge, at the middle of its line, the spread dot out to one side of it: along the line it was inside the hedge)
+                let (foot, across) = self.tree_middle();
                 all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
-                all.push((Handle::Radius, foot + self.radius_dir() * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
+                all.push((Handle::Radius, foot + across * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
             }
             _ => {}
         }
@@ -1764,13 +1811,17 @@ impl State {
                 }
                 self.spec.pulls[i].1 = by;
             }
+            Handle::Radius if self.form == TREE => {
+                let (foot, across) = self.tree_middle();
+                self.spec.radius = snap((hit - foot).dot(across).abs()).clamp(brickloft_core::tree::LEAST_SPREAD, HANDLE_LIMIT);
+            }
             Handle::Radius => {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
             Handle::Rise if self.form == TREE => {
                 let height = snap(hit.z - self.spec.points[0].z.floor()).round();
-                self.spec.rise = Some(height.clamp(brickloft_core::tree::LEAST_HEIGHT, HANDLE_LIMIT));
+                self.spec.rise = Some(height.clamp(brickloft_core::tree::Tree::least_height(self.spec.tree.kind), HANDLE_LIMIT));
             }
             Handle::Rise => {
                 let mid = (self.spec.points[0] + self.spec.points[1]) / 2.0;
@@ -1789,8 +1840,8 @@ impl State {
     /// Whether points can be added to the form to pull it out of shape.
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
-        // (but a tree, which is grown and not drawn)
-        self.form != TREE
+        // (but a tree, which is grown and not drawn; a hedge and reeds are bent by them as a curve is, and grass's ground is raised)
+        self.form != TREE || brickloft_core::tree::Tree::lies_along(self.spec.tree.kind)
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -1815,6 +1866,8 @@ impl State {
         // is in the form before any turn, as all the form's points are.
         let on = match self.form {
             SPHERE | PYRAMID => at,
+            // grass: where it was clicked, on the ground
+            TREE if self.spec.tree.kind == brickloft_core::tree::Kind::Grass => DVec3::new(at.x.round(), at.y.round(), self.spec.points.first().map_or(0.0, |p| p.z)),
             _ => self.built.path.iter().copied().min_by(|a, b| a.distance_squared(at).total_cmp(&b.distance_squared(at)))?,
         };
         let on = brickloft_core::spec::Turn::of(&self.spec.snapped()).back(on);

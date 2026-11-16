@@ -74,10 +74,12 @@ pub enum Kind {
     Petunia,
     /// a stand of bulrushes or of plumed reeds
     Reeds,
+    /// a patch or strip of grass over ground that can be raised
+    Grass,
 }
 
 /// The kinds on offer, with the names they are written and read by.
-pub const KINDS: [(Kind, &str); 12] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds")];
+pub const KINDS: [(Kind, &str); 13] = [(Kind::Pine, "pine"), (Kind::Palm, "palm"), (Kind::Oak, "oak"), (Kind::Beech, "beech"), (Kind::Boxwood, "boxwood"), (Kind::Hedge, "hedge"), (Kind::Peony, "peony"), (Kind::Sunflower, "sunflower"), (Kind::Tulip, "tulip"), (Kind::Hydrangea, "hydrangea"), (Kind::Petunia, "petunia"), (Kind::Reeds, "reeds"), (Kind::Grass, "grass")];
 
 /// How a tree is grown: the settings a form carries for it. Its height is
 /// the form's `rise` and its spread the form's `radius`.
@@ -115,6 +117,7 @@ impl Tree {
             Kind::Hydrangea => (60, 9, 30),
             Kind::Petunia => (60, 26, 40),
             Kind::Reeds => (60, 24, 35),
+            Kind::Grass => (55, 1, 30),
         };
         Tree { kind, seed: 1, fullness, count, bend, extras: false }
     }
@@ -133,6 +136,8 @@ impl Tree {
             Kind::Hydrangea => (1, 24),
             Kind::Petunia => (3, 80),
             Kind::Reeds => (1, 120),
+            // (grass has nothing to count)
+            Kind::Grass => (1, 1),
         }
     }
 
@@ -141,6 +146,17 @@ impl Tree {
     pub fn clamped(self) -> Tree {
         let (least, most) = Tree::count_range(self.kind);
         Tree { fullness: self.fullness.clamp(0, 100), count: self.count.clamp(least, most), bend: self.bend.clamp(0, 100), ..self }
+    }
+
+    /// The least a plant of a kind may be tall, in cells. Grass is short;
+    /// under a dozen cells nothing else has room for a stem with anything on it.
+    pub fn least_height(kind: Kind) -> f64 {
+        if kind == Kind::Grass { 3.0 } else { LEAST_HEIGHT }
+    }
+
+    /// Whether a kind lies along a line the form's points give (see [`Lay`]).
+    pub fn lies_along(kind: Kind) -> bool {
+        matches!(kind, Kind::Hedge | Kind::Reeds | Kind::Grass)
     }
 
     /// The height and spread a tree of a kind starts at, in cells. Large,
@@ -167,6 +183,8 @@ impl Tree {
             Kind::Petunia => (20.0, 26.0),
             // a stand of reeds' spread is half its width; its length is apart, as a hedge's is
             Kind::Reeds => (84.0, 10.0),
+            // grass's height is its blades', and its spread how far it reaches to each side of its line
+            Kind::Grass => (8.0, 20.0),
         }
     }
 }
@@ -477,8 +495,15 @@ impl Model {
     /// reaches `long` to each side of its middle along x. Other kinds take
     /// no notice of it.
     pub fn with_length(tree: &Tree, base: DVec3, height: f64, spread: f64, long: f64) -> Model {
+        Model::laid(tree, base, height, spread, &Lay::straight(long))
+    }
+
+    /// [`Model::new`], for a plant that lies along a line: a hedge, a
+    /// stand of reeds or a patch of grass (see [`Lay`]). Other kinds take
+    /// no notice of the line.
+    pub fn laid(tree: &Tree, base: DVec3, height: f64, spread: f64, lay: &Lay) -> Model {
         let tree = tree.clamped();
-        let (height, spread) = (height.max(LEAST_HEIGHT), spread.max(LEAST_SPREAD));
+        let (height, spread) = (height.max(Tree::least_height(tree.kind)), spread.max(LEAST_SPREAD));
         // each kind has numbers of its own from one seed
         // (by name and not by its place in the list, so that a kind
         // added to the list does not change the plants the others grow)
@@ -495,6 +520,7 @@ impl Model {
             Kind::Hydrangea => 10,
             Kind::Petunia => 11,
             Kind::Reeds => 12,
+            Kind::Grass => 13,
         };
         let mut grown = Grown { parts: Vec::new(), limbs: Vec::new(), forks: Vec::new(), numbers: Numbers(tree.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt) };
         match tree.kind {
@@ -502,11 +528,21 @@ impl Model {
             Kind::Palm => palm(&mut grown, &tree, height, spread),
             Kind::Oak => broadleaf(&mut grown, &tree, height, spread, &OAK),
             Kind::Beech => broadleaf(&mut grown, &tree, height, spread, &BEECH),
-            Kind::Hedge => hedge(&mut grown, &tree, height, spread, long),
+            Kind::Hedge | Kind::Reeds => {
+                // grown straight, then laid along its line (see [`Grown::lay_along`])
+                let run = Run::new(lay);
+                let half = run.long() / 2.0;
+                if tree.kind == Kind::Hedge {
+                    hedge(&mut grown, &tree, height, spread, half, lay.closed && lay.run.len() > 2);
+                } else {
+                    reeds(&mut grown, &tree, height, spread, half);
+                }
+                grown.lay_along(0, 0, &run, half);
+            }
+            Kind::Grass => grass(&mut grown, &tree, height, spread, lay),
             Kind::Peony => peony(&mut grown, &tree, height, spread),
             Kind::Hydrangea => hydrangea(&mut grown, &tree, height, spread),
             Kind::Petunia => petunia(&mut grown, &tree, height, spread),
-            Kind::Reeds => reeds(&mut grown, &tree, height, spread, long),
             Kind::Boxwood => boxwood(&mut grown, &tree, height, spread),
             Kind::Sunflower => sunflower(&mut grown, &tree, height, spread),
             Kind::Tulip => tulip(&mut grown, &tree, height, spread),
@@ -1434,9 +1470,10 @@ fn berries(g: &mut Grown, at: DVec3, r: f64, from: DVec3) {
 /// step along from the last, and pushed in by a random amount the
 /// looseness sets: at none it is freshly clipped, at full it has grown
 /// out. The inside is filled, so no light shows through it.
-fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
+fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64, closed: bool) {
     let (dense, loose) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
-    let long = long.max(spread);
+    // (`closed`: it comes round to its own start, and has no ends)
+    let long = long.max(2.0);
     let mass = (spread * (0.26 + 0.1 * dense)).clamp(2.6, height * 0.3);
     let foot = height * 0.1;
     // half its width at a height: narrower towards the top
@@ -1446,7 +1483,7 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
     let fill = ((2.0 * long / inner).ceil() as usize).max(1);
     for n in 0..=fill {
         // (stopping short of the two ends, which the tufts close)
-        let reach = (long - inner - mass * 0.4).max(0.0);
+        let reach = if closed { long } else { (long - inner - mass * 0.4).max(0.0) };
         let x = -reach + 2.0 * reach * n as f64 / fill as f64;
         g.blob(DVec3::new(x, 0.0, foot + (height - foot) * 0.5), DVec3::new(inner, inner, ((height - foot) * 0.5 - mass * 0.4).max(2.0)), LEAF_DARK, true);
     }
@@ -1471,10 +1508,11 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
         let r = mass * g.between(0.8, 1.15);
         let at = at - outward * (r * 0.75 + loose * g.between(0.0, 0.45) * mass) + g.any_way() * 0.25 * mass * (0.3 + loose);
         // (kept inside the hedge's size, its clusters of leaves and all)
-        let (far, wide) = ((long - r - 1.7).max(0.0), (spread - r - 1.7).max(0.0));
+        let (far, wide) = (if closed { long } else { (long - r - 1.7).max(0.0) }, (spread - r - 1.7).max(0.0));
         let at = DVec3::new(at.x.clamp(-far, far), at.y.clamp(-wide, wide), at.z.clamp(foot + r * 0.4, height - r * 0.8));
         g.leaves(at, DVec3::new(r, r, r * 0.8));
-        if tree.extras && g.unit() < 0.35 {
+        // (as many to an area on a thin hedge, whose tufts are small and many, as on a thick one)
+        if tree.extras && g.unit() < 0.35 * (mass / 4.5).powi(2).min(1.0) {
             berries(g, at, r * 0.8, at - outward * mass);
         }
     };
@@ -1493,8 +1531,8 @@ fn hedge(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
             }
         }
     }
-    // and its two ends
-    for end in [-1.0, 1.0] {
+    // and its two ends, if it has them
+    for end in if closed { vec![] } else { vec![-1.0, 1.0] } {
         for j in 0..=across {
             for k in 0..up {
                 let z = foot + mass * 0.6 + (height - foot - mass * 0.6) * k as f64 / up as f64;
@@ -1794,9 +1832,10 @@ fn petunia(g: &mut Grown, tree: &Tree, height: f64, spread: f64) {
 /// stretched to the oval. All lean the same way by an amount of their
 /// own, as reeds do in a wind.
 fn reeds(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
+    let long = long.max(2.0);
     let (full, sway) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
     let stems = tree.count.max(1) as usize;
-    let long = long.max(spread);
+    let _ = spread;
     let wind = g.between(0.0, TAU);
     let downwind = DVec3::new(wind.cos(), wind.sin(), 0.0);
     for n in 0..stems {
@@ -1840,6 +1879,199 @@ fn reeds(g: &mut Grown, tree: &Tree, height: f64, spread: f64, long: f64) {
             }
             let radius = vec![1.0; path.len()];
             g.limbs.push(Limb { path, radius, parent: Some(limb), level: 1 });
+        }
+    }
+}
+
+/// Where a hedge, a stand of reeds or a patch of grass lies: the line it
+/// runs along, and for grass the places its ground is raised.
+///
+/// Everything is given from the plant's own foot, as its parts are.
+#[derive(Clone, Debug, Default)]
+pub struct Lay {
+    /// the line it runs along, as points on the ground; two at least
+    pub run: Vec<DVec3>,
+    /// whether the line comes back to where it began
+    pub closed: bool,
+    /// grass: places its ground is raised, and by how much (see [`grass`])
+    pub mounds: Vec<(DVec3, f64)>,
+    /// how far from each such place the ground goes with it
+    pub reach: f64,
+}
+
+impl Lay {
+    /// Straight along x, `long` to each side of the foot.
+    pub fn straight(long: f64) -> Lay {
+        Lay { run: vec![-DVec3::X * long, DVec3::X * long], closed: false, mounds: Vec::new(), reach: 8.0 }
+    }
+}
+
+/// A line along the ground with a way of finding the place so far along it.
+struct Run {
+    points: Vec<DVec3>,
+    /// how far along the line each point is
+    along: Vec<f64>,
+}
+
+impl Run {
+    fn new(lay: &Lay) -> Run {
+        let mut points: Vec<DVec3> = lay.run.iter().map(|p| DVec3::new(p.x, p.y, 0.0)).collect();
+        if lay.closed && points.len() > 2 {
+            points.push(points[0]);
+        }
+        // (a point on top of the last has no direction, and is left out)
+        points.dedup_by(|b, a| a.distance(*b) < 1e-6);
+        if points.len() < 2 {
+            points = vec![DVec3::ZERO, DVec3::X];
+        }
+        let mut along = vec![0.0];
+        for i in 1..points.len() {
+            along.push(along[i - 1] + points[i].distance(points[i - 1]));
+        }
+        Run { points, along }
+    }
+
+    fn long(&self) -> f64 {
+        *self.along.last().unwrap()
+    }
+
+    /// The place `s` along the line, and the way the line is heading
+    /// there. Before its start and past its end it carries straight on.
+    fn place(&self, s: f64) -> (DVec3, DVec3) {
+        let i = self.along.partition_point(|a| *a <= s).clamp(1, self.points.len() - 1);
+        let heading = (self.points[i] - self.points[i - 1]).normalize();
+        (self.points[i - 1] + heading * (s - self.along[i - 1]), heading)
+    }
+
+    /// Where a point of a plant grown straight along x, `half` to each
+    /// side of its middle, is once the plant is laid along this line: as
+    /// far along the line as it was along x, and as far to the side of it.
+    fn laid(&self, p: DVec3, half: f64) -> DVec3 {
+        let (at, heading) = self.place(p.x + half);
+        at + DVec3::new(-heading.y, heading.x, 0.0) * p.y + DVec3::Z * p.z
+    }
+
+    /// How far a point of the ground is from the line.
+    fn distance(&self, p: DVec3) -> f64 {
+        self.points.windows(2).map(|w| {
+            let ab = w[1] - w[0];
+            let t = ((p - w[0]).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+            (w[0] + ab * t).truncate().distance(p.truncate())
+        }).fold(f64::INFINITY, f64::min)
+    }
+
+    /// Whether a point of the ground is inside the line, taken as an
+    /// outline (the even-odd rule, as `sdf::Fill` has it).
+    fn holds(&self, p: DVec3) -> bool {
+        let mut inside = false;
+        let mut a = *self.points.last().unwrap();
+        for &b in &self.points {
+            if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+                inside = !inside;
+            }
+            a = b;
+        }
+        inside
+    }
+}
+
+impl Grown {
+    /// Lay everything grown since `parts` and `limbs` along `run` (see
+    /// [`Run::laid`]).
+    ///
+    /// A hedge is grown straight and then laid along its line, where it
+    /// could have been grown along the line from the start. Grown straight,
+    /// its rows of tufts, its stems and its filling are each a few plain
+    /// loops; and a hedge laid along a straight line is, part for part, the
+    /// hedge there was before it could bend. A ball stays a ball and a
+    /// branch a branch: each is moved, and none is sheared, so on a bend
+    /// the tufts on the outside stand a little apart and those on the
+    /// inside crowd, as leaves do.
+    fn lay_along(&mut self, parts: usize, limbs: usize, run: &Run, half: f64) {
+        for part in &mut self.parts[parts..] {
+            part.shape = match part.shape {
+                Shape::Cone { a, ba, ra, rb, .. } => Shape::cone(run.laid(a, half), run.laid(a + ba, half), ra, rb),
+                Shape::Blob { c, inv, least, leafy } => Shape::Blob { c: run.laid(c, half), inv, least, leafy },
+                other => other,
+            };
+        }
+        for limb in &mut self.limbs[limbs..] {
+            limb.path.iter_mut().for_each(|p| *p = run.laid(*p, half));
+        }
+    }
+}
+
+/// Grass: a patch or a strip of it, over ground that can be raised.
+///
+/// It covers the ground within its spread of the line it is laid along,
+/// and, where the line is closed, everything the line encloses: a strip
+/// along a path, or a lawn of any outline.
+///
+/// It is a surface and not a solid. Under the blades is a skin of soil
+/// about two cells thick, in a colour of its own, so that a patch set on a
+/// floor leaves no gap under it and a mound is closed on top; under a
+/// mound there is nothing. Blades with nothing under them were tried in
+/// the mind only: over a floor of another colour the floor shows between
+/// every tuft, and a raised patch would be blades standing in the air.
+///
+/// The ground is raised by the points added to it. A point lifted by `h`
+/// lifts the ground round it by
+/// `h * (1 + cos(pi * d / reach)) / 2` at the distance `d`, out to the
+/// reach, the same bell the points added to other forms pull by (see
+/// `sdf::Field::Warp`). It is never lowered below the floor the patch
+/// stands on: a dip is made in ground that has first been raised.
+///
+/// The blades are in tufts, on a grid shaken so that no rows show, two to
+/// four to a tuft, each of its own height and lean and of one of three
+/// greens; all lean a little one way, as grass does. A blade is two
+/// lengths of round rib a cell or so thick, the thinnest that is built.
+fn grass(g: &mut Grown, tree: &Tree, height: f64, spread: f64, lay: &Lay) {
+    let (thick, lean) = (tree.fullness as f64 / 100.0, tree.bend as f64 / 100.0);
+    let run = Run::new(lay);
+    let covered = |p: DVec3| run.distance(p) <= spread || (lay.closed && run.holds(p));
+    let reach = lay.reach.max(1.0);
+    let lifted = |p: DVec3| {
+        let all: f64 = lay.mounds.iter().map(|(at, by)| {
+            let d = at.truncate().distance(p.truncate());
+            if d < reach { by * 0.5 * (1.0 + (PI * d / reach).cos()) } else { 0.0 }
+        }).sum();
+        all.max(0.0)
+    };
+    let (lo, hi) = run.points.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), p| (lo.min(*p - spread), hi.max(*p + spread)));
+    g.limb_record(vec![DVec3::ZERO, DVec3::Z], vec![1.0, 1.0], None, 0);
+    // the soil: a skin of flat balls, close enough to run together
+    let step = 2.4;
+    let across = |low: f64, high: f64, step: f64| (0..=((high - low) / step).ceil() as usize).map(move |i| low + i as f64 * step);
+    for y in across(lo.y, hi.y, step) {
+        for x in across(lo.x, hi.x, step) {
+            let p = DVec3::new(x, y, 0.0);
+            if covered(p) {
+                g.blob(p + DVec3::Z * (lifted(p) + 0.45), DVec3::new(2.3, 2.3, 1.15), TRUNK, false);
+            }
+        }
+    }
+    // the blades
+    let wind = g.between(0.0, TAU);
+    let downwind = DVec3::new(wind.cos(), wind.sin(), 0.0);
+    let gap = 3.4 - 1.9 * thick;
+    for y in across(lo.y, hi.y, gap) {
+        for x in across(lo.x, hi.x, gap) {
+            let p = DVec3::new(x + g.between(-0.45, 0.45) * gap, y + g.between(-0.45, 0.45) * gap, 0.0);
+            let blades = 2 + (g.unit() * 2.4) as usize;
+            // (the numbers are drawn whether or not the tuft is kept, so that widening a patch leaves the tufts it had as they were)
+            let drawn: Vec<(DVec3, DVec3, f64, f64)> = (0..blades).map(|_| (g.any_way(), g.any_way(), g.between(0.5, 1.0), g.unit())).collect();
+            if !covered(p) {
+                continue;
+            }
+            let foot = p + DVec3::Z * (lifted(p) + 1.0);
+            for (first, second, long, tone) in drawn {
+                let up = (DVec3::Z + downwind * 0.45 * lean + first * 0.3).normalize();
+                let over = (up + downwind * 0.5 * lean + second * 0.25).normalize();
+                let (half, tip) = (foot + up * height * long * 0.55, foot + up * height * long * 0.55 + over * height * long * 0.45);
+                let shade = if tone < 0.5 { LEAF } else if tone < 0.78 { LEAF_DARK } else { LEAF_LIGHT };
+                g.cone(foot, half, 0.95, 0.85, shade);
+                g.cone(half, tip, 0.85, 0.62, shade);
+            }
         }
     }
 }
@@ -2839,5 +3071,109 @@ mod tests {
         let (plumed, _) = stand(60.0, true);
         assert!(!plumed.shades.contains(&EXTRA) && bricks_of(&plumed, &[TOP]).len() > stems.len() * 3);
         assert!(bank.bounds().1.z > height * 0.8 && bank.bounds().1.z <= height + 2.0);
+    }
+
+    /// A hedge or grass through `points`, as a spec.
+    fn along(kind: Kind, points: &[(f64, f64)], spread: f64, closed: bool) -> Spec {
+        Spec { points: points.iter().map(|(x, y)| DVec3::new(x + 0.5, y + 0.5, 0.5)).collect(), radius: spread, closed, stretch: DVec3::ONE, ..spec(kind, 1) }
+    }
+
+    /// The tree a spec describes, as its solid, by way of a build: how tall it stands over a place on the ground.
+    fn top_at(built: &crate::spec::Built, x: f64, y: f64) -> Option<i32> {
+        built.bricks.iter().filter(|b| (b.min[0] as f64) <= x && x < (b.min[0] + b.ext[0]) as f64 && (b.min[1] as f64) <= y && y < (b.min[1] + b.ext[1]) as f64).map(|b| b.min[2] + b.ext[2]).max()
+    }
+
+    #[test]
+    fn a_hedge_follows_its_line_round_bends_and_its_thickness_is_its_own() {
+        let (height, _) = Tree::usual_size(Kind::Hedge);
+        // an L: along x, then up y
+        let bent = build(&along(Kind::Hedge, &[(-60.0, 0.0), (0.0, 0.0), (55.0, 10.0), (60.0, 70.0)], 10.0, false)).unwrap();
+        // it stands, to nearly its full height, at each of its points and between them; and not across the corner it goes round
+        for (x, y) in [(-55.0, 0.0), (-30.0, 0.0), (0.0, 0.0), (30.0, 3.0), (60.0, 40.0), (60.0, 64.0)] {
+            let top = top_at(&bent, x, y).unwrap_or_else(|| panic!("no hedge at {x}, {y}"));
+            assert!(top as f64 > height * 0.75 && top as f64 <= height + 2.0, "{top} tall at {x}, {y}");
+        }
+        assert!(top_at(&bent, -20.0, 50.0).is_none() && top_at(&bent, 20.0, 45.0).is_none(), "the hedge cuts the corner");
+        // as thick on the bend's far leg as on its near one: about twice its spread, measured across each
+        let across_x = (-25..25).filter(|y| top_at(&bent, -30.5, *y as f64 + 0.5).is_some()).count();
+        let across_y = (35..85).filter(|x| top_at(&bent, *x as f64 + 0.5, 45.5).is_some()).count();
+        assert!((16..=22).contains(&across_x) && (16..=22).contains(&across_y), "{across_x} and {across_y} across");
+
+        // Thickness and length are apart. Thicker, it is no longer; made thin again it is the hedge it was.
+        let line = [(-80.0, 0.0), (0.0, 0.0), (80.0, 0.0)];
+        let size = |spread: f64| {
+            let built = build(&along(Kind::Hedge, &line, spread, false)).unwrap();
+            let (lo, hi) = extent(&built, &[TRUNK, LEAF, LEAF_DARK, LEAF_LIGHT, LIMB]);
+            (hi.x - lo.x, hi.y - lo.y, built.bricks)
+        };
+        let (thin, thick, again) = (size(10.0), size(40.0), size(10.0));
+        assert!((thin.0 - 160.0).abs() < 8.0 && (thick.0 - 160.0).abs() < 8.0, "{} long thin, {} long thick, on a line of 160", thin.0, thick.0);
+        assert!(thin.1 < 22.0 && thick.1 > 70.0 && thick.1 < 82.0, "{} and {} thick", thin.1, thick.1);
+        assert_eq!(thin.2, again.2);
+        // laid along a straight line it is the hedge a length alone gave
+        let straight = Model::laid(&Tree::of(Kind::Hedge), DVec3::splat(0.5), height, 12.0, &Lay::straight(40.0));
+        let old = Model::with_length(&Tree::of(Kind::Hedge), DVec3::splat(0.5), height, 12.0, 40.0);
+        assert_eq!(straight.parts.len(), old.parts.len());
+        assert!(straight.parts.iter().zip(&old.parts).all(|(a, b)| a.shape.bounds().0.distance(b.shape.bounds().0) < 1e-6));
+
+        // a closed line is a ring with no ends: hedge all the way round, and none in the middle
+        let ring = build(&along(Kind::Hedge, &[(-50.0, -40.0), (50.0, -40.0), (50.0, 40.0), (-50.0, 40.0)], 9.0, true)).unwrap();
+        let open = build(&along(Kind::Hedge, &[(-50.0, -40.0), (50.0, -40.0), (50.0, 40.0), (-50.0, 40.0)], 9.0, false)).unwrap();
+        assert!(top_at(&ring, 0.0, 0.0).is_none());
+        // (the side between the last point and the first is there only when it is closed)
+        let west = |built: &crate::spec::Built| (-20..20).filter(|y| (-66..-40).any(|x| top_at(built, x as f64 + 0.5, *y as f64 + 0.5).is_some())).count();
+        assert!(west(&ring) == 40 && west(&open) < 10, "{} of 40 closed, {} open", west(&ring), west(&open));
+
+        // reeds stand along a line the same way
+        let bank = Model::laid(&Tree::of(Kind::Reeds), DVec3::splat(0.5), 84.0, 8.0, &Lay { run: vec![DVec3::ZERO, DVec3::new(60.0, 0.0, 0.0), DVec3::new(60.0, 60.0, 0.0)], closed: false, mounds: vec![], reach: 8.0 });
+        let feet: Vec<DVec3> = bank.limbs.iter().filter(|l| l.level == 0).map(|l| l.path[0]).collect();
+        assert!(feet.iter().any(|f| f.y > 40.0 && f.x > 50.0) && feet.iter().any(|f| f.x < 20.0 && f.y.abs() < 9.0) && !feet.iter().any(|f| f.x < 40.0 && f.y > 20.0), "the reeds do not follow the bank");
+    }
+
+    #[test]
+    fn grass_is_a_skin_of_soil_and_blades_that_added_points_raise() {
+        let (height, spread) = Tree::usual_size(Kind::Grass);
+        let strip = along(Kind::Grass, &[(-30.0, 0.0), (0.0, 0.0), (30.0, 0.0)], spread, false);
+        let flat = build(&strip).unwrap();
+        // thin: nowhere taller than its blades and the soil under them
+        let (lo, hi) = extent(&flat, &[TRUNK, LEAF, LEAF_DARK, LEAF_LIGHT]);
+        assert!(hi.z <= height + 3.0 && lo.z >= 0.0, "{} to {} high", lo.z, hi.z);
+        // soil under all of it, with no gap: over the whole patch the ground is covered, and it is the soil's colour at the bottom
+        let (mut covered, mut all) = (0, 0);
+        for x in (-28..28).step_by(3) {
+            for y in (-18..18).step_by(3) {
+                all += 1;
+                covered += top_at(&flat, x as f64 + 0.5, y as f64 + 0.5).is_some() as usize;
+            }
+        }
+        assert_eq!(covered, all, "bare ground showing through the grass");
+        let soil = bricks_of(&flat, &[TRUNK]);
+        assert!(soil.len() > 100 && soil.iter().all(|b| b.z < 3.0), "{} bricks of soil", soil.len());
+        // three greens, and blades of different heights
+        for shade in [LEAF, LEAF_DARK, LEAF_LIGHT] {
+            assert!(bricks_of(&flat, &[shade]).len() > 200, "few bricks of green {shade}");
+        }
+        let tops: std::collections::HashSet<i32> = (-25..25).filter_map(|x| top_at(&flat, x as f64 + 0.5, 0.5)).collect();
+        assert!(tops.len() >= 4, "the blades are all one height: {tops:?}");
+        // thicker growth is more blades
+        let blades = |full: i32| build(&Spec { tree: Tree { fullness: full, ..strip.tree }, ..strip.clone() }).unwrap().bricks.len();
+        assert!(blades(100) > blades(0) * 3 / 2);
+
+        // a point added and lifted raises the ground round it, by about as much, and leaves the far end alone
+        let mound = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), DVec3::Z * 12.0)], pull_reach: 16.0, ..strip.clone() }).unwrap();
+        let (at_it, far) = (top_at(&mound, 10.5, 2.5).unwrap(), top_at(&mound, -25.5, 2.5).unwrap());
+        assert!(at_it as f64 > 12.0 && at_it as f64 <= 12.0 + height + 3.0 && far as f64 <= height + 3.0, "{at_it} high at the mound, {far} far from it");
+        // a surface: under the mound there is nothing
+        assert!(!mound.bricks.iter().any(|b| b.min[0] <= 10 && 10 < b.min[0] + b.ext[0] && b.min[1] <= 2 && 2 < b.min[1] + b.ext[1] && b.min[2] <= 4 && 4 < b.min[2] + b.ext[2]), "the mound is solid");
+        // the soil is its skin still: soil bricks up at the mound's height
+        assert!(bricks_of(&mound, &[TRUNK]).iter().any(|b| b.z > 9.0));
+        // pushed down, the ground stays on the floor it stands on
+        let dip = build(&Spec { pulls: vec![(DVec3::new(10.5, 2.5, 0.5), -DVec3::Z * 12.0)], pull_reach: 16.0, ..strip.clone() }).unwrap();
+        assert_eq!(dip.bricks.iter().map(|b| b.min[2]).min(), Some(0));
+
+        // a closed line is an outline, filled; open, it is a strip along the line
+        let corners = [(-40.0, -40.0), (40.0, -40.0), (40.0, 40.0), (-40.0, 40.0)];
+        let (lawn, strips) = (build(&along(Kind::Grass, &corners, 6.0, true)).unwrap(), build(&along(Kind::Grass, &corners, 6.0, false)).unwrap());
+        assert!(top_at(&lawn, 0.5, 0.5).is_some() && top_at(&strips, 0.5, 0.5).is_none());
     }
 }
