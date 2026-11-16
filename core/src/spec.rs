@@ -427,7 +427,7 @@ fn coarse(spec: &Spec, grain: i32) -> Spec {
     coarse.pulls = spec.pulls.iter().map(|(at, by)| (*at / g, *by / g)).collect();
     coarse.pull_reach /= g;
     coarse.stones = spec.stones.map(|s| crate::pattern::Stones { size: s.size / g, gap: s.gap / g, ..s });
-    coarse.mosaic = spec.mosaic.map(|m| crate::pattern::Mosaic { tile: ((m.tile as f64 / g).round() as i32).max(1), ..m });
+    coarse.mosaic = spec.mosaic.map(|m| crate::pattern::Mosaic { tile: ((m.tile as f64 / g).round() as i32).max(1), tall: ((m.tall as f64 / g).round() as i32).max(1), ..m });
     coarse.depth = ((spec.depth as f64 / g).round() as i32).max(1);
     coarse.max_ext = (spec.max_ext / grain.max(1)).max(1);
     coarse.snapped()

@@ -445,7 +445,9 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 if mosaic {
                     s.stones = None;
                 }
-                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style: 0, tile: 2, border: 1, seed: 1 });
+                // (started as medallions, the style that shows most of what a mosaic can be on a floor of any outline)
+                let style = brickloft_core::pattern::STYLES.iter().position(|style| style.name == "medallions").unwrap_or(0);
+                s.mosaic = mosaic.then_some(brickloft_core::pattern::Mosaic { style, tile: 2, tall: 2, border: 1, seed: 1 });
                 // a mosaic is its colours: started in a mosaic's unless the pattern's colouring is already chosen
                 if mosaic && state.paint.mode != Mode::Pattern {
                     (state.paint.mode, state.paint.colours) = (Mode::Pattern, crate::paint::MOSAIC.to_vec());
@@ -461,7 +463,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     })
                     .response
                 });
-                helped(ui, help("mosaic_tile"), |ui| ui.add(Slider::new(&mut laid.tile, 1..=12).text("Tile size")));
+                helped(ui, help("mosaic_tile"), |ui| ui.add(Slider::new(&mut laid.tile, 1..=16).text("Tile width")));
+                helped(ui, help("mosaic_tall"), |ui| ui.add(Slider::new(&mut laid.tall, 1..=16).text("Tile depth")));
                 helped(ui, help("mosaic_border"), |ui| ui.add(Slider::new(&mut laid.border, 0..=6).text("Border")));
                 ui.horizontal(|ui| {
                     ui.add(egui::DragValue::new(&mut laid.seed).speed(1.0));

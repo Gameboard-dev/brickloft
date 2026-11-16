@@ -288,6 +288,16 @@ pub struct Learnt {
 /// `turned` adds each window's quarter turns and mirror images as tiles
 /// too, for a sample whose motifs may lie any way round.
 pub fn learn(sample: &Sample, n: usize, turned: bool) -> Result<Learnt, String> {
+    let same: Vec<u8> = (0..=255).collect();
+    learn_turning(sample, n, turned.then_some((&same, &same)))
+}
+
+/// [`learn`], for a sample whose colours are themselves things with a way
+/// round: a tile cut along one diagonal is, a quarter turn on, a tile cut
+/// along the other. `turns` gives, for each colour, the colour it becomes
+/// under a quarter turn clockwise (seen with rows running downwards) and
+/// under a mirror image left to right; `None` adds no turned windows.
+pub fn learn_turning(sample: &Sample, n: usize, turns: Option<(&[u8], &[u8])>) -> Result<Learnt, String> {
     if !(2..=4).contains(&n) {
         return Err("windows are 2 to 4 cells across".into());
     }
@@ -298,11 +308,12 @@ pub fn learn(sample: &Sample, n: usize, turned: bool) -> Result<Learnt, String> 
             let window: Vec<u8> = (0..n * n).map(|k| sample.at(x + k % n, y + k / n)).collect();
             // the window itself, then its turns and mirror images
             let mut ways = vec![window];
-            if turned {
+            if let Some((quarter, mirror)) = turns {
                 for k in 0..7 {
                     let last = &ways[k];
-                    // (a quarter turn each time, and a mirror image half way through)
-                    let next: Vec<u8> = if k == 3 { (0..n * n).map(|i| last[(i / n * n + (n - 1 - i % n)) as usize]).collect() } else { (0..n * n).map(|i| last[((n - 1 - i % n) * n + i / n) as usize]).collect() };
+                    // (a quarter turn each time, and a mirror image half way
+                    // through: the cells change places, and each is itself turned)
+                    let next: Vec<u8> = if k == 3 { (0..n * n).map(|i| mirror[last[(i / n * n + (n - 1 - i % n)) as usize] as usize]).collect() } else { (0..n * n).map(|i| quarter[last[((n - 1 - i % n) * n + i / n) as usize] as usize]).collect() };
                     ways.push(next);
                 }
             }

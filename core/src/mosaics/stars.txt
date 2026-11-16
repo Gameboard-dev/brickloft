@@ -1,0 +1,8 @@
+# Stars on plain ground: a square with a point on each side, eight
+# triangles round four squares, and a different colour at its heart.
+0 0   0   0   0   0
+0 0   0/1 1\0 0   0
+0 0/1 2   2   1\0 0
+0 0\1 2   2   1/0 0
+0 0   0\1 1/0 0   0
+0 0   0   0   0   0

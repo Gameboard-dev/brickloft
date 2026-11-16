@@ -70,16 +70,20 @@ fn scatter(at: [i32; 3]) -> f64 {
 pub const STONE: [[u8; 3]; 4] = [[168, 140, 120], [146, 122, 104], [190, 160, 130], [124, 110, 98]];
 
 /// The colours a mosaic starts in: cream for the ground, then terracotta,
-/// a deep blue and ochre.
+/// a deep blue and ochre, which the features of its pattern share (see
+/// `brickloft_core::pattern::colour_of`). Four and not one for each of a
+/// pattern's seven features: a floor reads as one design in a few colours,
+/// and anyone who wants each feature picked out adds colours to the list.
 pub const MOSAIC: [[u8; 3]; 4] = [[226, 214, 190], [176, 84, 60], [44, 74, 122], [204, 160, 72]];
 
 impl Paint {
     /// The colour of a brick whose pattern gives it colour number `shade`
-    /// (see `brickloft_core::spec::Built::shades`): that one of the
-    /// colours, going round again past the last. `None` for a paint with
-    /// no colours.
+    /// (see `brickloft_core::spec::Built::shades`): the first colour for
+    /// the pattern's ground, and the rest shared among its features (see
+    /// `brickloft_core::pattern::colour_of`). `None` for a paint with no
+    /// colours.
     pub fn shade(&self, shade: u8) -> Option<[u8; 3]> {
-        (!self.colours.is_empty()).then(|| self.colours[shade as usize % self.colours.len()])
+        (!self.colours.is_empty()).then(|| self.colours[brickloft_core::pattern::colour_of(shade, self.colours.len())])
     }
 
     /// The colour of separate piece number `piece` of a form (see

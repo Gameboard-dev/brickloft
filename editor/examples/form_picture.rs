@@ -1,7 +1,7 @@
 //! Draw the bricks of a form from a report or spec file as a picture, to
 //! look at a fit without starting the editor:
 //!
-//!   cargo run --release -p brickloft-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [key=value ...]
+//!   cargo run --release -p brickloft-editor --example form_picture -- report.txt out.png [turn] [tilt] [zoom] [x y z] [colours:N] [key=value ...]
 //!
 //! `turn` is the side it is seen from, in degrees about z (default 35), and
 //! `tilt` how far above, in degrees (default 35). `zoom` enlarges the
@@ -43,11 +43,13 @@ fn main() {
         None => (lo + hi) / 2.0,
     };
     let mut canvas = Canvas::new(SIZE, 2, middle, zoom * SIZE as f64 / (hi - lo).length() / 1.02, towards);
-    // a pattern's colours, if the form has one: a mosaic's ground, then its three other colours
-    const SHADES: [[f64; 3]; 4] = [[226.0, 214.0, 190.0], [176.0, 84.0, 60.0], [44.0, 74.0, 122.0], [204.0, 160.0, 72.0]];
+    // A pattern's colours, if the form has one: a mosaic's ground, then the
+    // colours its features share. `colours:N` uses the first N of them.
+    const SHADES: [[f64; 3]; 8] = [[226.0, 214.0, 190.0], [176.0, 84.0, 60.0], [44.0, 74.0, 122.0], [204.0, 160.0, 72.0], [70.0, 120.0, 90.0], [120.0, 60.0, 100.0], [40.0, 40.0, 48.0], [150.0, 170.0, 190.0]];
+    let colours = args.iter().find_map(|a| a.strip_prefix("colours:")?.parse::<usize>().ok()).unwrap_or(4).clamp(1, SHADES.len());
     for (n, brick) in built.bricks.iter().enumerate() {
         if let Some(shade) = built.shades.get(n) {
-            canvas.brick = SHADES[*shade as usize % 4];
+            canvas.brick = SHADES[brickloft_core::pattern::colour_of(*shade, colours)];
         }
         canvas.shape(brick.mask, DVec3::from_array(brick.min.map(|v| v as f64)), DVec3::from_array(brick.ext.map(|v| v as f64)));
     }

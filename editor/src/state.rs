@@ -2012,7 +2012,7 @@ mod tests {
     #[test]
     fn a_mosaic_is_coloured_as_its_pattern_has_it() {
         let mut state = State::new();
-        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, tile: 2, border: 1, seed: 3 }), ..Spec::default() };
+        state.spec = Spec { form: Form::Circle, points: vec![cell(0.0, 0.0, 0.0)], radius: 24.0, fill: true, depth: 1, mosaic: Some(brickloft_core::pattern::Mosaic { style: 1, tile: 2, tall: 2, border: 1, seed: 3 }), ..Spec::default() };
         state.form = CIRCLE;
         state.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::MOSAIC.to_vec(), axis: 2, width: 2 };
         state.refresh(|| 0.0);
@@ -2020,7 +2020,7 @@ mod tests {
         assert_eq!(state.built.shades.len(), state.built.bricks.len());
         let painted = state.painted();
         // each brick in the colour of its number, and more than one colour in use
-        assert!(painted.iter().zip(&state.built.shades).all(|(brick, shade)| brick.1 == Some(crate::paint::MOSAIC[*shade as usize % 4])));
+        assert!(painted.iter().zip(&state.built.shades).all(|(brick, shade)| brick.1 == Some(crate::paint::MOSAIC[brickloft_core::pattern::colour_of(*shade, 4)])));
         let colours: std::collections::HashSet<[u8; 3]> = painted.iter().filter_map(|p| p.1).collect();
         assert!(colours.len() >= 3, "{} colours", colours.len());
         // a quarter turn and a flip leave each brick its colour

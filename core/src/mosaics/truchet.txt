@@ -1,0 +1,8 @@
+# Every tile cut along a diagonal into two colours, one way or the other
+# with no rule to it: the tiles of Sebastien Truchet, which join up into
+# zigzags, diamonds and pinwheels wherever chance has it.
+# https://en.wikipedia.org/wiki/Truchet_tiles
+1/2 2\1 1/2 1\2
+1\2 1/2 2/1 2\1
+2/1 1\2 1\2 1/2
+2\1 2/1 1/2 2\1

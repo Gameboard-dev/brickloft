@@ -1,0 +1,5 @@
+# Pinwheels: four cut tiles turning about a point, with a lane of plain
+# ground between one pinwheel and the next.
+1/2 2\1 0
+1\2 2/1 0
+0   0   0

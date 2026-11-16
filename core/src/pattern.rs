@@ -318,50 +318,459 @@ pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize,
 pub struct Mosaic {
     /// which of [`STYLES`]
     pub style: usize,
-    /// how many cells across one tile of the mosaic is
+    /// how many cells one tile of the mosaic is across, and how many deep:
+    /// the two differ for a mosaic of long triangles and lozenges
     pub tile: i32,
-    /// how many tiles wide the plain border round the edge is, at least 1
+    pub tall: i32,
+    /// how many tiles wide the plain border round the edge is
     pub border: i32,
     /// which filling: any number, each a different mosaic
     pub seed: u64,
 }
 
-/// A style of mosaic: a small sample whose motifs wave function collapse
-/// lays out afresh over the floor (see [`crate::wfc`]).
+/// A style of mosaic: either a small sample whose motifs wave function
+/// collapse lays out afresh over the floor (see [`crate::wfc`]), or a
+/// pattern drawn by rule (see [`drawn`]).
 pub struct Style {
     pub name: &'static str,
-    /// the sample, rows of digits, each digit one of the form's colours
+    /// the sample: see [`read_sample`]
     sample: &'static str,
+    /// how many tiles across the windows learnt from the sample are: 3
+    /// keeps whole motifs together, 2 lets them be taken apart and mixed
+    window: usize,
     /// whether the motifs may lie any way round
     turned: bool,
+    /// set for a style that is drawn by rule and not learnt from a sample (see [`drawn`])
+    drawn: Option<Drawn>,
 }
 
 /// The styles on offer. Each sample is a text file beside this one, so
 /// that a style can be drawn and changed without reading any Rust.
-pub const STYLES: [Style; 5] = [
-    Style { name: "key", sample: include_str!("mosaics/key.txt"), turned: true },
-    Style { name: "diamonds", sample: include_str!("mosaics/diamonds.txt"), turned: true },
-    Style { name: "weave", sample: include_str!("mosaics/weave.txt"), turned: true },
-    Style { name: "flowers", sample: include_str!("mosaics/flowers.txt"), turned: true },
-    Style { name: "waves", sample: include_str!("mosaics/waves.txt"), turned: false },
+pub const STYLES: [Style; 11] = [
+    Style { name: "truchet", sample: include_str!("mosaics/truchet.txt"), window: 2, turned: true, drawn: None },
+    Style { name: "lozenges", sample: include_str!("mosaics/lozenges.txt"), window: 3, turned: true, drawn: None },
+    Style { name: "stars", sample: include_str!("mosaics/stars.txt"), window: 3, turned: true, drawn: None },
+    Style { name: "pinwheels", sample: include_str!("mosaics/pinwheels.txt"), window: 2, turned: true, drawn: None },
+    Style { name: "chevrons", sample: include_str!("mosaics/chevrons.txt"), window: 2, turned: false, drawn: None },
+    Style { name: "key", sample: include_str!("mosaics/key.txt"), window: 3, turned: true, drawn: None },
+    Style { name: "weave", sample: include_str!("mosaics/weave.txt"), window: 3, turned: true, drawn: None },
+    Style { name: "flowers", sample: include_str!("mosaics/flowers.txt"), window: 3, turned: true, drawn: None },
+    Style { name: "rug", sample: "", window: 0, turned: false, drawn: Some(Drawn::Rug) },
+    Style { name: "snowflake", sample: "", window: 0, turned: false, drawn: Some(Drawn::Snowflake) },
+    Style { name: "medallions", sample: "", window: 0, turned: false, drawn: Some(Drawn::Medallions) },
 ];
 
 /// How many times a mosaic is started again after a contradiction before
 /// the floor is laid plain.
 const TRIES: usize = 30;
 
+/// A tile of a mosaic, as the colour at each of its four corners: top
+/// left, top right, bottom left, bottom right, with the sample's rows
+/// running downwards. A tile of one colour has it at all four. A tile cut
+/// along a diagonal into two triangles has one colour at one end of the
+/// other diagonal and the second at its other end; the two corners the cut
+/// runs through belong to neither, and are [`ON_CUT`].
+///
+/// Told by its corners, a tile is turned by moving its corners round,
+/// which is all a quarter turn or a mirror image does to it.
+type Tile = [u8; 4];
+const ON_CUT: u8 = 255;
+
+/// A sample for a mosaic, read from text, and what its tiles are.
+struct Read {
+    sample: crate::wfc::Sample,
+    /// the tile each number in the sample stands for
+    tiles: Vec<Tile>,
+    /// for each tile, the tile it is a quarter turn clockwise on, and its mirror image
+    quarter: Vec<u8>,
+    mirror: Vec<u8>,
+}
+
+/// Read a mosaic's sample. A line is a row of tiles with spaces between:
+///
+/// - `2` is a tile all of colour 2;
+/// - `1/2` is a tile cut from bottom left to top right, colour 1 above and
+///   to the left of the cut and colour 2 below and to the right;
+/// - `1\2` is a tile cut from top left to bottom right, colour 1 below and
+///   to the left and colour 2 above and to the right.
+///
+/// A line with no spaces is a row of one-colour tiles, a digit each. Lines
+/// that are empty or start with `#` are skipped. Colours are 0 to 3.
+fn read_sample(text: &str) -> Result<Read, String> {
+    let colour = |c: char| c.to_digit(10).filter(|d| *d < 4).map(|d| d as u8).ok_or_else(|| format!("`{c}` is not a colour from 0 to 3"));
+    let tile = |word: &str| -> Result<Tile, String> {
+        let chars: Vec<char> = word.chars().collect();
+        match chars.as_slice() {
+            [c] => colour(*c).map(|c| [c; 4]),
+            [a, '/', b] => Ok([colour(*a)?, ON_CUT, ON_CUT, colour(*b)?]),
+            [a, '\\', b] => Ok([ON_CUT, colour(*b)?, colour(*a)?, ON_CUT]),
+            _ => Err(format!("`{word}` is not a tile: write `2`, `1/2` or `1\\2`")),
+        }
+    };
+    let mut tiles: Vec<Tile> = vec![[0; 4]]; // the plain ground first, which the border is made of
+    let number = |t: Tile, tiles: &mut Vec<Tile>| match tiles.iter().position(|known| *known == t) {
+        Some(n) => n as u8,
+        None => {
+            tiles.push(t);
+            (tiles.len() - 1) as u8
+        }
+    };
+    let rows: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    let mut cells = Vec::new();
+    let mut across = 0;
+    for row in &rows {
+        let words: Vec<String> = if row.contains(' ') { row.split_whitespace().map(str::to_string).collect() } else { row.chars().map(String::from).collect() };
+        if across != 0 && words.len() != across {
+            return Err("the rows of a sample are all the same length".into());
+        }
+        across = words.len();
+        for word in &words {
+            let t = tile(word)?;
+            cells.push(number(t, &mut tiles));
+        }
+    }
+    if across == 0 || across > 64 || rows.len() > 64 {
+        return Err("a sample is 1 to 64 rows of 1 to 64 tiles".into());
+    }
+    // every tile's turns and mirror images are tiles too: [top left, top right, bottom left, bottom right]
+    let turn = |t: Tile| [t[2], t[0], t[3], t[1]];
+    let flip = |t: Tile| [t[1], t[0], t[3], t[2]];
+    let mut at = 0;
+    while at < tiles.len() {
+        let t = tiles[at];
+        number(turn(t), &mut tiles);
+        number(flip(t), &mut tiles);
+        at += 1;
+    }
+    let quarter = tiles.clone().iter().map(|t| number(turn(*t), &mut tiles)).collect();
+    let mirror = tiles.clone().iter().map(|t| number(flip(*t), &mut tiles)).collect();
+    Ok(Read { sample: crate::wfc::Sample { across, down: rows.len(), colours: cells }, tiles, quarter, mirror })
+}
+
+/// A grid of tiles strewn with a style's motifs by wave function collapse.
+/// The tiles marked `plain` are to be plain ground, and those marked
+/// `outside` are not part of the floor at all. `None` if the pattern could
+/// not be completed.
+///
+/// The solver is told beforehand which tiles are to be plain, so that it
+/// lays whole motifs clear of them. Overruling it afterwards cut motifs in
+/// two along the border: half a star against the edge of the floor. A
+/// style with no plain ground in it (every tile of it is cut, say) cannot
+/// be told that, and is overruled after all.
+fn strewn(style: &Style, [across, down]: [usize; 2], plain: &[bool], outside: &[bool], seed: u64) -> Option<Vec<Tile>> {
+    use crate::wfc::{learn_turning, Grid};
+    let read = read_sample(style.sample).ok()?;
+    let turns = style.turned.then_some((read.quarter.as_slice(), read.mirror.as_slice()));
+    let learnt = learn_turning(&read.sample, style.window, turns).ok()?;
+    let filled = [true, false].into_iter().find_map(|told| {
+        let mut grid = Grid::new(&learnt.rules, [across, down]);
+        for k in 0..across * down {
+            if outside[k] {
+                grid.leave_out(k % across, k / across);
+            } else if told && plain[k] {
+                // (a learnt tile is a window of the sample: the tile of the mosaic it lays is the window's first)
+                grid.only(k % across, k / across, |t| learnt.colour[t] == 0);
+            }
+        }
+        grid.fill(seed, TRIES / 2).ok()
+    })?;
+    Some(filled.iter().map(|tile| tile.map_or([0; 4], |t| read.tiles[learnt.colour[t] as usize])).collect())
+}
+
+/// Which of `count` colours a brick takes whose pattern gives it the
+/// number `shade` (see `spec::Built::shades`).
+///
+/// A pattern numbers its parts and not its colours: 0 is the ground and
+/// each number above it one feature of the pattern (a rug's frame, its
+/// medallion, a snowflake's branches). The ground has the first colour to
+/// itself. The features share the rest out in turn, going round again when
+/// there are more features than colours. So two colours give the whole
+/// pattern in one colour on the other, and every colour added picks one
+/// more feature out, until each has its own.
+///
+/// Going round all the colours, the ground's among them, was the first
+/// rule, and it painted some feature the colour of the ground whenever
+/// there were fewer colours than features: that feature vanished.
+pub fn colour_of(shade: u8, count: usize) -> usize {
+    match (shade, count) {
+        (0, _) | (_, 0 | 1) => 0,
+        _ => 1 + (shade as usize - 1) % (count - 1),
+    }
+}
+
+/// The styles that are drawn by rule and not learnt from a sample.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Drawn {
+    /// a rug in the Persian manner: a framed rectangle with a medallion at
+    /// its middle, a piece in each corner and figures between
+    Rug,
+    /// one eight-armed snowflake at the middle of the floor
+    Snowflake,
+    /// a few figures repeated over the floor like a tiled ceiling, each
+    /// repeat its own mirror image eight ways
+    Medallions,
+}
+
+/// The feature of a rug that is its frame: the colour its plain tiles take
+/// (those the floor's edge cuts into), since the frame is what lies there.
+const RUG_FRAME: u8 = 1;
+
+/// A style drawn by rule, as a grid of tiles: a dense pattern of outlined
+/// lozenges, octagons, hexagons, squares and bars, ring within ring, whose
+/// outlines run into one another where the figures meet, and which is its
+/// own mirror image from side to side and from end to end.
+///
+/// ## How it is drawn
+///
+/// Every figure is a way of measuring how far a place is from the figure:
+/// across plus along for a lozenge, the greater of the two for a square,
+/// and mixtures of the two for an octagon, a hexagon and a bar. The measure
+/// is nothing on the figure's outline, below nothing inside it, and grows
+/// steadily away from it. One number is worked out for every place: the
+/// least of all the figures' measures there. The floor is coloured by that
+/// number in bands a tile wide, by a short repeating run of on and off.
+///
+/// So each figure is ringed inside and out by bands of its own shape, and
+/// where the bands of two figures meet they join into one outline round
+/// both, which is what gives the crowded, interlocked look of the real
+/// thing. It is how a distance function joins two solids into one (see
+/// `sdf`), used flat.
+///
+/// The figures are set out by rule, as a snowflake is. A place is first
+/// folded onto one part of the floor: a quarter of it for a rug (left onto
+/// right, bottom onto top), an eighth for a snowflake (and across the
+/// diagonal too), and for medallions an eighth of one repeat. The figures
+/// are placed in that part alone, and the folding repeats them everywhere
+/// else. The pattern is then its own mirror image because the folding is,
+/// with nothing to be turned over afterwards. The seed chooses which
+/// figure each is, its size, where it stands and the run of bands.
+///
+/// ## Colours
+///
+/// A band that is on takes the number of the figure nearest it, by what
+/// part of the pattern that figure is: a rug's frame, its medallion, its
+/// corner pieces; a snowflake's arms, its branches, its tips. A band that
+/// is off is the ground, 0. The numbers go up to 7, and whoever paints the
+/// bricks shares them out among however many colours there are: with two
+/// colours the whole pattern is one colour on the other, and each colour
+/// added picks another part of it out.
+///
+/// ## Why not wave function collapse
+///
+/// The patterns were asked for under that name, and the sampled mosaics
+/// use it. It was tried for a rug's field and gave a rug its scattered
+/// small motifs, which is a plain rug. What makes a rug or a snowflake
+/// look like one is a few large figures that govern the whole of it, and
+/// wave function collapse knows only what may sit beside what, a few tiles
+/// across.
+///
+/// ## The tiles
+///
+/// The number is taken at four places in every tile, one in each of the
+/// quarters its two diagonals cut it into. Where all four are one colour
+/// the tile is that colour. Where the two quarters on one side of a
+/// diagonal are one colour and the two on the other side another, the tile
+/// is cut along that diagonal. Every measure used here changes by whole
+/// tiles along the grid's lines and its diagonals, so those are the only
+/// two cases but for a few tiles where several figures' bands meet, which
+/// take the colour at their middle.
+///
+/// `unbroken` says which tiles are whole tiles of the floor. The pattern
+/// is set out about the middle of the rectangle of tiles that takes them
+/// all in, and a rug fills that rectangle, so a rug wants a rectangular
+/// floor: a straight band lying flat.
+fn drawn(kind: Drawn, [across, down]: [usize; 2], unbroken: &[bool], seed: u64) -> Vec<Tile> {
+    let mut tiles: Vec<Tile> = vec![[0; 4]; across * down];
+    let whole = |k: usize| unbroken[k];
+    let (Some(i0), Some(i1)) = ((0..across).find(|i| (0..down).any(|j| whole(j * across + i))), (0..across).rfind(|i| (0..down).any(|j| whole(j * across + i)))) else { return tiles };
+    let (Some(j0), Some(j1)) = ((0..down).find(|j| (0..across).any(|i| whole(j * across + i))), (0..down).rfind(|j| (0..across).any(|i| whole(j * across + i)))) else { return tiles };
+    // Half the rectangle, in whole tiles, so that its middle is a corner of
+    // the grid: a figure about a corner is made of whole and half tiles,
+    // and about the middle of a tile it is not. (A floor an odd number of
+    // tiles across has one row left over, which stays plain.)
+    let (half_wide, half_deep) = (((i1 + 1 - i0) / 2) as f64, ((j1 + 1 - j0) / 2) as f64);
+    if half_wide < 2.0 || half_deep < 2.0 {
+        return tiles;
+    }
+    let middle = (i0 as f64 + half_wide, j0 as f64 + half_deep);
+    let least = half_wide.min(half_deep);
+    let mut numbers = Numbers(seed ^ 0x6A09_E667_F3BC_C908);
+    // a whole number from `low` to `high`
+    let mut pick = |low: f64, high: f64| (low + numbers.unit() * (high - low + 1.0)).floor().clamp(low, high.max(low));
+    // A measure: how far a folded place is from a figure. Boxed, since the
+    // figures of one pattern are of several kinds in one list, and there
+    // are a few dozen at most.
+    type Measure = Box<dyn Fn(f64, f64) -> f64>;
+    const NONE: f64 = f64::INFINITY;
+    // A figure about a middle: within `across` of it one way and `along`
+    // the other, and within `both` of it by the two added together. Left
+    // out (`NONE`), a limit is no limit: the third alone is a lozenge, the
+    // first two a rectangle, all three an octagon or a pointed bar.
+    let shape = |cx: f64, cy: f64, across: f64, along: f64, both: f64| -> Measure {
+        Box::new(move |u, v| {
+            let (a, b) = ((u - cx).abs(), (v - cy).abs());
+            (a - across).max(b - along).max(a + b - both)
+        })
+    };
+    // a line on the diagonal, from a place outwards for `long` tiles each way
+    let slant = |cx: f64, cy: f64, long: f64| -> Measure {
+        Box::new(move |u, v| {
+            let (a, b) = (u - cx, v - cy);
+            (a - b).abs().max((a + b - long).abs() - long)
+        })
+    };
+    // a lozenge, a square or an octagon, as the seed has it
+    let any = |which: f64, cx: f64, cy: f64, size: f64, cut: f64| match which as i32 {
+        0 => shape(cx, cy, NONE, NONE, size),
+        1 => shape(cx, cy, size, size, NONE),
+        _ => shape(cx, cy, size, size, size + cut.min(size)),
+    };
+    // the figures of the part everything is folded onto, each with the number of the feature it is
+    let mut figures: Vec<(u8, Measure)> = Vec::new();
+    // how many bands out from the figures the pattern goes before the ground is left bare: no limit, for a pattern that fills the floor
+    let mut reach: Option<i64> = None;
+    // how many tiles a repeat is, for a pattern that repeats
+    let mut period = 2.0;
+    match kind {
+        Drawn::Rug => {
+            // the frame: how far in from the edge
+            figures.push((RUG_FRAME, Box::new(move |u, v| (half_wide - u).min(half_deep - v))));
+            // the medallion
+            figures.push((2, any(pick(0.0, 2.0), 0.0, 0.0, pick(1.0, (least / 3.0).max(1.0)), pick(1.0, (least / 4.0).max(1.0)))));
+            // on the line along the rug through its middle, and on the line across it
+            let (out, size) = (pick((half_wide * 0.5).ceil(), (half_wide * 0.72).floor()), pick(1.0, (least / 4.0).max(1.0)));
+            figures.push((4, if pick(0.0, 2.0) < 2.0 { shape(out, 0.0, size, NONE, size + pick(1.0, 3.0)) } else { shape(out, 0.0, NONE, NONE, size) }));
+            let (up, size) = (pick((half_deep * 0.5).ceil(), (half_deep * 0.75).floor()), pick(1.0, (least / 4.0).max(1.0)));
+            figures.push((5, if pick(0.0, 2.0) < 2.0 { shape(0.0, up, NONE, size, size + pick(1.0, 3.0)) } else { shape(0.0, up, NONE, NONE, size) }));
+            // in the corner
+            figures.push((3, any(pick(0.0, 2.0), pick((half_wide * 0.7).ceil(), (half_wide * 0.86).floor()), pick((half_deep * 0.7).ceil(), (half_deep * 0.86).floor()), pick(1.0, (least / 5.0).max(1.0)), pick(1.0, 2.0))));
+            // in the quarter, between them all
+            figures.push((6, any(pick(0.0, 1.0), pick((half_wide * 0.3).ceil(), (half_wide * 0.5).floor()), pick((half_deep * 0.3).ceil(), (half_deep * 0.5).floor()), pick(0.0, 2.0), 1.0)));
+        }
+        Drawn::Snowflake => {
+            // The arms are lines, and a line's first band is the line
+            // drawn two tiles thick. Left at that, or with one more band
+            // round the whole flake a tile clear of it. Any more and the
+            // bands of the arms and their branches run together into a
+            // lozenge with no arms to be seen.
+            let rings = if pick(0.0, 1.0) < 1.0 { 1.0 } else { 3.0 };
+            reach = Some(rings as i64);
+            // how long an arm is: to the nearer edge, less the rings round it
+            let long = (least - rings - 1.0).max(3.0);
+            // the heart
+            figures.push((4, any(pick(0.0, 2.0), 0.0, 0.0, pick(1.0, (long / 5.0).max(1.0)), 1.0)));
+            // the four arms along the grid's lines, pointed, and the four between them on its diagonals
+            figures.push((1, shape(0.0, 0.0, long, 0.0, long)));
+            let short = pick((long * 0.4).ceil(), (long * 0.65).floor());
+            figures.push((2, slant(0.0, 0.0, short)));
+            // The branches: off a straight arm on the diagonal, and off a
+            // diagonal arm along the grid, shorter the further out, as a
+            // snowflake's are.
+            let count = pick(2.0, 4.0);
+            for n in 1..=count as i32 {
+                let at = (long * n as f64 / (count + 1.0)).round();
+                figures.push((3, slant(at, 0.0, ((long - at) * 0.5).round().max(1.0))));
+            }
+            let count = pick(1.0, 2.0);
+            for n in 1..=count as i32 {
+                let at = (short * n as f64 / (count + 1.0)).round().max(1.0);
+                // (half its length a whole number, so that its two ends are both on the grid)
+                let half = ((short - at) * 0.5).round().max(1.0);
+                figures.push((3, shape(at + half, at, half, 0.0, NONE)));
+            }
+            // a lozenge at the tip of each arm, and one in each gap between the arms
+            figures.push((5, shape(long, 0.0, NONE, NONE, pick(1.0, 2.0))));
+            figures.push((5, shape(short, short, NONE, NONE, pick(1.0, 2.0))));
+            let out = pick((long * 0.55).ceil(), (long * 0.8).floor());
+            figures.push((6, shape(out, pick(1.0, (out * 0.4).floor().max(1.0)), NONE, NONE, pick(0.0, 1.0))));
+        }
+        Drawn::Medallions => {
+            let half = pick(4.0, 8.0).min(least.max(2.0));
+            period = half * 2.0;
+            // at the middle of a repeat, at its corners, at the middle of its sides, and one between
+            figures.push((1, any(pick(0.0, 2.0), 0.0, 0.0, pick(1.0, (half / 2.0).floor().max(1.0)), pick(1.0, 2.0))));
+            figures.push((2, any(pick(0.0, 2.0), half, half, pick(1.0, (half / 2.0).floor().max(1.0)), pick(1.0, 2.0))));
+            figures.push((3, any(pick(0.0, 2.0), half, 0.0, pick(0.0, (half / 3.0).floor()), 1.0)));
+            let out = pick(2.0, (half - 1.0).max(2.0));
+            figures.push((4, shape(out, pick(1.0, (out - 1.0).max(1.0)), NONE, NONE, pick(0.0, 1.0))));
+        }
+    }
+    // The bands, outwards from a figure's outline: on and off by turns, one
+    // or two bands of each. The first is on, so that every figure has its
+    // outline.
+    let mut run: Vec<bool> = Vec::new();
+    // (a snowflake's are one band each, to keep its lines thin)
+    for turn in 0..if kind == Drawn::Snowflake { 2 } else { pick(1.0, 3.0) as usize * 2 } {
+        if kind == Drawn::Snowflake {
+            run.push(turn == 0);
+            continue;
+        }
+        for _ in 0..pick(1.0, 2.0) as usize {
+            run.push(turn % 2 == 0);
+        }
+    }
+    // a place folded onto the part the figures are in
+    let fold = |x: f64, y: f64| {
+        let ordered = |u: f64, v: f64| (u.max(v), u.min(v));
+        match kind {
+            Drawn::Rug => (x.abs(), y.abs()),
+            Drawn::Snowflake => ordered(x.abs(), y.abs()),
+            Drawn::Medallions => ordered((x - period * (x / period).round()).abs(), (y - period * (y / period).round()).abs()),
+        }
+    };
+    // the colour at a place, in tiles from the middle
+    let colour = |x: f64, y: f64| {
+        let (u, v) = fold(x, y);
+        let (mut level, mut feature) = (f64::INFINITY, 0u8);
+        for (number, far) in &figures {
+            let here = far(u, v);
+            if here < level {
+                (level, feature) = (here, *number);
+            }
+        }
+        let band = level.floor() as i64;
+        if reach.is_some_and(|reach| band >= reach) || !run[band.rem_euclid(run.len() as i64) as usize] {
+            0
+        } else {
+            feature
+        }
+    };
+    for j in j0..j0 + 2 * half_deep as usize {
+        for i in i0..i0 + 2 * half_wide as usize {
+            let (x, y) = (i as f64 - middle.0, j as f64 - middle.1);
+            // the quarters towards the tile's top, right, bottom and left sides
+            let [top, right, bottom, left] = [(0.5, 1.0 / 6.0), (5.0 / 6.0, 0.5), (0.5, 5.0 / 6.0), (1.0 / 6.0, 0.5)].map(|(dx, dy)| colour(x + dx, y + dy));
+            tiles[j * across + i] = if top == left && bottom == right && top != bottom {
+                [top, ON_CUT, ON_CUT, bottom] // cut from bottom left to top right
+            } else if top == right && bottom == left && top != bottom {
+                [ON_CUT, top, bottom, ON_CUT] // cut from top left to bottom right
+            } else if top == right && right == bottom && bottom == left {
+                [top; 4]
+            } else {
+                [colour(x + 0.5, y + 0.5); 4]
+            };
+        }
+    }
+    tiles
+}
+
 /// Fit a mosaic over a region and push it through cells `w0..w0 + depth`
-/// across `axis`, onto `bricks`, with each brick's colour (a digit of the
-/// style's sample) onto `shades`. Returns the fit of the region.
+/// across `axis`, onto `bricks`, with each brick's colour (0 to 3) onto
+/// `shades`. Returns the fit of the region.
 ///
 /// The region is fitted first as the one solid it is, so that its edge is
-/// as smooth as any flat form's. Then it is coloured. It is cut into square
-/// tiles, `tile` cells across, on the brick grid, and wave function
-/// collapse gives each tile a colour. The sloped bricks of the edge keep
-/// their places, in the style's first colour. Everything else the fit made
-/// is whole cells, and those are sorted by their tile's colour and joined
-/// again into the largest bricks of one colour, so that tiles of a colour
-/// side by side are one brick and not a brick each.
+/// as smooth as any flat form's. Then it is coloured. It is cut into
+/// tiles, `tile` cells across and `tall` deep, on the brick grid, and wave
+/// function collapse gives each tile one of the style's tiles: one colour,
+/// or two triangles of two colours either side of a diagonal.
+///
+/// A tile cut into triangles is two sloped bricks, each a tile across and
+/// a tile deep, which for a tile wider than it is deep is a long ramp. The
+/// two fill one box between them, as the two halves of a sloped pair do
+/// anywhere else. Everything else the fit made is whole cells, and those
+/// are sorted by their tile's colour and joined again into the largest
+/// bricks of one colour, so that tiles of a colour side by side are one
+/// brick and not a brick each.
 ///
 /// The colours were first fitted one at a time, each colour's tiles as a
 /// solid of its own. The outline fitter is made to prefer a slope to a
@@ -369,57 +778,54 @@ const TRIES: usize = 30;
 /// small tiles into a slope, on both sides: bricks of two colours in one
 /// place. Sorting whole cells cannot do that.
 ///
-/// A tile that a sloped brick of the edge reaches into is the first
-/// colour throughout, since a brick is one colour, and so are the tiles
-/// within `border` of the edge: a floor mosaic has a border, and it keeps
-/// the pattern clear of the part of the floor the edge has cut up.
+/// A tile is plain ground, the style's first colour, wherever it is not
+/// whole: where the edge of the region or one of the edge's sloped bricks
+/// cuts into it, since a brick is one colour. So are the tiles within
+/// `border` of the edge. A floor mosaic has a border, and it keeps the
+/// pattern clear of the part of the floor the edge has cut up.
 ///
-/// If the pattern cannot be completed (see `wfc`), the floor is laid plain,
-/// in the style's first colour.
+/// If the pattern cannot be completed (see `wfc`), the floor is laid plain.
 #[allow(clippy::too_many_arguments)]
 pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>, shades: &mut Vec<u8>) -> Fit {
-    use crate::wfc::{learn, Grid, Sample};
     let (ua, va) = match axis {
         0 => (1, 2),
         1 => (0, 2),
         _ => (0, 1),
     };
-    let tile = settings.tile.clamp(1, 64);
+    let (wide, tall) = (settings.tile.clamp(1, 64), settings.tall.clamp(1, 64));
     let style = &STYLES[settings.style.min(STYLES.len() - 1)];
     let fit = fit_planar(&|x, y| region(DVec2::new(x, y)), min, max, opts);
-    // the tiles that cover the box, set on multiples of a tile's width so
+    // the tiles that cover the box, set on multiples of a tile's size so
     // that moving the form does not slide the pattern under it
-    let first = [min[0].div_euclid(tile), min[1].div_euclid(tile)];
-    let across = ((max[0] + tile - 1).div_euclid(tile) - first[0]).max(1) as usize;
-    let down = ((max[1] + tile - 1).div_euclid(tile) - first[1]).max(1) as usize;
-    let tile_of = |x: i32, y: i32| (y.div_euclid(tile) - first[1]) as usize * across + (x.div_euclid(tile) - first[0]) as usize;
-    let middle = |k: usize| DVec2::new((first[0] + (k % across) as i32) as f64 + 0.5, (first[1] + (k / across) as i32) as f64 + 0.5) * tile as f64;
-    // how deep inside the region a tile's middle is, in tiles: under nothing, it is outside
-    let inside: Vec<f64> = (0..across * down).map(|k| -region(middle(k)) / tile as f64).collect();
-    let mut colours: Vec<u8> = Sample::read(style.sample)
-        .and_then(|sample| learn(&sample, 3, style.turned))
-        .and_then(|learnt| {
-            let mut grid = Grid::new(&learnt.rules, [across, down]);
-            for k in (0..across * down).filter(|k| inside[*k] < -0.75) {
-                grid.leave_out(k % across, k / across);
-            }
-            let filled = grid.fill(settings.seed, TRIES)?;
-            Ok(filled.iter().map(|tile| tile.map_or(0, |t| learnt.colour[t])).collect())
-        })
-        .unwrap_or_else(|_| vec![0; across * down]);
-    // the border, and the tiles the edge's sloped bricks reach into
-    let edge = settings.border.clamp(0, 8) as f64 - 0.5;
-    for k in (0..across * down).filter(|k| inside[*k] < edge) {
-        colours[k] = 0;
-    }
+    let first = [min[0].div_euclid(wide), min[1].div_euclid(tall)];
+    let across = ((max[0] + wide - 1).div_euclid(wide) - first[0]).max(1) as usize;
+    let down = ((max[1] + tall - 1).div_euclid(tall) - first[1]).max(1) as usize;
+    let tile_of = |x: i32, y: i32| (y.div_euclid(tall) - first[1]) as usize * across + (x.div_euclid(wide) - first[0]) as usize;
+    let middle = |k: usize| DVec2::new(((first[0] + (k % across) as i32) as f64 + 0.5) * wide as f64, ((first[1] + (k / across) as i32) as f64 + 0.5) * tall as f64);
+    // how deep inside the region a tile's middle is, in tiles (by its shorter side): under nothing, it is outside
+    let inside: Vec<f64> = (0..across * down).map(|k| -region(middle(k)) / wide.min(tall) as f64).collect();
     let cells = |piece: &crate::fit_planar::Piece| {
         let (x, y, w, h) = (piece.x, piece.y, piece.w, piece.h);
         (0..w * h).map(move |k| (x + k % w, y + k / w))
     };
-    for piece in fit.pieces.iter().filter(|piece| piece.mask != 15) {
+    // how many of each tile's cells the fit made whole: a tile short of
+    // any, or within the border, is plain
+    let mut whole_cells = vec![0; across * down];
+    for piece in fit.pieces.iter().filter(|piece| piece.mask == 15) {
         for (x, y) in cells(piece) {
-            colours[tile_of(x, y)] = 0;
+            whole_cells[tile_of(x, y)] += 1;
         }
+    }
+    let unbroken: Vec<bool> = whole_cells.iter().map(|n| *n == wide * tall).collect();
+    let edge = settings.border.clamp(0, 8) as f64 - 0.5;
+    // (a rug has a frame of its own, and its plain tiles are the frame's colour)
+    let is_rug = style.drawn == Some(Drawn::Rug);
+    let plain: Vec<bool> = (0..across * down).map(|k| !unbroken[k] || (!is_rug && inside[k] < edge)).collect();
+    let outside: Vec<bool> = inside.iter().map(|depth| *depth < -0.75).collect();
+    let plain_colour = if is_rug { RUG_FRAME } else { 0 };
+    let mut tiles = if let Some(kind) = style.drawn { drawn(kind, [across, down], &unbroken, settings.seed) } else { strewn(style, [across, down], &plain, &outside, settings.seed).unwrap_or_else(|| vec![[0; 4]; across * down]) };
+    for k in (0..across * down).filter(|k| plain[*k]) {
+        tiles[k] = [plain_colour; 4];
     }
     let mut push = |mask4: u8, x: i32, y: i32, w: i32, h: i32, shade: u8| {
         let mask = (0..8u8).fold(0u8, |m, c| m | (mask4 >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
@@ -434,13 +840,28 @@ pub fn lay_mosaic(region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: usize,
             at += run;
         }
     };
-    // the whole cells, each with its tile's colour
+    // the tiles cut into two triangles: a sloped brick each, a tile in size
+    // (a piece's mask has a bit for each corner it fills: 1 top left, 2 top
+    // right, 4 bottom left, 8 bottom right, rows running the way y does)
+    for (k, tile) in tiles.iter().enumerate().filter(|(_, tile)| tile.contains(&ON_CUT)) {
+        let (x, y) = ((first[0] + (k % across) as i32) * wide, (first[1] + (k / across) as i32) * tall);
+        if tile[1] == ON_CUT {
+            // cut from bottom left to top right
+            push(0b0111, x, y, wide, tall, tile[0]);
+            push(0b1110, x, y, wide, tall, tile[3]);
+        } else {
+            // cut from top left to bottom right
+            push(0b1101, x, y, wide, tall, tile[2]);
+            push(0b1011, x, y, wide, tall, tile[1]);
+        }
+    }
+    // the whole cells of every other tile, each with its tile's colour
     let mut whole: Vec<(i32, i32, u8)> = Vec::new();
     for piece in &fit.pieces {
         if piece.mask == 15 {
-            whole.extend(cells(piece).map(|(x, y)| (y, x, colours[tile_of(x, y)])));
+            whole.extend(cells(piece).filter(|(x, y)| !tiles[tile_of(*x, *y)].contains(&ON_CUT)).map(|(x, y)| (y, x, tiles[tile_of(x, y)][0])));
         } else {
-            push(piece.mask, piece.x, piece.y, piece.w, piece.h, 0);
+            push(piece.mask, piece.x, piece.y, piece.w, piece.h, plain_colour);
         }
     }
     // Joined into bricks of one colour: along each row into runs, and a run
@@ -602,34 +1023,117 @@ mod tests {
         // a disc of radius 30
         let disc = |p: DVec2| p.length() - 30.0;
         let (min, max) = ([-32, -32], [32, 32]);
+        let whole_floor = fit_planar(&|x, y| disc(DVec2::new(x, y)), min, max, &Opts::default());
         for (style, named) in STYLES.iter().enumerate() {
             let (mut bricks, mut shades) = (Vec::new(), Vec::new());
-            let settings = Mosaic { style, tile: 2, border: 1, seed: 7 };
+            let settings = Mosaic { style, tile: 2, tall: 2, border: 1, seed: 7 };
             let fit = lay_mosaic(&disc, &settings, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
             let name = named.name;
             assert_eq!(bricks.len(), shades.len(), "{name}");
-            // the whole disc is covered, closely, with no cell in two bricks
-            let area = std::f64::consts::PI * 900.0;
-            assert!((fit.solid - area).abs() < 0.03 * area && fit.error < 0.03 * area, "{name}: {} of {area}, {} wrong", fit.solid, fit.error);
-            let mut seen = HashSet::new();
-            let squares = bricks.iter().filter(|b| b.mask == 0xff);
-            assert!(squares.clone().all(|b| (0..b.ext[0]).all(|x| (0..b.ext[1]).all(|y| seen.insert((b.min[0] + x, b.min[1] + y))))), "{name}: two bricks share a cell");
-            // more than one colour, and far fewer bricks than tiles (706 tiles of 2 by 2 in the disc)
+            // the floor is the form's own fit, coloured: the same area, as closely fitted
+            assert_eq!((fit.solid, fit.error), (whole_floor.solid, whole_floor.error), "{name}");
+            // every place of the floor is in one brick, and none in two
+            let holding = |x: f64, y: f64| bricks.iter().filter(|b| x >= b.min[0] as f64 && x < (b.min[0] + b.ext[0]) as f64 && y >= b.min[1] as f64 && y < (b.min[1] + b.ext[1]) as f64).filter(|b| crate::shapes::inside_shape(crate::shapes::shape_info(b.mask).unwrap(), (x - b.min[0] as f64) / b.ext[0] as f64, (y - b.min[1] as f64) / b.ext[1] as f64, 0.5)).count();
+            for k in 0..120 * 120 {
+                let p = DVec2::new(-30.0 + (k % 120) as f64 / 2.0 + 0.13, -30.0 + (k / 120) as f64 / 2.0 + 0.19);
+                let count = holding(p.x, p.y);
+                assert!(count <= 1, "{name}: {count} bricks hold {p:?}");
+                assert!(count == 1 || disc(p) > -1.5, "{name}: no brick holds {p:?}, well inside the floor");
+            }
+            // more than one colour, and far fewer bricks than the 2,800 cells of the disc
             let used: HashSet<u8> = shades.iter().copied().collect();
-            assert!(used.len() >= 2, "{name} is all one colour");
-            assert!(bricks.len() < 700, "{name}: {} bricks", bricks.len());
-            // the sloped pieces of the edge are all the border's colour
-            assert!(bricks.iter().zip(&shades).filter(|(b, _)| b.mask != 0xff).all(|(_, shade)| *shade == 0), "{name}: a sloped piece is not the border's colour");
-            // one seed is one mosaic, another seed another
+            assert!(used.len() >= 2 && used.iter().all(|shade| *shade < 8), "{name}: colours {used:?}");
+            assert!(bricks.len() < 1400, "{name}: {} bricks", bricks.len());
+            // one seed is one mosaic
             let again = |seed: u64| {
                 let (mut b, mut s) = (Vec::new(), Vec::new());
                 lay_mosaic(&disc, &Mosaic { seed, ..settings }, 2, min, max, 0, 1, &Opts::default(), &mut b, &mut s);
                 (b, s)
             };
             assert_eq!(again(7), (bricks.clone(), shades.clone()), "{name}");
-            if name != "waves" {
-                assert_ne!(again(8).0, bricks, "{name}: two seeds gave one mosaic");
+        }
+        // a style of triangles lays sloped bricks inside the floor, as long as its tiles are
+        let (mut bricks, mut shades) = (Vec::new(), Vec::new());
+        lay_mosaic(&disc, &Mosaic { style: 0, tile: 4, tall: 2, border: 1, seed: 7 }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
+        let long = bricks.iter().zip(&shades).filter(|(b, _)| b.mask != 0xff && b.ext[0] == 4 && b.ext[1] == 2).count();
+        assert!(long > 40, "{long} long triangles");
+        assert!(bricks.iter().zip(&shades).any(|(b, shade)| b.mask != 0xff && *shade != 0), "no sloped brick has a colour of its own");
+    }
+
+    #[test]
+    fn a_drawn_style_is_a_dense_pattern_of_cut_tiles_and_its_own_mirror_image() {
+        // a floor 120 by 80, in tiles of 2: 60 tiles by 40
+        let floor = |p: DVec2| (p.x.abs() - 60.0).max(p.y.abs() - 40.0);
+        let (min, max) = ([-60, -40], [60, 40]);
+        for (style, named) in STYLES.iter().enumerate().filter(|(_, style)| style.drawn.is_some()) {
+            let name = named.name;
+            let lay = |seed: u64| {
+                let (mut bricks, mut shades) = (Vec::new(), Vec::new());
+                lay_mosaic(&floor, &Mosaic { style, tile: 2, tall: 2, border: 1, seed }, 2, min, max, 0, 1, &Opts::default(), &mut bricks, &mut shades);
+                (bricks, shades)
+            };
+            for seed in [1, 5, 12] {
+                let (bricks, shades) = lay(seed);
+                // the colours at a place: of the bricks that hold it
+                let colours = |x: f64, y: f64| -> Vec<u8> { bricks.iter().zip(&shades).filter(|(b, _)| x >= b.min[0] as f64 && x < (b.min[0] + b.ext[0]) as f64 && y >= b.min[1] as f64 && y < (b.min[1] + b.ext[1]) as f64 && crate::shapes::inside_shape(crate::shapes::shape_info(b.mask).unwrap(), (x - b.min[0] as f64) / b.ext[0] as f64, (y - b.min[1] as f64) / b.ext[1] as f64, 0.5)).map(|(_, shade)| *shade).collect() };
+                // every place is one colour, and the same colour as its mirror images left to right and top to bottom
+                for k in 0..2000 {
+                    let (x, y) = ((k % 50) as f64 * 1.19 + 0.313, (k / 50) as f64 * 0.97 + 0.211);
+                    let here = colours(x, y);
+                    assert!(here.len() == 1 && here == colours(-x, y) && here == colours(x, -y), "{name}, seed {seed}: the pattern differs across its middle at {x}, {y}: {here:?}, {:?}, {:?}", colours(-x, y), colours(x, -y));
+                }
+                // a dense pattern: several features, many sloped bricks, and none of it most of the floor
+                let sloped = bricks.iter().filter(|b| b.mask != 0xff).count();
+                assert!(sloped > 150, "{name}, seed {seed}: {sloped} sloped bricks");
+                let used: HashSet<u8> = shades.iter().copied().collect();
+                assert!(used.len() >= 4 && used.iter().all(|shade| *shade < 8), "{name}, seed {seed}: features {used:?}");
+                for shade in 1..8u8 {
+                    let area: f64 = bricks.iter().zip(&shades).filter(|(_, s)| **s == shade).map(|(b, _)| (b.ext[0] * b.ext[1]) as f64 * if b.mask == 0xff { 1.0 } else { 0.5 }).sum();
+                    assert!(area < 0.5 * 9600.0, "{name}, seed {seed}: feature {shade} covers {area} of 9600");
+                }
             }
+            // one seed is one pattern, and another seed another
+            assert_eq!(lay(5), lay(5), "{name}");
+            assert_ne!(lay(5), lay(6), "{name}");
+        }
+    }
+
+    #[test]
+    fn features_share_the_colours_and_the_ground_keeps_its_own() {
+        // two colours: every feature is the second
+        assert_eq!((0..8).map(|shade| colour_of(shade, 2)).collect::<Vec<_>>(), [0, 1, 1, 1, 1, 1, 1, 1]);
+        // four: the features go round the three that are not the ground's
+        assert_eq!((0..8).map(|shade| colour_of(shade, 4)).collect::<Vec<_>>(), [0, 1, 2, 3, 1, 2, 3, 1]);
+        // as many as there are features: each its own
+        assert_eq!((0..8).map(|shade| colour_of(shade, 8)).collect::<Vec<_>>(), [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!((colour_of(5, 1), colour_of(5, 0)), (0, 0));
+    }
+
+    #[test]
+    fn a_sample_is_read_as_tiles_that_turn() {
+        let read = read_sample("0 1/2\n1\\2 3\n").unwrap();
+        // the ground, then the tiles as met, then their turns
+        assert_eq!(read.tiles[0], [0; 4]);
+        let cut = read.tiles[read.sample.colours[1] as usize];
+        assert_eq!(cut, [1, ON_CUT, ON_CUT, 2]);
+        // a quarter turn clockwise: the colour at the top left goes to the top right
+        let turned = read.tiles[read.quarter[read.sample.colours[1] as usize] as usize];
+        assert_eq!(turned, [ON_CUT, 1, 2, ON_CUT]);
+        // four quarter turns, or two mirror images, are no turn at all
+        for tile in 0..read.tiles.len() as u8 {
+            let round = (0..4).fold(tile, |t, _| read.quarter[t as usize]);
+            assert_eq!((round, read.mirror[read.mirror[tile as usize] as usize]), (tile, tile));
+        }
+        // a row of digits is a row of one-colour tiles
+        assert_eq!(read_sample("012\n").unwrap().sample.colours.len(), 3);
+        for bad in ["0 5", "0 1/", "0 1|2", "01\n0", ""] {
+            assert!(read_sample(bad).is_err(), "{bad:?} was read");
+        }
+        // every style on offer is read and learnt
+        for style in STYLES.iter().filter(|style| style.drawn.is_none()) {
+            let read = read_sample(style.sample).unwrap_or_else(|e| panic!("{}: {e}", style.name));
+            let turns = style.turned.then_some((read.quarter.as_slice(), read.mirror.as_slice()));
+            assert!(crate::wfc::learn_turning(&read.sample, style.window, turns).is_ok(), "{}", style.name);
         }
     }
 
