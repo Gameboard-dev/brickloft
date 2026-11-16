@@ -130,6 +130,7 @@ The settings Claude can give:
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `tree` | `[kind, seed, fullness, count, bend, extras]` says which plant a `tree` form is (a tree, a bush or a flower); only the kind is needed (see below) |
+| `hedge` | `true` builds an arch as clipped hedge, grown as the `tree` setting says a hedge is (`hedge,seed,fullness,count,bend,extras`); `false` for plain brick |
 | `bloom` | `[flower, tilt, turn, stem, fallen]` says which flower a `tree` of the kind `flower` is and how it lies; only the flower is needed (see below) |
 | `furniture` | `[kind, seed, board, shelves, spacing, bay, plinth, back, moulding, books]` says which piece a `furniture` form is; only the kind is needed (see below) |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band, a filled outline or a cube as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |

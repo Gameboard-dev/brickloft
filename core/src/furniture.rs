@@ -735,7 +735,7 @@ fn leaning(lay: &mut Lay, at: [i32; 3], thick: i32, lean: i32, deep: i32, tall: 
 /// How far `p` is from one brick: negative inside it. Exact for a box.
 /// For a sloped piece it is the furthest `p` is beyond any of the piece's
 /// faces, which is never more than the true distance and has its sign.
-fn brick_distance(b: &CellBrick, p: DVec3) -> f64 {
+pub(crate) fn brick_distance(b: &CellBrick, p: DVec3) -> f64 {
     let (lo, ext) = (DVec3::new(b.min[0] as f64, b.min[1] as f64, b.min[2] as f64), DVec3::new(b.ext[0] as f64, b.ext[1] as f64, b.ext[2] as f64));
     let q = (p - lo - ext / 2.0).abs() - ext / 2.0;
     let mut d = q.max(DVec3::ZERO).length() + q.max_element().min(0.0);

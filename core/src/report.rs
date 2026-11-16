@@ -94,6 +94,8 @@ pub fn spec_text(spec: &Spec) -> String {
     line("blend", spec.blend.map_or("none".into(), number));
     // whether a joined form is taken away from the forms it joins
     line("carve", spec.carve.to_string());
+    // whether the form is built as clipped hedge (an arch is); a save from before it could be has no line for it
+    line("hedge", spec.hedge.to_string());
     // stepping stones: how far apart, the gap, how uneven, and which scattering
     // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The eleventh was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused. The twelfth is whether planks are grooved or cobblestone's mortar is sunk, 1 or 0. It is apart from the third because the third was once a bevel that cobblestone had too and was taken from it: a file from then says 1 there, and must not come back with its mortar sunk.)
     line("mosaic", spec.mosaic.map_or("none".into(), |m| {
@@ -275,6 +277,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
             }
             // (a file from before a form could be taken away has no such line, and its form adds)
             "carve" => spec.carve = flag(value)?,
+            "hedge" => spec.hedge = flag(value)?,
             "mosaic" => {
                 spec.mosaic = if value == "none" {
                     None
@@ -1249,6 +1252,7 @@ mosaic = {values}
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
                 carve: true,
+                hedge: true,
                 tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false, bloom: crate::tree::Bloom { flower: crate::tree::Flower::Gerbera, tilt: 35, turn: 250, stem: true, fallen: true } },
                 furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100 },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
@@ -1275,6 +1279,8 @@ tree = pine,1,60,15,50,0").unwrap().tree;
         assert!(["blend = 7", "blend = -1", "blend = inf", "blend = nan", "blend = round"].iter().all(|line| parse_spec(line).is_err()));
         // nor has one from before a form could be taken away
         assert!(!parse_spec("blend = 2").unwrap().carve && parse_spec("carve = true").unwrap().carve && parse_spec("carve = 1").is_err());
+        // nor has one from before a form could be built as hedge
+        assert!(!parse_spec("form = arch round").unwrap().hedge && parse_spec("hedge = true").unwrap().hedge && parse_spec("hedge = 1").is_err());
         for spec in specs {
             assert_eq!(parse_spec(&spec_text(&spec)).unwrap(), spec);
         }

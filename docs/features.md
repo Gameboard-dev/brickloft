@@ -441,6 +441,19 @@ Planks and stepping stones have no ground. Each board or stone takes one of
 the colours, and the sets they start with are shades of one wood or one
 stone.
 
+An **arch** can be built as clipped hedge: choose **hedge** in its
+**Texture** list. Its band is then the Plant form's hedge, with tufts of
+leaves over every face, inside the opening as well as outside, light on
+top and dark underneath, on stems at its two feet. **Density**,
+**Looseness**, **Berries** and a seed appear under the list, and it comes
+in the hedge's sets of colours. The opening keeps the plain arch's shape:
+the leaves stand into it by one microbrick at the most. A hedge is at
+least 6 microbricks thick, so a thinner or shallower arch is built 6 by
+6, and the panel says so. **Filled** has no effect on an arch of hedge.
+An arch 60 across is about 5,000 bricks.
+
+<img src="images/arch-hedge.png" width="330" alt="A round arch built as clipped hedge on stems"> <img src="images/arch-hedge-pointed.png" width="330" alt="A pointed arch of hedge with red berries">
+
 ## Plants
 
 **Plant** grows a tree, a bush or a flower: a pine, a palm or an oak; a
