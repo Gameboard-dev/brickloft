@@ -22,8 +22,8 @@ control does.
 | Light blue | a size: a radius, or an arch's height |
 | Orange | a point you added (see [Added points](#added-points)) |
 
-Round the middle of the grid being edited are three **arrows** and three
-**rings**, red for x, green for y and blue for z (see [Grids](#grids)). They
+At the form being edited are three **arrows**, and round the middle of its
+grid three **rings**, red for x, green for y and blue for z (see [Grids](#grids)). They
 are drawn a tenth the size of what is on the grid. The **Show** boxes at the
 top of the panel switch the rulers, the rings, the arrows and the form's dots on
 and off, each on its own. Anything hidden cannot be taken hold of either.
@@ -203,11 +203,17 @@ arch runs straight along it, and leaves its feet where they are. The arch
 is then fitted as smoothly as any other. An arch from one of the reports
 this was written for went from 199 bricks to 31.
 
-The arrows and rings stand at the middle of everything on the grid being
-edited, sized to it.
+The rings stand at the middle of everything on the grid being edited. The
+arrows stand at the middle of the forms they move: the form being edited and
+any on its grid picked with it (Shift + click).
 
-- **Drag an arrow** to move the whole grid along that axis. A level grid
-  moves a unit at a time; a grid at an angle moves freely.
+- **Drag an arrow** to move those forms along that axis, a unit at a time.
+  They stop short of the forms left behind, unless Ctrl is held to join
+  them. On a grid at an angle they move along the grid's own axis of that
+  colour, which is not quite the way the arrow points.
+- With every form on the grid picked, or one form alone on it, the arrow
+  moves the whole grid. A level grid moves a unit at a time; a grid at an
+  angle moves freely.
 - **Drag a ring** round to turn the whole grid about that axis, by any
   angle, in whole degrees.
 - **Level the grid** puts a turned grid back on the world's.
@@ -556,7 +562,8 @@ passes a megabyte.
 | Drag a form by its bricks | move it within its grid |
 | Ctrl + drag a form | move it into another form and join the two |
 | Drag a dot | reshape the form; on a cube, move one side |
-| Drag an arrow, a ring | move, turn the whole grid |
+| Drag an arrow | move the form being edited and any picked with it |
+| Drag a ring | turn the whole grid |
 | Alt + click a form | add a point to it |
 | Alt + right-click an added point | take it off |
 | Ctrl + drag an added point on a circle | move it out of the circle's plane |
