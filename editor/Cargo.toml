@@ -26,6 +26,12 @@ arcs-core = { path = "../core" }
 # GUI are switched on. A full engine (Bevy) was the alternative: it would give
 # the same four things for several times the compile time and download size.
 three-d = { version = "0.19", default-features = false, features = ["window", "egui-gui"] }
+# Reads the panel's explanations from src/help.json (see `panel::help`). The
+# desktop program already builds it, for brdb; the browser page gains it.
+# Reading a list of names and sentences by hand would mean writing JSON's
+# string escapes again.
+# https://docs.rs/serde_json
+serde_json = "1"
 
 # Only to give the desktop window an icon (see `open_window`). It is the
 # version three-d already builds, so it adds nothing to compile.

@@ -103,6 +103,7 @@ dependencies = [
  "clipboard-win",
  "js-sys",
  "png",
+ "serde_json",
  "three-d",
  "wasm-bindgen",
  "web-sys",

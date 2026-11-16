@@ -127,6 +127,7 @@ editor/src/
   lib.rs          the frame loop: events, fit, draw
   state.rs        the workspace: forms, dots, dragging, grids, undo
   panel.rs        the settings panel
+  help.json       the explanation shown for each control in the panel, by name
   camera.rs       the flown camera
   brz.rs          the prefab file, and the clipboard
   mesh.rs         a triangle mesh for each brick shape
