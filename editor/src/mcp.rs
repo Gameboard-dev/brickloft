@@ -730,15 +730,14 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             };
             // all read before any is set, so that a request with a mistake in it changes nothing
             let (rulers, rings, arrows, dots) = (flag("rulers")?, flag("rings")?, flag("arrows")?, flag("dots")?);
-            let (floor, size) = (number("floor_below", 0.0, 40.0)?, number("arrows_and_rings_size", 0.1, 1.0)?);
+            let floor = number("floor_below", 0.0, 40.0)?;
             state.show_ruler = rulers.unwrap_or(state.show_ruler);
             state.show_rings = rings.unwrap_or(state.show_rings);
             state.show_arrows = arrows.unwrap_or(state.show_arrows);
             state.show_dots = dots.unwrap_or(state.show_dots);
             state.floor_gap = floor.unwrap_or(state.floor_gap);
-            state.gizmo_size = size.unwrap_or(state.gizmo_size);
             state.scene += 1;
-            return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap, "arrows_and_rings_size": state.gizmo_size }).to_string());
+            return Ok(json!({ "rulers": state.show_ruler, "rings": state.show_rings, "arrows": state.show_arrows, "dots": state.show_dots, "floor_below": state.floor_gap }).to_string());
         }
         "measure_between" => {
             let which = |name: &str| -> Result<usize, String> {

@@ -265,10 +265,6 @@ pub struct State {
     /// 60 to keep an even slider fine enough for small forms; the sliders
     /// are logarithmic now, which does that at any reach.
     pub max_size: f64,
-    /// How large the arrows and rings are drawn, as a share of half the
-    /// widest extent of what is on the grid: set by the user, since how
-    /// much of a form they may cover depends on the form and the view.
-    pub gizmo_size: f64,
     /// the box of cells the bricks occupy, low corner and high, for the rulers
     pub bounds: Option<Bounds>,
     /// How far below the form's lowest brick the floor is drawn, in
@@ -372,9 +368,11 @@ pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
 }
 
 /// How long the arrows and how wide the rings are, as a share of the way
-/// from the middle of a grid's forms to their furthest side.
-/// This is what the panel.s slider starts at.
-pub const GIZMO: f64 = 0.12;
+/// from the middle of a grid's forms to their furthest side: a tenth, so
+/// that they mark the middle of what they move without covering it. It was
+/// 0.6 and then a quarter, each found to bury the form, and then a slider,
+/// which only asked the user to find the size that should have been chosen.
+pub const GIZMO: f64 = 0.1;
 
 /// A plane whose normal is this near square to the line of sight (as the
 /// cosine of the angle between them) is seen too nearly edge on to drag in:
@@ -428,7 +426,6 @@ impl State {
             show_rings: true,
             show_dots: true,
             max_size: brickloft_core::spec::MAX_SPAN,
-            gizmo_size: GIZMO,
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
@@ -1141,7 +1138,7 @@ impl State {
         // grid: it grows and shrinks with the grid, and leaves most of it
         // clear. (Six tenths of the way, as it was first made, covered the
         // forms it was there to move.)
-        let reach = (self.gizmo_size * (hi - lo).max_element() / 2.0).max(1.5);
+        let reach = (GIZMO * (hi - lo).max_element() / 2.0).max(1.5);
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), [reach; 3]))
     }
 

@@ -309,7 +309,7 @@
     {
       "name": "set_view",
       "title": "Choose what is drawn",
-      "description": "Switch on or off what is drawn over the bricks: the rulers along each axis, the rings that turn a grid, the arrows that move it, and the dots of the form being edited. Also how far the floor is lowered below the forms, to look at one from underneath, and how large the rings and arrows are. Only what is given changes; nothing that is built is changed. Returns the settings as they now are. Switch all four off for a picture of the bricks alone, and back on afterwards: the player needs the dots to edit.",
+      "description": "Switch on or off what is drawn over the bricks: the rulers along each axis, the rings that turn a grid, the arrows that move it, and the dots of the form being edited. Also how far the floor is lowered below the forms, to look at one from underneath. Only what is given changes; nothing that is built is changed. Returns the settings as they now are. Switch all four off for a picture of the bricks alone, and back on afterwards: the player needs the dots to edit.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -330,12 +330,6 @@
             "minimum": 0,
             "maximum": 40,
             "description": "How far the floor is lowered below the forms, in microbricks."
-          },
-          "arrows_and_rings_size": {
-            "type": "number",
-            "minimum": 0.1,
-            "maximum": 1,
-            "description": "The size of the rings and arrows, as a share of the size of what is on the grid."
           }
         },
         "additionalProperties": false

@@ -210,10 +210,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
 
-        // a setting of the view, not of any one form: above everything that changes with the form
-        helped(ui, help("arrows_and_rings"), |ui| {
-            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.01).text("UI Size"))
-        });
+        // settings of the view, not of any one form: above everything that changes with the form
         ui.horizontal(|ui| {
             ui.label("Show");
             ui.checkbox(&mut state.show_ruler, "Rulers");

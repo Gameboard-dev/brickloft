@@ -2,7 +2,6 @@
   "add_to_this_grid": "Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.",
   "arch_askew": "This arch runs at an angle to the brick grid: its feet differ along both X and Y. No flat outline can be fitted to it, so it is fitted cell by cell and comes out stepped. For a smooth arch, keep its feet in line along X or Y (Dots move: Keep Y), and turn its grid with a ring to aim it.",
   "arch_kind": "The shape of the arch between its two feet.",
-  "arrows_and_rings": "How large the arrows and rings that move and turn a grid are drawn, as a share of the size of what is on the grid.",
   "bezier_pull": "How strongly this point draws the curve towards itself. 1 is neutral.",
   "brick_budget": "The smallest brick size that keeps the build within this many bricks is used.",
   "brick_size": "Fits the form with bricks a multiple of this size. Automatic picks the finest size that keeps the build within the brick budget.",

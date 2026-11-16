@@ -23,10 +23,9 @@ control does.
 | Orange | a point you added (see [Added points](#added-points)) |
 
 Round the middle of the grid being edited are three **arrows** and three
-**rings**, red for x, green for y and blue for z (see [Grids](#grids)). The
-**UI Size** slider at the top of the panel sets how large they are
-drawn, from 0.1 to 1 of the size of what is on the grid. The **Show** boxes
-beside it switch the rulers, the rings, the arrows and the form's dots on
+**rings**, red for x, green for y and blue for z (see [Grids](#grids)). They
+are drawn a tenth the size of what is on the grid. The **Show** boxes at the
+top of the panel switch the rulers, the rings, the arrows and the form's dots on
 and off, each on its own. Anything hidden cannot be taken hold of either.
 
 **Let Claude drive the editor**, also at the top of the panel, lets Claude
