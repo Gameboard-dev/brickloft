@@ -204,14 +204,14 @@ dependencies = [
 
 [[package]]
 name = "brickloft-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glam",
 ]
 
 [[package]]
 name = "brickloft-editor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "brdb",
  "brickloft-core",
