@@ -59,7 +59,7 @@ in the middle moves the whole cube. **Size along X / Y / Z** in the panel
 sets each length about the middle instead.
 
 Made short along one axis, a cube is a rectangular floor or wall.
-A material from the **Materials** list (see [Patterns](#patterns)) is laid through the cube's
+A texture from the **Texture** list (see [Patterns](#patterns)) is laid through the cube's
 shortest length, so it shows on the largest face: the top of a floor, or
 the face of a wall. When two lengths are equally short, the pattern goes
 through the height before the depth, and through the depth before the
@@ -262,7 +262,7 @@ one form's settings, are still listed and opened.
 
 ## Patterns
 
-**Materials**, the tinted box under the settings every form shares, lays a
+**Texture**, the tinted box under the settings every form shares, lays a
 cube or any curve as a pattern in
 place of plain brick. The list starts at **none**, and a form has one
 pattern at most. A cube made short one way gives a rectangular floor or
@@ -270,7 +270,7 @@ wall, a filled circle a round one, and a curved band a path. How each
 pattern is made, and why that way, is in [algorithm.md](algorithm.md),
 sections 7.8 and 7.9.
 
-| Material | What it lays |
+| Texture | What it lays |
 |---|---|
 | **stepping stones** | separate stones of any shape with gaps between them. With **Gap** at 0 the stones are fitted together, as in a paved floor. |
 | **medallions** | a few ringed figures repeated over the whole floor |
