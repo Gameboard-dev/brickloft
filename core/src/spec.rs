@@ -2882,7 +2882,7 @@ mod tests {
         // a floor 240 by 160 and 4 deep, which as a plain floor is a handful of bricks (a floor one deep is at single microbricks anyway: there is no coarser brick it can be built of)
         let floor = |mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-119.5, 0.5, 0.5), DVec3::new(120.5, 0.5, 0.5)], thick: 160.0, depth: 4, plane: 2, grain: 0, budget: 2500, mosaic, ..Spec::default() };
         let rug = crate::pattern::STYLES.iter().position(|style| style.name == "rug").unwrap();
-        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: 0, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: 0 }))).unwrap();
+        let built = build(&floor(Some(crate::pattern::Mosaic { style: rug, size: 2, bevel: 0, border: 0, seed: 8, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }))).unwrap();
         // Far over the budget, at the finest size: some 25,000 bricks. (Held
         // to the budget it is built of bricks 2 or more across and is under
         // 8,000. A flat form's `grain` says 1 either way, its bricks being

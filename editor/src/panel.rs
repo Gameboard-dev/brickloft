@@ -435,7 +435,8 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if choice != before {
                 s.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
                 // (`then` and not `then_some`, which works its value out whether or not it is wanted: with the stepping stones chosen that was 1 - 2, and the editor stopped)
-                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: 0 });
+                // (cobbles start uneven: all alike, they are a grid of squares; and nothing starts bevelled, which wants a form two cells deep)
+                s.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 0, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: if named(choice) == "cobblestone" { [60, 60, 0] } else { [0; 3] } });
                 // A pattern is its colours, and each has colours of its
                 // own to start in (a rug's reds and golds, a floor of
                 // planks' browns). They are brought in with the pattern
@@ -466,13 +467,19 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             if let Some(laid) = &mut s.mosaic {
                 // (each style shows the settings it has a use for)
                 let style = named(choice);
-                if matches!(style, "planks" | "masonry") {
+                let masonry = matches!(style, "bricks" | "cobblestone");
+                if style == "planks" || masonry {
                     helped(ui, help("pattern_size"), |ui| ui.add(Slider::new(&mut laid.size, 1..=8).text("Size")));
                 }
-                if style == "masonry" {
-                    helped(ui, help("pattern_uneven"), |ui| ui.add(Slider::new(&mut laid.uneven, 0..=100).suffix("%").text("Uneven")));
+                if masonry {
+                    // how unlike one another the pieces are, each way (see `brickloft_core::pattern::Masonry`)
+                    helped(ui, help("pattern_uneven_along"), |ui| ui.add(Slider::new(&mut laid.uneven[0], 0..=100).suffix("%").text("Uneven along")));
+                    helped(ui, help("pattern_uneven_across"), |ui| ui.add(Slider::new(&mut laid.uneven[1], 0..=100).suffix("%").text("Uneven across")));
+                    helped(ui, help("pattern_uneven_depth"), |ui| ui.add(Slider::new(&mut laid.uneven[2], 0..=100).suffix("%").text("Uneven in depth")));
                     helped(ui, help("pattern_mortar"), |ui| ui.checkbox(&mut laid.mortar, "Mortar between"));
                     helped(ui, help("pattern_bevel"), |ui| ui.add(Slider::new(&mut laid.bevel, 0..=4).text("Bevel")));
+                }
+                if style == "bricks" {
                     // below nothing, every course is moved along by an amount of its own
                     let mut uneven = laid.stagger < 0;
                     if helped(ui, help("pattern_stagger_uneven"), |ui| ui.checkbox(&mut uneven, "Uneven stagger")).changed() {
@@ -814,7 +821,7 @@ mod tests {
                 state.preset();
                 state.refresh(|| 0.0);
                 state.spec.stones = (choice == 1).then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
-                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: 0 });
+                state.spec.mosaic = (choice >= 2).then(|| brickloft_core::pattern::Mosaic { style: choice - 2, size: 2, bevel: 1, border: 0, seed: 1, mortar: true, stagger: -1, upright: false, uneven: [0; 3] });
                 if choice != 0 {
                     state.paint.mode = Mode::Pattern;
                     state.paint.colours = crate::paint::palette(if choice == 1 { "stepping stones" } else { brickloft_core::pattern::STYLES[choice - 2].name }).to_vec();
