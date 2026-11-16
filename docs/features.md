@@ -45,6 +45,7 @@ until you tick it.
 | **Sphere** | a centre, and a radius | Solid or a hollow shell; stretch along each axis for an ellipsoid; keep the whole, a dome, or a segment between two heights. |
 | **Revolve** | a profile, spun about the upright through its first point | Solid, or a shell along the profile. |
 | **Pyramid** | the middle of its base | Half its base, stretch along x and y, height; solid or a hollow tent. |
+| **Tree** | the foot of its trunk | Kind: pine, palm or oak. Height, spread, three settings of its own and a seed (see [Trees](#trees)). |
 
 ### Curves as bricks
 
@@ -65,7 +66,7 @@ becomes a disc, and a round-tube ring a disc with a rounded rim.
 - **Drag a dot** to move a point or change a size. Dots snap to the grid.
 - **Dots move** (in the panel) chooses the plane a dragged point moves in:
   facing the camera, or with x, y or z held still.
-- **Ctrl + scroll** makes a circle, sphere or pyramid a microbrick larger or
+- **Ctrl + scroll** makes a circle, sphere, pyramid or tree a microbrick larger or
   smaller.
 - **Stretch** scales a form along each axis, up to 1000 times.
 - **Flip** mirrors the finished bricks along x, y or z: a dome becomes a bowl.
@@ -309,6 +310,54 @@ Planks and stepping stones have no ground. Each board or stone takes one of
 the colours, and the sets they start with are shades of one wood or one
 stone.
 
+## Trees
+
+**Tree** grows a pine, a palm or an oak. Each kind is grown by a method of
+its own, from the facts of how that tree grows: how they are made is in
+[algorithm.md](algorithm.md), section 7.10.
+
+<img src="images/tree-pine-decorated.png" width="330" alt="A pine with a gold star on its leader and red and gold baubles under the ends of its boughs"> <img src="images/tree-oak-autumn.png" width="330" alt="An oak in its early autumn colours: gold leaves in clumps, orange in their shade, on dark spreading limbs">
+
+| Kind | What it is |
+|---|---|
+| **Pine** | a spruce, the Christmas tree: a straight stem with tiers of drooping boughs that shorten to one pointed leader, each bough a flat spray of side shoots |
+| **Palm** | a coconut palm: a slender, ringed, eight-sided trunk, swollen at the foot, that leans and curves upright, and one crown of arching fronds with a row of leaflets down each side |
+| **Oak** | an oak grown in the open: a short thick trunk, flared at the foot, dividing into heavy crooked limbs that spread wide and fork again and again, with leaves in separate masses at the ends of the branches |
+
+Every tree has a **Height** and a **Spread** (a palm's is its **Frond
+length**), which the dot at its top and the dot at its side set too. Three
+more settings mean something different for each kind.
+
+| Setting | Pine | Palm | Oak |
+|---|---|---|---|
+| a number | **Tiers of boughs**, 4 to 40 | **Fronds**, 5 to 40 | **Main limbs**, 2 to 7 |
+| how full, 0 to 100% | **Fullness**: more boughs, wider sprays | **Leaflet length** | **Foliage**: larger masses of leaves, less sky |
+| how bent, 0 to 100% | **Droop** of the boughs | **Lean** of the trunk | **Gnarl**: how crooked the limbs are |
+| extras | **A star and baubles** | **Coconuts** | none |
+
+**Seed** is which tree of its kind: any whole number, each a different
+tree, and the same number is always the same tree. **Another** takes the
+next number. The height, spread and other settings change the tree a seed
+gives without making it a different tree.
+
+**Colours** offers each kind's sets of colours: for a pine spruce green,
+under snow, blue spruce and in frost; for a palm three; for an oak summer,
+early autumn, late autumn and spring. A tree is coloured **As the pattern
+has it**, with a colour for each of its parts: the trunk, leaves, leaves
+in shade, new growth, limbs, the top of a pine's boughs or the rib of a
+frond, and two for the extras. Change any of the eight under
+[Colour](#colour) to make a set of your own. Under snow, the white is the
+colour for the tops of the boughs.
+
+A tree starts large, a pine 140 microbricks tall, because its shoots and
+leaflets are two microbricks thick at any size and a small tree has room
+for little else. At that size a tree is 17,000 to 40,000 bricks and takes
+up to a second to build, so a slider moves it in steps. **Brick size**
+left on **Automatic** always builds a tree at 1 microbrick, whatever the
+budget. A tree can be turned, flipped, moved, joined to other forms and
+put on a grid of its own like any form. It cannot be mirrored and takes no
+added points.
+
 ## Colour
 
 Each form has its own colouring.
@@ -404,7 +453,7 @@ passes a megabyte.
 | Ctrl+C, Ctrl+V | copy, paste |
 | Ctrl+Z, Ctrl+Y | undo, redo |
 | Delete | remove the form being edited |
-| Ctrl + scroll | resize a circle, sphere or pyramid |
+| Ctrl + scroll | resize a circle, sphere, pyramid or tree |
 | Right-drag, middle-click | look around, face the cursor |
 | W A S D, Space, E, Q | fly |
 | Shift + scroll | camera speed |
