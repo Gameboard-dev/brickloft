@@ -219,6 +219,10 @@ pub struct State {
     /// 60 to keep an even slider fine enough for small forms; the sliders
     /// are logarithmic now, which does that at any reach.
     pub max_size: f64,
+    /// How large the arrows and rings are drawn, as a share of half the
+    /// widest extent of what is on the grid: set by the user, since how
+    /// much of a form they may cover depends on the form and the view.
+    pub gizmo_size: f64,
     /// the box of cells the bricks occupy, low corner and high, for the rulers
     pub bounds: Option<Bounds>,
     /// How far below the form's lowest brick the floor is drawn, in
@@ -323,6 +327,7 @@ pub fn into_grid(spec: &Spec, p: DVec3) -> DVec3 {
 
 /// How long the arrows and how wide the rings are, as a share of the way
 /// from the middle of a grid's forms to their furthest side.
+/// This is what the panel.s slider starts at.
 pub const GIZMO: f64 = 0.25;
 
 /// How far from a dragged dot others go with it, in reaches of an added point.
@@ -365,6 +370,7 @@ impl State {
             panel_right: 0.0,
             show_ruler: true,
             max_size: arcs_core::spec::MAX_SPAN,
+            gizmo_size: GIZMO,
             bounds: None,
             floor_gap: 0.0,
             auto_best: false,
@@ -1083,7 +1089,7 @@ impl State {
         // grid: it grows and shrinks with the grid, and leaves most of it
         // clear. (Six tenths of the way, as it was first made, covered the
         // forms it was there to move.)
-        let reach = (GIZMO * (hi - lo).max_element() / 2.0).max(1.5);
+        let reach = (self.gizmo_size * (hi - lo).max_element() / 2.0).max(1.5);
         Some((out_of_grid(&self.spec, (lo + hi) / 2.0), [reach; 3]))
     }
 

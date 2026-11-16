@@ -196,6 +196,12 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
         ui.label("View: right-drag looks around (right over backwards if you like), middle-click turns to face what the cursor is on, W A S D fly, Space or E rises, Q sinks, Shift + scroll sets how fast.");
         ui.separator();
 
+        // a setting of the view, not of any one form: above everything that changes with the form
+        helped(ui, "How large the arrows and rings that move and turn a grid are drawn, as a share of the size of what is on the grid.", |ui| {
+            ui.add(Slider::new(&mut state.gizmo_size, 0.1..=1.0).step_by(0.05).text("Arrows and rings"))
+        });
+        ui.separator();
+
         let before = state.form;
         helped(ui, "The kind of form to build. Choosing one starts it at its usual size.", |ui| {
             ComboBox::from_label("Form").selected_text(FORMS[state.form]).show_ui(ui, |ui| {

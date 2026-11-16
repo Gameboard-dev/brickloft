@@ -21,7 +21,9 @@ control does.
 | Orange | a point you added (see [Added points](#added-points)) |
 
 Round the middle of the grid being edited are three **arrows** and three
-**rings**, red for x, green for y and blue for z (see [Grids](#grids)).
+**rings**, red for x, green for y and blue for z (see [Grids](#grids)). The
+**Arrows and rings** slider at the top of the panel sets how large they are
+drawn, from 0.1 to 1 of the size of what is on the grid.
 
 ## Forms
 
