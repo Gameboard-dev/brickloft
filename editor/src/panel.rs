@@ -419,7 +419,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 if stones {
                     s.mosaic = None; // one pattern at a time
                 }
-                s.stones = stones.then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.0, uneven: 0.5, seed: 1 });
+                s.stones = stones.then_some(brickloft_core::pattern::Stones { size: 10.0, gap: 1.5, uneven: 0.5, seed: 1 });
                 // stones are told apart by their colours: started in stone colours unless colours have been chosen
                 if stones && state.paint.mode == Mode::Solid {
                     (state.paint.mode, state.paint.colours) = (Mode::Patches, crate::paint::STONE.to_vec());

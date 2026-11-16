@@ -122,10 +122,15 @@ pub fn scatter(region: &dyn Fn(DVec2) -> f64, min: [i32; 2], max: [i32; 2], ston
     points
 }
 
-/// One stone: the point it grew from and the points of the stones round it.
+/// One stone: the point it grew from and the lines half way to the stones
+/// round it.
 pub struct Stone {
     pub at: DVec2,
-    near: Vec<DVec2>,
+    /// For each stone round it, the line half way between the two, as the
+    /// direction towards the other stone and how far along that direction
+    /// the line is: a place `p` is `far - towards.dot(p)` on this stone's
+    /// side of it.
+    lines: Vec<(DVec2, f64)>,
     half_gap: f64,
     /// how sharply its corners are rounded: higher is sharper
     sharp: f64,
@@ -141,17 +146,34 @@ impl Stone {
     /// (the "log-sum-exp" one) gives the same edges and rounds the corners
     /// where two of them meet, as a stone's are.
     /// https://en.wikipedia.org/wiki/LogSumExp
+    ///
+    /// The smooth least differs from the plain least only where two of the
+    /// distances are within a cell or so of each other, which is at the
+    /// corners. So the plain least is found first, and a place it puts
+    /// well inside the stone or well outside is answered from it. Taking
+    /// the exponential of every distance at every place asked about was
+    /// most of the time a path of stones took: 170 ms for a path that is
+    /// 20 ms as solid brick.
     pub fn eval(&self, p: DVec2, region: &dyn Fn(DVec2) -> f64) -> f64 {
-        let to_me = p.distance_squared(self.at);
-        // (a distance far past the nearest adds nothing, and is left out before it can overflow)
-        let mut sum = (-self.sharp * -region(p)).exp();
-        for other in &self.near {
-            // how far p is on this stone's side of the line half way to the other
-            let inside = (p.distance_squared(*other) - to_me) / (2.0 * other.distance(self.at));
-            sum += (-self.sharp * inside).exp();
+        // how far the smooth least can fall below the plain least, with room to spare
+        let near = 2.0 / self.sharp;
+        let mut least = f64::INFINITY;
+        for (towards, far) in &self.lines {
+            least = least.min(far - towards.dot(p));
         }
-        let least = -sum.ln() / self.sharp;
-        self.half_gap - least
+        if least < self.half_gap - near {
+            return self.half_gap - least; // well past a neighbour's line: outside
+        }
+        let edge = -region(p);
+        let least = least.min(edge);
+        if least < self.half_gap - near || least > self.half_gap + near {
+            return self.half_gap - least;
+        }
+        let mut sum = (-self.sharp * edge).exp();
+        for (towards, far) in &self.lines {
+            sum += (-self.sharp * (far - towards.dot(p))).exp();
+        }
+        self.half_gap + sum.ln() / self.sharp
     }
 }
 
@@ -166,7 +188,14 @@ pub fn stones(region: &dyn Fn(DVec2) -> f64, min: [i32; 2], max: [i32; 2], setti
         .iter()
         .map(|at| Stone {
             at: *at,
-            near: points.iter().copied().filter(|q| q != at && q.distance(*at) < reach).collect(),
+            lines: points
+                .iter()
+                .filter(|q| *q != at && q.distance(*at) < reach)
+                .map(|q| {
+                    let towards = (*q - *at).normalize();
+                    (towards, towards.dot((*q + *at) / 2.0))
+                })
+                .collect(),
             half_gap: settings.gap.max(LEAST_GAP) / 2.0,
             // Corners rounded over about half a cell, whatever the stone's
             // size. Rounder than that and the smooth least falls short of
@@ -180,63 +209,108 @@ pub fn stones(region: &dyn Fn(DVec2) -> f64, min: [i32; 2], max: [i32; 2], setti
         .collect()
 }
 
+/// Whether a place, given within a piece's box as two numbers from 0 to 1,
+/// is in the piece itself: anywhere, for a rectangle; for a triangle, on
+/// the near side of its sloped edge.
+fn in_piece(mask: u8, u: f64, v: f64) -> bool {
+    if mask == 15 {
+        return true;
+    }
+    // the corner the triangle lacks, and how far the place is from the one opposite it
+    let missing = (!mask & 15).trailing_zeros();
+    let (from_u, from_v) = (if missing & 1 == 1 { u } else { 1.0 - u }, if missing & 2 == 2 { v } else { 1.0 - v });
+    from_u + from_v < 1.0
+}
+
 /// Fit the stones of a region and push them through cells `w0..w0 + depth`
-/// across `axis`, onto `bricks`. Returns the fit: the area of the stones
-/// themselves and the area where their bricks disagree with them.
+/// across `axis`, onto `bricks`. Returns the sum of the stones' fits: the
+/// area of the stones themselves and the area where their bricks disagree
+/// with them.
 ///
-/// All the stones are fitted at once, as one solid of many separate parts.
-/// They were first fitted one at a time, which is the simpler thing to
-/// write, and each fit was sound by itself. But two fits know nothing of
-/// each other: across a narrow gap, the triangle that finishes one stone's
-/// sloped edge and the triangle that finishes its neighbour's wanted cells
-/// of the same box, one had to be given up, and the stone it belonged to
-/// was left with a notch. The outline fitter already settles that for the
-/// two faces of a thin wall, and settles it the same way between stones.
+/// Each stone is fitted by itself, so that every edge of every stone gets
+/// the sloped bricks an outline of its own gets. Fitted all at once as one
+/// solid of many parts, two stones either side of a narrow gap wanted
+/// cells of the same box for the triangles of their facing edges, the
+/// fitter gave the box to one, and the other's edge was finished in steps:
+/// a stone with a corner missing its wedge.
+///
+/// Fitted apart, the triangles of two facing edges may lie in boxes that
+/// share cells, and both are kept, since what the two bricks fill does not
+/// meet: the gap runs between them. Only where what they fill would meet
+/// (each fit may stray half a cell from its stone, and the least gap is one
+/// cell) is the later stone fitted again a little smaller.
 #[allow(clippy::too_many_arguments)]
 pub fn lay_stones(region: &dyn Fn(DVec2) -> f64, settings: &Stones, axis: usize, min: [i32; 2], max: [i32; 2], w0: i32, depth: i32, opts: &Opts, bricks: &mut Vec<CellBrick>) -> Fit {
+    use crate::fit_planar::Piece;
     let (ua, va) = match axis {
         0 => (1, 2),
         1 => (0, 2),
         _ => (0, 1),
     };
-    let all = stones(region, min, max, settings);
-    if all.is_empty() {
-        return Fit::default();
-    }
-    // Which stone a point could be in: the one whose point is nearest. The
-    // stones are filed by the square their point is in, a stone's width to
-    // a square, so that the nearest is looked for among a few and not all.
-    let square = settings.size.max(LEAST_STONE);
-    let filed_at = |p: DVec2| ((p.x / square).floor() as i32, (p.y / square).floor() as i32);
-    let mut filed: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    for (i, stone) in all.iter().enumerate() {
-        filed.entry(filed_at(stone.at)).or_default().push(i);
-    }
-    let solid = |x: f64, y: f64| {
-        let p = DVec2::new(x, y);
-        let (i, j) = filed_at(p);
-        // (no point is further than two squares from the nearest stone's and still inside it)
-        let nearest = (i - 2..=i + 2).flat_map(|a| (j - 2..=j + 2).map(move |b| (a, b))).filter_map(|at| filed.get(&at)).flatten().min_by(|a, b| all[**a].at.distance_squared(p).total_cmp(&all[**b].at.distance_squared(p)));
-        match nearest {
-            Some(stone) => all[*stone].eval(p, region),
-            // far from every stone: outside them all, by any amount
-            None => square,
-        }
+    let size = settings.size.max(LEAST_STONE);
+    let mut whole = Fit::default();
+    // the pieces laid so far, and for each cell the pieces whose boxes cover it
+    let mut laid: Vec<Piece> = Vec::new();
+    let mut over: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    let cells = |piece: &Piece| {
+        let (x, y, w, h) = (piece.x, piece.y, piece.w, piece.h);
+        (0..w * h).map(move |k| (x + k % w, y + k / w))
     };
-    let fit = fit_planar(&solid, min, max, opts);
-    for piece in &fit.pieces {
-        let mask = (0..8u8).fold(0u8, |m, c| m | (piece.mask >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
-        let mut at = 0;
-        while at < depth {
-            let run = (depth - at).min(opts.max_ext.max(1));
-            let (mut min, mut ext) = ([0; 3], [0; 3]);
-            (min[ua], min[va], min[axis]) = (piece.x, piece.y, w0 + at);
-            (ext[ua], ext[va], ext[axis]) = (piece.w, piece.h, run);
-            bricks.push(CellBrick { mask, min, ext });
-            at += run;
+    // whether a piece fills any of what a piece already laid fills: nine places to a cell they share
+    let meets = |piece: &Piece, laid: &[Piece], over: &HashMap<(i32, i32), Vec<usize>>| {
+        let within = |q: &Piece, x: f64, y: f64| in_piece(q.mask, (x - q.x as f64) / q.w as f64, (y - q.y as f64) / q.h as f64);
+        cells(piece).any(|cell| {
+            over.get(&cell).is_some_and(|others| {
+                (0..9).any(|k| {
+                    let (x, y) = (cell.0 as f64 + (k % 3) as f64 / 3.0 + 0.17, cell.1 as f64 + (k / 3) as f64 / 3.0 + 0.16);
+                    within(piece, x, y) && others.iter().any(|o| within(&laid[*o], x, y))
+                })
+            })
+        })
+    };
+    for mut stone in stones(region, min, max, settings) {
+        // No place is further from the nearest stone's point than the
+        // points are kept apart, or a dart would have landed there: so a
+        // stone reaches no further than that from its own.
+        let reach = size * 0.9 + 1.0;
+        let (lo, hi) = (stone.at - DVec2::splat(reach), stone.at + DVec2::splat(reach));
+        let (from, to) = ([(lo.x.floor() as i32).max(min[0]), (lo.y.floor() as i32).max(min[1])], [(hi.x.ceil() as i32).min(max[0]), (hi.y.ceil() as i32).min(max[1])]);
+        if to[0] <= from[0] || to[1] <= from[1] {
+            continue;
+        }
+        // as it is; then, if it would meet a stone already laid, drawn in by half a cell, and by a whole one
+        let mut fit = fit_planar(&|x, y| stone.eval(DVec2::new(x, y), region), from, to, opts);
+        for _ in 0..2 {
+            if !fit.pieces.iter().any(|piece| meets(piece, &laid, &over)) {
+                break;
+            }
+            stone.half_gap += 0.5;
+            fit = fit_planar(&|x, y| stone.eval(DVec2::new(x, y), region), from, to, opts);
+        }
+        whole.solid += fit.solid;
+        whole.error += fit.error;
+        for piece in fit.pieces {
+            // (still meeting one after that: left out)
+            if meets(&piece, &laid, &over) {
+                continue;
+            }
+            for cell in cells(&piece) {
+                over.entry(cell).or_default().push(laid.len());
+            }
+            laid.push(piece);
+            let mask = (0..8u8).fold(0u8, |m, c| m | (piece.mask >> ((c >> ua & 1) | (c >> va & 1) << 1) & 1) << c);
+            let mut at = 0;
+            while at < depth {
+                let run = (depth - at).min(opts.max_ext.max(1));
+                let (mut min, mut ext) = ([0; 3], [0; 3]);
+                (min[ua], min[va], min[axis]) = (piece.x, piece.y, w0 + at);
+                (ext[ua], ext[va], ext[axis]) = (piece.w, piece.h, run);
+                bricks.push(CellBrick { mask, min, ext });
+                at += run;
+            }
         }
     }
-    fit
+    whole
 }
 
 /// How a mosaic is laid: the settings a form carries for it.
@@ -510,9 +584,10 @@ mod tests {
         let all = stones(&band, BOX.0, BOX.1, &usual());
         for stone in &all {
             assert!(stone.eval(stone.at, &band) < 0.0, "a stone does not hold the point it grew from");
-            for other in &stone.near {
-                // half way to a neighbour is in the gap, in neither stone
-                assert!(stone.eval((stone.at + *other) / 2.0, &band) > 0.0);
+            for (towards, far) in &stone.lines {
+                // on the line half way to a neighbour: in the gap, in neither stone
+                let on_line = stone.at + *towards * (far - towards.dot(stone.at));
+                assert!(stone.eval(on_line, &band) > 0.0);
             }
         }
         // no stone reaches outside the path
@@ -569,10 +644,16 @@ mod tests {
         // closely fitted, with sloped pieces and not only squares
         assert!(fit.error < 0.2 * fit.solid, "{} wrong of {}", fit.error, fit.solid);
         assert!(bricks.iter().any(|b| b.mask != 0xff), "the stones are all square blocks");
-        // two cells deep, on the ground, and no cell in two bricks
+        // two cells deep, on the ground, and no place in two bricks: boxes
+        // may share cells across a gap, so it is places that are asked about
         assert!(bricks.iter().all(|b| b.min[2] == 0 && b.ext[2] == 2));
-        let mut seen = HashSet::new();
-        assert!(bricks.iter().all(|b| (0..b.ext[0]).all(|x| (0..b.ext[1]).all(|y| seen.insert((b.min[0] + x, b.min[1] + y))))), "two bricks share a cell");
+        for k in 0..124 * 20 * 16 {
+            let (x, y) = (-62.0 + (k % (124 * 4)) as f64 / 4.0 + 0.13, -10.0 + (k / (124 * 4)) as f64 / 4.0 + 0.11);
+            let holding = bricks.iter().filter(|b| x >= b.min[0] as f64 && x < (b.min[0] + b.ext[0]) as f64 && y >= b.min[1] as f64 && y < (b.min[1] + b.ext[1]) as f64).filter(|b| crate::shapes::inside_shape(crate::shapes::shape_info(b.mask).unwrap(), (x - b.min[0] as f64) / b.ext[0] as f64, (y - b.min[1] as f64) / b.ext[1] as f64, 0.5)).count();
+            assert!(holding <= 1, "{holding} bricks hold the place {x}, {y}");
+        }
+        // every stone's edge is finished: among the bricks on a stone's rim
+        // there are sloped ones, and few stones are all square blocks
         // the bricks fall into separate stones, about as many as were scattered
         let scattered = scatter(&band, BOX.0, BOX.1, &usual()).len();
         let of = pieces(&bricks);
