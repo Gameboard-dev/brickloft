@@ -103,6 +103,8 @@ pub fn spec_text(spec: &Spec) -> String {
     // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, whether it has its extras (1 or 0), and how thick its trunk is (a percentage of the usual; a save from before trunks could be set has none, and is read as 100)
     // (and a pine's decorations: how many baubles, whether tinsel, which lights, and whether they shine in the game)
     line("tree", format!("{},{},{},{},{},{},{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8, spec.tree.girth, spec.tree.baubles, spec.tree.tinsel as u8, spec.tree.lights, spec.tree.shine as u8, spec.tree.hang));
+    // a single flower head: which flower, how far it is tipped over and which way round (degrees), and whether it has a stem and fallen petals (1 or 0). A line of its own and not more values on the tree's, where it would stand after six of a pine's decorations: a rose tipped over is then `bloom = rose,30` and not a count to twelve. A save from before there were single flowers has no such line.
+    line("bloom", spec.tree.bloom.text());
     // furniture: which kind, which arrangement of books, how thick its boards are, how many shelves (0 for as many as fit at the spacing), the spacing, the widest a bay may be (0 for no uprights), how tall its plinth is, whether it has a back and mouldings (1 or 0), and how full of books it is, 0 to 100
     {
         let f = &spec.furniture;
@@ -328,10 +330,12 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 // (the rose bush is gone: read as the flower nearest it, the peony)
                 let named = if parts[0] == "rose" { "peony" } else { parts[0] };
-                let kind = crate::tree::KINDS.iter().find(|k| k.1 == named).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, beech, boxwood, hedge, peony, sunflower, tulip, hydrangea, petunia, reeds, grass, birch, willow, datepalm, scotspine, cypress, yucca, daisy, daffodil, bed or cherry"))?.0;
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == named).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, beech, boxwood, hedge, peony, sunflower, tulip, hydrangea, petunia, reeds, grass, birch, willow, datepalm, scotspine, cypress, yucca, daisy, daffodil, bed, cherry or flower"))?.0;
                 // (a rose's own numbers meant canes and blooms, and are no peony's: it comes as a peony starts out, of the same seed)
                 let parts = if parts[0] == "rose" { &parts[..parts.len().min(2)] } else { &parts[..] };
                 let mut tree = crate::tree::Tree::of(kind);
+                // (which flower a single flower is has a line of its own, which may have been read already)
+                tree.bloom = spec.tree.bloom;
                 // (numbers from a file, which may be anyone's: kept to what the sliders allow)
                 let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };
                 if let Some(seed) = parts.get(1) {
@@ -374,6 +378,7 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                 }
                 spec.tree = tree.clamped();
             }
+            "bloom" => spec.tree.bloom = crate::tree::Bloom::read(value).map_err(|e| bad(&e))?,
             "furniture" => {
                 let parts: Vec<&str> = value.split(',').map(str::trim).collect();
                 // The kind, and then as many of the rest as are given, in
@@ -1244,11 +1249,12 @@ mosaic = {values}
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
                 carve: true,
-                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false },
+                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true, girth: 165, baubles: 70, tinsel: true, hang: 55, lights: 2, shine: false, bloom: crate::tree::Bloom { flower: crate::tree::Flower::Gerbera, tilt: 35, turn: 250, stem: true, fallen: true } },
                 furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 9, board: 1, shelves: 0, spacing: 8, bay: 0, plinth: 0, back: true, moulding: false, books: 100 },
                 maze: crate::maze::Maze { kind: crate::maze::Kind::Grid, rings: 11, divisions: 9, grow: 3, seed: 9876543210987654321, entrance: 200, floor: 2, solution: true, hedge: true },
             },
-            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, hang: 80, lights: 0, shine: true }, ..Spec::default() },
+            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false, girth: 50, baubles: 0, tinsel: false, hang: 80, lights: 0, shine: true, bloom: Default::default() }, ..Spec::default() },
+            Spec { form: Form::Tree, points: vec![at(0.0, 0.0, 0.0)], radius: 20.0, rise: Some(24.0), tree: crate::tree::Tree { seed: 4, fullness: 80, bend: 15, extras: true, bloom: crate::tree::Bloom { flower: crate::tree::Flower::WaterLily, tilt: 90, turn: 359, stem: false, fallen: true }, ..crate::tree::Tree::of(crate::tree::Kind::Flower) }, ..Spec::default() },
             Spec { form: Form::Furniture, points: vec![at(0.0, 2.0, 30.0)], radius: 30.0, stretch: DVec3::new(0.6, 0.15, 1.0), furniture: crate::furniture::Furniture { kind: crate::furniture::Kind::Bookcase, seed: 12345678901234567890, board: 3, shelves: 4, spacing: 17, bay: 40, plinth: 5, back: false, moulding: true, books: 35 }, ..Spec::default() },
         ];
         // a save from before a trunk's width could be set has no number for it, and its tree is as it was

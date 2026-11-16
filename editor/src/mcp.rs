@@ -1214,6 +1214,44 @@ mod tests {
     }
 
     #[test]
+    fn a_single_flower_keeps_which_flower_it_is_and_how_it_lies_through_undo_copy_and_save() {
+        use brickloft_core::tree::{Bloom, Flower, Kind, Tree};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        // by its kind alone it is a red rose facing up, at its usual size
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "tree", "tree": "flower" } }), || 0.0).unwrap());
+        assert_eq!((state.spec.tree, state.spec.radius, state.spec.rise), (Tree::of(Kind::Flower), Tree::usual_size(Kind::Flower).1, Some(Tree::usual_size(Kind::Flower).0)));
+        assert_eq!((added["forms"][0]["settings"]["bloom"].as_str(), state.paint.colours.as_slice()), (Some("rose,0,0,0,0"), crate::paint::palette("flower")));
+        let upright = state.built.bricks.clone();
+        // which flower and how it lies, given beside the kind in either order of the two, and alone afterwards
+        let lying = Bloom { flower: Flower::WaterLily, tilt: 60, turn: 45, stem: true, fallen: true };
+        let changed = said(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": "waterlily,60,45,1,1", "tree": "flower,3,80,1,90,1" } }), || 0.0).unwrap());
+        let wanted = Tree { seed: 3, fullness: 80, bend: 90, extras: true, bloom: lying, ..Tree::of(Kind::Flower) };
+        assert_eq!(state.forms()[0].0.tree, wanted);
+        assert_eq!(changed["forms"][0]["settings"]["bloom"], "waterlily,60,45,1,1");
+        assert_ne!(state.built.bricks, upright);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": ["rose", 20] } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.tree, Tree { bloom: Bloom { tilt: 20, ..Bloom::default() }, ..wanted });
+        // one step back is the lily lying down, and forward again the rose
+        assert!(state.undo());
+        assert_eq!(state.forms()[0].0.tree, wanted);
+        // copied and pasted, and saved and opened, it is the same flower lying the same way
+        let (_, copied) = state.copied();
+        state.paste(copied);
+        assert_eq!(state.forms().iter().filter(|form| form.0.tree == wanted).count(), 2);
+        let opened = crate::store::forms_in(&crate::store::describe(&state.forms())).unwrap();
+        assert_eq!(opened.iter().map(|form| form.0.tree).collect::<Vec<_>>(), state.forms().iter().map(|form| form.0.tree).collect::<Vec<_>>());
+        // what is no flower is refused, and what is out of range is brought within it
+        let before = state.forms();
+        for bad in [json!("orchid"), json!("rose,steep"), json!("rose,1,2,3,4,5"), json!(""), json!("rose\nradius = 900")] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": bad } }), || 0.0).is_err(), "{bad} was accepted");
+        }
+        assert_eq!(state.forms(), before);
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "bloom": "gerbera,900,-90,5,5" } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.tree.bloom, Bloom { flower: Flower::Gerbera, tilt: 90, turn: 270, stem: true, fallen: true });
+    }
+
+    #[test]
     fn a_tree_is_added_by_its_kind_alone_at_its_usual_size_and_in_its_own_colours() {
         use brickloft_core::tree::{Kind, Tree};
         let mut state = State::new();
