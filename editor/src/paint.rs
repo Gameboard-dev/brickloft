@@ -62,7 +62,7 @@ pub const MOSAIC: [[u8; 3]; 4] = [[226, 214, 190], [176, 84, 60], [44, 74, 122],
 /// The colours a rug starts in: a deep red ground, then gold, a dark
 /// blue, ivory, a warm red, leaf green, a dark green and saffron, one for
 /// each feature of the rug (see `brickloft_core::pattern::rug_garden`).
-pub const RUG: [[u8; 3]; 8] = [[112, 22, 30], [212, 165, 70], [24, 50, 92], [236, 220, 180], [198, 74, 44], [62, 110, 62], [20, 72, 60], [240, 196, 96]];
+pub const RUG: [[u8; 3]; 8] = [[112, 22, 30], [200, 150, 56], [24, 50, 92], [236, 220, 180], [198, 74, 44], [96, 140, 72], [24, 84, 66], [244, 204, 104]];
 
 /// The colours a floor of planks starts in: eight browns a little apart,
 /// one for each number a board may have.
