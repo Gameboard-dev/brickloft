@@ -1966,6 +1966,452 @@ present. A pattern made only of small repeated motifs, with no figure
 larger than a few tiles, is the case it still suits (see
 [future-work.md](future-work.md)).
 
+### 7.10 Trees, bushes and flowers
+
+A plant is one solid, fitted cell by cell (section 7.1) and coloured part
+by part ([core/src/tree.rs](../core/src/tree.rs)). The solid is the union
+of several thousand simple parts: tapered round branches, the eight-sided
+lengths of a palm's trunk, and balls of leaves. There are three trees (a
+pine, a palm and an oak), two bushes (a boxwood and a rose) and two
+flowers (a sunflower and a tulip). Each is grown by a method of its own,
+because they differ in how they grow and a single rule general enough for
+all of them describes none of them closely. The trees come first below,
+and the bushes and flowers after them reuse their parts.
+
+<img src="images/tree-pine.png" width="330" alt="A spruce in bricks: a straight brown trunk with tiers of drooping green boughs that shorten to a single pointed leader, with gaps between the tiers"> <img src="images/tree-palm.png" width="330" alt="A coconut palm in bricks: a slender ringed trunk that leans and curves upright, a crown of arching fronds with rows of hanging leaflets, and coconuts under the crown">
+
+<img src="images/tree-oak.png" width="420" alt="An oak in bricks: a short thick trunk flared at the foot, dividing into heavy crooked limbs that spread wide, with clumps of leaves at the ends of the branches and sky between them">
+
+#### Why three methods
+
+The standard model of a tree is Weber and Penn's
+([Creation and rendering of realistic trees](https://courses.cs.duke.edu/fall02/cps124/resources/p119-weber.pdf),
+1995): one recursive rule in which every level of branching has some forty
+numbers. It was the starting point here, and two of its devices are used
+as they stand: a branch angle that changes with height, and a pull upwards
+on the ends of branches. The whole model was not taken. Its numbers
+describe a tree's statistics, and at this size a tree is recognised by its
+structure. A spruce is its separate tiers, a palm is one crown on one
+stem, and an oak is a few heavy limbs. Each of those is easier to build
+directly than to coax out of forty numbers per level.
+
+Builders of brick trees work the same way. A brick spruce is built as
+stacked rings of leaves, each drooping over the one below, and
+[its builder notes](https://fullplatebuilds.com/2018/04/14/spruce-tutorial/)
+that the lowest ring sets the shape of the whole tree. A brick palm is a
+segmented trunk with about twenty fronds, the lowest of them hanging
+([palm tutorial](https://fullplatebuilds.com/2018/11/21/palm-tree-tutorial/)).
+Voxel generators that are public use rules of the same kind: tier by tier
+for a spruce, and balls of leaves at the ends of branches for an oak.
+
+#### The pine
+
+The pine is a spruce or fir, the Christmas tree. It is built tier by tier
+from four facts about a spruce's boughs
+([Norway spruce](https://en.wikipedia.org/wiki/Picea_abies);
+[its crown architecture, measured](https://bioresources.cnr.ncsu.edu/resources/crown-architecture-and-structural-development-of-young-norway-spruce-trees-picea-abies-karst-a-basis-for-more-realistic-growth-modelling/)).
+
+The boughs come in tiers with air between them, one tier for each year's
+growth, four to seven boughs to a tier. Each tier is turned by a random
+angle from the one below. The tiers are closer together towards the top.
+With $`u`$ running from 0 at the lowest tier to 1 at the highest, a tier
+stands at the share
+
+```math
+h(u) = 0.55\,u + 0.45\left(1 - (1 - u)^{1.7}\right)
+```
+
+of the way from the lowest bough to the leader.
+
+The boughs shorten to the top, which makes the cone, and the lowest tiers
+are drawn in a little, as they are on a tree whose lowest boughs are
+shaded. A tier's boughs are the length
+
+```math
+L(u) = R\,\frac{s(u)}{\max s}, \qquad s(u) = \left(0.9\,(1 - u)^{0.9} + 0.1\right)\left(0.84 + 0.16\,\min(1,\ u / 0.12)\right)
+```
+
+where $`R`$ is the spread asked for. One bough of each tier has the full
+length and the others 84 to 100% of it.
+
+The angle changes with height. A bough leaves the stem at the angle
+$`e_0`$ above level, sags on the way out by an amount $`g`$ that the
+**Droop** setting $`d`$ scales, and turns up again at its tip by $`t`$.
+At the share $`x`$ of the way along it, it climbs at
+
+```math
+e(x) = e_0 - 2g\,x + (2g + t)\,x^3, \qquad e_0 = -0.2 + 0.95\,u^{1.4} - 0.22\,d\,(1 - u)
+```
+
+radians, with $`g = 0.55\,d\,(1 - 0.7u)`$ and $`t = 0.5 - 0.2u`$. The
+lowest boughs therefore leave the stem pointing 20 degrees down, hang
+lower still half way out and end level, and the highest climb at 40
+degrees. The S of each bough is what separates a spruce from a cone.
+
+A bough is a flat spray. It carries a pair of side shoots every 2.3
+cells, angled forward and hanging a little, longest a quarter of the way
+out. Long side shoots carry short shoots of their own. Near the stem the
+bough is bare wood, more of it the lower the bough.
+
+The needles are not built one by one. A side shoot with its needles is a
+round cone a little over two cells thick. That is the thinnest a part can
+be and still be built at any angle: a thinner one fills less than half of
+some of the cells it passes through, and the fitter leaves those cells
+empty.
+
+Between the tiers a full tree has a few shorter boughs, and the leader
+stands above the top tier with two small whorls of climbing shoots.
+
+<img src="images/tree-pine-snow.png" width="640" alt="Close view of a pine's boughs in the snowy set of colours: the tops of the boughs white, their undersides green, the trunk showing between the tiers">
+
+#### The palm
+
+The palm is a coconut palm
+([*Cocos nucifera*](https://www3.ctahr.hawaii.edu/gsp/doc/Forestry/Little_Skolmen_CFT/CFT_Cocos_nucifera.pdf)).
+It has one level of structure, a stem and a crown, and both are placed by
+rule.
+
+The trunk leans from its foot and curves back to upright, as a palm does
+that has grown towards the light. At the share $`t`$ of its height
+$`H`$, its middle stands
+
+```math
+x(t) = \frac{a\,H}{2.7}\left(1 - (1 - t)^{2.7}\right)
+```
+
+to one side of its foot, where $`a`$ is the slope at the foot, set by
+**Lean** up to 0.85. The slope is $`a\,(1 - t)^{1.7}`$, which is steepest
+at the foot and zero at the top. The trunk is swollen at the foot to about
+1.7 times its width higher up, and hardly tapers above that.
+
+The trunk is eight-sided. Its section is taken level and not square to the
+lean, so four of its eight faces lie on the grid's own planes at any lean
+and the other four are 45 degree ramps. The distance from a point to a
+length of trunk whose middle is at $`c`$ and whose faces are $`r`$ from
+it is
+
+```math
+f = \sigma\left(\max\left(|q_x|,\ |q_y|,\ \frac{|q_x| + |q_y|}{\sqrt 2}\right) - r\right), \qquad q = p - c
+```
+
+with $`c`$ and $`r`$ taken at the point's own height. The factor
+$`\sigma = 1 / \sqrt{1 + m^2 + w^2}`$, for a length that leans at the
+slope $`m`$ and widens at the rate $`w`$, keeps $`f`$ from exceeding the
+true distance (section 5). The trunk is a stack of such lengths, each a
+few cells tall and a little wider at its top than the next is at its
+foot. That step is a ring, and its top cell is a darker colour: the scar a
+fallen frond leaves.
+
+The fronds are set round the top of the trunk by the golden angle, each
+137.5 degrees from the last, which is how a coconut palm sets them and the
+turn that never puts one leaf directly over another
+([Vogel's model](https://en.wikipedia.org/wiki/Golden_angle)). The
+frond numbered $`i`$ of $`n`$ has the age $`\alpha = i / (n - 1)`$. It
+leaves the crown at the angle $`\theta_0`$ from upright and has turned
+over by a further $`\beta`$ at its tip:
+
+```math
+\theta(x) = \theta_0 + \beta\,x^{1.7}, \qquad \theta_0 = 0.12 + 1.32\,\alpha^{0.85}, \qquad \beta = 0.75 + 0.95\,\alpha
+```
+
+in radians, at the share $`x`$ of the way along it. The youngest fronds
+stand nearly upright and arch a little. The oldest leave the crown below
+level and hang. The bend grows towards the tip, so every frond's tip
+droops.
+
+A frond is pinnate. Its rib carries a pair of leaflets every three cells
+from a fifth of the way along. The leaflets are shortest at the two ends
+of the rib, are held out to the side on a young frond and hang on an old
+one, and each bends down half way along its length.
+
+<img src="images/tree-palm-crown.png" width="640" alt="Close view of a palm's crown: each frond a pale rib with a row of narrow leaflets hanging from each side, the trunk below it in ringed eight-sided lengths">
+
+#### The oak
+
+The oak is an open-grown English or white oak: a short thick trunk that
+divides low down into a few heavy limbs, and a crown as wide as the tree
+is tall ([white oak](https://en.wikipedia.org/wiki/Quercus_alba)). Above
+the trunk it has no leading stem, so it is the one tree here grown by a
+recursive rule. The rule is one fork, applied until the branches are
+twigs.
+
+A limb of radius $`r`$ runs a length of about $`6.2\,r^{0.62}`$ and
+divides in two. The two share its cross-section by Leonardo da Vinci's
+rule: a share $`q`$, drawn between 0.52 and 0.86, carries on and the rest
+turns aside, so
+
+```math
+r_1 = r\sqrt{q}, \qquad r_2 = r\sqrt{1 - q}, \qquad r_1^2 + r_2^2 = r^2
+```
+
+Measured trees keep the rule with an exponent between 1.8 and 2.3
+([Eloy 2011](https://arxiv.org/abs/1105.2591)), and 2 is used. A share
+near 0.5 is an even fork and a share near 0.86 is a small side branch off
+a limb that carries on, so one rule gives both. The side branch turns
+aside by 35 to 65 degrees and the limb turns the other way by less, in
+proportion to what it gave up. Each fork is turned by the golden angle
+about the limb from the fork before, which fills the crown in all round.
+The trunk divides the same way into two to seven limbs.
+
+Between forks a limb's direction $`v`$ is changed twice by
+
+```math
+v \leftarrow \frac{v + 0.44\,k\,\xi + \left(0.36\,w\,o - 0.1\,w\,z + 0.15\,(1 - w)^2\,z\right)}{\lVert\,\cdot\,\rVert}
+```
+
+where $`\xi`$ is a random direction and $`k`$ the **Gnarl** setting,
+$`w = r / r_\text{trunk}`$ is how heavy the limb is, $`o`$ points level
+away from the trunk and $`z`$ points up. A heavy limb is drawn outwards
+and sags. A thin one turns up to the light. The result is limbs that
+strike out wide, then climb at their ends.
+
+A branch thinner than one cell is not built. It ends in leaves.
+
+The crown has to fill a dome of the height and spread asked for, and no
+rule gives the reach of a crooked limb before it is grown. The branches
+are therefore grown twice from the same random numbers. The first growth
+is at no particular size and only measures how far the branches reach.
+The second is at the size that puts six sevenths of the branch ends
+within nine tenths of the dome's width, and it is held in: a branch
+nearer the outline than 0.7 of the way from the dome's heart is turned
+back along it. A last small stretch brings the furthest end exactly to
+the dome. Growing once and stretching the result was tried first. One
+long limb then set the size of the whole crown, and the rest of it
+huddled round the trunk.
+
+The leaves are at the ends of the branches and nowhere else, so the crown
+is separate masses with sky between them and the limbs show from below. A
+branch that ends is carried on for three lengths as a spray too thin to
+build, and at each length there is a tuft: one flattened ball of leaves
+and two smaller ones beside it. A ball of leaves is itself built as a
+smaller ball with many small balls, each two or three cells across,
+standing out of it all over. The small balls are clusters of leaves and
+the gaps between them are the hollows.
+
+<img src="images/tree-oak-limbs.png" width="640" alt="Close view under an oak's crown: the trunk dividing into thick limbs that run out level and fork, with lumpy masses of leaves, light on top and dark underneath, at the ends of the branches">
+
+The first leaves were smooth balls with smooth noise added to their
+distance, which is the usual way to roughen a surface. It looked much the
+same and took four times as long. Noise steepens a distance function, so
+every value had to be more than halved to stay an underestimate (section
+5), and the fitter then sampled a shell of cells twice as deep, working
+the noise out at each sample. A union of balls is an exact distance and
+needs no such allowance.
+
+[Space colonisation](https://algorithmicbotany.org/papers/colonization.egwnp2007.pdf)
+(Runions, Lane and Prusinkiewicz 2007) was the other candidate for the
+oak. It scatters points through the crown and grows branches towards
+them, and it gives fine irregular broadleaf crowns. It was not taken for
+two reasons. Its branches are one node spacing thick everywhere, and a
+tree in bricks needs a few heavy limbs several cells thick, which a rule
+that divides a limb's cross-section gives by construction. And each point
+influences every branch near it, so changing one setting grows a
+different tree. Here a seed is one skeleton, and the height, spread and
+foliage can be changed while the tree stays recognisably itself.
+
+#### The bushes
+
+<img src="images/plant-boxwood.png" width="330" alt="A boxwood bush in bricks: a dense rounded mound of lumpy green foliage, lighter on top, on several short stems"> <img src="images/plant-rose.png" width="330" alt="A rose bush in bricks: arching green canes with tufts of leaves and pink blooms with yellow hearts on the outside">
+
+A boxwood is a dense rounded evergreen, about as tall as it is wide, on
+several stems ([*Buxus sempervirens*](https://plants.ces.ncsu.edu/plants/buxus-sempervirens/)).
+Its stems are grown by forks, as an oak's limbs are, three forks deep,
+each from its own place in the ground. Its leaves are not left to the ends
+of the branches as an oak's are, because a boxwood has no sky in it. Tufts
+of leaves are set all over a dome instead, a golden angle apart: the tuft
+numbered $`n`$ of $`N`$ stands at the height $`1 - 2(n + \tfrac12)/N`$
+of the dome and at the angle $`n \cdot 137.5^\circ`$ round it, which
+covers a ball evenly. Each tuft is pushed in a little by a random amount
+that **Looseness** scales, and the lowest seventh of the dome is left open
+so the stems show at the foot. That gives the lumpy, layered outline of a
+shrub left to grow. Builders of brick bushes get the same effect by
+turning each layer of leaves against the one below
+([leafy bush tutorial](https://fullplatebuilds.com/2018/12/07/leafy-bush-tutorial/)).
+
+A rose is canes: long shoots from the ground that climb and then arch
+over, with the flowers at the ends of the canes and of their side shoots
+([roses](https://plants.ces.ncsu.edu/plants/rosa/)). A cane is a palm's
+frond stood on the ground. It leaves at 6 to 26 degrees from upright and
+turns over by a further $`\beta\,x^{1.6}`$ along its length, with
+$`\beta`$ set by **Arch of the canes**. The canes are set round the
+middle by the golden angle, grown at no particular size and stretched to
+the height and spread asked for. A tuft of leaves sits every few cells
+along the outer two thirds of a cane. A bloom sits on the outward side of
+some tufts and of every tip: a ball of petals about five cells across with
+a small heart of another colour facing outwards.
+
+#### The flowers
+
+<img src="images/plant-sunflowers.png" width="330" alt="Three sunflowers in bricks, of different heights, facing the same way: dark hearts ringed with lighter seeds and yellow petals, on stout stems with broad drooping leaves"> <img src="images/plant-tulips.png" width="330" alt="A clump of tulips in bricks: orange cups flamed with red on bare stems, with strap-shaped leaves arching from the ground">
+
+A flower is small, and a part must be two cells thick to be built, so the
+flowers are large: a sunflower is 90 cells tall with a head 34 across, and
+a tulip 64 tall with a cup 12 across. The head sets the size. A seed is a
+ball two and a half cells through, and a head needs some dozens of them
+before it reads as a disc of seeds and not a button.
+
+A sunflower's head is built as the plant builds it, by Vogel's model
+([Fermat's spiral and the golden angle](https://en.wikipedia.org/wiki/Fermat%27s_spiral#The_golden_ratio_and_the_golden_angle)).
+The seed numbered $`k`$ stands at
+
+```math
+r_k = c\sqrt{k}, \qquad \theta_k = k \cdot 137.508^\circ
+```
+
+from the middle of the disc, with $`c = 1.3`$ cells. Each seed is a
+golden angle on from the last, which packs them evenly at any size of
+head. Rings of seeds, the obvious alternative, leave gaps between the
+rings and line the seeds up in spokes. The inner seeds have one colour
+number and the outer ring another, the disc bulges a little in the middle,
+and its back is a coarser plate of the same pattern in green. Round the
+disc are the ray florets, the petals: 13, 21 or 34 of them by the size of
+the head, Fibonacci numbers as a real head's are, with a second row behind
+and between the first. Each petal is two round ribs side by side at its
+root that meet at its tip, so it is flat and pointed. The head faces to
+one side and nods by an amount **Nod of the head** sets, and the heads of
+a clump face the same way to within 35 degrees, as grown sunflowers all
+face east ([common sunflower](https://en.wikipedia.org/wiki/Common_sunflower)).
+The stem carries heart-shaped leaves, each a fan of five ribs, a golden
+angle apart and smaller towards the top.
+
+A tulip is a cup of six petals in two rings of three, the inner three
+standing in the gaps of the outer, on a bare stem with two or three
+strap-shaped leaves from the ground
+([tulip](https://en.wikipedia.org/wiki/Tulip)). Each petal is three ribs
+side by side, bowed out from the base of the cup and in again at the lip,
+with the middle rib the longest so the petal comes to a point. The cup is
+1.25 times as tall as it is wide. The two rings have different colour
+numbers, so a cup can be one colour, two tones or flamed. A leaf is three
+ribs that leave the ground nearly upright against the stem and turn
+outwards along their length.
+
+A clump of either flower is several plants from one seed. They stand
+round the first by Vogel's model again, each at its own height between
+60% and 96% of the tallest.
+
+#### One colour for each part
+
+Every part carries a number: the trunk or stem, leaves, leaves in shade,
+new growth, limbs, and then petals, blooms and the heart of a flower. A brick takes the number of the part its middle
+lies deepest in, and the colouring **As the pattern has it** paints it
+(section 7.9, Colours by feature).
+
+Some numbers are decided from the tree as a whole. On a pine, needles
+with open air a cell and a half above them are the top of a bough. They
+have a number of their own, which the natural sets of colours paint a
+paler green and the snowy sets paint white. On an oak, leaves with open
+air above them are light and leaves with open air below them are dark,
+with the boundary made uneven by smooth noise. The oak's leaves were first
+lit by where each brick lay in its own ball of leaves. Every ball was then
+light on top and dark underneath, and a mass read as the balls it was
+made of.
+
+The fitter merges cubes into the largest boxes it can and knows nothing
+of colour, so one box may run from a bough's bark out into its needles.
+After the fit, every cell of every box is asked its number. A box of one
+number is kept, and the cells of the others are merged again number by
+number. No brick is of two colours.
+
+#### Finding the parts near a sample
+
+A fit of a tree asks for the distance at some ten million samples, and a
+pine has five thousand parts. Comparing every sample with every part
+would take minutes. The parts are filed in a uniform grid of buckets one
+cell wide. A bucket lists the parts that come within 0.9 of a cell of it,
+which is as far as the fitter looks from a cell's corner before it calls
+the cell empty or full (section 7.1). A sample reads its own bucket's
+list, which holds six parts on a pine, and takes the least of their
+distances.
+
+Two details make that sound and quick. An empty bucket has to answer with
+a distance too, and the answer must not exceed the truth, because the
+fitter skips a whole block of cells whose middle is far enough from the
+surface. A second grid four times coarser records how many coarse buckets
+lie between each bucket and the nearest part, and an empty bucket answers
+with that gap. And a sample well inside one part stops looking: its depth
+in that part is no deeper than its true depth, which is all the fitter
+asks of a point inside.
+
+The bucket size was measured. Buckets four cells wide, the size a curve's
+segments are filed in, listed about fifty of a pine's side shoots each,
+and the default pine took 2.9 seconds. Buckets one cell wide take it in
+1.0. A hierarchy of boxes round the parts would serve no better: the
+parts are small and spread evenly through the crown, which is the case a
+uniform grid suits, and a sample finds its bucket by three
+multiplications.
+
+#### Why the processor and not the graphics card
+
+Nine tenths of a tree's build time is the distance function, which is
+arithmetic a graphics card does well, so a version on the card was
+considered. The editor draws through OpenGL 3.3 and WebGL2, which have no
+compute shaders. The field would be drawn slice by slice into a texture
+by a fragment shader, with the parts and the bucket grid passed in as
+textures, and read back
+([WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices)).
+It was not built, for three reasons.
+
+The first decides it. Which brick a cell gets depends on which of its 64
+samples are inside the tree, and some samples always lie within rounding
+error of the surface. The shading languages at these versions do not fix
+how a sum, a division or a square root is rounded: the rule that does
+arrived with
+[GLSL 4.00](https://developer.download.nvidia.com/opengl/specs/GL_ARB_shader_precision.txt),
+and even it allows a multiply and an add to be fused and a square root to
+be three units out in its last place. Two cards could therefore give
+different bricks for one seed, and neither need agree with the processor.
+A seed that names one tree on every machine is worth more than the
+speed.
+
+The core library also has to build a tree with no graphics card at all,
+for tests, reports and the picture examples, so the processor's version
+would exist in any case and would have to be the one the card's was held
+to.
+
+And the fitter does not ask for its samples in one batch. It asks for a
+block's middle, then perhaps its corners, then perhaps 64 samples in some
+of its cells, each answer deciding the next question. A card would have
+to answer every possible question in advance, most of which are never
+asked, or the fitter would have to be rewritten in rounds.
+
+The speed was to be had on the processor, and it has been. The blocks of
+a fit are independent of one another, and the fitter now divides them
+among threads (see [performance.md](performance.md), Threads). The bricks
+are the same whatever the number of threads. On a desktop with 16 logical
+cores the pine builds in 0.21 seconds in place of 1.1, which is the gain a
+graphics card was wanted for, without its three costs. The browser build
+has no threads and builds a pine in the one-thread time.
+
+#### What is measured
+
+At the usual sizes:
+
+| Plant | Size | Parts | Bricks | One thread | 16 threads |
+|---|---|---|---|---|---|
+| Pine | 140 tall, 72 across | 5,495 | 33,643 | 1.1 s | 0.21 s |
+| Palm | 120 tall, fronds 44 long | 1,149 | 16,753 | 0.36 s | 0.09 s |
+| Oak | 110 tall, 124 across | 3,283 | 40,092 | 1.1 s | 0.22 s |
+| Boxwood | 40 tall, 42 across | 1,065 | 8,513 | 0.23 s | 0.05 s |
+| Rose | 46 tall, 72 across | 533 | 7,143 | 0.16 s | 0.04 s |
+| Sunflowers, three | 90 tall | 659 | 8,581 | 0.23 s | 0.06 s |
+| Tulips, five | 64 tall | 551 | 5,880 | 0.30 s | 0.10 s |
+
+At 100 tall the three trees take 0.58, 0.27 and 0.55 seconds on one
+thread. The time is nearly
+all distance samples: 9.2 million of them for the pine, at about 100
+nanoseconds each. Growing the tree and filing its parts takes 50
+milliseconds and colouring the bricks 20.
+
+The discrepancy of a tree is high, 15% for the pine, and it does not mean
+what it means for a sphere. A spray of side shoots two cells thick has
+most of its volume within half a cell of its surface, where no brick can
+follow it exactly.
+
+A tree is always fitted at brick size 1 when the brick size is automatic,
+whatever the budget, as a tile pattern is (section 9). At a coarser size
+the shoots and leaflets are thinner than a brick and vanish, and what is
+left is a trunk in a cloud.
+
 ## 8. Changing a form: added points, mirror, turning, grids
 
 ### Added points
@@ -2189,6 +2635,10 @@ was no longer being built. The search goes from coarse to fine because a fit
 $`g`$ times coarser has about $`g^3`$ fewer cells to look at, so every size
 tried on the way costs less than the one finally kept.
 
+A tile pattern and a tree are fitted at brick size 1 whatever the budget.
+Their detail is a cell or two across, and at a coarser size it is gone
+(7.9, 7.10). A larger brick can still be chosen by name.
+
 ### Where a form fits cleanly
 
 A form fits well only where its surfaces land on the grid. A round arch
@@ -2359,6 +2809,16 @@ is nearly all surface, and the disagreement is all at the surface.
 
 Tilted flat curves cannot be filled. Only a curve lying flat across the
 grid has an outline the two-dimensional fitter can fill.
+
+A tree, bush or flower is fitted cell by cell, the roughest method, so
+its trunk and limbs are stepped where a sphere's surface would be smooth,
+and its discrepancy is high (7.10). A sunflower's seeds are too few for
+its spirals to be counted, and a rose's bloom is a ball with a heart and
+has no petals of its own. Its smallest parts are two cells thick, so a
+tree under about 40 cells tall has room for an outline and little more.
+The leaves of an oak are balls of clusters and not leaves, and a pine's
+needles are the shoots that carry them. A tree is not its own mirror
+image and takes no added points.
 
 A pattern needs a flat band or a filled outline. Stones fitted together
 with the gap at 0 keep seams between them, because each stone is fitted by

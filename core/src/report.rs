@@ -31,6 +31,7 @@ fn form_name(form: Form) -> String {
         Form::Revolve => "revolve".into(),
         Form::Pyramid => "pyramid".into(),
         Form::Cube => "cube".into(),
+        Form::Tree => "tree".into(),
     }
 }
 
@@ -92,6 +93,8 @@ pub fn spec_text(spec: &Spec) -> String {
     // stepping stones: how far apart, the gap, how uneven, and which scattering
     // a mosaic: which style, the size of its boards or bricks, the bevel of its slabs, the border's width, which filling, and for masonry whether there is mortar (1 or 0), the stagger, whether the courses are upright (1 or 0) and how uneven they are along and across. (The third value is whether bricks are bevelled, 1 or 0. It was once how deep the bevel was, so any number above 0 is read as bevelled. The last was an unevenness in depth, which is gone: it is written as 0 so that the values keep their places, and read and left unused.)
     line("mosaic", spec.mosaic.map_or("none".into(), |m| format!("{},{},{},{},{},{},{},{},{},{},0", crate::pattern::STYLES[m.style.min(crate::pattern::STYLES.len() - 1)].name, m.size, m.bevel as u8, m.border, m.seed, m.mortar as u8, m.stagger, m.upright as u8, m.uneven[0], m.uneven[1])));
+    // a tree: which kind, which one of it, how full, how many (tiers, fronds or limbs), how bent, and whether it has its extras (1 or 0)
+    line("tree", format!("{},{},{},{},{},{}", crate::tree::KINDS[spec.tree.kind as usize].1, spec.tree.seed, spec.tree.fullness, spec.tree.count, spec.tree.bend, spec.tree.extras as u8));
     line("stones", spec.stones.map_or("none".into(), |s| format!("{},{},{},{}", number(s.size), number(s.gap), number(s.uneven), s.seed)));
     s
 }
@@ -155,6 +158,8 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     ("revolve", _) => Form::Revolve,
                     ("pyramid", _) => Form::Pyramid,
                     ("cube", _) => Form::Cube,
+                    // (a bush or a flower is a tree of another kind)
+                    ("tree" | "plant", _) => Form::Tree,
                     ("arch", kind) => {
                         let kind = kind.unwrap_or("round");
                         let found: Option<ArchType> = ARCH_TYPES
@@ -287,6 +292,35 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
                     // (sizes from a file, which may be anyone's: kept to what the sliders allow)
                     Some(crate::pattern::Mosaic { style, size: (whole(size)?.clamp(1, 16)) as i32, bevel, border: (whole(border)?.clamp(0, 8)) as i32, seed: seed.parse().map_err(|_| bad("the seed is a whole number"))?, mortar, stagger, upright, uneven })
                 }
+            }
+            "tree" => {
+                let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+                // The kind, and then as many of the rest as are given, in
+                // order: `oak` alone is the oak as it starts out, and
+                // `oak,7` the seventh of them.
+                if parts.len() > 6 {
+                    return Err(bad("expected `kind,seed,fullness,count,bend,extras`, or the first few of them"));
+                }
+                let kind = crate::tree::KINDS.iter().find(|k| k.1 == parts[0]).ok_or_else(|| bad("unknown kind of tree: pine, palm, oak, boxwood, rose, sunflower or tulip"))?.0;
+                let mut tree = crate::tree::Tree::of(kind);
+                // (numbers from a file, which may be anyone's: kept to what the sliders allow)
+                let within = |text: &str| -> Result<i32, String> { Ok(whole(text)?.clamp(0, 100) as i32) };
+                if let Some(seed) = parts.get(1) {
+                    tree.seed = seed.parse().map_err(|_| bad("the seed is a whole number, not negative"))?;
+                }
+                if let Some(fullness) = parts.get(2) {
+                    tree.fullness = within(fullness)?;
+                }
+                if let Some(count) = parts.get(3) {
+                    tree.count = within(count)?;
+                }
+                if let Some(bend) = parts.get(4) {
+                    tree.bend = within(bend)?;
+                }
+                if let Some(extras) = parts.get(5) {
+                    tree.extras = whole(extras)? != 0;
+                }
+                spec.tree = tree.clamped();
             }
             "stones" => {
                 spec.stones = if value == "none" {
@@ -1069,7 +1103,9 @@ mosaic = {values}
                 stones: Some(crate::pattern::Stones { size: 6.5, gap: 1.5, uneven: 0.25, seed: 99 }),
                 mosaic: Some(crate::pattern::Mosaic { style: 1, size: 3, bevel: false, border: 2, seed: 41, mortar: true, stagger: -1, upright: false, uneven: [0; 2] }),
                 blend: Some(2.5),
+                tree: crate::tree::Tree { kind: crate::tree::Kind::Palm, seed: 12345678901234567890, fullness: 35, count: 23, bend: 80, extras: true },
             },
+            Spec { form: Form::Tree, points: vec![at(3.0, -4.0, 0.0)], radius: 30.0, rise: Some(90.0), tree: crate::tree::Tree { kind: crate::tree::Kind::Oak, seed: 7, fullness: 100, count: 2, bend: 0, extras: false }, ..Spec::default() },
         ];
         // a save from before forms could be joined has no line for it, and one out of range is refused
         assert_eq!(parse_spec("form = sphere

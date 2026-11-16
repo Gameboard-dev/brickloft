@@ -25,6 +25,11 @@ these wherever a build shares its work out (see [Threads](#threads)).
 | Hollow sphere, radius 50, wall 2 | 264 ms | 35,191 | 9.8% |
 | Hollow dome, radius 100, wall 2 | 691 ms | 71,041 | 9.5% |
 | Torus, radius 40, 8 thick | 130 ms | 645 | 11.1% |
+| Pine tree, 140 tall | 1.1 s (0.21 s on 16 threads) | 33,643 | 15.3% |
+| Palm tree, 120 tall | 0.36 s (0.09 s) | 16,753 | 18.7% |
+| Oak tree, 110 tall, 124 across | 1.1 s (0.22 s) | 40,092 | 7.1% |
+| Rose bush, 46 tall | 0.16 s (0.04 s) | 7,143 | 9.7% |
+| Three sunflowers, 90 tall | 0.23 s (0.06 s) | 8,581 | 16.5% |
 
 The ordinary forms fit in tens of milliseconds and a large solid sphere in
 about a fifth of a second. The two thin shells are the exceptions. A wall
@@ -32,6 +37,11 @@ of 2 at that radius is too thin for the sphere layout, so they are fitted
 cell by cell, and their brick counts show what that method costs. For
 comparison, a shell of radius 70 with a wall 4 thick, which the layout can
 handle, takes a tenth as many bricks laid out as it did cell by cell.
+
+The trees are the slowest forms and are not in the timing example. Their
+times come from the test `where_the_time_goes` in
+[core/src/tree.rs](../core/src/tree.rs), run by name with `--ignored
+--nocapture` (see [Trees](#trees) below).
 
 Most of each time is the measurement of the result, not the fitting. Laying
 out a solid sphere of radius 80 takes about 7 ms, and measuring it takes
@@ -225,6 +235,46 @@ sphere stays the same along each axis.
 The torus is a circle built as a round tube, so it costs what a pipe
 costs: one outline fit, the chamfer, and the measurement against the tube's
 distance function, which the 130 ms in the table above includes.
+
+### Trees
+
+A tree is the union of thousands of parts, and its time is the time to
+find the distance to the nearest part at about ten million samples (see
+[algorithm.md](algorithm.md), section 7.10). Four choices set it.
+
+| Choice | Before | After |
+|---|---|---|
+| Parts filed in buckets 1 cell wide in place of 4 | pine 2.9 s | 1.0 s |
+| An oak's leaves as a union of small balls in place of smooth noise on large ones | oak 2.2 s | 0.9 s |
+| A sample's bucket found without rounding down | palm 0.47 s | 0.39 s |
+| How far the empty buckets are from the tree worked out on a grid 4 times coarser | 100 ms a tree | under 5 ms |
+
+Buckets four cells wide suit a curve, whose segments are long. A pine's
+side shoots are two cells apart, and a bucket that wide listed about fifty
+of them, so a sample was compared with fifty parts to find the one or two
+near it. A bucket of one cell lists six.
+
+Smooth noise added to a distance function makes it steeper, and a
+distance function may never overstate (see
+[skipping empty and solid space](#skipping-empty-and-solid-space)). The
+noisy leaves had to be scaled to under half their value to stay honest.
+The fitter then took every cell within two cells of a leaf for a cell on
+the surface and sampled it 64 times, with the noise worked out at each
+sample. A union of balls is an exact distance and needs none of that.
+
+Rounding a number down is a call into the maths library on a processor
+the compiler may not assume has the instruction for it. A sample's bucket
+needs three, and they were a fifth of a palm's time. Inside the grid the
+numbers are never negative, so dropping the fraction is the same answer.
+
+What is left is about 100 nanoseconds a sample, nine tenths of a build on
+one thread. The blocks of a fit are independent and the fitter divides
+them among threads (see [Threads](#threads)), which takes a pine from 1.1
+seconds to 0.21 on 16 logical cores with the same bricks. Growing the tree
+and filing its parts, 50 milliseconds, and colouring its bricks, 20, are
+still done on one thread and are now a third of that. A graphics card was considered for the samples and
+not used, because it cannot promise the same bricks on every machine;
+the reasons are in [algorithm.md](algorithm.md), section 7.10.
 
 ### Stretched ramps
 
@@ -544,6 +594,10 @@ crate, `three-d`, with only the features in use switched on.
 Thin hollow spheres that fall back to the cell-by-cell fitter take about a
 quarter of a second at radius 50 on one thread, and 55 ms on sixteen. They
 still need tens of thousands of bricks.
+
+A tree takes up to a second at its usual size on one thread, which is
+what the browser has, and four times as long at twice the size, since its
+time grows with its surface.
 
 A very large revolve during a best-fit search is slow to respond. Each of
 its builds is longer than a frame, so the view holds still for one build at
