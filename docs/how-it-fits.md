@@ -44,32 +44,32 @@ point, radius and thickness is snapped to half cells before anything is
 computed (`Spec::snapped` in `spec.rs`). A form placed between units could
 only be approximated by bricks that are all slightly off it.
 
-Cell $(i, j, k)$ is the cube $[i, i+1] \times [j, j+1] \times [k, k+1]$.
+Cell $`(i, j, k)`$ is the cube $`[i, i+1] \times [j, j+1] \times [k, k+1]`$.
 Whole numbers are cell corners (the **lattice**); halves are cell centres.
 
 ### The bricks (`shapes.rs`)
 
 A brick is a box, any whole number of cells along each axis, holding one of
-nine shapes. Take the box as the unit cube $0 \le x, y, z \le 1$:
+nine shapes. Take the box as the unit cube $`0 \le x, y, z \le 1`$:
 
 | Shape | Game brick | Solid | Corners held | Share of box | Poses |
 |---|---|---|---|---|---|
 | Cube | Micro-Brick | all of it | 8 | 1 | 1 |
-| Ramp | Micro-Wedge | $y + z \le 1$ | 6 | 1/2 | 12 |
-| Tetrahedron | Micro-Wedge Triangle Corner | $x + y + z \le 1$ | 4 | 1/6 | 8 |
-| Cut cube | Micro-Wedge Outer Corner | $x + y + z \le 2$ | 7 | 5/6 | 8 |
-| Hip | Micro-Wedge Corner | $\max(x, y) \le 1 - z$ | 5 | 1/3 | 24 |
-| Inner corner | Micro-Wedge Inner Corner | $\min(x, y) + z \le 1$ | 7 | 2/3 | 24 |
-| Half outer corner | Micro-Wedge 1/2 Outer Corner | $x + y \le 1,\ z \le x + y$ | 5 | 1/3 | 24 |
-| Half inner corner | Micro-Wedge 1/2 Inner Corner | $x + y \le 1,\ z \le y$ | 4 | 1/6 | 12 |
-| its mirror image | Micro-Wedge 1/2 Inner Corner Inv. | $x + y \le 1,\ z \le x$ | 4 | 1/6 | 12 |
+| Ramp | Micro-Wedge | $`y + z \le 1`$ | 6 | 1/2 | 12 |
+| Tetrahedron | Micro-Wedge Triangle Corner | $`x + y + z \le 1`$ | 4 | 1/6 | 8 |
+| Cut cube | Micro-Wedge Outer Corner | $`x + y + z \le 2`$ | 7 | 5/6 | 8 |
+| Hip | Micro-Wedge Corner | $`\max(x, y) \le 1 - z`$ | 5 | 1/3 | 24 |
+| Inner corner | Micro-Wedge Inner Corner | $`\min(x, y) + z \le 1`$ | 7 | 2/3 | 24 |
+| Half outer corner | Micro-Wedge 1/2 Outer Corner | $`x + y \le 1,\ z \le x + y`$ | 5 | 1/3 | 24 |
+| Half inner corner | Micro-Wedge 1/2 Inner Corner | $`x + y \le 1,\ z \le y`$ | 4 | 1/6 | 12 |
+| its mirror image | Micro-Wedge 1/2 Inner Corner Inv. | $`x + y \le 1,\ z \le x`$ | 4 | 1/6 | 12 |
 
 "Poses" is how many distinct ways the shape can sit in its box under the 24
 rotations of a cube.
 
 **A shape is a set of box corners.** Every shape but one is the convex hull
 of the corners it holds, so a shape is stored as an 8-bit mask, one bit per
-corner, bit $x + 2y + 4z$. Stretching the box stretches the shape and leaves
+corner, bit $`x + 2y + 4z`$. Stretching the box stretches the shape and leaves
 the mask alone. Rotating or mirroring a brick is a permutation of the bits.
 Two bricks whose boxes share a face and whose masks agree on that face's
 four corners meet exactly, with no gap and no overlap. That last property is
@@ -82,7 +82,7 @@ does not touch, which no other shape's mask can be. Bit permutations still
 rotate it correctly, since the removed hip moves with it.
 
 **How the shapes pair up.** A tetrahedron and a cut cube fill a box between
-them, across the plane $x + y + z = \text{const}$. A plane tilted on all
+them, across the plane $`x + y + z = \text{const}`$. A plane tilted on all
 three axes therefore passes through the grid cutting alternate layers of
 cells into one and the other. A ramp and its opposite ramp fill a box; so do
 a hip and an inner corner. Two half inner corners make a hip. An upright
@@ -137,62 +137,68 @@ Every curve is flattened to a polyline that stays within 0.02 of a cell of
 the true curve. Everything after this point works on polylines, so adding a
 kind of curve never touches a fitter.
 
-**Circle through three points.** With $a = P_1 - P_0$, $b = P_2 - P_0$ and
-$n = a \times b$, the centre is
+**Circle through three points.** With $`a = P_1 - P_0`$, $`b = P_2 - P_0`$ and
+$`n = a \times b`$, the centre is
 
-$$c = P_0 + \frac{\lvert a\rvert^2\,(b \times n) + \lvert b\rvert^2\,(n \times a)}{2\,\lvert n\rvert^2}$$
+```math
+c = P_0 + \frac{\lvert a\rvert^2\,(b \times n) + \lvert b\rvert^2\,(n \times a)}{2\,\lvert n\rvert^2}
+```
 
-Three points in a line have $n = 0$ and no circle.
+Three points in a line have $`n = 0`$ and no circle.
 
-**Round arch.** Two feet a span $L$ apart and a rise $s$ give a circular arc
+**Round arch.** Two feet a span $`L`$ apart and a rise $`s`$ give a circular arc
 of radius
 
-$$R = \frac{L^2/4 + s^2}{2s}$$
+```math
+R = \frac{L^2/4 + s^2}{2s}
+```
 
-which is a semicircle when $s = L/2$. The other arches are closed forms
+which is a semicircle when $`s = L/2`$. The other arches are closed forms
 between the same feet: two arcs meeting at a point, a triangle, half an
-ellipse, a parabola $z = s\,(1 - (2x/L)^2)$, and a catenary
-$z = a\cosh(x/a)$ with $a$ solved numerically for the rise.
+ellipse, a parabola $`z = s\,(1 - (2x/L)^2)`$, and a catenary
+$`z = a\cosh(x/a)`$ with $`a`$ solved numerically for the rise.
 
 **Spline.** A centripetal Catmull-Rom spline. It passes through every point,
-and its parameter spacing $\lvert P_{i+1} - P_i\rvert^{1/2}$ is the one
+and its parameter spacing $`\lvert P_{i+1} - P_i\rvert^{1/2}`$ is the one
 choice that cannot form cusps or loops within a span.
 
-**Bézier.** Rational, with a weight $w_i$ per point:
+**Bézier.** Rational, with a weight $`w_i`$ per point:
 
-$$C(t) = \frac{\sum_i w_i\,B_i(t)\,P_i}{\sum_i w_i\,B_i(t)}$$
+```math
+C(t) = \frac{\sum_i w_i\,B_i(t)\,P_i}{\sum_i w_i\,B_i(t)}
+```
 
-where $B_i$ are the Bernstein polynomials. A weight pulls the curve towards
+where $`B_i`$ are the Bernstein polynomials. A weight pulls the curve towards
 its point. With three points this gives every conic exactly: a middle weight
 below 1 is an ellipse, 1 a parabola, above 1 a hyperbola, and
-$\cos(\theta/2)$ the circular arc of angle $\theta$, which a plain Bézier
+$`\cos(\theta/2)`$ the circular arc of angle $`\theta`$, which a plain Bézier
 cannot represent.
 
 ## 5. Solids as distance functions (`sdf.rs`)
 
-A form is a function $f(p)$ that is negative inside the form, positive
+A form is a function $`f(p)`$ that is negative inside the form, positive
 outside, and near the surface equal to the distance from it. Forms are built
 from a few of these and combined:
 
-| Solid | $f(p)$ |
+| Solid | $`f(p)`$ |
 |---|---|
-| Round tube of radius $r$ along a curve | $\operatorname{dist}(p, \text{curve}) - r$ |
-| Flat band along a curve in a plane | $\max\big(\operatorname{dist}_{\text{in plane}} - \tfrac{t}{2},\ \lvert\text{height above plane}\rvert - \tfrac{d}{2}\big)$ |
-| Ellipsoid with radii $r_x, r_y, r_z$ | $\big(\sqrt{\sum (p_k/r_k)^2} - 1\big)\cdot \min_k r_k$ |
-| Outline spun about an upright axis | the outline's 2D function at $\big(\sqrt{x^2+y^2},\ z\big)$ |
+| Round tube of radius $`r`$ along a curve | $`\mathrm{dist}(p, \text{curve}) - r`$ |
+| Flat band along a curve in a plane | $`\max\big(\mathrm{dist}_{\text{in plane}} - \tfrac{t}{2},\ \lvert\text{height above plane}\rvert - \tfrac{d}{2}\big)`$ |
+| Ellipsoid with radii $`r_x, r_y, r_z`$ | $`\big(\sqrt{\sum (p_k/r_k)^2} - 1\big)\cdot \min_k r_k`$ |
+| Outline spun about an upright axis | the outline's 2D function at $`\big(\sqrt{x^2+y^2},\ z\big)`$ |
 | Pyramid | the largest of the distances out of its four slopes, its base and its top |
 
-| Combination | $f$ |
+| Combination | $`f`$ |
 |---|---|
-| Both of $A$ and $B$ together | $\min(f_A, f_B)$ |
-| $A$ cut to where $B$ is | $\max(f_A, f_B)$ |
-| $A$ with $B$ taken out | $\max(f_A, -f_B)$ |
+| Both of $`A`$ and $`B`$ together | $`\min(f_A, f_B)`$ |
+| $`A`$ cut to where $`B`$ is | $`\max(f_A, f_B)`$ |
+| $`A`$ with $`B`$ taken out | $`\max(f_A, -f_B)`$ |
 
 A dome is an ellipsoid cut by a half-space; a segment is one cut by a slab; a
 hollow shell is an ellipsoid with a smaller one taken out. None of these is
 a separate case in the code.
 
-One property is relied on everywhere: $f$ never claims the surface is
+One property is relied on everywhere: $`f`$ never claims the surface is
 further away than it is. That lets the fitters and the measurement skip
 large regions after a single evaluation (see
 [performance.md](performance.md)). Operations that stretch space, such as
@@ -201,24 +207,26 @@ their result by the largest stretch to keep the property.
 
 ## 6. What is being minimised
 
-Write $F$ for the form and $B$ for the union of the bricks. The
+Write $`F`$ for the form and $`B`$ for the union of the bricks. The
 **discrepancy** is the volume where they disagree:
 
-$$E = \operatorname{vol}(F \setminus B) + \operatorname{vol}(B \setminus F)$$
+```math
+E = \mathrm{vol}(F \setminus B) + \mathrm{vol}(B \setminus F)
+```
 
 material that should be there and is not, plus material that is there and
 should not be. In two dimensions it is an area.
 
-For the laid-out fitters each brick has its box to itself, so $E$ is a sum
+For the laid-out fitters each brick has its box to itself, so $`E`$ is a sum
 over boxes and each box can be judged alone. That makes the simplest case
 exactly solvable: with one-cell bricks, each cell can hold nothing or one of
 the shapes, the choices in different cells do not affect each other, and
-trying every choice in every cell finds the true minimum of $E$.
+trying every choice in every cell finds the true minimum of $`E`$.
 
 That optimum is a staircase wherever the surface is not at 45°, and its
 sloped pieces do not line up with one another. Each fitter below therefore
 adds structure so that slopes are long and consecutive pieces share whole
-faces, and pays for it with a slightly larger $E$. For a sphere of radius 12
+faces, and pays for it with a slightly larger $`E`$. For a sphere of radius 12
 the trade is 3 to 4% discrepancy with no stepped faces, against 2 to 3% with
 a third of the surface stepped.
 
@@ -228,8 +236,8 @@ a third of the surface stepped.
 
 The general method, used when nothing better applies.
 
-1. **Classify.** Each cell is sampled at $4 \times 4 \times 4 = 64$ points.
-   Bit $s$ of a 64-bit word says whether sample $s$ is inside the form.
+1. **Classify.** Each cell is sampled at $`4 \times 4 \times 4 = 64`$ points.
+   Bit $`s`$ of a 64-bit word says whether sample $`s`$ is inside the form.
 2. **Choose.** Each candidate shape has its own 64-bit word, worked out
    once. The disagreement between a cell and a candidate is the number of
    set bits in their exclusive-or. The cell gets the candidate that
@@ -261,18 +269,20 @@ corner by construction, so slopes meet end to end. The question is which
 lattice points to use as corners.
 
 **Candidates.** The form is first fitted with one-cell pieces, as in 7.1 but
-with $8 \times 8$ samples to a cell. The boundary of that result is a fine
+with $`8 \times 8`$ samples to a cell. The boundary of that result is a fine
 staircase hugging the true outline, and its corners are the candidates.
 
 **Choosing corners.** The staircase is cut into stretches where it truly
 turns back. Along each stretch, corners are chosen by a shortest-path search
-(dynamic programming). Going from candidate $i$ to a later candidate $j$ in
+(dynamic programming). Going from candidate $`i`$ to a later candidate $`j`$ in
 one side costs
 
-$$\text{cost}(i \to j) = \underbrace{e(i, j)}_{\text{area between the side and the true outline}} + \underbrace{\lambda}_{\text{price of a corner}}$$
+```math
+\text{cost}(i \to j) = \underbrace{e(i, j)}_{\text{area between the side and the true outline}} + \underbrace{\lambda}_{\text{price of a corner}}
+```
 
 and the search finds the chain of sides of least total cost. The price
-$\lambda$ is 0.1 of a cell plus the **Simplify** setting. Even at Simplify 0
+$`\lambda`$ is 0.1 of a cell plus the **Simplify** setting. Even at Simplify 0
 it matters: a step is two corners where a slope is one, so a slope wins
 whenever it fits as well.
 
@@ -307,31 +317,37 @@ happen to meet; patching those afterwards never fully worked.
 
 ### 7.3 Spheres, ellipsoids, domes (`fit_round.rs`)
 
-A sphere is laid out whole from one observation. The sphere of radius $r$ is
+A sphere is laid out whole from one observation. The sphere of radius $`r`$ is
 
-$$\frac{x^2}{r^2} + \frac{y^2}{r^2} + \frac{z^2}{r^2} \le 1$$
+```math
+\frac{x^2}{r^2} + \frac{y^2}{r^2} + \frac{z^2}{r^2} \le 1
+```
 
 a sum of one term per axis. Cut each axis at distances
-$t_0 < t_1 < \dots < t_K$ from the centre, chosen so that
+$`t_0 < t_1 < \dots < t_K`$ from the centre, chosen so that
 
-$$\left(\frac{t_i}{r}\right)^2 = \frac{i}{K} \quad\text{that is}\quad t_i = r\sqrt{i/K}$$
+```math
+\left(\frac{t_i}{r}\right)^2 = \frac{i}{K} \quad\text{that is}\quad t_i = r\sqrt{i/K}
+```
 
-Then the lattice point at cuts $(i, j, k)$ has
-$x^2/r^2 + y^2/r^2 + z^2/r^2 = (i + j + k)/K$, so it is inside the sphere
+Then the lattice point at cuts $`(i, j, k)`$ has
+$`x^2/r^2 + y^2/r^2 + z^2/r^2 = (i + j + k)/K`$, so it is inside the sphere
 exactly when
 
-$$i + j + k \le K$$
+```math
+i + j + k \le K
+```
 
 The cuts divide space into boxes. A box's eight corners have index sums
-$s, s+1, s+1, s+1, s+2, s+2, s+2, s+3$ where $s$ is the sum at its inner
+$`s, s+1, s+1, s+1, s+2, s+2, s+2, s+3`$ where $`s`$ is the sum at its inner
 corner, so the corners inside the sphere are always one of four sets:
 
-| $s$ compared with $K$ | Corners inside | Brick |
+| $`s`$ compared with $`K`$ | Corners inside | Brick |
 |---|---|---|
-| $s + 3 \le K$ | all 8 | cube |
-| $s + 2 = K$ | 7 | cut cube |
-| $s + 1 = K$ | 4 | tetrahedron |
-| $s = K$ | 1 | none (a point) |
+| $`s + 3 \le K`$ | all 8 | cube |
+| $`s + 2 = K`$ | 7 | cut cube |
+| $`s + 1 = K`$ | 4 | tetrahedron |
+| $`s = K`$ | 1 | none (a point) |
 
 with ramps where a box touches the flat middle of an axis. Every box holds
 nothing, a whole box, or one stretched brick, and neighbouring boxes share
@@ -339,22 +355,22 @@ corners, so every brick meets its neighbours face to face. The surface has
 no steps and no gaps by construction, and every surface corner lies exactly
 on the sphere.
 
-**Putting the cuts on the lattice.** The ideal cuts $r\sqrt{i/K}$ are not
+**Putting the cuts on the lattice.** The ideal cuts $`r\sqrt{i/K}`$ are not
 whole numbers. They are replaced by lattice values chosen together by
 dynamic programming, working from the outside in, under two rules: every gap
 is at least one cell, and gaps never grow outwards (which keeps the solid
 convex). Outside in, because the outer gaps are the narrow ones and it is
 those the lattice constrains.
 
-**Choosing $K$.** More rings are finer facets, but each cut is then nearer
-its neighbours than rounding can place it. Every $K$ the lattice has room
+**Choosing $`K`$.** More rings are finer facets, but each cut is then nearer
+its neighbours than rounding can place it. Every $`K`$ the lattice has room
 for is laid out and scored against the true solid, the best few are improved
 by moving one cut a cell at a time while the score improves, and the best is
 kept. About one ring per two to three cells of radius is typical.
 
 **Ellipsoids** use the same method with a radius per axis. **Domes and
 segments** are cut at one of the cuts along z. **Hollow shells** are the
-same solid with a smaller one, $i + j + k \le K - m$, taken out; $m \ge 2$,
+same solid with a smaller one, $`i + j + k \le K - m`$, taken out; $`m \ge 2`$,
 so that no box has both surfaces passing through it and each box is still
 one brick. A shell needs a wall of about 2.5 cells or more for the lattice
 to have room; thinner walls fall back to 7.1.
@@ -362,31 +378,35 @@ to have room; thinner walls fall back to 7.1.
 ### 7.4 Pyramids (`fit_pyramid.rs`)
 
 The same idea with a different rule. Number the cuts across from the middle
-outwards and the levels from the base up, with $L$ levels in all. A corner
+outwards and the levels from the base up, with $`L`$ levels in all. A corner
 is inside the pyramid when
 
-$$\max(i_x, i_y) + i_z \le L$$
+```math
+\max(i_x, i_y) + i_z \le L
+```
 
 The boxes then hold ramps on the four slopes and hips on the four ridges, and
 the pyramid is exact: it is its four slopes, with no approximation. Centred
-on a lattice point it is four hips and nothing else. $L$ is as small as
+on a lattice point it is four hips and nothing else. $`L`$ is as small as
 keeps every brick within the longest allowed.
 
 **Hollow.** A pyramid that is not filled has a smaller one,
-$\max(i_x, i_y) + i_z \le L - 2$, taken out, open underneath. Two levels,
+$`\max(i_x, i_y) + i_z \le L - 2`$, taken out, open underneath. Two levels,
 for the same reason as a shell. The bricks on the inside are what the
 smaller pyramid's bricks would leave of their boxes: a ramp leaves a ramp,
-and a hip leaves an inner corner, which runs up each inside ridge. $L$ is
+and a hip leaves an inner corner, which runs up each inside ridge. $`L`$ is
 chosen to divide the height and both half-widths evenly, so that the slopes
 stay flat; the wall then comes out near the thickness asked for, not exactly.
 
 ### 7.5 Round tubes and tori (`fit_stack.rs`)
 
 A round tube along a curve lying flat, and a torus, are built as a pipe with
-an eight-sided section. For a section $w$ cells across, the sloping sides
+an eight-sided section. For a section $`w`$ cells across, the sloping sides
 are as long as the flat ones when each chamfer is
 
-$$c = w\left(1 - \tfrac{1}{\sqrt{2}}\right)$$
+```math
+c = w\left(1 - \tfrac{1}{\sqrt{2}}\right)
+```
 
 rounded to whole cells.
 
@@ -442,10 +462,12 @@ When a point added to a flat curve pulls it out of its plane, the curve's
 outline seen from above is unchanged and only its height varies along it.
 
 **A lifted tube** is two surfaces over the ground it covers: its top and its
-underside. For a point of ground at distance $d$ from the curve, where the
-curve is at height $\ell$ and climbing with slope $m$,
+underside. For a point of ground at distance $`d`$ from the curve, where the
+curve is at height $`\ell`$ and climbing with slope $`m`$,
 
-$$z_{\pm} = \ell \pm \sqrt{r^2 - d^2}\,\sqrt{1 + m^2}$$
+```math
+z_{\pm} = \ell \pm \sqrt{r^2 - d^2}\,\sqrt{1 + m^2}
+```
 
 The second square root is there because the tube's section stands square to
 its curve, so measured straight up it is taller where the curve climbs.
@@ -490,23 +512,25 @@ cell folded along its diagonal.
 
 ### Added points
 
-A point added at $a$ and dragged by $b$ moves the form near $a$ and leaves
-the rest. A point at distance $d$ from $a$ moves by $b\,w(d)$, where
+A point added at $`a`$ and dragged by $`b`$ moves the form near $`a`$ and leaves
+the rest. A point at distance $`d`$ from $`a`$ moves by $`b\,w(d)`$, where
 
-$$w(d) = \tfrac{1}{2}\left(1 + \cos\frac{\pi d}{\rho}\right)\ \text{for } d < \rho, \qquad w(d) = 0 \text{ otherwise}$$
+```math
+w(d) = \tfrac{1}{2}\left(1 + \cos\frac{\pi d}{\rho}\right)\ \text{for } d < \rho, \qquad w(d) = 0 \text{ otherwise}
+```
 
-and $\rho$ is the reach. The cosine makes the bump join the rest with no
+and $`\rho`$ is the reach. The cosine makes the bump join the rest with no
 corner at either end.
 
-- **On a curve** $d$ is measured along the curve, so a pull on one side of a
+- **On a curve** $`d`$ is measured along the curve, so a pull on one side of a
   narrow loop leaves the other side alone. The polyline is first cut into
   pieces of half a cell, since a straight run is one long piece that could
   only move by its ends. A revolve's profile is pulled the same way.
-- **On a sphere or pyramid** $d$ is straight-line distance and the pull
-  acts on the distance function. To evaluate the pulled form at $p$, the
-  point that ended up at $p$ is needed: $p - t\,b$, where the share $t$
-  satisfies $t = w(\lvert p - t\,b - a\rvert)$. $t$ lies between 0 and 1 and
-  is found by bisection. Taking $w$ at $p$ itself, the easy approximation,
+- **On a sphere or pyramid** $`d`$ is straight-line distance and the pull
+  acts on the distance function. To evaluate the pulled form at $`p`$, the
+  point that ended up at $`p`$ is needed: $`p - t\,b`$, where the share $`t`$
+  satisfies $`t = w(\lvert p - t\,b - a\rvert)`$. $`t`$ lies between 0 and 1 and
+  is found by bisection. Taking $`w`$ at $`p`$ itself, the easy approximation,
   is badly out when the pull is as long as its reach.
 
 **Keeping the layout.** A sphere, pyramid or pipe with a point added keeps
@@ -518,12 +542,14 @@ is filled twice or left out.
 
 ### Mirror
 
-Mirroring along an axis about the plane $x_k = c$ keeps the form's low side
+Mirroring along an axis about the plane $`x_k = c`$ keeps the form's low side
 and replaces the high side with its image. For a curve this is done to the
-polyline: the part with $x_k \le c$ is kept and followed by its reflection.
+polyline: the part with $`x_k \le c`$ is kept and followed by its reflection.
 For a solid it is done to the distance function, evaluated at
 
-$$x_k' = c - \lvert x_k - c\rvert$$
+```math
+x_k' = c - \lvert x_k - c\rvert
+```
 
 Because it is applied to the form before fitting, a lopsided arch becomes a
 symmetric arch and is fitted as one. Added points on the high side are
@@ -541,11 +567,13 @@ their sides.
 ### Grids at an angle
 
 The game keeps bricks on grids, and a grid other than the world's can stand
-at any angle. Each form carries a grid number, a rotation $q$ (a
-quaternion) and a translation $t$, shared by every form on that grid. A
-point $p$ of a form is shown at
+at any angle. Each form carries a grid number, a rotation $`q`$ (a
+quaternion) and a translation $`t`$, shared by every form on that grid. A
+point $`p`$ of a form is shown at
 
-$$p_{\text{world}} = t + R(q)\,p$$
+```math
+p_{\text{world}} = t + R(q)\,p
+```
 
 Nothing in the fitting reads these: a form on a tilted grid is fitted
 exactly as if it were level, which is why it stays as smooth as it was. The
@@ -553,13 +581,13 @@ rotation only decides where the finished bricks are drawn and how they are
 written to the copied file, where a tilted grid becomes a frozen grid of its
 own holding all its forms.
 
-Turning a grid by a ring multiplies $q$ and adjusts $t$ so that the middle
+Turning a grid by a ring multiplies $`q`$ and adjusts $`t`$ so that the middle
 of everything on the grid stays where it is.
 
 ## 9. Fit against brick count
 
 **Simplify** applies to outlines (7.2). It is added to the corner price
-$\lambda$, in cells of area, so several short sides give way to one long one
+$`\lambda`$, in cells of area, so several short sides give way to one long one
 wherever that costs less disagreement than the corners saved. The price is
 judged in the outline alone and not multiplied by the form's depth, so
 making a form deeper never changes how its outline is fitted.
@@ -568,13 +596,13 @@ Volumes have no such price. One was tried and removed: a tetrahedron or cut
 cube corrects at most a sixth of a cell, so any useful price stripped every
 corner piece and left a pit wherever three slopes meet.
 
-**Brick size** $g$ fits the form shrunk by $g$ and scales the bricks back
-up, so every brick is a multiple of $g$ cells. A surface then takes about
-$1/g^2$ as many bricks and is followed $g$ times as coarsely. **Automatic**
+**Brick size** $`g`$ fits the form shrunk by $`g`$ and scales the bricks back
+up, so every brick is a multiple of $`g`$ cells. A surface then takes about
+$`1/g^2`$ as many bricks and is followed $`g`$ times as coarsely. **Automatic**
 tries sizes 8, 6, 4, 3, 2, 1 in that order and keeps the finest that is
 within the brick budget, with limits: a wall stays at least two bricks
 thick, a round solid at least four bricks to its radius. Coarse to fine,
-because a fit $g$ times coarser has about $g^3$ fewer cells to look at, so
+because a fit $`g`$ times coarser has about $`g^3`$ fewer cells to look at, so
 every size tried on the way costs less than the one finally kept.
 
 **Where a form fits cleanly.** A form fits well only where its surfaces land
@@ -604,7 +632,9 @@ each sample the direction the face points is compared with the direction
 the form's surface points there, which is the gradient of the distance
 function:
 
-$$\theta = \arccos\left(\hat{n}_{\text{face}} \cdot \frac{\nabla f}{\lvert\nabla f\rvert}\right)$$
+```math
+\theta = \arccos\left(\hat{n}_{\text{face}} \cdot \frac{\nabla f}{\lvert\nabla f\rvert}\right)
+```
 
 The report gives the share of the outside within 10, 20, 30 and 45 degrees,
 and the **stepped** share: level and upright faces 30° or more off, which

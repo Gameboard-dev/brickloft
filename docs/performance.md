@@ -39,18 +39,20 @@ holds, one bit each. Rotating, mirroring, and finding what a shape leaves of
 its box are bit operations and table lookups, with no geometry.
 
 **A cell's contents are 64 bits.** Each cell is sampled at
-$4 \times 4 \times 4$ points and the answers are packed into one `u64`.
+$`4 \times 4 \times 4`$ points and the answers are packed into one `u64`.
 Each candidate shape has its own word, computed once. How far a cell is from
 a candidate is
 
-$$\operatorname{popcount}(\text{cell} \oplus \text{candidate})$$
+```math
+\mathrm{popcount}(\text{cell} \oplus \text{candidate})
+```
 
 one exclusive-or and one instruction where the processor has it, so trying
 30 candidates in a cell costs about 30 operations.
 
-**A form is a distance function.** $f(p)$ is negative inside and never
-claims the surface is further than it is. So if $\lvert f(c)\rvert$ at the
-centre $c$ of a region is larger than the distance from $c$ to the region's
+**A form is a distance function.** $`f(p)`$ is negative inside and never
+claims the surface is further than it is. So if $`\lvert f(c)\rvert`$ at the
+centre $`c`$ of a region is larger than the distance from $`c`$ to the region's
 furthest corner, the whole region is on one side of the surface and nothing
 in it needs looking at.
 
@@ -59,9 +61,9 @@ in it needs looking at.
 ### Skipping empty and solid space
 
 The cell-by-cell fitter and the measurement both evaluate the form once at
-the centre of each $8 \times 8 \times 8$ block of cells. A block's furthest
-corner is $8 \cdot \tfrac{\sqrt{3}}{2} \approx 6.93$ cells from its centre,
-so a block with $\lvert f\rvert$ beyond that (plus a cell's own half
+the centre of each $`8 \times 8 \times 8`$ block of cells. A block's furthest
+corner is $`8 \cdot \tfrac{\sqrt{3}}{2} \approx 6.93`$ cells from its centre,
+so a block with $`\lvert f\rvert`$ beyond that (plus a cell's own half
 diagonal) is wholly inside or wholly outside and none of its 512 cells is
 sampled. For a solid, most of the bounding box is such blocks. The same test
 is then applied per cell before taking its 64 samples.
