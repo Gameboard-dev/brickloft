@@ -11,7 +11,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 7] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid"];
+pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -23,6 +23,7 @@ pub const BEZIER: usize = 3;
 pub const SPHERE: usize = 4;
 pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
+pub const CUBE: usize = 7;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -144,10 +145,11 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Sphere => SPHERE,
         Form::Revolve => REVOLVE,
         Form::Pyramid => PYRAMID,
+        Form::Cube => CUBE,
     }
 }
 
-/// The points a form of kind `form` (one of `ARCH` to `PYRAMID`) starts
+/// The points a form of kind `form` (one of `ARCH` to `CUBE`) starts
 /// from, and a Bezier curve's weights: where the editor sets one down, and
 /// what a form added from outside gets if it is given none of its own.
 pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
@@ -155,6 +157,8 @@ pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
         CIRCLE | PYRAMID => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        // standing on the floor
+        CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
         BEZIER => (vec![cell(-8.0, 0.0, 0.0), cell(0.0, 0.0, 12.0), cell(8.0, 0.0, 0.0)], vec![1.0, 1.0, 1.0]),
         // resting on the floor
@@ -195,6 +199,9 @@ pub enum Handle {
     Radius,
     /// pulls an arch's crown up or down
     Rise,
+    /// One side of a cube, which it moves in or out: 0 and 1 are its low
+    /// and its high side along x, 2 and 3 along y, 4 and 5 along z.
+    Side(usize),
 }
 
 pub struct State {
@@ -566,11 +573,12 @@ impl State {
     }
 
     /// Make the form being edited larger or smaller by `cells` of radius,
-    /// if it is one with a single size all round: a circle, a sphere or a
-    /// pyramid. Returns whether it is. By whole cells, so that a radius that
-    /// ends on the lattice still does.
+    /// if it is one with a single size all round: a circle, a sphere, a
+    /// pyramid or a cube (which keeps its proportions as nearly as whole
+    /// microbricks allow). Returns whether it is. By whole cells, so that a
+    /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -800,6 +808,11 @@ impl State {
         if spec.form == Form::Torus {
             (spec.form, spec.tube, spec.fill) = (Form::Circle, true, false);
         }
+        // a cube is never a round tube (see `brickloft_core::spec::Form::Cube`),
+        // whatever the form it was made from left behind
+        if spec.form == Form::Cube {
+            spec.tube = false;
+        }
         self.form = form_index(spec.form);
         if let Form::Arch(kind) = spec.form {
             self.arch = ARCHES.iter().position(|a| a.1 == kind).unwrap_or(0);
@@ -1010,6 +1023,15 @@ impl State {
                 s.radius = s.radius.floor() + 0.5;
                 s.fill = true;
             }
+            CUBE => {
+                // The same each way, an odd number of microbricks, so that
+                // it is centred on the cell its middle dot is in; and
+                // solid, since a floor or a wall is what it is mostly made
+                // into.
+                s.radius = s.radius.floor() + 0.5;
+                s.stretch = DVec3::ONE;
+                s.fill = true;
+            }
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
@@ -1039,8 +1061,12 @@ impl State {
             BEZIER => Form::Bezier,
             SPHERE => Form::Sphere,
             PYRAMID => Form::Pyramid,
+            CUBE => Form::Cube,
             _ => Form::Revolve,
         };
+        if self.form == CUBE {
+            s.tube = false; // not offered for it, so never left on by the form before
+        }
         // a curve through an arch's points is open, whatever a spline left behind
         if self.form == ARCH && s.points.len() != 3 {
             s.closed = false;
@@ -1223,6 +1249,20 @@ impl State {
         match self.form {
             ARCH if p.len() == 2 => all.push((Handle::Rise, (p[0] + p[1]) / 2.0 + DVec3::Z * self.arch_rise())),
             CIRCLE | SPHERE | PYRAMID if !p.is_empty() => all.push((Handle::Radius, p[0] + self.radius_dir() * self.spec.radius)),
+            // A dot at the middle of each side, where the bricks end. No
+            // radius dot: it would move all six sides at once, which
+            // Ctrl + scroll does, and seven dots round a small cube leave
+            // little of it to see.
+            CUBE if !p.is_empty() => {
+                let snapped = self.spec.snapped();
+                let sides = brickloft_core::spec::cube_sides(&snapped, snapped.points[0]);
+                for side in 0..6 {
+                    // the middle of the box as built, which is half a cell off its point when it could not be centred there
+                    let mut at = DVec3::from_array(sides.map(|(low, high)| (low + high) / 2.0));
+                    at[side / 2] = if side % 2 == 0 { sides[side / 2].0 } else { sides[side / 2].1 };
+                    all.push((Handle::Side(side), at));
+                }
+            }
             _ => {}
         }
         // where they are in the workspace, which is where they are drawn and dragged
@@ -1304,13 +1344,38 @@ impl State {
         self.grab = Some(held);
     }
 
-    /// Start another grid: a copy of the form being edited, on a grid of
-    /// its own, level until its rings are turned.
+    /// A cube as the menu starts one, to be added to the workspace: every
+    /// new form begins as this, in the plain colour, and is made into
+    /// whatever is wanted from there.
+    ///
+    /// Adding a form used to add another of the one being edited. That
+    /// was a copy when a copy was wanted and something to undo when it was
+    /// not: a second rug, with its pattern and colours, where a wall was
+    /// meant. A copy has a button and a key of its own now (see
+    /// [`State::add_copy`]). How the form being edited is fitted (its
+    /// longest brick, its brick size) is carried over, being a choice
+    /// about the build more than about one form.
+    fn fresh_cube(&self) -> Spec {
+        let fresh = Spec::default();
+        let radius = fresh.radius.floor() + 0.5; // as `preset_settings` starts one
+        let (points, _) = usual_points(CUBE, radius);
+        let s = &self.spec;
+        Spec { form: Form::Cube, points, radius, fill: true, max_ext: s.max_ext, grain: s.grain, budget: s.budget, simplify: s.simplify, wedges: s.wedges, ..fresh }
+    }
+
+    /// Start another grid with a new cube on it (see [`State::fresh_cube`]),
+    /// level until its rings are turned.
     pub fn add_grid(&mut self) {
         let next = std::iter::once(self.spec.on_grid).chain(self.others.iter().map(|o| o.spec.on_grid)).max().unwrap_or(0) + 1;
-        let paint = self.paint.clone();
-        self.add_form(Spec { on_grid: next, grid: LEVEL, grid_at: [0.0; 3], ..self.full_spec() });
-        self.paint = paint;
+        self.add_form(Spec { on_grid: next, ..self.fresh_cube() });
+        self.lock = Lock::Free;
+    }
+
+    /// Add a new cube (see [`State::fresh_cube`]) to the grid of the form
+    /// being edited, set down beside what is there.
+    pub fn add_cube(&mut self) {
+        self.add_form(Spec { on_grid: self.spec.on_grid, grid: self.spec.grid, grid_at: self.spec.grid_at, ..self.fresh_cube() });
+        self.lock = Lock::Free;
     }
 
     /// Add a copy of the form being edited to its grid: the same form,
@@ -1474,6 +1539,34 @@ impl State {
         }
         let held = if handle == Handle::Move { self.grab } else { self.dots().iter().find(|(h, _)| *h == handle).map(|h| h.1) };
         let Some(at) = held else { return };
+        // A side of a cube moves along the one axis it faces, to wherever
+        // on that axis the cursor's ray comes nearest, as an arrow does. In
+        // the plane facing the eye, as the radius dot is dragged, a side
+        // that faces away from the eye hardly moved at all: the cursor
+        // going up the screen is then mostly a movement upwards.
+        //
+        // The side opposite stays where it is, so the middle moves by half
+        // as much. A circle's middle stays put when its rim is pulled, and
+        // a cube could have done the same; but a box is laid against
+        // things, a floor up to a wall, and with both sides moving at once
+        // the one already in place would have to be put back after every
+        // change to the other.
+        if let Handle::Side(side) = handle {
+            let snapped = self.spec.snapped();
+            let Some(&middle) = snapped.points.first() else { return };
+            let (axis, (low, high)) = (side / 2, brickloft_core::spec::cube_sides(&snapped, middle)[(side / 2).min(2)]);
+            let Some(gone) = along_line(at, [DVec3::X, DVec3::Y, DVec3::Z][axis], origin, dir) else { return };
+            // on a whole microbrick, never past the side opposite, and no further out than any dot goes
+            let (low, high) = if side % 2 == 0 { ((low + gone).round().clamp(-HANDLE_LIMIT, high - 1.0), high) } else { (low, (high + gone).round().clamp(low + 1.0, HANDLE_LIMIT)) };
+            // The same sides as a middle, half a side and a stretch, which
+            // is how the form is kept (see `Form::Cube`): the radius and
+            // the other four sides exactly as the build has them now.
+            self.spec.radius = snapped.radius;
+            self.spec.points[0] = middle;
+            self.spec.points[0][axis] = (low + high) / 2.0;
+            self.spec.stretch[axis] = (high - low) / 2.0 / snapped.radius;
+            return;
+        }
         let normal = match (handle, self.lock) {
             (Handle::Point(_) | Handle::Move | Handle::Pull(_), Lock::Axis(a)) => [DVec3::X, DVec3::Y, DVec3::Z][a],
             _ => view,
@@ -1528,7 +1621,7 @@ impl State {
                 }
                 self.move_by(by, at);
             }
-            Handle::Slide(_) | Handle::Spin(_) => unreachable!("answered above"),
+            Handle::Slide(_) | Handle::Spin(_) | Handle::Side(_) => unreachable!("answered above"),
             Handle::Pull(i) => {
                 let Some(&(from, _)) = self.spec.pulls.get(i) else { return };
                 let mut by = DVec3::new(snap(hit.x - from.x), snap(hit.y - from.y), snap(hit.z - from.z));
