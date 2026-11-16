@@ -1656,7 +1656,7 @@ fn lay_tiles(fit: Fit, region: &dyn Fn(DVec2) -> f64, settings: &Mosaic, axis: u
 /// The tops were first laid as they were worked out, a brick to a cell,
 /// and a bevelled wall was a mesh of lines: eleven bricks along the side
 /// of one stone where one would do.
-fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
+pub(crate) fn joined(bricks: Vec<(CellBrick, u8)>, limit: i32) -> Vec<(CellBrick, u8)> {
     let mut bricks = bricks;
     for along in 0..3 {
         // whether a shape is the same at both ends of this axis: every corner filled or not as the corner opposite it along the axis is

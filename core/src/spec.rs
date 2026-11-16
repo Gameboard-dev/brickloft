@@ -628,6 +628,148 @@ fn pattern_flat_faces(spec: &Spec, built: &mut Built) {
     (built.bricks, built.shades) = (bricks, shades);
 }
 
+/// Lay a patterned form's pattern on its flat sides too.
+///
+/// A pattern is tiles pushed through a form one way, so it shows on the
+/// two faces across that way and, on the form's sides, only as the tiles'
+/// ends: stripes. On a floor a cell or two deep that is all a side is.
+/// On a box with some height the sides are faces of their own, and want
+/// the pattern as much as the top does.
+///
+/// So where the form's outermost layer of cells, either of the other two
+/// ways, is whole bricks open to the air over at least half the form's
+/// length each way (and four cells at the least), that layer is taken off
+/// and the pattern laid there in its place, one cell deep, seen from that
+/// side. A box has four such sides. A disc has none: its rim is a curve,
+/// and the short flat steps a curve is built of are not faces. The top and
+/// bottom cells of the form are left to the pattern that runs through
+/// it, so that the top face's own edge is not overwritten by a side's.
+/// A cell in a corner, open two ways, goes to whichever side is taken
+/// first.
+///
+/// Which cells are open is asked of a grid of every cell the form fills,
+/// one bit apiece: a brick's neighbours are not otherwise to be found
+/// without searching every other brick. A form too large for such a grid
+/// to be reasonable keeps its sides as they are.
+fn pattern_side_faces(spec: &Spec, built: &mut Built) {
+    let Some(mosaic) = &spec.mosaic else { return };
+    if built.shades.len() != built.bricks.len() || built.bricks.is_empty() {
+        return;
+    }
+    // the least a side must be each way to be a face, and the most cells a form may fill for its sides to be looked for
+    const LEAST_SIDE: i32 = 4;
+    const MOST_CELLS: i64 = 1 << 26;
+    let lo = [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k]).min().unwrap_or(0));
+    let hi = [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap_or(0));
+    let size = [0, 1, 2].map(|k| (hi[k] - lo[k]) as i64);
+    if size.iter().product::<i64>() > MOST_CELLS {
+        return;
+    }
+    // the way the pattern runs through the form: the way most of its bricks run from one face to the other
+    let through = (0..3).max_by_key(|k| built.bricks.iter().filter(|b| b.min[*k] == lo[*k] && b.ext[*k] == hi[*k] - lo[*k]).count()).unwrap_or(2);
+    if hi[through] - lo[through] < LEAST_SIDE + 2 {
+        return;
+    }
+    let at = |cell: [i32; 3]| (0..3).all(|k| cell[k] >= lo[k] && cell[k] < hi[k]).then(|| (((cell[2] - lo[2]) as i64 * size[1] + (cell[1] - lo[1]) as i64) * size[0] + (cell[0] - lo[0]) as i64) as usize);
+    let cells_of = |min: [i32; 3], ext: [i32; 3]| (0..ext[2]).flat_map(move |z| (0..ext[1]).flat_map(move |y| (0..ext[0]).map(move |x| [min[0] + x, min[1] + y, min[2] + z])));
+    let mut filled = vec![false; size.iter().product::<i64>() as usize];
+    for brick in &built.bricks {
+        for cell in cells_of(brick.min, brick.ext) {
+            filled[at(cell).unwrap()] = true;
+        }
+    }
+    // the faces: which way each looks, the layer of cells it is, and its cells
+    let mut claimed = vec![false; filled.len()];
+    let mut faces: Vec<(usize, i32, Vec<(i32, i32)>)> = Vec::new();
+    for side in (0..3).filter(|k| *k != through) {
+        let (ua, va) = match side {
+            0 => (1, 2),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        for outwards in [-1, 1] {
+            let mut layers: std::collections::BTreeMap<i32, Vec<[i32; 3]>> = std::collections::BTreeMap::new();
+            for brick in built.bricks.iter().filter(|b| b.mask == CUBE) {
+                let layer = if outwards < 0 { brick.min[side] } else { brick.min[side] + brick.ext[side] - 1 };
+                let (mut min, mut ext) = (brick.min, brick.ext);
+                (min[side], ext[side]) = (layer, 1);
+                for cell in cells_of(min, ext).filter(|cell| cell[through] > lo[through] && cell[through] < hi[through] - 1) {
+                    let mut beyond = cell;
+                    beyond[side] += outwards;
+                    if at(beyond).is_none_or(|k| !filled[k]) && !claimed[at(cell).unwrap()] {
+                        layers.entry(layer).or_default().push(cell);
+                    }
+                }
+            }
+            for (layer, cells) in layers {
+                let span = |k: usize| cells.iter().map(|cell| cell[k]).max().unwrap() - cells.iter().map(|cell| cell[k]).min().unwrap() + 1;
+                // A side of the form, and not a step of a curve: it is the
+                // form's outermost layer that way, and runs at least half
+                // the form's length each way across it. The rim of a disc
+                // is steps a few cells long, each flat and open to the
+                // air, and a patch of pattern on every one made a curve
+                // into a patchwork.
+                let outermost = layer == if outwards < 0 { lo[side] } else { hi[side] - 1 };
+                let broad = |k: usize| span(k) >= LEAST_SIDE && 2 * span(k) >= hi[k] - lo[k];
+                if !outermost || !broad(ua) || !broad(va) {
+                    continue;
+                }
+                for cell in &cells {
+                    claimed[at(*cell).unwrap()] = true;
+                }
+                let mut flat: Vec<(i32, i32)> = cells.iter().map(|cell| (cell[ua], cell[va])).collect();
+                flat.sort_by_key(|(u, v)| (*v, *u));
+                faces.push((side, layer, flat));
+            }
+        }
+    }
+    if faces.is_empty() {
+        return;
+    }
+    // Every whole brick gives up its cells that are part of a face. Such a
+    // cell is in one of the brick's six outer layers (it is open to the
+    // air one way), so the brick is peeled a layer at a time, each layer
+    // that holds any: the rest of that layer stays as loose cells, to be
+    // joined up again, and what is left of the brick stays one brick.
+    let (mut bricks, mut shades): (Vec<CellBrick>, Vec<u8>) = (Vec::with_capacity(built.bricks.len()), Vec::with_capacity(built.bricks.len()));
+    let mut loose: Vec<(CellBrick, u8)> = Vec::new();
+    for (brick, shade) in built.bricks.iter().zip(&built.shades) {
+        let (mut min, mut ext) = (brick.min, brick.ext);
+        if brick.mask == CUBE {
+            for k in 0..3 {
+                for far in [false, true] {
+                    if ext.contains(&0) {
+                        continue;
+                    }
+                    let (mut from, mut span) = (min, ext);
+                    (from[k], span[k]) = (if far { min[k] + ext[k] - 1 } else { min[k] }, 1);
+                    if !cells_of(from, span).any(|cell| claimed[at(cell).unwrap()]) {
+                        continue;
+                    }
+                    loose.extend(cells_of(from, span).filter(|cell| !claimed[at(*cell).unwrap()]).map(|cell| (CellBrick { mask: CUBE, min: cell, ext: [1; 3] }, *shade)));
+                    ext[k] -= 1;
+                    if !far {
+                        min[k] += 1;
+                    }
+                }
+            }
+        }
+        if !ext.contains(&0) {
+            bricks.push(CellBrick { mask: brick.mask, min, ext });
+            shades.push(*shade);
+        }
+    }
+    for (brick, shade) in crate::pattern::joined(loose, spec.max_ext.max(1)) {
+        bricks.push(brick);
+        shades.push(shade);
+    }
+    let opts = fit_planar::Opts { brick_cost: 0.0, max_ext: spec.max_ext, wedges: spec.wedges };
+    for (side, layer, flat) in &faces {
+        crate::pattern::lay_mosaic_on(flat, mosaic, *side, *layer, 1, &opts, &mut bricks, &mut shades);
+    }
+    (built.bricks, built.shades) = (bricks, shades);
+}
+
 fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
     let g = grain.max(1) as f64;
     let coarse = coarse(spec, grain);
@@ -646,6 +788,7 @@ fn build_at(spec: &Spec, grain: i32, measured: bool) -> Result<Built, String> {
     };
     if grain == 1 {
         pattern_flat_faces(&coarse, &mut built);
+        pattern_side_faces(&coarse, &mut built);
     }
     // (a mirrored form is its own mirror image, so its bricks are held to it too)
     // (not a build laid in a pattern's colours, which name its bricks one by one)
@@ -3011,6 +3154,40 @@ mod tests {
         for (n, a) in built.bricks.iter().enumerate().filter(|(_, a)| a.mask == CUBE) {
             assert!(built.bricks[n + 1..].iter().filter(|b| b.mask == CUBE).all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
         }
+    }
+
+    #[test]
+    fn a_pattern_is_laid_on_the_sides_of_a_form_with_some_height() {
+        // a block 40 by 30 and 12 high, as a filled closed outline, laid as planks
+        let block = |depth: i32, mosaic| Spec { form: Form::Spline, points: vec![DVec3::new(-19.5, 0.5, 0.5), DVec3::new(20.5, 0.5, 0.5)], thick: 30.0, depth, plane: 2, mosaic, ..Spec::default() };
+        let planks = crate::pattern::STYLES.iter().position(|style| style.name == "planks").unwrap();
+        let laid = |depth: i32| build(&block(depth, Some(crate::pattern::Mosaic { style: planks, size: 2, bevel: 0, border: 0, seed: 3, mortar: true, stagger: -1, upright: false, uneven: [0; 3] }))).unwrap();
+        let (plain, built) = (build(&block(12, None)).unwrap(), laid(12));
+        assert_eq!(built.shades.len(), built.bricks.len());
+        let (lo, hi) = ([0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k]).min().unwrap()), [0, 1, 2].map(|k| built.bricks.iter().map(|b| b.min[k] + b.ext[k]).max().unwrap()));
+        // On each of the four sides, between the top cell and the bottom
+        // one, the colours change going up the side: a pattern seen from
+        // the side, where tiles pushed through from the top would give
+        // every column of a side one colour from top to bottom.
+        let colour_at = |cell: [i32; 3]| built.bricks.iter().zip(&built.shades).find(|(b, _)| (0..3).all(|k| cell[k] >= b.min[k] && cell[k] < b.min[k] + b.ext[k])).map(|(_, shade)| *shade);
+        for (side, at) in [(0, lo[0]), (0, hi[0] - 1), (1, lo[1]), (1, hi[1] - 1)] {
+            let other = 1 - side;
+            let changing = (lo[other] + 2..hi[other] - 2).filter(|along| {
+                let column: HashSet<Option<u8>> = (lo[2] + 1..hi[2] - 1).map(|up| { let mut cell = [0, 0, up]; (cell[side], cell[other]) = (at, *along); colour_at(cell) }).collect();
+                assert!(!column.contains(&None), "a cell of the side is empty");
+                column.len() > 1
+            }).count();
+            assert!(changing > 5, "side {side} at {at}: {changing} columns change colour going up");
+        }
+        // the same room is filled as with no pattern, each cell once
+        let cells = |built: &Built| built.bricks.iter().map(|b| b.ext.iter().product::<i32>()).sum::<i32>();
+        assert_eq!(cells(&built), cells(&plain));
+        for (n, a) in built.bricks.iter().enumerate() {
+            assert!(built.bricks[n + 1..].iter().all(|b| (0..3).any(|k| a.min[k] + a.ext[k] <= b.min[k] || b.min[k] + b.ext[k] <= a.min[k])), "two bricks share room");
+        }
+        // a floor two deep has no sides to speak of: every brick runs through it
+        let floor = laid(2);
+        assert!(floor.bricks.iter().all(|b| b.min[2] == floor.bricks[0].min[2] && b.ext[2] == 2));
     }
 
     #[test]
