@@ -119,11 +119,12 @@ The settings Claude can give:
 
 | Setting | Meaning |
 |---|---|
-| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve` or `pyramid` |
-| `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, or the points of a curve or profile. A form added without points starts where the editor would start one. |
+| `form` | `arch round`, `arch pointed`, `arch triangular`, `arch elliptical`, `arch parabolic`, `arch catenary`, `circle`, `spline`, `bezier`, `sphere`, `revolve`, `pyramid` or `cube` |
+| `points` | The form's own points as `[x, y, z]`: an arch's feet, a centre, a cube's middle, or the points of a curve or profile. A form added without points starts where the editor would start one. |
 | `radius`, `rise`, `thick`, `depth` | Sizes in microbricks |
 | `fill`, `tube`, `closed` | Solid or shell, round tube or flat band, closed loop |
 | `stretch`, `cut`, `plane`, `weights` | Stretch per axis, the part of a sphere to keep, the axis a circle faces, a Bézier curve's pulls |
+| `radius` and `stretch` of a `cube` | `radius` is half the cube's side, and `stretch` scales it along x, y and z. A floor 40 by 30 and 2 deep is `radius` 20 with `stretch` `[1, 0.75, 0.05]`. Each length is rounded to a whole microbrick. With `fill` false the cube is hollow, with walls `thick` on every side. `depth`, `tube` and `plane` do nothing to a cube. |
 | `mirror`, `flip`, `turned` | Mirroring per axis, flipping per axis, quarter turns |
 | `pulls`, `pull_reach` | Points added to pull the form out of shape, and their reach |
 | `stones` | `[size, gap, uneven, seed]` lays a flat band or filled outline as stepping stones; a `gap` of 0 fits the stones together; `none` for solid brick |

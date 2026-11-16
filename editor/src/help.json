@@ -1,5 +1,5 @@
 {
-  "add_to_this_grid": "Another of this form on the same grid, set down beside it. The two are kept clear of each other and turn together.",
+  "add_to_this_grid": "A new cube on the same grid as the form being edited, set down beside what is there. Forms on one grid are kept clear of each other and turn together. Choose another kind from Form, or drag the cube's dots to make it a floor or a wall.",
   "arch_askew": "This arch runs at an angle to the brick grid: its feet differ along both X and Y. No flat outline can be fitted to it, so it is fitted cell by cell and comes out stepped.",
   "arch_kind": "The shape of the arch between its two feet.",
   "bezier_pull": "How strongly this point draws the curve towards itself. 1 is neutral.",
@@ -15,9 +15,11 @@
   "colour_runs_along": "The direction a blend or stripes run in across the form.",
   "colours": "The colours used. Click one to change it. A blend or stripes take up to four and a pattern up to eight, added with + and taken away with -. Right-click a colour to copy it, and right-click another to paste it there.",
   "copy_to_clipboard": "Writes everything in the workspace to brickloft-build.brz, a Brickadia prefab file, and puts that file on the clipboard. Ctrl+C does the same, and Ctrl+V adds the forms of a copied file back to the workspace.",
+  "cube_size": "How long the cube is along this axis, in whole microbricks. Its middle stays where it is. To move one side alone, drag the dot on it. A pattern is laid through the shortest of the three lengths, so it shows on the largest face.",
   "depth": "How deep a flat band is, measured across the plane its curve lies in.",
   "discrepancy": "The volume where the bricks and the true form disagree: missing material plus extra material.",
   "dots_move": "Which way a dragged dot moves: in the plane facing the camera, or with one of its coordinates kept as it is.",
+  "duplicate_form": "A copy of the form being edited on the same grid, coloured the same, set down beside it. Ctrl+D does the same.",
   "facing": "The axis the circle faces along. Z lays it flat.",
   "fill_curve": "Fills everything the curve encloses: a ring becomes a disc, an arch a filled arch.",
   "flip": "Mirror the finished form along an axis, about the middle of its points.",
@@ -30,7 +32,7 @@
   "mirror": "Make the form its own mirror image along an axis: its low side along that axis is kept, and the high side becomes its mirror image, about the middle of the form's dots. An arch with one foot higher than the other gets two feet alike; a point added to one side of a circle appears on the other too.",
   "natural_height": "Ticked, the arch takes the height its shape gives it: a round arch is a semicircle. Dragging the top dot sets your own height.",
   "neighbouring_dots_follow": "How much of a dragged dot's movement the dots near it share: 0 moves it alone, 1 takes its nearest neighbours almost all the way with it. The share falls away with distance, out to three times the reach of added points.",
-  "new_grid": "Another of this form on a grid of its own, which its rings turn to any angle and its arrows move, apart from every other grid.",
+  "new_grid": "A new cube on a grid of its own, which its rings turn to any angle and its arrows move, apart from every other grid.",
   "pattern": "A pattern to lay the form as, in place of solid brick. Stepping stones are separate stones of any shape, or with the gap at 0 stones fitted together. Medallions repeats a few ringed figures over the whole floor. Rug is a Persian carpet: nested borders, a lobed medallion with pendants, corner pieces, and scrolling stems with flowers and leaves. Planks is a floor of boards. Bricks is courses of bricks, every one a rectangle. Cobblestone is stones of any shape fitted together. Both can be as uneven as you ask, with or without mortar, and with their tops bevelled. Choosing a pattern brings its colours with it unless you have set your own: the first colour is the ground or the mortar, and the others are shared among the pattern's parts, up to eight.",
   "pattern_bevel": "How many microbricks of each piece's top slope down to its edge, all round it. A brick has a sloped brick along each side and a hipped one at each corner; a cobble's bevel is rougher, its sides being at any angle. 0 leaves the tops flat. It can be no more than one less than the form's Depth.",
   "pattern_border": "How many microbricks of plain ground are left round the edge of the pattern.",
@@ -68,6 +70,7 @@
   "snap_after_every_drag": "Runs Snap to best fit nearby by itself each time a drag ends.",
   "snap_best_fit": "A form fits cleanly only where its surfaces land on the brick grid. This tries each dot and size up to a microbrick either way and keeps whatever fits closest.",
   "snap_half_microbricks": "Dots snap to half microbricks, which are single game units. Unticked they snap to whole microbricks.",
+  "solid_cube": "Solid all through, or hollow with walls as thick as Wall thickness on every side. A hollow box too short to have a hollow inside is open through its shortest length: a frame.",
   "solid_pyramid": "Solid all through, or a hollow tent open underneath.",
   "solid_revolve": "Solid all through, or a shell along the profile as thick as Wall thickness: a vase or a bowl.",
   "solid_sphere": "Solid all through, or a hollow shell as thick as Wall thickness.",
@@ -84,6 +87,6 @@
   "tube_section": "How a round tube's section is made. Rounded is a pipe with chamfered edges. Protruded is flat bands of different widths side by side: smooth along the curve and stepped across it.",
   "whole_circle": "Builds the whole circle through the three points, where unticked it is the arc from the first point to the last.",
   "workspace": "Forms stand on grids. Forms on one grid are kept clear of each other, and are turned and moved together by the rings and arrows. Hold Ctrl while dragging the form being edited to move it into another instead: the two are then one build, and the moved form gives up the room they share. Grids pass through each other.",
-  "workspace_buttons": "Add to this grid sets another of this form beside it on the same grid: the two are kept clear of each other and turn together. New grid gives the new form a grid of its own, which its rings turn to any angle. Remove takes the form being edited out of the workspace.",
+  "workspace_buttons": "Add to this grid sets a new cube beside the forms on this grid: they are kept clear of each other and turn together. New grid gives the new cube a grid of its own, which its rings turn to any angle. Duplicate adds a copy of the form being edited to its grid, in the same colours. Remove takes the form being edited out of the workspace.",
   "workspace_form": "Edit this form, and its grid. Clicking it in the view does the same."
 }

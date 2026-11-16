@@ -16,6 +16,11 @@ use crate::shapes::{CellBrick, CUBE, UPRIGHT};
 use glam::{DVec2, DVec3};
 use std::f64::consts::PI;
 
+// In a file of its own, as the newest form and one that shares nothing with
+// the others but the flat outline it ends as.
+mod cube;
+pub use cube::{sides as cube_sides, through as cube_through};
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Form {
     /// 3 points: the circular arc through them (`closed`: the whole circle)
@@ -37,6 +42,10 @@ pub enum Form {
     /// 1 point, the middle of its base: a pyramid `radius` to each side of
     /// it (scaled by `stretch` along x and y) and `rise` tall
     Pyramid,
+    /// 1 point, its middle: a box `radius` to each side of it, scaled by
+    /// `stretch` along each axis. A cube until it is stretched; a floor or
+    /// a wall when one length is made short.
+    Cube,
 }
 
 /// A form to build. Lengths are in cells; points sit in cell space, where
@@ -1107,6 +1116,7 @@ fn solid_as_made(spec: &Spec) -> Result<(Solid, Vec<DVec3>), String> {
             let Solid::Volume { min, max, .. } = solid else { unreachable!() };
             Ok((Solid::Pyramid { bricks: fit_pyramid(&pyramid), field, min, max }, path))
         }
+        Form::Cube => cube::cube(spec, need(1)?[0]),
         Form::Revolve => {
             let p = need(2)?;
             let axis = p[0].truncate();

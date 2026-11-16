@@ -1,7 +1,7 @@
 //! The side panel: every setting of the form that is not a handle in the view.
 
 use crate::paint::{Mode, MODES};
-use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
+use crate::state::{Cut, Lock, State, ARCH, ARCHES, BEZIER, CIRCLE, CUBE, FORMS, PYRAMID, REVOLVE, SPHERE, SPLINE};
 use brickloft_core::shapes::{shape_info, Kind};
 use three_d::egui::{self, Color32, ComboBox, Slider, Ui};
 
@@ -328,6 +328,27 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                     helped(ui, help("stretch_circle"), |ui| ui.add_enabled(!across || s.tube, Slider::new(&mut s.stretch[axis], 0.25..=1000.0).logarithmic(true).text(if across { format!("{name} (the tube's depth)") } else { name.to_string() })));
                 }
             }
+            CUBE => {
+                // Its three lengths in microbricks, as it is built. The
+                // form keeps half a side and a stretch along each axis
+                // (see `brickloft_core::spec::Form::Cube`), and a slider
+                // for each of those would be four sliders for three
+                // lengths, none of them in the units a wall is measured in.
+                let snapped = s.snapped();
+                if let Some(&middle) = snapped.points.first() {
+                    let sides = brickloft_core::spec::cube_sides(&snapped, middle);
+                    for (axis, (low, high)) in sides.into_iter().enumerate() {
+                        let before = high - low;
+                        let mut size = before;
+                        helped(ui, help("cube_size"), |ui| ui.add(Slider::new(&mut size, 1.0..=(2.0 * largest).max(1.0)).logarithmic(true).step_by(1.0).clamping(egui::SliderClamping::Never).text(format!("Size along {}", ["X", "Y", "Z"][axis]))));
+                        if size != before && size.is_finite() {
+                            // about its middle, which stays where it is
+                            s.radius = snapped.radius;
+                            s.stretch[axis] = size.round().clamp(1.0, 2.0 * brickloft_core::spec::MAX_SPAN) / 2.0 / snapped.radius;
+                        }
+                    }
+                }
+            }
             BEZIER => {
                 ui.label("Pull of each point (higher draws the curve closer):");
                 s.weights.resize(s.points.len(), 1.0);
@@ -390,6 +411,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             PYRAMID => {
                 helped(ui, help("solid_pyramid"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow tent)"));
             }
+            // (no round tube: see `brickloft_core::spec::Form::Cube`)
+            CUBE => {
+                helped(ui, help("solid_cube"), |ui| ui.checkbox(&mut s.fill, "Solid (untick for a hollow box or a frame)"));
+            }
             _ => {
                 helped(ui, help("fill_curve"), |ui| ui.checkbox(&mut s.fill, "Fill the area the curve encloses"));
                 helped(ui, help("round_tube"), |ui| ui.checkbox(&mut s.tube, "Round tube instead of a flat band"));
@@ -404,15 +429,16 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
             });
         }
         let wall = match state.form {
-            SPHERE | REVOLVE | PYRAMID => "Wall thickness",
+            SPHERE | REVOLVE | PYRAMID | CUBE => "Wall thickness",
             _ => "Thickness",
         };
-        // (a pyramid's wall is measured straight up, and only a hollow one has any)
-        if !(state.form == PYRAMID && s.fill) {
+        // (a pyramid's wall is measured straight up, and only a hollow one has any; nor has a solid cube)
+        if !(matches!(state.form, PYRAMID | CUBE) && s.fill) {
             helped(ui, help("thickness"), |ui| ui.add(Slider::new(&mut s.thick, 0.5..=largest).logarithmic(true).step_by(0.5).text(wall)));
         }
         // (a round tube too: a pattern is laid on whatever of a form is flat, see `brickloft_core::spec::pattern_flat_faces`)
-        if is_curve {
+        // (and a cube, which is its largest face pushed through its shortest length)
+        if is_curve || state.form == CUBE {
             // One pattern in place of solid brick, or none: see
             // `brickloft_core::pattern`. One list and not a tickbox for
             // each, since a form has one pattern at most. 0 is none, 1
@@ -508,7 +534,10 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Asked {
                 let sets = crate::paint::palettes(named(choice));
                 state.paint.colours = sets[seed as usize % sets.len()].to_vec();
             }
-            helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
+            // (a cube's depth is one of its three lengths)
+            if state.form != CUBE {
+                helped(ui, help("depth"), |ui| ui.add(Slider::new(&mut s.depth, 1..=largest as i32).logarithmic(true).text("Depth")));
+            }
         }
         if !s.pulls.is_empty() {
             helped(ui, help("reach_of_added_points"), |ui| ui.add(Slider::new(&mut s.pull_reach, 1.0..=largest).logarithmic(true).step_by(0.5).text("Reach of added points")));
@@ -684,13 +713,16 @@ fn workspace(ui: &mut Ui, state: &mut State) {
             state.activate(k);
         }
     }
-    ui.label("Ctrl+C copies the form being edited and any marked +. Ctrl + click a form to mark it, Ctrl+A for all.");
+    ui.label("Ctrl+C copies the form being edited and any marked +. Ctrl + click a form to mark it, Ctrl+A for all. Ctrl+V pastes what was copied onto this grid. Ctrl+D duplicates the form being edited.");
     ui.horizontal(|ui| {
         if ui.button("Add to this grid").on_hover_text(help("add_to_this_grid")).clicked() {
-            state.add_copy();
+            state.add_cube();
         }
         if ui.button("New grid").on_hover_text(help("new_grid")).clicked() {
             state.add_grid();
+        }
+        if ui.button("Duplicate").on_hover_text(help("duplicate_form")).clicked() {
+            state.add_copy();
         }
         if ui.add_enabled(!state.others.is_empty(), egui::Button::new("Remove")).on_hover_text(help("remove_form")).clicked() {
             state.remove_active();
