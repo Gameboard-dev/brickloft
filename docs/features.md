@@ -114,15 +114,15 @@ Several forms can be worked on together.
 - Forms on the same grid are kept clear of each other: one dragged into
   another stops beside it or comes to rest on top of it, and one reshaped
   until it reaches another pushes that one away.
-- **Shift + drag a form** to move it into another form on its grid and
-  join the two into one build (see [Joining forms](#joining-forms)).
+- **Ctrl + drag the form being edited** to move it into another form on
+  its grid and join the two into one build (see [Joining forms](#joining-forms)).
 - **Delete** removes the form being edited. **Ctrl+Z** and **Ctrl+Y** undo
   and redo.
 
 ### Joining forms
 
-A form dragged with **Shift** held goes where it is dragged, into other
-forms if that is where, so a tower can be sunk into a wall or a dome set
+The form being edited, dragged with **Ctrl** held, goes where it is
+dragged, into other forms if that is where, so a tower can be sunk into a wall or a dome set
 into a roof. The moved form is then joined to the others on its grid. It
 gives up the room it shares with them, so that no two bricks overlap, which
 the game would refuse. The other forms keep all their bricks.
@@ -134,10 +134,14 @@ show a notch a cell or two deep where the moved form's sloped surface meets
 the other form.
 
 A joined form stays where it is when a form it sits in is reshaped, where
-an unjoined one would be pushed clear. Dragging it again without Shift
+an unjoined one would be pushed clear. Dragging it again without Ctrl
 sets it clear of the others. Being joined is not remembered by undo or by a
 save. After Ctrl+Z, or when a save is opened again, drag the form with
-Shift once more to join it.
+Ctrl once more to join it.
+
+Ctrl + click on a form that is not being edited marks it for copying, so
+click the form first to edit it and then drag it with Ctrl. Ctrl can also
+be pressed after the drag has begun.
 
 ### Grids
 
@@ -354,7 +358,7 @@ before and after a change.
 |---|---|
 | Click a form | edit it |
 | Drag a form by its bricks | move it within its grid |
-| Shift + drag a form | move it into another form and join the two |
+| Ctrl + drag the form being edited | move it into another form and join the two |
 | Drag a dot | reshape the form |
 | Drag an arrow, a ring | move, turn the whole grid |
 | Shift + click a form | add a point to it |

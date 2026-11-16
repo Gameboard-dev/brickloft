@@ -34,7 +34,7 @@ one grid are two sets of bricks, and the editor keeps forms on a grid clear
 of each other for that reason. Blending would fit several forms as one
 solid.
 
-Forms can already be joined without blending. A form dragged with Shift
+Forms can already be joined without blending. A form dragged with Ctrl
 held is moved into another, and its bricks are cut back where the two
 overlap (see [algorithm.md](algorithm.md), "Forms joined on purpose").
 That keeps each form its own bricks and its own settings, at the cost of a

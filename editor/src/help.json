@@ -76,7 +76,7 @@
   "tube_rounded": "A pipe: the edges chamfered round with sloped pieces.",
   "tube_section": "How a round tube's section is made. Rounded is a pipe with chamfered edges. Protruded is flat bands of different widths side by side: smooth along the curve and stepped across it.",
   "whole_circle": "Builds the whole circle through the three points, where unticked it is the arc from the first point to the last.",
-  "workspace": "Forms stand on grids. Forms on one grid are kept clear of each other, and are turned and moved together by the rings and arrows. Hold Shift while dragging a form to move it into another instead: the two are then one build, and the moved form gives up the room they share. Grids pass through each other.",
+  "workspace": "Forms stand on grids. Forms on one grid are kept clear of each other, and are turned and moved together by the rings and arrows. Hold Ctrl while dragging the form being edited to move it into another instead: the two are then one build, and the moved form gives up the room they share. Grids pass through each other.",
   "workspace_buttons": "Add to this grid sets another of this form beside it on the same grid: the two are kept clear of each other and turn together. New grid gives the new form a grid of its own, which its rings turn to any angle. Remove takes the form being edited out of the workspace.",
   "workspace_form": "Edit this form, and its grid. Clicking it in the view does the same."
 }

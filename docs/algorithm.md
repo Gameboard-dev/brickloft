@@ -1961,7 +1961,7 @@ everything on the grid stays where it is.
 ### Forms joined on purpose
 
 Forms on one grid are normally kept clear of each other. A form dragged
-with Shift held is moved into the others instead and marked as joined
+with Ctrl held is moved into the others instead and marked as joined
 (`merge` and `joined` in [editor/src/state.rs](../editor/src/state.rs)).
 The two forms then overlap, and the game refuses a brick whose box overlaps
 another's, so the joined form gives up the room they share. This is done

@@ -294,14 +294,14 @@ pub struct State {
     /// whether Ctrl is held during a drag: a point added to a circle then
     /// moves straight out of the circle's plane instead of within it
     pub lift: bool,
-    /// Whether Shift is held during a drag. A form moved then goes where
+    /// Whether Ctrl is held during a drag. A form moved then goes where
     /// it is dragged, into other forms if that is where, and is not set
     /// down clear of them: the two are to be one build.
     pub merge: bool,
     /// Whether the form being edited was moved into other forms on
     /// purpose. A joined form is not pushed clear of the others when one
     /// of them is reshaped, and gives up to them the room they share (see
-    /// `painted`). Moving it without Shift sets it clear again.
+    /// `painted`). Moving it without Ctrl sets it clear again.
     pub joined: bool,
     /// how much of a dragged dot's movement the dots near it share, 0 to 1
     pub follow: f64,
@@ -1348,7 +1348,7 @@ impl State {
     /// Move the form being edited by so many units, short of any other form
     /// in the way; `held` is the point of it the drag has hold of.
     fn move_by(&mut self, by: [i32; 3], held: DVec3) {
-        // not into another form: onto it or beside it, unless Shift says into it
+        // not into another form: onto it or beside it, unless Ctrl says into it
         let Some(by) = (if self.merge { Some(by) } else { self.clear_of_others(by) }) else { return };
         if by == [0; 3] {
             return;
@@ -2078,7 +2078,7 @@ mod tests {
     }
 
     #[test]
-    fn a_form_moved_with_shift_goes_into_another_and_gives_up_the_room_they_share() {
+    fn a_form_moved_with_ctrl_goes_into_another_and_gives_up_the_room_they_share() {
         let ball = |radius: f64| Spec { form: Form::Sphere, points: vec![cell(0.0, 0.0, 0.0)], radius, ..Spec::default() };
         let mut state = State::new();
         state.load_spec(ball(8.0));
@@ -2089,11 +2089,11 @@ mod tests {
         let apart = [0, 1, 2].map(|k| state.others[0].place[k] - state.place[k]);
         let overlap = |state: &State| Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place);
         let boxes_meet = |all: &[Painted]| all.iter().enumerate().any(|(n, a)| all[n + 1..].iter().any(|b| a.2 != b.2 && (0..3).all(|k| 2 * a.0.min[k] + a.3[k] < 2 * (b.0.min[k] + b.0.ext[k]) + b.3[k] && 2 * b.0.min[k] + b.3[k] < 2 * (a.0.min[k] + a.0.ext[k]) + a.3[k])));
-        // without Shift it stops against the other
+        // without Ctrl it stops against the other
         state.move_by(apart, DVec3::ZERO);
         assert!(!overlap(&state) && !state.joined);
         let whole = state.painted().iter().filter(|b| b.2 == 0).count();
-        // with Shift it goes all the way in, most of the way to the other's middle
+        // with Ctrl it goes all the way in, most of the way to the other's middle
         state.merge = true;
         let most = [0, 1, 2].map(|k| (state.others[0].place[k] - state.place[k]) * 2 / 3);
         state.move_by(most, DVec3::ZERO);
@@ -2110,7 +2110,7 @@ mod tests {
         state.spec.radius = 9.0;
         state.refresh(|| 0.0);
         assert!(state.others[0].joined && Standing::new(&state.others[0].built.bricks, state.others[0].place).meets(cells_of(&state.built.bricks), state.place), "the joined form was pushed out");
-        // moved without Shift, it is set clear again
+        // moved without Ctrl, it is set clear again
         state.activate(0);
         state.merge = false;
         state.move_by([2, 0, 0], DVec3::ZERO);

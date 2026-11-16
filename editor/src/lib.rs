@@ -295,7 +295,10 @@ pub fn run_form(form: usize, claude: bool) {
                 }
                 Event::MouseMotion { position, modifiers, handled, .. } if dragging.is_some() => {
                     state.lift = modifiers.ctrl || modifiers.command;
-                    state.merge = modifiers.shift;
+                    // Ctrl and not Shift: a press with Shift on the form being
+                    // edited adds a point to pull it by, so a drag begun with
+                    // Shift held never moved the form at all.
+                    state.merge = modifiers.ctrl || modifiers.command;
                     let (origin, dir) = (camera.position_at_pixel(*position), camera.view_direction_at_pixel(*position));
                     state.drag(dragging.unwrap(), d(origin), d(dir), d(camera.view_direction()));
                     *handled = true;
