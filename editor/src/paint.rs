@@ -414,8 +414,17 @@ impl Paint {
     /// for a paint with no colours at all, which is then left to whatever
     /// colour the player has selected in the game.
     pub fn colour(&self, brick: &CellBrick, lo: [i32; 3], hi: [i32; 3]) -> Option<[u8; 3]> {
+        self.colour_along(brick, lo, hi, self.axis.min(2), false)
+    }
+
+    /// [`Paint::colour`], with the way a blend or stripes run given and
+    /// not taken from the paint: along `axis`, from the form's low end,
+    /// or if `back` from its high end. A plant's run up it, from its foot,
+    /// whichever way the plant has been turned or flipped (see
+    /// `State::grows_along`).
+    pub fn colour_along(&self, brick: &CellBrick, lo: [i32; 3], hi: [i32; 3], axis: usize, back: bool) -> Option<[u8; 3]> {
         let colours = &self.colours;
-        let (count, axis) = (colours.len(), self.axis.min(2));
+        let count = colours.len();
         if count == 0 {
             return None;
         }
@@ -423,14 +432,16 @@ impl Paint {
             return Some(colours[0]);
         }
         let centre = brick.min[axis] as f64 + brick.ext[axis] as f64 / 2.0;
-        // 0 at the form's low end along the axis, 1 at its high end
+        // how far the brick is from the end the colours start at
+        let far = if back { hi[axis] as f64 - centre } else { centre - lo[axis] as f64 };
+        // 0 at that end of the form, 1 at the other
         let span = (hi[axis] - lo[axis]).max(1) as f64;
-        let along = ((centre - lo[axis] as f64) / span).clamp(0.0, 1.0);
+        let along = (far / span).clamp(0.0, 1.0);
         // where that falls among the colours: 0 is the first, count - 1 the last
         let place = along * (count - 1) as f64;
         Some(match self.mode {
             Mode::Stripes => {
-                let band = ((centre - lo[axis] as f64) / self.width.max(1) as f64).floor().max(0.0) as usize;
+                let band = (far / self.width.max(1) as f64).floor().max(0.0) as usize;
                 colours[band % count]
             }
             _ => {
