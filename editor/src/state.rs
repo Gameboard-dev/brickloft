@@ -11,7 +11,7 @@ use brickloft_core::DVec3;
 /// so the menu works on this index and the arch type is kept beside it.
 /// The forms in the menu. A torus is the Circle as a round tube, and an arc
 /// through three points is an Arch with three, so neither has an entry.
-pub const FORMS: [&str; 8] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube"];
+pub const FORMS: [&str; 9] = ["Arch", "Circle", "Spline", "Bézier", "Sphere", "Revolve", "Pyramid", "Cube", "Plant"];
 
 // Where each is in that list. Named, because the places have changed as
 // forms were merged, and a bare number left behind in a `match` then meant
@@ -24,6 +24,7 @@ pub const SPHERE: usize = 4;
 pub const REVOLVE: usize = 5;
 pub const PYRAMID: usize = 6;
 pub const CUBE: usize = 7;
+pub const TREE: usize = 8;
 
 /// Most points an arch may have: two feet and up to six between.
 pub const ARCH_POINTS: usize = 8;
@@ -146,17 +147,18 @@ pub(crate) fn form_index(form: Form) -> usize {
         Form::Revolve => REVOLVE,
         Form::Pyramid => PYRAMID,
         Form::Cube => CUBE,
+        Form::Tree => TREE,
     }
 }
 
-/// The points a form of kind `form` (one of `ARCH` to `CUBE`) starts
+/// The points a form of kind `form` (one of `ARCH` to `TREE`) starts
 /// from, and a Bezier curve's weights: where the editor sets one down, and
 /// what a form added from outside gets if it is given none of its own.
 pub fn usual_points(form: usize, radius: f64) -> (Vec<DVec3>, Vec<f64>) {
     match form {
         ARCH => (vec![cell(-8.0, 0.0, 0.0), cell(8.0, 0.0, 0.0)], Vec::new()),
         // on the floor
-        CIRCLE | PYRAMID => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
+        CIRCLE | PYRAMID | TREE => (vec![cell(0.0, 0.0, 0.0)], Vec::new()),
         // standing on the floor
         CUBE => (vec![cell(0.0, 0.0, radius.floor())], Vec::new()),
         SPLINE => (vec![cell(-10.0, 0.0, 0.0), cell(-4.0, 0.0, 6.0), cell(4.0, 0.0, 2.0), cell(10.0, 0.0, 8.0)], Vec::new()),
@@ -578,7 +580,7 @@ impl State {
     /// microbricks allow). Returns whether it is. By whole cells, so that a
     /// radius that ends on the lattice still does.
     pub fn resize(&mut self, cells: f64) -> bool {
-        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE);
+        let round = matches!(self.form, CIRCLE | SPHERE | PYRAMID | CUBE | TREE);
         if round {
             self.spec.radius = (self.spec.radius + cells).clamp(0.5, HANDLE_LIMIT);
         }
@@ -883,6 +885,11 @@ impl State {
     /// the radius, or an arch's rise.
     fn tunable(&self, only: Option<Handle>) -> Vec<Tune> {
         let mut all = Vec::new();
+        // A tree has nothing to tune: it fits no better a cell to one
+        // side, and each try would be a second's building.
+        if self.form == TREE {
+            return all;
+        }
         let wanted = |h: Handle| only.is_none_or(|o| o == h);
         for i in 0..self.spec.points.len() {
             for axis in 0..3 {
@@ -1086,11 +1093,34 @@ impl State {
                 s.stretch = DVec3::ONE;
                 s.fill = true;
             }
+            TREE => {
+                let kind = s.tree.kind;
+                self.usual_tree(kind);
+            }
             _ => {}
         }
         if matches!(self.form, SPLINE | BEZIER | REVOLVE) {
             self.lock = Lock::Axis(1);
         }
+    }
+
+    /// Make the form the tree of `kind` as it starts out: its settings, its
+    /// usual size, and its own colours. The seed is kept, so that going
+    /// from kind to kind and back finds the same tree.
+    ///
+    /// The colours come with it because a tree in the one colour a form
+    /// starts in is a grey shape: its parts are told apart by colour.
+    pub fn usual_tree(&mut self, kind: brickloft_core::tree::Kind) {
+        use brickloft_core::tree::{Tree, KINDS};
+        let (height, spread) = Tree::usual_size(kind);
+        self.spec.tree = Tree { seed: self.spec.tree.seed, ..Tree::of(kind) };
+        (self.spec.radius, self.spec.rise) = (spread, Some(height));
+        self.paint = Paint { mode: crate::paint::Mode::Pattern, colours: crate::paint::palette(KINDS[kind as usize].1).to_vec(), ..Paint::default() };
+    }
+
+    /// A tree's height.
+    pub fn tree_height(&self) -> f64 {
+        self.spec.rise.unwrap_or(brickloft_core::tree::Tree::usual_size(self.spec.tree.kind).0)
     }
 
     /// Whether the form is an arch on its two feet alone, which has a kind
@@ -1116,6 +1146,7 @@ impl State {
             SPHERE => Form::Sphere,
             PYRAMID => Form::Pyramid,
             CUBE => Form::Cube,
+            TREE => Form::Tree,
             _ => Form::Revolve,
         };
         if self.form == CUBE {
@@ -1316,6 +1347,13 @@ impl State {
                     at[side / 2] = if side % 2 == 0 { sides[side / 2].0 } else { sides[side / 2].1 };
                     all.push((Handle::Side(side), at));
                 }
+            }
+            // a tree: one dot at its top for its height, and one at its
+            // side, half way up, for its spread
+            TREE if !p.is_empty() => {
+                let foot = DVec3::new(p[0].x, p[0].y, p[0].z.floor());
+                all.push((Handle::Rise, foot + DVec3::Z * self.tree_height()));
+                all.push((Handle::Radius, foot + self.radius_dir() * self.spec.radius + DVec3::Z * (self.tree_height() / 2.0).round()));
             }
             _ => {}
         }
@@ -1701,6 +1739,10 @@ impl State {
                 let out = (hit - self.spec.points[0]).dot(self.radius_dir());
                 self.spec.radius = snap(out.abs()).clamp(0.5, HANDLE_LIMIT);
             }
+            Handle::Rise if self.form == TREE => {
+                let height = snap(hit.z - self.spec.points[0].z.floor()).round();
+                self.spec.rise = Some(height.clamp(brickloft_core::tree::LEAST_HEIGHT, HANDLE_LIMIT));
+            }
             Handle::Rise => {
                 let mid = (self.spec.points[0] + self.spec.points[1]) / 2.0;
                 self.spec.rise = Some(snap(hit.z - mid.z).clamp(0.5, HANDLE_LIMIT));
@@ -1718,7 +1760,8 @@ impl State {
     /// Whether points can be added to the form to pull it out of shape.
     /// Every form on offer takes them.
     pub fn can_pull(&self) -> bool {
-        true
+        // (but a tree, which is grown and not drawn)
+        self.form != TREE
     }
 
     /// Add a point to the curve nearest `at`, a place in the view (where a
@@ -2176,6 +2219,49 @@ mod tests {
         state.turn(2, false);
         state.turn(2, true);
         assert_eq!(state.spec.turned, brickloft_core::shapes::UPRIGHT);
+    }
+
+    #[test]
+    fn a_tree_starts_at_its_usual_size_with_dots_for_its_height_and_spread() {
+        use brickloft_core::tree::{Kind, Tree};
+        let mut state = State::new();
+        state.form = TREE;
+        state.preset();
+        let (height, spread) = Tree::usual_size(Kind::Pine);
+        assert_eq!((state.spec.rise, state.spec.radius, state.floor_gap), (Some(height), spread, 0.0));
+        assert_eq!(state.paint.mode, crate::paint::Mode::Pattern);
+        assert_eq!(state.full_spec().form, Form::Tree);
+        // small, for the rest: a dot at the foot, one at the top and one at the side
+        (state.spec.rise, state.spec.radius) = (Some(30.0), 10.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        let dots = state.handles();
+        assert_eq!(dots.iter().map(|d| d.0).collect::<Vec<_>>(), [Handle::Point(0), Handle::Rise, Handle::Radius]);
+        let top = dots[1].1;
+        assert_eq!((top.x, top.y, top.z), (0.5, 0.5, 30.0), "the top dot is not at the top of the tree");
+        // the top dot dragged up six cells makes it six taller, and stops at the least a tree can be
+        let eye = DVec3::new(0.5, -200.0, 30.0);
+        state.drag(Handle::Rise, eye, (top + DVec3::Z * 6.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(36.0));
+        state.drag(Handle::Rise, eye, (top - DVec3::Z * 29.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.rise, Some(brickloft_core::tree::LEAST_HEIGHT));
+        // the side dot sets its spread
+        let side = state.handles()[2].1;
+        let eye = DVec3::new(side.x, -200.0, side.z);
+        state.drag(Handle::Radius, eye, (side + DVec3::X * 4.0 - eye).normalize(), DVec3::Y);
+        assert_eq!(state.spec.radius, 14.0);
+        assert!(state.refresh(|| 0.0) && state.problem.is_none(), "{:?}", state.problem);
+        // no points are added to a tree, and nothing about it is searched for
+        assert!(!state.can_pull() && state.tunable(None).is_empty());
+        // another kind comes at its own size and in its own colours, and is the same tree when come back to
+        state.spec.tree.seed = 9;
+        state.usual_tree(Kind::Oak);
+        assert_eq!((state.spec.tree, state.spec.rise), (Tree { seed: 9, ..Tree::of(Kind::Oak) }, Some(Tree::usual_size(Kind::Oak).0)));
+        assert_eq!(state.paint.colours, crate::paint::palette("oak"));
+        // every set of colours has a colour for each of a tree's eight parts, and a name
+        for kind in brickloft_core::tree::KINDS.map(|k| k.1) {
+            assert!(crate::paint::palettes(kind).iter().all(|set| set.len() == 8), "{kind}");
+            assert_eq!(crate::paint::palettes(kind).len(), crate::paint::tree_palette_names(kind).len(), "{kind}");
+        }
     }
 
     #[test]

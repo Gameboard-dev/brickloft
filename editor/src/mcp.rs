@@ -774,6 +774,17 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
                 return Err("settings needs at least `form`: the kind of form to add".into());
             }
             let mut spec = changed(&Spec::default(), settings)?;
+            let tree = (spec.form == brickloft_core::spec::Form::Tree).then_some(spec.tree.kind);
+            if let Some(kind) = tree {
+                // a tree given no size is the size the editor starts one at, not a form's usual radius: a tree 8 across is a twig
+                let (height, spread) = brickloft_core::tree::Tree::usual_size(kind);
+                if !settings.contains_key("radius") {
+                    spec.radius = spread;
+                }
+                if !settings.contains_key("rise") {
+                    spec.rise = Some(height);
+                }
+            }
             if spec.points.is_empty() {
                 // set down where the editor would set one down
                 let (points, weights) = crate::state::usual_points(crate::state::form_index(spec.form), spec.radius);
@@ -788,7 +799,7 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
             state.record();
             // set down beside what is there, and edited; then as asked
             // (a pattern asked for with no colours comes in its own, as it does from the panel: in one colour it would not show at all)
-            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name));
+            let own = spec.stones.map(|_| "stepping stones").or(spec.mosaic.map(|laid| brickloft_core::pattern::STYLES[laid.style.min(brickloft_core::pattern::STYLES.len() - 1)].name)).or(tree.map(|kind| brickloft_core::tree::KINDS[kind as usize].1));
             state.add_form(spec);
             if let Some(paint) = paint {
                 state.paint = paint;
@@ -802,10 +813,14 @@ pub fn apply(state: &mut State, name: &str, arguments: &Value, now_ms: impl Fn()
         "update_form" => {
             let at = index(&forms)?;
             let (spec, paint, place) = &mut forms[at];
+            let was = spec.form;
             *spec = changed(spec, settings)?;
             brickloft_core::spec::build(spec)?;
             if let Some(colour) = arguments.get("colour") {
                 *paint = recoloured(paint, colour)?;
+            } else if spec.form == brickloft_core::spec::Form::Tree && was != spec.form {
+                // (a form made into a tree comes in the tree's colours, as one added does)
+                *paint = Paint { mode: Mode::Pattern, colours: crate::paint::palette(brickloft_core::tree::KINDS[spec.tree.kind as usize].1).to_vec(), ..Paint::default() };
             }
             if let Some(to) = arguments.get("place") {
                 *place = placed(to)?;
@@ -1115,6 +1130,50 @@ mod tests {
             let said = apply(&mut state, "add_form", &json!({ "settings": { "form": form } }), || 0.0);
             assert!(said.is_ok(), "{form}: {said:?}");
             assert!(!state.built.bricks.is_empty(), "{form} was added with no bricks");
+        }
+    }
+
+    #[test]
+    fn a_tree_is_added_by_its_kind_alone_at_its_usual_size_and_in_its_own_colours() {
+        use brickloft_core::tree::{Kind, Tree};
+        let mut state = State::new();
+        let said = |text: String| serde_json::from_str::<Value>(&text).unwrap();
+        // by its kind and seed alone: the usual size, and not a form's usual radius of 8
+        let added = said(apply(&mut state, "add_form", &json!({ "settings": { "form": "tree", "tree": "palm,3" } }), || 0.0).unwrap());
+        let (height, spread) = Tree::usual_size(Kind::Palm);
+        assert_eq!((state.spec.form, state.spec.tree.kind, state.spec.tree.seed), (brickloft_core::spec::Form::Tree, Kind::Palm, 3));
+        assert_eq!((state.spec.rise, state.spec.radius), (Some(height), spread));
+        assert_eq!(state.spec.tree, Tree { seed: 3, ..Tree::of(Kind::Palm) }, "the settings not given are not the kind's own");
+        assert!(state.built.bricks.len() > 5000 && state.built.shades.len() == state.built.bricks.len(), "{} bricks", state.built.bricks.len());
+        // in the palm's colours, as the pattern has them, and told so
+        assert_eq!((state.paint.mode, state.paint.colours.as_slice()), (Mode::Pattern, crate::paint::palette("palm")));
+        assert_eq!(added["forms"][0]["colour"]["mode"], "pattern");
+        assert_eq!(added["forms"][0]["settings"]["tree"], "palm,3,60,20,45,0");
+        // every brick is painted the colour of its part: trunk and leaves both
+        let painted = state.painted();
+        let of = |n: usize| painted.iter().filter(|b| b.2 == 0 && b.1 == Some(crate::paint::palette("palm")[n])).count();
+        assert!(of(0) > 100 && of(1) > 1000, "{} of trunk, {} of leaves", of(0), of(1));
+        // a size and a list of settings are taken as given, and a form changed into a tree comes in the tree's colours
+        let small = said(apply(&mut state, "update_form", &json!({ "index": 1, "settings": { "form": "tree", "tree": ["oak", 7, 80, 3, 20, 0], "radius": 20, "rise": 36, "points": [[0.5, 0.5, 0.5]] } }), || 0.0).unwrap());
+        assert_eq!(small["forms"][1]["settings"]["tree"], "oak,7,80,3,20,0");
+        assert_eq!(small["forms"][1]["colour"]["mode"], "pattern");
+        assert_eq!(small["forms"][1]["box_in_grid"]["size"][2].as_f64().map(|v| v <= 37.0 && v > 28.0), Some(true), "{}", small["forms"][1]["box_in_grid"]);
+        // what is not a tree is refused, and what is out of range is brought within it
+        for bad in [json!("birch"), json!("oak,minus one"), json!("oak,1,2,3,4,5,6"), json!(""), json!("pine\nradius = 900")] {
+            assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": bad } }), || 0.0).is_err(), "{bad} was accepted");
+        }
+        apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "tree": "pine,1,5000,-3,999,7", "radius": 12, "rise": 30 } }), || 0.0).unwrap();
+        assert_eq!(state.forms()[0].0.tree, Tree { kind: Kind::Pine, seed: 1, fullness: 100, count: 4, bend: 100, extras: true });
+        // a tree too large to build is refused, and the workspace is as it was
+        let before = state.forms();
+        assert!(apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "radius": 990, "rise": 990 } }), || 0.0).is_err());
+        assert_eq!(state.forms(), before);
+        // a bush and a flower are kinds of the same form, each at its own size and in its own colours
+        for (kind, name) in brickloft_core::tree::KINDS {
+            apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "arch round", "points": [[0.5, 0.5, 0.5], [9.5, 0.5, 0.5]], "radius": 8, "rise": "natural" } }), || 0.0).unwrap();
+            apply(&mut state, "update_form", &json!({ "index": 0, "settings": { "form": "plant", "tree": name, "radius": Tree::usual_size(kind).1 / 2.0, "rise": Tree::usual_size(kind).0 / 2.0, "points": [[0.5, 0.5, 0.5]] } }), || 0.0).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let (spec, paint, _) = &state.forms()[0];
+            assert_eq!((spec.form, spec.tree, paint.colours.as_slice()), (brickloft_core::spec::Form::Tree, Tree::of(kind), crate::paint::palette(name)), "{name}");
         }
     }
 

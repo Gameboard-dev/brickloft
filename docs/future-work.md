@@ -130,37 +130,48 @@ What remains:
   (a mosaic on a dome) by choosing colours for the form's bricks. That
   needs the pattern mapped onto a curved surface and is a separate step.
 
-## Trees and flora
+## More plants
 
-Trees, shrubs and flowers are not started. A survey of existing generators
-found no dependency worth taking, so the generator would be written fresh
-in the core, in Rust, like the rest.
+Three trees, two bushes and two flowers are built: a pine, a palm and an
+oak, a boxwood and a rose, sunflowers and tulips, each grown by its own
+method ([algorithm.md](algorithm.md), section 7.10). What remains:
 
-The planned method has three parts.
+- **More bushes.** A hedge is the boxwood's canopy held inside a box in
+  place of a dome. An upright or spiky plant (a juniper, a yucca, an
+  agave) needs a rule of its own, a rosette of stiff blades, which the
+  tulip's leaves are a start on. A hydrangea or rhododendron is the rose
+  with a rounder habit and its blooms in large heads at the ends of the
+  shoots.
+- **More flowers.** A daisy is a small sunflower. A lily or a daffodil
+  needs a trumpet, and a rose seen close needs petals in a spiral, which
+  the golden angle would place. A bed of mixed flowers would be several
+  kinds from one seed.
+- **More kinds.** A birch or a willow is the oak's rule with other
+  numbers: a leading stem that carries on, thin limbs, and for the willow
+  a pull downwards on the ends of the branches. A date palm is the palm
+  with a thicker trunk and stiffer fronds. A Scots pine needs a rule the
+  pine does not have, for a crown that loses its lower boughs and flattens
+  with age.
+- **A bare tree.** The oak's skeleton is complete without its leaves, and
+  a winter oak is a setting away. Its twigs stop at one cell thick, so a
+  bare crown would be coarser than a real one.
+- **Smoother limbs.** A tree is fitted cell by cell. Its trunk and limbs
+  are round tubes along curves, which the pipe and lifted-tube layouts
+  build with far fewer steps (sections 7.5 and 7.7). Building the limbs
+  that way and only the foliage cell by cell would need the two joined
+  where they meet, as added points are joined to a sphere today.
+- **Speed.** A tree takes about a fifth of a second on a desktop's cores
+  and up to a second on one, nearly all of it distance samples. Growing
+  the tree and filing its parts is still done on one thread. Evaluating
+  the samples on a graphics card is
+  possible in OpenGL 3.3 and WebGL2, by drawing slices of the field into
+  a texture, and would be several times faster again. It was set aside
+  because those versions do not fix how arithmetic is rounded, so two
+  machines could build different bricks from one seed. It could be used
+  if the card only sorted cells into far, inside and near the surface,
+  and the processor still decided every cell near the surface.
 
-- **The skeleton.** A tree is a trunk that puts out branches, each of
-  which puts out its own, with every level described by a few numbers: how
-  many branches, at what angle, how long, how much they bend.
-  [ez-tree](https://github.com/dgreenheck/ez-tree) (MIT) is a readable
-  reference for such a recursive, parametric skeleton.
-- **Branch thickness.** Leonardo da Vinci's rule sets the radii: where a
-  branch of radius $`r_0`$ divides into branches of radii $`r_1`$ and
-  $`r_2`$, the cross-sections add up,
-
-  ```math
-  r_0^2 = r_1^2 + r_2^2
-  ```
-
-  so a tree thins towards its twigs without a thickness chosen by hand for
-  each branch.
-- **Foliage and flowers.** A crown is a union of rounded blobs about the
-  ends of the branches, which the fitters already take as one distance
-  function (see [algorithm.md](algorithm.md), section 5). A flower head
-  places its seeds or petals by Vogel's model of phyllotaxis, which puts
-  the $`k`$-th at the angle $`k \cdot 137.5^\circ`$ and the distance
-  $`c\sqrt{k}`$ from the middle and gives the spirals of a sunflower.
-
-Code under a licence the project cannot take is not to be ported. That
-rules out the GPL generators (Veloren's `tree.rs`, friggog/tree-gen,
-Blender's Sapling add-on and Arbaro) and proctree.js, which carries no
-licence.
+Code under a licence the project cannot take was not ported and is not to
+be. That rules out the GPL generators (Veloren's `tree.rs`,
+friggog/tree-gen, Blender's Sapling add-on and Arbaro) and proctree.js,
+which carries no licence.

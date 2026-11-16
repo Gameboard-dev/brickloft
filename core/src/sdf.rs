@@ -394,6 +394,9 @@ pub enum Field {
     /// A pyramid standing on `base`: `half` its base's size along x and y,
     /// `top` half its flat top's, `height` tall.
     Pyramid { base: DVec3, half: [f64; 2], top: [f64; 2], height: f64 },
+    /// A tree (see [`crate::tree`]). Shared and not copied: it is some
+    /// thousands of parts and the grid they are filed in.
+    Tree(std::sync::Arc<crate::tree::Model>),
 }
 
 impl Field {
@@ -495,6 +498,7 @@ impl Field {
                 };
                 slope(0).max(slope(1)).max(-up).max(up - height)
             }
+            Field::Tree(tree) => tree.eval(p),
         }
     }
 }
